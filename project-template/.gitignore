@@ -1,0 +1,7 @@
+# Transient board export — written by board.html "Apply edits", consumed by
+# apply-board-edits.mjs. It is a hand-off artifact, never a source of truth, so it
+# must not be committed. (Run apply-board-edits.mjs with --keep to inspect it.)
+.flow/board-edits.json
+
+# OS cruft
+.DS_Store

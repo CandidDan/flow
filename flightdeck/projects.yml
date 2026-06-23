@@ -1,0 +1,37 @@
+# Flightdeck registry — the authoritative list of projects the flightdeck reads across.
+#
+# This is what makes "the global flightdeck" a real thing rather than a guess: every Flow
+# project registers here (the last step of both onboarding routes — see project-template/
+# INIT.md and RETROFIT.md). The portfolio-manager reads this list first; if it's empty it
+# falls back to scanning sibling directories for `.flow/tasks/`. The live Cowork flightdeck
+# artifact iterates the same list. One registry, two consumers.
+#
+# Per project:
+#   name     — short display name (matches the project's config.yml project.name).
+#   repo     — "owner/repo" on GitHub (used when reading state via the GitHub connector).
+#   path     — local path or glob to the repo when shared into a Cowork workspace; "" if none.
+#              The portfolio-manager reads <path>/.flow/tasks/ directly when present (no
+#              connector needed), else falls back to `repo` via GitHub.
+#   enabled  — false to keep a project registered but hidden from the digest/board.
+
+projects:
+  - name: "nudge"
+    repo: "CandidDan/Nudge"
+    path: "~/Projects/nudge"
+    enabled: true
+
+  - name: "roost"
+    repo: "CandidDan/Roost"
+    path: "~/Projects/roost"
+    enabled: true
+
+  - name: "meadow"
+    repo: "CandidDan/meadow"
+    path: "~/Projects/meadow"
+    enabled: true
+
+  # Register a new project by appending a block here (INIT.md / RETROFIT.md step "Register"):
+  # - name: "REPLACE-ME"
+  #   repo: "owner/REPLACE-ME"
+  #   path: ""
+  #   enabled: true

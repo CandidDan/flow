@@ -1,0 +1,113 @@
+name: flow-gates
+
+# Enforces the Definition of Done on every PR, regardless of stack, by reading the
+# command names from .flow/config.yml. The protocol says "no PR without the gate";
+# this makes that true even if an agent (or human) tries to skip it locally.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # need the base commit to diff against
+
+      # The store is main-only: feature branches carry code, never task-state. A branch
+      # that also edited .flow/tasks/ would clobber main's newer state when it merges.
+      # Reject it here so the rule isn't trust-based.
+      - name: Guard — store is main-only
+        if: github.event_name == 'pull_request'
+        run: |
+          base="origin/${{ github.base_ref }}"
+          changed="$(git diff --name-only "$base"...HEAD)"
+          if echo "$changed" | grep -qE '^\.flow/tasks/'; then
+            echo "::error::This PR modifies .flow/tasks/. Task state lives on main only —"
+            echo "::error::feature branches carry code, not store changes. Move the state"
+            echo "::error::transition to a commit on main and drop it from this branch."
+            echo "$changed" | grep -E '^\.flow/tasks/' | sed 's/^/  offending: /'
+            exit 1
+          fi
+
+      - name: Read commands from .flow/config.yml
+        id: cfg
+        run: |
+          # Braces matter: without them `a || b && c` runs the chmod even when snap succeeded
+          # (live-validation finding, 2026-06-05).
+          sudo snap install yq 2>/dev/null || { sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 && sudo chmod +x /usr/local/bin/yq; }
+          {
+            echo "install=$(yq -r '.commands.install' .flow/config.yml)"
+            echo "build=$(yq -r '.commands.build' .flow/config.yml)"
+            echo "lint=$(yq -r '.commands.lint' .flow/config.yml)"
+            echo "test=$(yq -r '.commands.test' .flow/config.yml)"
+            echo "coverage=$(yq -r '.commands.coverage' .flow/config.yml)"
+            echo "covmin=$(yq -r '.coverage_min' .flow/config.yml)"
+          } >> "$GITHUB_OUTPUT"
+
+      # NOTE: language toolchain setup (node/python/go/etc.) goes here, per project.
+      # Left out of the template because it's the one genuinely stack-specific step —
+      # add the matching setup-* action when you scaffold the repo. (If your coverage
+      # command uses node's --test-coverage-* flags, you need Node >= 22 — live-validation
+      # finding, 2026-06-05.)
+
+      - name: Install
+        run: ${{ steps.cfg.outputs.install }}
+
+      - name: Build
+        run: ${{ steps.cfg.outputs.build }}
+
+      - name: Lint
+        run: ${{ steps.cfg.outputs.lint }}
+
+      - name: Test
+        run: ${{ steps.cfg.outputs.test }}
+
+      - name: Coverage (fails under coverage_min)
+        run: ${{ steps.cfg.outputs.coverage }}
+
+      # Optional but recommended: a dependency audit. Wire to the stack's auditor.
+      # - name: Dependency audit
+      #   run: npm audit --audit-level=high   # or pip-audit, etc.
+
+  # The flow tooling is JS regardless of the project's stack, so it's tested on its own —
+  # the foundation's own Definition of Done ("every behaviour has a proving test") applies
+  # to the tooling too. Stays independent of the per-stack gate above.
+  flow-tooling:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test flow tooling
+        run: node --test .flow/bin/*.test.mjs
+
+      # Drift detection (back-ported from Nudge's state:check): a validated store beats a
+      # trusted one. Problems fail; warnings (e.g. stale board snapshot) just report.
+      - name: flow-doctor — store consistency
+        run: node .flow/bin/flow-doctor.mjs
+
+  # Scope enforcement: a flow/<id> PR's diff must stay within the task's declared `touches`.
+  # Runs in the per-stack gate job (needs the PR diff + base). Mirrors the store-guard.
+  touches:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: touches-guard — diff stays within declared scope
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          git fetch -q origin "${{ github.base_ref }}"
+          node .flow/bin/touches-guard.mjs

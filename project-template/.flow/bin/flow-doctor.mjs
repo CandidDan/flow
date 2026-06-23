@@ -1,0 +1,261 @@
+#!/usr/bin/env node
+// flow-doctor.mjs — drift detection for the work store, back-ported from Nudge's
+// `state:check` pattern: a validated store beats a trusted one. Checks that the task
+// files are internally consistent and that the board snapshot hasn't drifted from them.
+// Run on demand or in CI (flow-tooling job). Exits non-zero on PROBLEMS; WARNINGS report only.
+//
+//   node .flow/bin/flow-doctor.mjs
+//
+// PROBLEMS (exit 1): malformed frontmatter · missing required fields · illegal status ·
+//   duplicate ids · in_review without pr/branch · blocked without blocked_reason ·
+//   in_progress without owner/started · two in_progress tasks with overlapping touches (the
+//   atomic-claim rule was bypassed) · a declared source_root that's missing/uncovered, or a
+//   top-level source tree no source_root covers (the gate-coverage floor — see below).
+// WARNINGS (exit 0): ready task with owner set · ready task with empty touches (concurrency
+//   relies on it) · live tasks with overlapping touches (they can't run in parallel — sequence
+//   them; don't call them parallel-safe) · board snapshot ids/statuses drifted from the files ·
+//   no source_roots declared yet (adoption nudge).
+//
+// GATE-COVERAGE FLOOR. config.yml declares `source_roots:` — each `{ path, check }` naming a
+// tree and the command that parses/lints it. The gate only validates trees a command reaches,
+// so an undeclared runtime is invisible until production (real incident: Deno edge functions,
+// gate ran only in app/, a parse error took down inbound for ~7 days). This check makes the
+// floor a *declared, ratcheting* contract and catches it drifting as the repo grows: a new
+// top-level source tree that no `source_root` covers FAILS the gate until it's declared (or
+// explicitly ignored). It can't prove a command truly parses a tree — it makes coverage
+// explicit and reviewed, not magically complete.
+
+import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { STATUSES } from "./apply-board-edits.mjs";
+
+const REQUIRED = ["id", "title", "status", "priority"];
+
+// Dirs never treated as source trees (build output, deps, VCS, Flow's own plumbing).
+const ROOT_IGNORE = new Set([
+  "node_modules", ".git", ".github", ".flow", ".claude", "dist", "build", "out", ".next",
+  "coverage", "vendor", ".venv", "venv", "target", ".turbo", ".cache", "tmp", ".vercel",
+]);
+const SOURCE_EXT = new Set([
+  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".rs", ".go", ".rb", ".java", ".kt",
+  ".cs", ".php", ".ex", ".exs", ".swift", ".scala", ".dart",
+]);
+
+// Parse the `source_roots:` block from config.yml without a YAML dep. Tolerant line scan of:
+//   source_roots:
+//     - path: "app/"
+//       check: "npm run lint"
+function parseSourceRoots(configPath) {
+  if (!existsSync(configPath)) return { exists: false, declared: false, roots: [] };
+  const lines = readFileSync(configPath, "utf8").split("\n");
+  const start = lines.findIndex((l) => /^source_roots:/.test(l));
+  if (start === -1) return { exists: true, declared: false, roots: [] };
+  const roots = [];
+  let cur = null;
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\S/.test(line)) break;                     // dedent to a new top-level key → block done
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
+    const unq = (v) => v.split("#")[0].trim().replace(/^["'](.*)["']$/, "$1");
+    let m;
+    if ((m = trimmed.match(/^-\s*path:\s*(.+)$/))) { cur = { path: unq(m[1]), check: "" }; roots.push(cur); }
+    else if ((m = trimmed.match(/^path:\s*(.+)$/)))  { cur = { path: unq(m[1]), check: "" }; roots.push(cur); }
+    else if ((m = trimmed.match(/^check:\s*(.+)$/)) && cur) { cur.check = unq(m[1]); }
+  }
+  return { declared: true, roots };
+}
+
+// Does any directory at or beneath `dir` (bounded depth, ignoring junk) hold a source file?
+function containsSource(dir, depth = 0) {
+  if (depth > 4) return false;
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return false; }
+  for (const e of entries) {
+    if (e.isFile() && SOURCE_EXT.has(e.name.slice(e.name.lastIndexOf(".")))) return true;
+  }
+  for (const e of entries) {
+    if (e.isDirectory() && !ROOT_IGNORE.has(e.name) && !e.name.startsWith(".")) {
+      if (containsSource(join(dir, e.name), depth + 1)) return true;
+    }
+  }
+  return false;
+}
+
+// Top-level dirs (depth 1 from repo root) that hold source and aren't ignored.
+function topLevelSourceDirs(repoRoot) {
+  let entries;
+  try { entries = readdirSync(repoRoot, { withFileTypes: true }); } catch { return []; }
+  return entries
+    .filter((e) => e.isDirectory() && !ROOT_IGNORE.has(e.name) && !e.name.startsWith("."))
+    .map((e) => e.name)
+    .filter((name) => containsSource(join(repoRoot, name)));
+}
+
+// A top-level dir is covered if a declared root path equals it, sits inside it, or contains it.
+function rootCovers(declaredPath, topDir) {
+  const p = declaredPath.replace(/\/+$/, "");
+  return p === topDir || p.startsWith(topDir + "/") || topDir.startsWith(p + "/");
+}
+
+// Parse the `touches:` value, tolerating BOTH frontmatter forms:
+//   inline:      touches: ["src/**", "api/x.ts"]
+//   multi-line:  touches:
+//                  - "src/**"
+//                  - "api/x.ts"
+// (A naive same-line scan misses the multi-line form — it would read those tasks as having
+// empty touches, silencing both the empty-touches warning and overlap detection below.)
+function parseTouchesList(head) {
+  const lines = head.split("\n");
+  const i = lines.findIndex((l) => /^\s*touches:/.test(l));
+  if (i === -1) return [];
+  const inline = lines[i].replace(/^\s*touches:\s*/, "").split("#")[0].trim();
+  if (inline.startsWith("[")) return [...inline.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]);
+  const out = [];
+  for (let j = i + 1; j < lines.length; j++) {
+    const t = lines[j].trim();
+    if (t === "" || t.startsWith("#")) continue;
+    const m = t.match(/^-\s*(.+)$/);
+    if (!m) break; // dedent to the next key → list done
+    out.push(m[1].split("#")[0].trim().replace(/^["'](.*)["']$/, "$1"));
+  }
+  return out.filter(Boolean);
+}
+
+// The non-wildcard leading path of a glob, trimmed to whole segments — what we compare for overlap.
+//   "a/b/**" -> "a/b" · "a/b/c.ts" -> "a/b/c.ts" · "a/**/x" -> "a"
+function staticPrefix(glob) {
+  const i = glob.search(/[*?[\]{}]/);
+  let p = i === -1 ? glob : glob.slice(0, i);
+  if (i !== -1 && !p.endsWith("/")) p = p.slice(0, p.lastIndexOf("/") + 1);
+  return p.replace(/\/+$/, "");
+}
+// Segment-aware path containment, so "app/foo" and "app/foobar" do NOT match.
+function pathContains(p, q) { return p === q || q.startsWith(p + "/") || p.startsWith(q + "/"); }
+// Two globs overlap if identical or one's static prefix contains the other's. Heuristic (no full
+// glob-intersection), but it catches the dominant cases: an exact shared file, and nested trees.
+function globsOverlap(a, b) { return a === b || pathContains(staticPrefix(a), staticPrefix(b)); }
+// First overlapping (a, b) glob pair between two touches lists, or null.
+function touchesOverlap(A, B) {
+  for (const a of A) for (const b of B) if (globsOverlap(a, b)) return [a, b];
+  return null;
+}
+
+function parseTask(text) {
+  if (!text.startsWith("---")) return null;
+  const end = text.indexOf("\n---", 3);
+  if (end === -1) return null;
+  const head = text.slice(3, end);
+  const get = (k) => {
+    const m = head.match(new RegExp(`^${k}:\\s*(.*)$`, "m"));
+    return m ? m[1].split("#")[0].trim().replace(/^"(.*)"$/, "$1") : undefined;
+  };
+  return { id: get("id"), title: get("title"), status: get("status"), priority: get("priority"),
+           owner: get("owner"), started: get("started"), branch: get("branch"), pr: get("pr"),
+           blocked_reason: get("blocked_reason"), touches: get("touches"),
+           touchesList: parseTouchesList(head) };
+}
+
+export function runDoctor({ flowDir }) {
+  const problems = [], warnings = [];
+  const tasksDir = join(flowDir, "tasks");
+  const seen = new Map();
+  const tasks = [];
+
+  for (const name of readdirSync(tasksDir).sort()) {
+    if (!name.endsWith(".md") || name === "_TEMPLATE.md") continue;
+    const t = parseTask(readFileSync(join(tasksDir, name), "utf8"));
+    if (!t) { problems.push(`${name}: malformed frontmatter`); continue; }
+    const missing = REQUIRED.filter((k) => !t[k]);
+    if (missing.length) { problems.push(`${name}: missing required field(s): ${missing.join(", ")}`); continue; }
+    if (!STATUSES.has(t.status)) { problems.push(`${name}: illegal status "${t.status}"`); continue; }
+    if (seen.has(t.id)) problems.push(`${name}: duplicate id ${t.id} (also in ${seen.get(t.id)})`);
+    seen.set(t.id, name);
+
+    if (t.status === "in_review" && (!t.pr || !t.branch))
+      problems.push(`${t.id}: in_review but ${!t.pr ? "pr" : "branch"} is empty — hand-off incomplete or flow-status didn't fire`);
+    if (t.status === "blocked" && !t.blocked_reason)
+      problems.push(`${t.id}: blocked with no blocked_reason — undecidable AND unexplained`);
+    if (t.status === "in_progress" && (!t.owner || !t.started))
+      problems.push(`${t.id}: in_progress but ${!t.owner ? "owner" : "started"} is empty — claim was not completed properly`);
+    if (t.status === "ready" && t.owner)
+      warnings.push(`${t.id}: ready but owner="${t.owner}" — stale claim? clear it so the task is re-claimable`);
+    if (t.status === "ready" && (!t.touchesList || t.touchesList.length === 0))
+      warnings.push(`${t.id}: ready with empty touches — overlap detection can't protect it under parallel sessions`);
+    tasks.push(t);
+  }
+
+  // Touches overlap among the *live* set (ready + in_progress). The concurrency model assumes a
+  // ready task can be claimed without colliding with anything in flight, and that tasks the
+  // orchestrator calls "parallel-safe" truly are. This makes that mechanical, not a prose claim:
+  //   - two in_progress tasks sharing touches -> PROBLEM (two sessions in the same files; the
+  //     atomic-claim rule was bypassed).
+  //   - any other live pair sharing touches   -> WARNING (they can't run in parallel; the queue
+  //     will serialize them — surfaced so "parallel-safe" can't be asserted falsely, the exact
+  //     miss that shipped two overlapping "parallel" tasks once).
+  const live = tasks.filter((t) => t.status === "ready" || t.status === "in_progress");
+  for (let a = 0; a < live.length; a++) {
+    for (let b = a + 1; b < live.length; b++) {
+      const ov = touchesOverlap(live[a].touchesList || [], live[b].touchesList || []);
+      if (!ov) continue;
+      const where = ov[0] === ov[1] ? ov[0] : `${ov[0]} vs ${ov[1]}`;
+      if (live[a].status === "in_progress" && live[b].status === "in_progress")
+        problems.push(`${live[a].id} and ${live[b].id} are BOTH in_progress with overlapping touches (${where}) — two sessions in the same files; the atomic-claim rule was bypassed`);
+      else
+        warnings.push(`${live[a].id} and ${live[b].id} have overlapping touches (${where}) — they can't run in parallel; sequence them or split the shared path (don't label them parallel-safe)`);
+    }
+  }
+
+  // Board snapshot drift (warn only — live mode and regeneration both fix it).
+  const boardPath = join(flowDir, "board.html");
+  if (existsSync(boardPath)) {
+    const m = readFileSync(boardPath, "utf8").match(/const TASKS = \[([\s\S]*?)\n\];/);
+    if (m) {
+      const snapIds = new Map([...m[1].matchAll(/id:"([^"]+)"[^}]*?status:"([^"]+)"/g)].map((x) => [x[1], x[2]]));
+      for (const t of tasks) {
+        if (!snapIds.has(t.id)) warnings.push(`board snapshot missing ${t.id} — regenerate (board-builder)`);
+        else if (snapIds.get(t.id) !== t.status)
+          warnings.push(`board snapshot has ${t.id}=${snapIds.get(t.id)}, files say ${t.status} — regenerate`);
+      }
+      for (const id of snapIds.keys())
+        if (!seen.has(id)) warnings.push(`board snapshot has ${id} but no task file exists — regenerate`);
+    }
+  }
+
+  // Gate-coverage floor: every source tree must be declared + mapped to a check, and no
+  // undeclared top-level source tree may exist. Graceful adoption: a repo that hasn't declared
+  // source_roots yet only gets a warning (so dropping this check into an existing project
+  // doesn't fail its gate before it's calibrated).
+  const repoRoot = dirname(flowDir);
+  const { exists: configExists, declared, roots } = parseSourceRoots(join(flowDir, "config.yml"));
+  if (configExists && !declared) {
+    warnings.push("no source_roots declared in config.yml — gate coverage is unverified; " +
+      "declare each source tree + the check that parses it (see config.yml note).");
+  } else if (declared) {
+    for (const r of roots) {
+      if (!r.path) { problems.push("source_root with no path in config.yml"); continue; }
+      if (!r.check) problems.push(`source_root "${r.path}" has no check — declare the command that parses/lints it`);
+      if (!existsSync(join(repoRoot, r.path))) problems.push(`source_root "${r.path}" does not exist on disk — stale declaration`);
+    }
+    for (const dir of topLevelSourceDirs(repoRoot)) {
+      if (!roots.some((r) => r.path && rootCovers(r.path, dir))) {
+        problems.push(`source tree "${dir}/" is not covered by any source_root — declare it (with a check) ` +
+          `or it's never parsed before production. If it shouldn't be gated, add it to ROOT_IGNORE.`);
+      }
+    }
+  }
+
+  return { problems, warnings, count: tasks.length };
+}
+
+// ── CLI ──
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const flowDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const { problems, warnings, count } = runDoctor({ flowDir });
+  console.log(`flow-doctor: ${count} task(s) checked`);
+  for (const w of warnings) console.warn(`  WARN  ${w}`);
+  for (const p of problems) console.error(`  FAIL  ${p}`);
+  if (!problems.length && !warnings.length) console.log("  store is healthy");
+  process.exit(problems.length ? 1 : 0);
+}

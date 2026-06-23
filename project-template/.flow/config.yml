@@ -1,0 +1,72 @@
+# .flow/config.yml
+# The ONLY file that changes per stack. The protocol in CLAUDE.md is identical
+# across every project; it refers to the command names below. Fill these in when
+# you scaffold a new project from the template, and the gates work everywhere.
+
+project:
+  name: "REPLACE-ME"            # short slug, also used as the task-id prefix
+  language: "REPLACE-ME"        # e.g. typescript, python, swift, go, ruby
+  description: "REPLACE-ME"
+
+# Commands. Each must exit non-zero on failure so CI and the qa-verifier can trust them.
+# Examples are illustrative — set the real ones for this repo.
+#
+# COVER EVERY SOURCE TREE. The gate only validates what these commands actually reach. If the
+# repo has more than one runtime or source root — e.g. a Node app AND Deno/edge functions, a
+# frontend AND a separate worker, infra/ alongside src/ — make sure build/lint (and a parse/
+# type-check) touch ALL of them, not just the primary app. A tree no command parses is never
+# checked until production. (Real incident: edge functions were Deno-only, the gate ran only in
+# app/, and a parse error that the runtime upgrade exposed took down inbound for ~7 days. Add a
+# per-tree check, e.g. `deno check supabase/functions/**/*.ts`.) When in doubt, list your source
+# roots and confirm each is parsed by some command here.
+#
+# NOTE for lockfile stacks: if `install` is strict (`npm ci`, `pnpm i --frozen-lockfile`,
+# `poetry install --sync`), run it once locally after adding any dependency and commit the
+# resynced lockfile. A lock that's only half-updated passes a lenient local install but fails
+# the gate's strict install — exactly how a drifted lock hides until the first PR.
+commands:
+  install: "REPLACE-ME"         # e.g. "npm ci"            | "uv sync"          | "bundle install"
+  build:   "REPLACE-ME"         # e.g. "npm run build"     | "python -m build"  | "swift build"
+  lint:    "REPLACE-ME"         # e.g. "npm run lint"      | "ruff check ."     | "swiftlint"
+  test:    "REPLACE-ME"         # e.g. "npm test"          | "pytest"           | "swift test"
+  coverage: "REPLACE-ME"        # command that prints a coverage % and exits non-zero under threshold
+                                # e.g. "npm run coverage" | "pytest --cov --cov-fail-under=80"
+
+# The coverage FLOOR — a backstop, not the real gate. It's a blunt, game-able signal
+# (lines executed, not behaviour proven), so the actual correctness check is the
+# qa-verifier's criterion->test mapping; this just stops coverage quietly collapsing.
+# The gate fails if coverage drops below this, regardless of stack. Pick a real number;
+# raise it over time, never lower it silently. Sitting exactly at the floor proves nothing.
+coverage_min: 80
+
+# Source roots — the gate-coverage floor. Declare every tree that holds source AND the command
+# that parses/lints it. flow-doctor enforces this on every PR: a declared root that's missing or
+# has no check FAILS, and any top-level source tree NOT covered here FAILS too — so a new runtime
+# added six months from now (a worker, edge functions, a second language) can't slip in ungated
+# the way it silently could before. Calibrate at scaffold (list what's actually in the repo);
+# it ratchets like coverage_min — widen it as the repo grows, the drift check keeps it honest.
+# Single-stack repos just declare one root. If a tree genuinely shouldn't be gated, add it to
+# flow-doctor's ROOT_IGNORE rather than leaving it silently uncovered.
+source_roots:
+  - path: "REPLACE-ME/"         # e.g. "app/"                 → the primary app
+    check: "REPLACE-ME"         #      "npm run lint"         → a command that PARSES this tree
+  # Add one block per additional runtime/source root, e.g. for a polyglot repo:
+  # - path: "supabase/functions/"
+  #   check: "deno check supabase/functions/**/*.ts"
+
+# Security expectations the security-reviewer enforces on top of its general review.
+# List anything stack- or project-specific that has bitten you before.
+security:
+  secrets_scan: true            # no credentials, tokens, keys committed
+  dependency_audit: true        # e.g. "npm audit" / "pip-audit" — wire into CI
+  focus:                        # extra scrutiny areas — tailor per project
+    - "authn/authz boundaries"
+    - "input validation on all external entry points"
+    - "secret storage (vaults/env, never source)"
+    # e.g. for a Supabase project you might add: "row-level security policies", "OAuth token handling"
+
+# Branch + PR conventions (kept here so agents and CI agree).
+git:
+  base_branch: "main"
+  branch_prefix: "flow/"        # branches are flow/<task-id>-<slug>
+  protect_main: true            # never commit to base directly

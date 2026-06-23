@@ -1,0 +1,62 @@
+name: flow-review
+
+# Independent AI review on every flow PR. The three gate agents (qa/security/code-review)
+# run as subagents OF THE WORKER'S SESSION — same lineage, same context, the worker grading
+# homework it helped set. This review runs server-side with fresh eyes and no session state,
+# which is what makes it independent. It matters most on the auto-ok lane, where no human
+# approved the spec going in.
+#
+# Blocking semantics: this review posts findings; the human (or branch protection, if you make
+# it a required check) decides what blocks. For true MODEL diversity, also enable GitHub
+# Copilot code review as an advisory second opinion in repo settings → rulesets (needs a
+# Copilot seat; it's a GitHub-side setting, not a workflow).
+#
+# DISABLED BY DEFAULT. Enable with repo variable FLOW_AI=true + CLAUDE_CODE_OAUTH_TOKEN secret
+# (from `claude setup-token` — uses your Max plan quota, not API credits).
+# (Check anthropics/claude-code-action's current README for input names when enabling.)
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+jobs:
+  review:
+    if: ${{ vars.FLOW_AI == 'true' && startsWith(github.event.pull_request.head.ref, 'flow/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          # Subscription auth (Pro/Max): run `claude setup-token` locally, save the result as
+          # the CLAUDE_CODE_OAUTH_TOKEN repo secret. Uses your plan quota, not API credits.
+          # (Token dies if you log out of Claude Code — regenerate with `claude setup-token`.)
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Pay-per-use alternative: comment the line above and use an API key instead.
+          # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are the independent reviewer for this PR — you did not write this code and owe
+            it nothing. Review the diff against its task:
+
+            1. Parse the task id from the branch name (flow/<id>-…) and read the matching file
+               in .flow/tasks/ — its acceptance criteria, scope boundaries, and touches globs.
+            2. Verify the diff: satisfies each acceptance criterion (name the evidence), stays
+               inside the declared scope and touches, handles edge cases and failure paths, and
+               introduces no security concerns (secrets, injection, authz, unvalidated input).
+            3. Check the tests actually assert the criteria's outcomes — not merely that code
+               runs. A criterion without a proving test is a blocking finding.
+            4. Post ONE review comment: verdict (APPROVE / CHANGES NEEDED), blocking findings
+               with file:line and the concrete fix, then non-blocking notes. Be specific and
+               brief; no boilerplate praise.
+
+            You review only. Never push commits, never edit files, never change labels or task
+            state. If the branch has no matching task file, say so — that itself is a finding.
+          claude_args: "--max-turns 25"

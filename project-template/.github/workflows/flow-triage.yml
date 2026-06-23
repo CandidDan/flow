@@ -1,0 +1,66 @@
+name: flow-triage
+
+# The scheduled triage sweep: turns the GitHub Issues inbox into proposed/ready tasks,
+# batched once a day so triage lands in one consolidated moment (before the portfolio
+# digest), not as drip-fed interruptions.
+#
+#   un-triaged issue            -> draft a full ready-task spec AS A COMMENT on the issue,
+#                                  label `proposed`. Nothing enters .flow/tasks/ yet.
+#   issue labelled `approved`   -> the human said yes (a label flip, doable from a phone):
+#                                  create the ready task file on main, label `triaged`.
+#   issue labelled `auto-ok`    -> pre-authorised lane (human policy, not per-item approval):
+#                                  skip proposal, create the ready task file directly.
+#
+# Authority stays with the human: triage PROPOSES; only an `approved` or `auto-ok` label —
+# both human-applied — lets work enter the queue.
+#
+# DISABLED BY DEFAULT. Enable by setting repo variable FLOW_AI=true and adding the
+# CLAUDE_CODE_OAUTH_TOKEN secret (from `claude setup-token` — uses your Max plan quota). (Check anthropics/claude-code-action's current README for
+# input names when you first enable this — the action evolves.)
+
+on:
+  schedule:
+    - cron: "0 6 * * 1-5"   # weekday mornings, before the portfolio digest — adjust to taste
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  triage:
+    if: ${{ vars.FLOW_AI == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          # Subscription auth (Pro/Max): run `claude setup-token` locally, save the result as
+          # the CLAUDE_CODE_OAUTH_TOKEN repo secret. Uses your plan quota, not API credits.
+          # (Token dies if you log out of Claude Code — regenerate with `claude setup-token`.)
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Pay-per-use alternative: comment the line above and use an API key instead.
+          # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Run the issue triage sweep for this repository, following the "Triaging the inbox"
+            section of .claude/skills/task-writer/SKILL.md exactly. Concretely:
+
+            1. List open issues. Skip any labelled `proposed` or `triaged`.
+            2. For each remaining issue WITHOUT the `auto-ok` label: draft a complete ready-task
+               spec (the .flow/tasks/_TEMPLATE.md shape: context, scope with explicit boundaries,
+               observable acceptance criteria, touches globs) and post it as a comment on the
+               issue, then add the `proposed` label. Do NOT create a task file.
+            3. For each open issue labelled `approved` (the human accepted a proposal) or
+               `auto-ok` (pre-authorised lane): create the ready task file in .flow/tasks/ with
+               the next id, `issue:` set to the issue URL, commit it to main with message
+               "flow: triage <id> from issue #<n>", then swap the issue's labels to `triaged`.
+            4. If an issue is not worth doing, comment one line saying why and close it.
+
+            Hard limits: never modify code or any file outside .flow/tasks/; never edit an
+            existing task file; never work on an issue yourself; if a proposal would require
+            guessing the human's intent, ask the question in the issue comment instead of
+            proposing. Apply the readiness bar honestly — a vague proposal is worse than none.
+          claude_args: "--max-turns 30"

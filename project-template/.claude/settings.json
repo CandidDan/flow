@@ -1,0 +1,8 @@
+{
+  "$comment": "Committed, repo-level Claude Code settings. Makes the private Flow plugin marketplace known to every session on this repo without a manual `claude plugin marketplace add`. After cloning, run `claude plugin install flow@flow` (or enable via /plugin). The worker also auto-discovers this repo's own .claude/skills + .claude/agents, so the gate still runs even if the plugin isn't installed; the plugin is what makes task-writer / board-builder / portfolio-manager work from a Cowork orchestrator session. Personal/local overrides go in .claude/settings.local.json (gitignored).",
+  "extraKnownMarketplaces": {
+    "flow": {
+      "source": { "source": "github", "repo": "CandidDan/flow-plugin" }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+# CandidDan/flow — canonical Flow infrastructure (template, flightdeck, docs, + reusable
+# workflows and the bin package as they land). Nested repos and local artifacts are excluded.
+
+# Nested repos that are their own distributables — NOT part of canonical:
+flow-plugin/        # CandidDan/flow-plugin — the marketplace, versioned separately
+flow-validation/    # the throwaway CI-validation repo
+
+# Local artifacts / junk
+mnt/
+.DS_Store
+**/.DS_Store
+
+# Node (for the forthcoming bin package)
+node_modules/
+*.tsbuildinfo
+npm-debug.log*
+
+# Flow board-edits scratch (never committed)
+**/.flow/board-edits.json
