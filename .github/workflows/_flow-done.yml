@@ -16,10 +16,10 @@ permissions:
 
 jobs:
   mark-done:
-    # Only on a real merge of a flow branch — not on a closed-without-merge.
-    if: >
-      github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'flow/')
+    # Only on a real merge — not on a closed-without-merge. No branch-name gate: a cloud
+    # session's non-flow/ branch must still flip to done. The id is resolved from the branch
+    # OR the PR title (CAN-52); the step no-ops cleanly when neither carries one.
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,12 +34,18 @@ jobs:
       - name: Flip the merged task to done
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
           PR_NUM: ${{ github.event.pull_request.number }}
         run: |
-          # Task id is the "<slug>-<NNNN>" portion of the branch name flow/<id>-<text>.
-          id="$(printf '%s' "$HEAD_REF" | grep -oP '^flow/\K.+?-\d{1,4}(?=-)' || true)"
+          # Branch name first (canonical), PR title second (CAN-52 fallback for non-flow/ branches).
+          # The job checks out `main`; the helper lives there once the repo adopts the template.
+          # Guard its presence (so a bootstrap PR no-ops cleanly) and keep the call non-fatal under set -e.
+          id=""
+          if [ -f .flow/bin/parse-task-id.mjs ]; then
+            id="$(node .flow/bin/parse-task-id.mjs "$HEAD_REF" "$PR_TITLE" || true)"
+          fi
           if [ -z "$id" ]; then
-            echo "Could not parse a task id from '$HEAD_REF' — nothing to mark done."
+            echo "Could not parse a task id from branch '$HEAD_REF' or title '$PR_TITLE' — nothing to mark done."
             exit 0
           fi
           echo "Marking $id done (PR #$PR_NUM merged)."

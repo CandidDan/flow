@@ -19,7 +19,9 @@ permissions:
 
 jobs:
   sync-status:
-    if: startsWith(github.event.pull_request.head.ref, 'flow/')
+    # No branch-name gate: a cloud session forced onto a non-flow/ branch (e.g. claude/…) must
+    # still transition. The id is resolved from the branch OR the PR title (CAN-52); the step
+    # no-ops cleanly when neither carries one.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,13 +36,21 @@ jobs:
       - name: Sync task state from the PR event
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
           ACTION:   ${{ github.event.action }}
           MERGED:   ${{ github.event.pull_request.merged }}
           PR_URL:   ${{ github.event.pull_request.html_url }}
           PR_NUM:   ${{ github.event.pull_request.number }}
         run: |
-          id="$(printf '%s' "$HEAD_REF" | grep -oP '^flow/\K.+?-\d{1,4}(?=-)' || true)"
-          if [ -z "$id" ]; then echo "No task id in '$HEAD_REF' — nothing to sync."; exit 0; fi
+          # Branch name first (canonical), PR title second (CAN-52 fallback for non-flow/ branches).
+          # The job checks out `main`; the helper lives there once the repo adopts the template.
+          # Guard its presence (so a bootstrap PR no-ops cleanly) and keep the call non-fatal under
+          # set -e: any miss yields an empty id and the safe no-op below.
+          id=""
+          if [ -f .flow/bin/parse-task-id.mjs ]; then
+            id="$(node .flow/bin/parse-task-id.mjs "$HEAD_REF" "$PR_TITLE" || true)"
+          fi
+          if [ -z "$id" ]; then echo "No task id in branch '$HEAD_REF' or title '$PR_TITLE' — nothing to sync."; exit 0; fi
 
           case "$ACTION" in
             opened|reopened)

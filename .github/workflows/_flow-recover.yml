@@ -1,0 +1,144 @@
+name: _flow-recover (reusable)
+
+# Reusable form of the stranded-task self-heal sweep (CAN-51). Repos call it from a thin caller
+# that owns the `schedule` + `workflow_dispatch` (forwarding `threshold_minutes` via `with:`);
+# the logic is authored once in canonical. See docs/flow-reusable-workflows.md.
+#
+# CAN-51: self-heal tasks stranded `in_progress` with no PR. CAN-50 (flow-open-pr) makes a
+# worker stopping short of `gh pr create` less likely, but prevention can never be total — a
+# process can die at any point between push and PR (crash, timeout, network). Today that leaves
+# the task in_progress with no PR forever, until a human notices: the single point of manual
+# rescue the loop is meant to remove. A stranded task is a precisely detectable state, so this
+# sweep heals it: re-open the PR when work was pushed, or reset the claim to `ready` when there
+# is nothing to recover.
+#
+# Conservative by construction: only acts past a staleness threshold, never disturbs a task
+# with an open PR, and resets ONLY via apply-board-edits.mjs (a commit to main — never a
+# hand-edit). DORMANT until FLOW_AI=true (same switch as the queue-runner — no autonomous
+# workers, nothing to strand); always runnable on demand via the caller's workflow_dispatch.
+#
+# Reopened PRs use FLOW_PAT (CAN-58) so flow-gates fires on them too; falls back to GITHUB_TOKEN
+# when the secret is unset (recovery still works, just ungated). The thin caller passes the
+# secret with `secrets: inherit`. See _flow-open-pr.yml for FLOW_PAT setup.
+
+on:
+  workflow_call:
+    inputs:
+      threshold_minutes:
+        description: "Minutes of no movement before a task is considered stranded (default 75)."
+        required: false
+        type: string
+    secrets:
+      FLOW_PAT:
+        required: false
+
+permissions:
+  contents: write          # reset commit to main
+  pull-requests: write     # reopen-pr path
+
+jobs:
+  sweep:
+    if: ${{ vars.FLOW_AI == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Sweep stranded in_progress tasks
+        env:
+          # Only `gh` calls use this; the reset-to-ready `git push` uses the checkout credential.
+          GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
+          THRESHOLD: ${{ inputs.threshold_minutes || '75' }}
+        run: |
+          # Bootstrap guard: the helper lives in the consuming repo once it adopts the template.
+          if [ ! -f .flow/bin/flow-recover.mjs ]; then
+            echo "No .flow/bin/flow-recover.mjs in this repo yet — nothing to do."
+            exit 0
+          fi
+          git config user.name  "flow-bot"
+          git config user.email "flow-bot@users.noreply.github.com"
+          now="$(date +%s)"
+
+          # Bound the dispatch-supplied threshold: non-numeric -> default, cap at 24h so a
+          # stray large value can't silently disable the sweep for a whole run.
+          case "$THRESHOLD" in ""|*[!0-9]*) THRESHOLD=75 ;; esac
+          [ "$THRESHOLD" -gt 1440 ] && THRESHOLD=1440
+
+          # Each line is "<id>\t<started>" for an in_progress task.
+          node .flow/bin/flow-recover.mjs list-in-progress | while IFS="$(printf '\t')" read -r id started; do
+            [ -z "$id" ] && continue
+            # Validate the id shape before it ever reaches a shell command (git ls-remote, gh).
+            # Task files on main are trusted (only Dan / flow-bot write them, and flow-gates
+            # blocks PR-injected task changes), but this closes any $()-injection gap entirely.
+            if ! printf '%s' "$id" | grep -qE '^[A-Za-z][A-Za-z0-9]*-[0-9]{1,4}$'; then
+              echo "Skipping malformed task id '$id'."; continue
+            fi
+            echo "::group::$id"
+
+            # Discover the worker branch by convention (flow/<id>-…). A stranded task usually
+            # has an empty `branch` field, since flow-status only records it once a PR opens.
+            branch="$(git ls-remote --heads origin "flow/$id-*" | head -1 | sed 's#.*refs/heads/##')"
+            if [ -n "$branch" ]; then
+              branch_exists=1
+              # fetch-depth: 0 on the main checkout fetched every origin ref, so the
+              # remote-tracking origin/$branch is present for rev-list without an extra fetch.
+              ahead="$(git rev-list --count "origin/main..origin/$branch")"
+              has_open_pr="$(gh pr list --head "$branch" --state open --json number --jq 'length')"
+              tip_epoch="$(git log -1 --format=%ct "origin/$branch")"
+              age=$(( (now - tip_epoch) / 60 ))
+            else
+              branch_exists=0; ahead=0; has_open_pr=0
+              # No branch: age from the `started` date (date-only granularity is fine — the
+              # threshold is ~hours, and a task with no branch has clearly produced nothing).
+              if [ -n "$started" ] && start_epoch="$(date -d "$started" +%s 2>/dev/null)"; then
+                age=$(( (now - start_epoch) / 60 ))
+              else
+                age=0
+              fi
+            fi
+
+            decision="$(node .flow/bin/flow-recover.mjs classify \
+              --status in_progress --branch-exists "$branch_exists" --ahead "$ahead" \
+              --has-open-pr "$has_open_pr" --age "$age" --threshold "$THRESHOLD")"
+            echo "$id: branch='${branch:-<none>}' ahead=$ahead open_pr=$has_open_pr age=${age}m -> $decision"
+
+            case "$decision" in
+              reopen-pr)
+                # Reuse the CAN-50 decision + gh pr create for the existing branch.
+                d="$(node .flow/bin/flow-open-pr.mjs --branch "$branch" --base main --ahead "$ahead" --has-open-pr "$has_open_pr")"
+                if [ -n "$d" ]; then
+                  title="$(node -e 'console.log(JSON.parse(process.argv[1]).title)' "$d")"
+                  task_path="$(grep -rl "^id: \"$id\"" .flow/tasks/ | head -1)"
+                  body="$(printf '%s\n\nTask: `%s`\n' \
+                    "Recovered by **flow-recover** (CAN-51): \`$branch\` was pushed but no PR existed." \
+                    "${task_path:-.flow/tasks/ (id $id)}")"
+                  gh pr create --base main --head "$branch" --title "$title" --body "$body" || \
+                    echo "gh pr create failed for $id — will retry next sweep."
+                fi
+                ;;
+              reset-to-ready)
+                node .flow/bin/flow-recover.mjs reset "$id" > .flow/board-edits.json
+                node .flow/bin/apply-board-edits.mjs
+                if git diff --quiet -- .flow/tasks/; then
+                  echo "No change for $id (already reset / not found)."
+                else
+                  git add .flow/tasks/
+                  git commit -m "flow: recover $id -> ready (stranded ${age}m, no branch/PR)"
+                  # Rebase before pushing: a second reset in the same sweep would otherwise be
+                  # rejected because the first push moved main.
+                  git pull --rebase origin main
+                  git push origin main
+                fi
+                ;;
+              *)
+                echo "$id healthy — leaving it alone."
+                ;;
+            esac
+            echo "::endgroup::"
+          done

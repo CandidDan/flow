@@ -1,0 +1,23 @@
+name: ci
+
+# Canonical-repo CI. The repo's other workflows are all reusable (on: workflow_call), so they
+# never run here — nothing was validating the Flow tooling that consuming repos adopt by
+# reference. This runs the template's `.flow/bin` proving tests on every push/PR, so the bin
+# (and the reusable workflows that call it) can't ship broken from canonical.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tooling:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test the Flow tooling
+        run: node --test project-template/.flow/bin/*.test.mjs

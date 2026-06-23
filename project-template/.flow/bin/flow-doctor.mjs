@@ -10,12 +10,23 @@
 //   duplicate ids · in_review without pr/branch · blocked without blocked_reason ·
 //   in_progress without owner/started · two in_progress tasks with overlapping touches (the
 //   atomic-claim rule was bypassed) · a declared source_root that's missing/uncovered, or a
-//   top-level source tree no source_root covers (the gate-coverage floor — see below).
+//   top-level source tree no source_root covers (the gate-coverage floor — see below) ·
+//   a task file present on disk but not committed (the uncommitted-task guard — see below).
 // WARNINGS (exit 0): ready task with owner set · ready task with empty touches (concurrency
 //   relies on it) · live tasks with overlapping touches (they can't run in parallel — sequence
 //   them; don't call them parallel-safe) · board snapshot ids/statuses drifted from the files ·
 //   no source_roots declared yet (adoption nudge) · Flow infra behind canonical (only when
 //   FLOW_CANONICAL_VERSION is set — see "version drift" below).
+// NOTES (exit 0): a check that was skipped because its precondition wasn't met (e.g. not run
+//   inside a git work tree, so the uncommitted-task guard can't read `git status`).
+//
+// UNCOMMITTED-TASK GUARD (CAN-41). A task isn't in the store until it's committed to main —
+// the store IS the committed `.flow/tasks/` on main, and concurrency depends on every session
+// seeing the same committed state. A task file left uncommitted (or with uncommitted edits) is
+// invisible to other sessions and to the board: it looks claimed/done locally but isn't. This
+// fails on any `.flow/tasks/*.md` that `git status` reports as untracked or modified. Skipped
+// (a note, not a failure) outside a git work tree, so unit fixtures and tarball checkouts are
+// unaffected.
 //
 // VERSION DRIFT. Flow infra is authored in canonical (CandidDan/flow) and repos adopt it, so a
 // repo can silently fall behind. Set FLOW_CANONICAL_VERSION (CI can derive it from
@@ -31,9 +42,10 @@
 // explicitly ignored). It can't prove a command truly parses a tree — it makes coverage
 // explicit and reviewed, not magically complete.
 
-import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 import { STATUSES } from "./apply-board-edits.mjs";
 
 const REQUIRED = ["id", "title", "status", "priority"];
@@ -163,6 +175,53 @@ export function compareVersions(a, b) {
   return 0;
 }
 
+// ── uncommitted-task guard (CAN-41) ──
+// Pure detector: given `git status --porcelain` output and the list of on-disk task-file
+// paths (repo-relative, e.g. ".flow/tasks/0099-x.md"), return the task files that are present
+// but not committed — untracked or with staged/unstaged changes. `_TEMPLATE.md` is ignored;
+// staged deletions (not on disk) are ignored via the `files` filter. When `files` is
+// empty/omitted, no on-disk filtering is applied (so the function is unit-testable from canned
+// porcelain alone).
+export function findUncommittedTasks(porcelain, files) {
+  const onDisk = new Set(files ?? []);
+  const offending = [];
+  for (const raw of String(porcelain).split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    if (line.length < 4) continue;
+    let path = line.slice(3).trim(); // porcelain is "XY <path>"
+    if (path.includes(" -> ")) path = path.split(" -> ").pop().trim(); // renames
+    path = path.replace(/^"(.*)"$/, "$1"); // git quotes paths with special chars
+    if (!path.startsWith(".flow/tasks/") || !path.endsWith(".md")) continue;
+    if (path.endsWith("_TEMPLATE.md")) continue;
+    if (onDisk.size && !onDisk.has(path)) continue; // e.g. a staged deletion
+    if (!offending.includes(path)) offending.push(path);
+  }
+  return offending;
+}
+
+// Thin git wrapper (the only side-effecting part). Reads porcelain status scoped to
+// `.flow/tasks` from the repo root. Returns `{ inRepo: false }` outside a git work tree so the
+// caller can skip gracefully (a note, not a failure).
+function realGitPorcelain(flowDir) {
+  const repoRoot = resolve(flowDir, "..");
+  try {
+    const inside = execFileSync("git", ["rev-parse", "--is-inside-work-tree"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (inside !== "true") return { inRepo: false, porcelain: "" };
+    const porcelain = execFileSync("git", ["status", "--porcelain", "--", ".flow/tasks"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return { inRepo: true, porcelain };
+  } catch {
+    return { inRepo: false, porcelain: "" };
+  }
+}
+
 function parseTask(text) {
   if (!text.startsWith("---")) return null;
   const end = text.indexOf("\n---", 3);
@@ -178,14 +237,16 @@ function parseTask(text) {
            touchesList: parseTouchesList(head) };
 }
 
-export function runDoctor({ flowDir, canonicalVersion }) {
-  const problems = [], warnings = [];
+export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
+  const problems = [], warnings = [], notes = [];
   const tasksDir = join(flowDir, "tasks");
   const seen = new Map();
   const tasks = [];
+  const onDiskTaskPaths = [];
 
   for (const name of readdirSync(tasksDir).sort()) {
     if (!name.endsWith(".md") || name === "_TEMPLATE.md") continue;
+    onDiskTaskPaths.push(`.flow/tasks/${name}`);
     const t = parseTask(readFileSync(join(tasksDir, name), "utf8"));
     if (!t) { problems.push(`${name}: malformed frontmatter`); continue; }
     const missing = REQUIRED.filter((k) => !t[k]);
@@ -285,15 +346,31 @@ export function runDoctor({ flowDir, canonicalVersion }) {
     }
   }
 
-  return { problems, warnings, count: tasks.length };
+  // Uncommitted-task guard (CAN-41): a task isn't in the store until it's committed to main.
+  // Fails on task files present on disk but not committed. The git read is injectable
+  // (`gitStatus`) for tests; in production it shells out, and skips gracefully (a note) when
+  // not in a git work tree — so unit fixtures and tarball checkouts are unaffected.
+  const { inRepo, porcelain } = (gitStatus ?? (() => realGitPorcelain(flowDir)))();
+  if (inRepo) {
+    for (const f of findUncommittedTasks(porcelain, onDiskTaskPaths)) {
+      problems.push(
+        `${f}: present on disk but not committed — a task isn't in the store until it's committed to main (commit + push it)`,
+      );
+    }
+  } else {
+    notes.push("uncommitted-task check skipped — not a git work tree");
+  }
+
+  return { problems, warnings, notes, count: tasks.length };
 }
 
 // ── CLI ──
 if (import.meta.url === `file://${process.argv[1]}`) {
   const flowDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const canonicalVersion = process.env.FLOW_CANONICAL_VERSION || undefined;
-  const { problems, warnings, count } = runDoctor({ flowDir, canonicalVersion });
+  const { problems, warnings, notes, count } = runDoctor({ flowDir, canonicalVersion });
   console.log(`flow-doctor: ${count} task(s) checked`);
+  for (const n of notes ?? []) console.log(`  note  ${n}`);
   for (const w of warnings) console.warn(`  WARN  ${w}`);
   for (const p of problems) console.error(`  FAIL  ${p}`);
   if (!problems.length && !warnings.length) console.log("  store is healthy");

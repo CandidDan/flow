@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runDoctor, compareVersions } from "./flow-doctor.mjs";
+import { runDoctor, compareVersions, findUncommittedTasks } from "./flow-doctor.mjs";
 
 function fixture(files) {
   const flowDir = mkdtempSync(join(tmpdir(), "flow-doc-"));
@@ -246,5 +246,54 @@ test("version drift: canonical known but no .flow/VERSION stamp → adoption war
   const r = runDoctor({ flowDir: d, canonicalVersion: "0.2.0" });
   assert.deepEqual(r.problems, []);
   assert.ok(r.warnings.some((w) => w.includes("no .flow/VERSION stamp")));
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ── uncommitted-task guard (CAN-41) ──
+
+test("findUncommittedTasks: untracked task file is offending", () => {
+  const porcelain = "?? .flow/tasks/0099-x.md\n M src/app.ts\n";
+  assert.deepEqual(findUncommittedTasks(porcelain), [".flow/tasks/0099-x.md"]);
+});
+
+test("findUncommittedTasks: staged-but-uncommitted change to a tracked task is offending", () => {
+  assert.deepEqual(findUncommittedTasks("M  .flow/tasks/0030-slim.md\n"), [".flow/tasks/0030-slim.md"]);
+});
+
+test("findUncommittedTasks: unstaged worktree change to a tracked task is offending", () => {
+  assert.deepEqual(findUncommittedTasks(" M .flow/tasks/0030-slim.md\n"), [".flow/tasks/0030-slim.md"]);
+});
+
+test("findUncommittedTasks: _TEMPLATE.md and non-task changes are ignored", () => {
+  const porcelain = " M .flow/tasks/_TEMPLATE.md\n M src/app.ts\n?? README.md\n";
+  assert.deepEqual(findUncommittedTasks(porcelain), []);
+});
+
+test("findUncommittedTasks: a staged deletion (not on disk) is filtered out by `files`", () => {
+  // The task was committed-then-deleted: porcelain reports it, but it's not in the on-disk set.
+  assert.deepEqual(findUncommittedTasks("D  .flow/tasks/0001-gone.md\n", [".flow/tasks/0002-here.md"]), []);
+});
+
+test("runDoctor: an uncommitted task file (injected git status) is a PROBLEM", () => {
+  const d = fixture({ "0099-x.md": task("P-0099") });
+  const gitStatus = () => ({ inRepo: true, porcelain: "?? .flow/tasks/0099-x.md\n" });
+  const r = runDoctor({ flowDir: d, gitStatus });
+  assert.ok(r.problems.some((p) => p.includes("0099-x.md") && p.includes("not committed")));
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("runDoctor: clean git status → no uncommitted-task problem, no skip note", () => {
+  const d = fixture({ "0001-a.md": task("P-0001") });
+  const r = runDoctor({ flowDir: d, gitStatus: () => ({ inRepo: true, porcelain: "" }) });
+  assert.deepEqual(r.problems, []);
+  assert.ok(!r.notes.some((n) => n.includes("uncommitted-task check skipped")));
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("runDoctor: outside a git work tree → uncommitted-task check is skipped (a note, not a failure)", () => {
+  const d = fixture({ "0001-a.md": task("P-0001") });
+  const r = runDoctor({ flowDir: d, gitStatus: () => ({ inRepo: false, porcelain: "" }) });
+  assert.deepEqual(r.problems, []);
+  assert.ok(r.notes.some((n) => n.includes("uncommitted-task check skipped")));
   rmSync(d, { recursive: true, force: true });
 });
