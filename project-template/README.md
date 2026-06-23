@@ -18,6 +18,8 @@ CLAUDE.md                     The protocol. The contract Code reads every sessio
                               coverage commands + coverage_min. The protocol is identical across
                               every project; only these commands differ. This is what makes
                               "test coverage regardless of tech stack" actually universal.
+  VERSION                     The canonical Flow version this repo adopted. flow-doctor warns when
+                              it falls behind canonical (set FLOW_CANONICAL_VERSION in CI to enable).
   tasks/                      The source of truth. One Markdown file per task: machine fields in
     _TEMPLATE.md              frontmatter (clean data, incl. `touches` for concurrency), spec in
     0001-*.md                 the body. This IS the handoff. 0001 is a worked example task.
@@ -41,7 +43,8 @@ CLAUDE.md                     The protocol. The contract Code reads every sessio
   skills/
     task-writer/                orchestrator discipline: how to write a *ready* task
     board-builder/              regenerate board.html from the task files
-.github/workflows/
+.github/workflows/            Thin callers of canonical's reusable workflows (authored once in
+                              CandidDan/flow, adopted by reference — docs/flow-reusable-workflows.md).
   flow-gates.yml              CI: the gate from config.yml + the store-is-main-only guard +
                               the touches-guard (diff ⊆ declared scope) + the flow-tooling tests.
   flow-status.yml             PR open → `in_review` (+branch/pr); closed-unmerged → `ready`.

@@ -1,0 +1,69 @@
+name: _flow-status (reusable)
+
+# Reusable form of the PR-event status sync. Repos call it from a thin caller; the logic
+# is authored once in canonical. See docs/flow-reusable-workflows.md.
+#
+# Event-driven state: the worker writes code and opens/closes PRs; PR events own the
+# lifecycle transitions so frontmatter never needs hand-editing for them.
+#   opened / reopened          -> in_review (+ branch & pr recorded)
+#   closed without merge       -> back to ready (owner/branch/pr cleared for re-claim)
+#   closed by merge            -> handled by flow-done.yml (this job no-ops)
+# Workers write only two transitions by hand: the claim (ready -> in_progress, which must
+# stay an atomic first-push-wins commit) and blocked (a judgment call).
+
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-status:
+    if: startsWith(github.event.pull_request.head.ref, 'flow/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Sync task state from the PR event
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          ACTION:   ${{ github.event.action }}
+          MERGED:   ${{ github.event.pull_request.merged }}
+          PR_URL:   ${{ github.event.pull_request.html_url }}
+          PR_NUM:   ${{ github.event.pull_request.number }}
+        run: |
+          id="$(printf '%s' "$HEAD_REF" | grep -oP '^flow/\K.+?-\d{1,4}(?=-)' || true)"
+          if [ -z "$id" ]; then echo "No task id in '$HEAD_REF' — nothing to sync."; exit 0; fi
+
+          case "$ACTION" in
+            opened|reopened)
+              echo "PR #$PR_NUM opened -> $id in_review"
+              printf '{"updates":[{"id":"%s","status":"in_review","branch":"%s","pr":"%s"}]}\n' \
+                "$id" "$HEAD_REF" "$PR_URL" > .flow/board-edits.json
+              ;;
+            closed)
+              if [ "$MERGED" = "true" ]; then echo "Merged — flow-done owns this transition."; exit 0; fi
+              echo "PR #$PR_NUM closed unmerged -> $id back to ready"
+              printf '{"updates":[{"id":"%s","status":"ready","owner":"","branch":"","pr":""}]}\n' \
+                "$id" > .flow/board-edits.json
+              ;;
+          esac
+
+          node .flow/bin/apply-board-edits.mjs
+
+          if git diff --quiet -- .flow/tasks/; then
+            echo "No state change for $id (no matching task file?) — nothing to commit."
+            exit 0
+          fi
+          git config user.name  "flow-bot"
+          git config user.email "flow-bot@users.noreply.github.com"
+          git add .flow/tasks/
+          git commit -m "flow: $id status sync ($ACTION, PR #$PR_NUM)"
+          git push origin main

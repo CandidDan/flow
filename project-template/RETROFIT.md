@@ -19,10 +19,11 @@ store-guard would otherwise block its own birth PR). No application code changes
 
 ## 1. Overlay the Flow files (merge, don't clobber)
 
-Copy from `project-template/`: `.flow/` (config, _TEMPLATE, board, **all of** `bin/`),
-`.github/workflows/flow-*.yml`, and **merge** `.claude/` (agents + skills) into any existing
-`.claude/` - list collisions first; if a same-named file differs, stop and show the human.
-Append `.flow/board-edits.json` to `.gitignore`; add the `.gitattributes` entries.
+Copy from `project-template/`: `.flow/` (config, _TEMPLATE, board, `VERSION`, **all of** `bin/`),
+`.github/workflows/flow-*.yml` (thin callers of canonical's reusable workflows — see
+`docs/flow-reusable-workflows.md` in the flow repo), and **merge** `.claude/` (agents + skills)
+into any existing `.claude/` - list collisions first; if a same-named file differs, stop and show
+the human. Append `.flow/board-edits.json` to `.gitignore`; add the `.gitattributes` entries.
 
 ## 2. Calibrate `.flow/config.yml`
 
