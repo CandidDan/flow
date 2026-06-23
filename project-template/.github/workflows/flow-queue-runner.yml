@@ -1,18 +1,12 @@
 name: flow-queue-runner
 
-# Drains the ready queue without you re-running a command per task. Two ways in:
-#   - schedule: on a cadence, pick the top ready task (pick-task.mjs) and dispatch a fresh
-#     worker to it. Keep the `ready` queue stocked and the backlog drains on its own.
-#   - workflow_dispatch with a task_id: work exactly that task now. This is also the hook the
-#     board's "Work this →" link uses — one click to GitHub, Run, and a worker scaffolds itself.
+# Thin caller — the queue-runner logic lives in canonical (CandidDan/flow) as a reusable
+# workflow, adopted here by reference. This caller owns the schedule and the workflow_dispatch
+# input (forwarded with `with: task_id`); `secrets: inherit` passes CLAUDE_CODE_OAUTH_TOKEN
+# through. See docs/flow-reusable-workflows.md in the flow repo.
 #
-# Each run is a FRESH worker session (a new claude-code-action invocation) — never one long
-# thread across tasks, matching the protocol's "fresh session per task" rule. The worker runs
-# the full loop (claim → branch → build → gate → PR) and STOPS at the PR; merge stays human.
-#
-# DISABLED BY DEFAULT. Enable: repo variable FLOW_AI=true + CLAUDE_CODE_OAUTH_TOKEN secret
-# (`claude setup-token` — uses your Max plan quota, not API credits). Start with the schedule
-# commented/sparse and drive it manually until you trust it; widen the cadence later.
+# DISABLED BY DEFAULT — the reusable job is gated on repo variable FLOW_AI=true and needs the
+# CLAUDE_CODE_OAUTH_TOKEN secret. Start with a sparse cron and drive it manually until trusted.
 
 on:
   workflow_dispatch:
@@ -30,69 +24,9 @@ concurrency:
   group: flow-queue-runner
   cancel-in-progress: false
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
-  dispatch:
-    if: ${{ vars.FLOW_AI == 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Choose the task to work
-        id: pick
-        env:
-          INPUT_ID: ${{ github.event.inputs.task_id }}
-        run: |
-          id="$INPUT_ID"
-          if [ -z "$id" ]; then id="$(node .flow/bin/pick-task.mjs)"; fi
-          if [ -z "$id" ]; then
-            echo "Queue dry — no ready task with a clear blast radius. Nothing to dispatch."
-            echo "task_id=" >> "$GITHUB_OUTPUT"
-          else
-            echo "Dispatching a worker for $id."
-            echo "task_id=$id" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Work the task (fresh worker session)
-        if: ${{ steps.pick.outputs.task_id != '' }}
-        uses: anthropics/claude-code-action@v1
-        with:
-          # Subscription auth (Pro/Max) — uses your plan quota, not API credits.
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}   # pay-per-use alternative
-          # The build role gets the strongest model — fewer blocks/kickbacks = fewer human
-          # touchpoints, which is the whole point of the loop. Alias (not a pinned version) so it
-          # tracks the latest Opus. Note: heavier on Max-plan quota than Sonnet. The independent
-          # reviewer (flow-review) is deliberately left on a different model for genuine diversity.
-          # (If the action renames this input, see anthropics/claude-code-action's README — could
-          # also be passed as `--model opus` inside claude_args.)
-          model: "opus"
-          claude_args: "--max-turns 60"
-          prompt: |
-            You are the Flow worker for a single task. Read CLAUDE.md (the protocol) and the task
-            file in .flow/tasks/ whose id is "${{ steps.pick.outputs.task_id }}". Run the full loop:
-
-            1. CLAIM: git pull --rebase; set the task to in_progress with owner + started; commit
-               that task file to main and push. If the push is rejected, another worker claimed
-               it — stop, do nothing further.
-            2. BRANCH off latest main: flow/${{ steps.pick.outputs.task_id }}-<slug>.
-            3. BUILD strictly against the task's acceptance criteria and within its declared
-               `touches` — nothing more, nothing outside those globs.
-            4. GATE: run the project's build/lint/test/coverage from .flow/config.yml plus the
-               qa-verifier, security-reviewer and code-reviewer subagents. Fix failures; do not
-               open the PR until all pass.
-            5. PR: open it titled "[${{ steps.pick.outputs.task_id }}] <title>", link the task
-               file, paste the acceptance checklist with the proving test for each item. STOP —
-               do not merge.
-
-            If a real decision is needed that the task didn't settle, set the task `blocked` with
-            a `blocked_reason` and stop rather than guessing. Never widen scope past `touches`.
+  flow-queue-runner:
+    uses: CandidDan/flow/.github/workflows/_flow-queue-runner.yml@v1
+    with:
+      task_id: ${{ inputs.task_id }}
+    secrets: inherit

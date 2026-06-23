@@ -33,9 +33,12 @@ Fill in, replacing every `REPLACE-ME`:
 
 ## 3. The one stack-specific CI line
 
-In `.github/workflows/flow-gates.yml`, replace the marked toolchain NOTE with your language's
-setup action (e.g. `actions/setup-node@v4` + version; `setup-python`; `setup-go`). If your
-coverage uses Node's `--test-coverage-*` flags, pin Node >= 22.
+The `.github/workflows/flow-*.yml` files are **thin callers** of canonical's reusable workflows
+(authored once in `CandidDan/flow`, adopted here by reference — see `docs/flow-reusable-workflows.md`
+in the flow repo). The gate runs Node 22 by default. If yours is a **non-Node stack**, set
+`setup_node_version: ""` in `flow-gates.yml`'s `with:` and provision the toolchain inside the
+`.flow/config.yml` commands; a stack that needs a setup step the reusable gate doesn't model keeps a
+full `flow-gates.yml` instead of the thin caller (reference where it reaches, copy where it doesn't).
 
 ## 4. Set the board's repo
 

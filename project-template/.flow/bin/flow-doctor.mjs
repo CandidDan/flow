@@ -14,7 +14,13 @@
 // WARNINGS (exit 0): ready task with owner set · ready task with empty touches (concurrency
 //   relies on it) · live tasks with overlapping touches (they can't run in parallel — sequence
 //   them; don't call them parallel-safe) · board snapshot ids/statuses drifted from the files ·
-//   no source_roots declared yet (adoption nudge).
+//   no source_roots declared yet (adoption nudge) · Flow infra behind canonical (only when
+//   FLOW_CANONICAL_VERSION is set — see "version drift" below).
+//
+// VERSION DRIFT. Flow infra is authored in canonical (CandidDan/flow) and repos adopt it, so a
+// repo can silently fall behind. Set FLOW_CANONICAL_VERSION (CI can derive it from
+// `git ls-remote --tags https://github.com/CandidDan/flow`) and this warns when the repo's
+// `.flow/VERSION` stamp is older. Off by default so local runs are unchanged.
 //
 // GATE-COVERAGE FLOOR. config.yml declares `source_roots:` — each `{ path, check }` naming a
 // tree and the command that parses/lints it. The gate only validates trees a command reaches,
@@ -142,6 +148,21 @@ function touchesOverlap(A, B) {
   return null;
 }
 
+// ── version drift (Flow infra is authored in canonical; repos adopt — this is the guard) ──
+// Parse "v1.2.3" / "1.2" / "0.1.0" into numeric segments; a `v` prefix and a short form are fine.
+function parseVersion(v) {
+  return String(v).trim().replace(/^v/i, "").split(".").map((s) => parseInt(s, 10) || 0);
+}
+// -1 if a < b, 0 if equal, 1 if a > b (segment-wise, missing segments treated as 0).
+export function compareVersions(a, b) {
+  const pa = parseVersion(a), pb = parseVersion(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
 function parseTask(text) {
   if (!text.startsWith("---")) return null;
   const end = text.indexOf("\n---", 3);
@@ -157,7 +178,7 @@ function parseTask(text) {
            touchesList: parseTouchesList(head) };
 }
 
-export function runDoctor({ flowDir }) {
+export function runDoctor({ flowDir, canonicalVersion }) {
   const problems = [], warnings = [];
   const tasksDir = join(flowDir, "tasks");
   const seen = new Map();
@@ -246,13 +267,32 @@ export function runDoctor({ flowDir }) {
     }
   }
 
+  // Version drift: Flow infra is authored in canonical and repos adopt it, so a repo can fall
+  // behind. When the caller supplies canonical's current version (CI passes FLOW_CANONICAL_VERSION,
+  // e.g. from `git ls-remote --tags`), compare it to this repo's `.flow/VERSION` stamp. Warn (don't
+  // fail) — same graceful-adoption posture as source_roots: surface the drift, don't block on it.
+  // Inactive when no canonical version is supplied, so local runs behave exactly as before.
+  if (canonicalVersion !== undefined && canonicalVersion !== "") {
+    const versionPath = join(flowDir, "VERSION");
+    if (!existsSync(versionPath)) {
+      warnings.push(`canonical Flow is ${canonicalVersion} but this repo has no .flow/VERSION stamp — ` +
+        "record the adopted version so drift can be detected (see docs/flow-reusable-workflows.md).");
+    } else {
+      const local = readFileSync(versionPath, "utf8").trim();
+      if (compareVersions(local, canonicalVersion) < 0)
+        warnings.push(`Flow infra is behind canonical: repo .flow/VERSION=${local}, canonical=${canonicalVersion} — ` +
+          "re-sync (bump the reusable-workflow tag + adopt template changes; see docs/flow-reusable-workflows.md).");
+    }
+  }
+
   return { problems, warnings, count: tasks.length };
 }
 
 // ── CLI ──
 if (import.meta.url === `file://${process.argv[1]}`) {
   const flowDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const { problems, warnings, count } = runDoctor({ flowDir });
+  const canonicalVersion = process.env.FLOW_CANONICAL_VERSION || undefined;
+  const { problems, warnings, count } = runDoctor({ flowDir, canonicalVersion });
   console.log(`flow-doctor: ${count} task(s) checked`);
   for (const w of warnings) console.warn(`  WARN  ${w}`);
   for (const p of problems) console.error(`  FAIL  ${p}`);

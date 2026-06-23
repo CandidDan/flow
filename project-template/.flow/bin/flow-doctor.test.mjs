@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runDoctor } from "./flow-doctor.mjs";
+import { runDoctor, compareVersions } from "./flow-doctor.mjs";
 
 function fixture(files) {
   const flowDir = mkdtempSync(join(tmpdir(), "flow-doc-"));
@@ -203,4 +203,48 @@ test("source_roots: config present but none declared → adoption warning, not f
   assert.ok(r.warnings.some((w) => w.includes("no source_roots declared")));
   assert.ok(!r.problems.some((p) => p.includes("source")));
   rmSync(repo, { recursive: true, force: true });
+});
+
+// ── version drift (Flow infra is authored in canonical; repos adopt — the guard) ──
+
+test("compareVersions: orders, tolerates v-prefix and short forms", () => {
+  assert.equal(compareVersions("0.1.0", "0.2.0"), -1);
+  assert.equal(compareVersions("v1.2.0", "1.2.0"), 0);
+  assert.equal(compareVersions("1.0", "1.0.0"), 0);
+  assert.equal(compareVersions("2.0.0", "1.9.9"), 1);
+  assert.equal(compareVersions("v2", "v1.5"), 1);
+});
+
+test("version drift: no canonical version supplied → check is inert (no version warning)", () => {
+  const d = fixture({ "0001-a.md": task("P-0001") });
+  writeFileSync(join(d, "VERSION"), "0.1.0\n");
+  const r = runDoctor({ flowDir: d });               // canonicalVersion undefined
+  assert.deepEqual(r.problems, []);
+  assert.ok(!r.warnings.some((w) => w.includes("behind canonical") || w.includes("VERSION stamp")));
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("version drift: repo behind canonical → warning, not a problem", () => {
+  const d = fixture({ "0001-a.md": task("P-0001") });
+  writeFileSync(join(d, "VERSION"), "0.1.0\n");
+  const r = runDoctor({ flowDir: d, canonicalVersion: "0.2.0" });
+  assert.deepEqual(r.problems, []);
+  assert.ok(r.warnings.some((w) => w.includes("behind canonical") && w.includes("0.1.0") && w.includes("0.2.0")));
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("version drift: repo level with canonical → no warning", () => {
+  const d = fixture({ "0001-a.md": task("P-0001") });
+  writeFileSync(join(d, "VERSION"), "1.0.0\n");
+  const r = runDoctor({ flowDir: d, canonicalVersion: "1.0.0" });
+  assert.ok(!r.warnings.some((w) => w.includes("behind canonical")));
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("version drift: canonical known but no .flow/VERSION stamp → adoption warning", () => {
+  const d = fixture({ "0001-a.md": task("P-0001") });   // no VERSION file written
+  const r = runDoctor({ flowDir: d, canonicalVersion: "0.2.0" });
+  assert.deepEqual(r.problems, []);
+  assert.ok(r.warnings.some((w) => w.includes("no .flow/VERSION stamp")));
+  rmSync(d, { recursive: true, force: true });
 });
