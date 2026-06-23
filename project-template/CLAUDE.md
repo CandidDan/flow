@@ -23,7 +23,10 @@ worker never creates tasks; it only executes `ready` ones.
 
 End every response to the human with a one-line **TL;DR** synopsis of what the turn covered —
 include it even on short replies — so they can absorb each turn at a glance without re-reading the
-full output.
+full output. If the turn leaves **actions for the human to take**, follow the TL;DR with a short
+**ordered checklist of just those to-dos** — numbered, one line each, in the order to do them.
+Omit the checklist entirely when there's nothing for them to do (don't pad it with things you've
+already handled or future "maybe" work).
 
 ---
 

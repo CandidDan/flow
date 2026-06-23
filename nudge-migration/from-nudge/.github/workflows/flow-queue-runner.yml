@@ -1,0 +1,121 @@
+name: flow-queue-runner
+
+# The queue-runner removes the last human step from the happy path. Today each task is
+# started by a person opening a fresh session and saying "work the next ready task". This
+# workflow does that unattended:
+#
+#   - schedule        — picks the top ready task (.flow/bin/pick-task.mjs) and dispatches a
+#                       worker through the full Flow loop. No-ops cleanly when the queue is empty.
+#   - workflow_dispatch with task_id — works a CHOSEN task on demand. This is what the board's
+#                       per-task "Work this →" link targets (it opens this workflow; you enter
+#                       the id and hit Run).
+#
+# DORMANT BY DEFAULT. It does nothing until BOTH are set:
+#   - repo variable  FLOW_AI=true                  (the master switch)
+#   - repo secret    CLAUDE_CODE_OAUTH_TOKEN       (from `claude setup-token` — uses your
+#                                                    Max plan quota, not API credits)
+# So merging this is a no-behaviour-change. Flipping FLOW_AI on is the deliberate human step.
+#
+# Concurrency: one runner at a time. Claiming is first-push-wins on main (CLAUDE.md), but
+# serialising ticks avoids two workers racing to claim the same task and burning quota on the
+# loser's rebase-and-retry.
+
+on:
+  schedule:
+    # Top of each hour, 09:00–18:00 UTC, weekdays. Dormant until FLOW_AI=true; tune freely.
+    - cron: "0 9-18 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: "Task id to work (e.g. CAN-42). Leave blank to auto-pick the top ready task."
+        required: false
+        type: string
+
+concurrency:
+  group: flow-queue-runner
+  cancel-in-progress: false
+
+permissions:
+  contents: write        # claim commit to main + push the feature branch
+  pull-requests: write   # open the PR at the end of the loop
+  issues: read           # tasks may link an origin issue
+  id-token: write        # claude-code-action@v1 mints an OIDC token at startup
+
+jobs:
+  run:
+    if: ${{ vars.FLOW_AI == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Select the task to work
+        id: pick
+        env:
+          INPUT_TASK_ID: ${{ github.event.inputs.task_id }}
+        run: |
+          if [ -n "$INPUT_TASK_ID" ]; then
+            # Validate the dispatch input before it flows into the worker prompt — only a
+            # well-formed task id is ever passed downstream (no injected instructions).
+            if ! printf '%s' "$INPUT_TASK_ID" | grep -qE '^CAN-[0-9]+$'; then
+              echo "::error::task_id '$INPUT_TASK_ID' is not a valid id (expected CAN-<n>)."
+              exit 1
+            fi
+            id="$INPUT_TASK_ID"
+            echo "Manual dispatch: working $id"
+          else
+            id="$(node .flow/bin/pick-task.mjs)"
+            echo "Scheduled tick: top ready task is '${id:-<none>}'"
+          fi
+          echo "task_id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Queue empty — nothing to do
+        if: ${{ steps.pick.outputs.task_id == '' }}
+        run: echo "No eligible ready task. Exiting clean — the queue-runner is a no-op this tick."
+
+      - name: Work the task through the Flow loop
+        if: ${{ steps.pick.outputs.task_id != '' }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          # Subscription auth (Pro/Max): run `claude setup-token` locally and save the result
+          # as the CLAUDE_CODE_OAUTH_TOKEN repo secret. Uses your plan quota, not API credits.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Pay-per-use alternative: comment the line above and use an API key instead.
+          # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are a fresh Flow worker. Work task ${{ steps.pick.outputs.task_id }} through the
+            loop defined in CLAUDE.md — read that file's "Flow protocol" section first, it is the
+            contract. In short:
+
+            1. Read .flow/tasks/ and find the file whose frontmatter id is
+               ${{ steps.pick.outputs.task_id }}. If its status is not `ready`, stop and say so —
+               do not work an already-claimed, blocked, or done task.
+            2. CLAIM it atomically: git pull --rebase; set status: in_progress + owner (use this
+               run's id) + started (today); commit ONLY that one task file and push to main. If
+               the push is rejected, someone claimed first — stop, do not force.
+            3. Branch off latest main: git checkout -b flow/${{ steps.pick.outputs.task_id }}-<slug>.
+            4. Build ONLY what the acceptance criteria ask, staying inside the task's `touches`.
+               Never modify .flow/tasks/ on the branch (the store is main-only).
+            5. Run the gate from .flow/config.yml (build, lint, test, coverage) plus the
+               qa-verifier / security-reviewer / code-reviewer subagents. Fix every failure
+               BEFORE opening a PR. If you hit something undecidable or out of scope, set the
+               task to `blocked` with a blocked_reason on main and stop — do not guess.
+            6. Rebase onto latest main, re-run the gate if main moved, then open a PR titled
+               "[${{ steps.pick.outputs.task_id }}] <title>", linking the task file and ticking
+               the acceptance-criteria checklist with the proving test named for each item.
+
+            Open exactly one PR for one task, then stop. Do not pick up additional tasks.
+          # Agent mode denies every tool call unless it's allowlisted here — without this the
+          # worker reaches turn limit having done nothing (CAN-34 first live run: 31 turns, 9
+          # permission_denials, "success" but no claim/branch/PR). The loop needs Bash (git,
+          # npm, gh, deno), file edits, search, and Task to spawn the gate subagents
+          # (qa-verifier / security-reviewer / code-reviewer).
+          claude_args: |
+            --max-turns 80
+            --allowedTools "Bash,Edit,Write,Read,Glob,Grep,Task,TodoWrite,WebFetch,WebSearch"

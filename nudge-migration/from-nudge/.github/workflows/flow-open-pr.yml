@@ -1,0 +1,96 @@
+name: flow-open-pr
+
+# CAN-50: take the model off the critical path for PR creation. Autonomous workers reliably
+# do the whole loop — claim, branch, build, gate, push — then end their turn WITHOUT running
+# `gh pr create`, stranding the task `in_progress` with a pushed branch and no PR (observed
+# twice on CAN-43). PR creation is a deterministic, mechanical step, so it should not depend
+# on the model's diligence: this workflow opens the PR on branch push. A worker stopping short
+# then becomes harmless — the PR opens regardless, flow-status flips the task to in_review, and
+# the loop continues. Because the workflow opens it, the `[<id>] <title>` title is correct
+# every time.
+#
+# Idempotent: a re-push never opens a second PR (the helper AND the create step both gate on
+# "no open PR for this branch"). Only worker branches (flow/<id>-…) ahead of base get a PR.
+#
+# GATING AUTO-WORKER PRs (CAN-58). A PR opened with the Actions `GITHUB_TOKEN` does NOT trigger
+# downstream workflows (GitHub's loop-prevention), so `flow-gates` (on: pull_request) never ran
+# on the PRs this workflow creates — the Definition-of-Done gate was silently bypassed for the
+# entire autonomous path (observed on CAN-47 #122: only open-pr + Vercel ran until a human
+# close/reopened it). Fix: open the PR with a Personal Access Token (`FLOW_PAT`) instead, so the
+# `pull_request` event is attributed to a real actor and `flow-gates` fires automatically.
+#
+#   Required secret:  FLOW_PAT
+#   How to create it: GitHub → Settings → Developer settings → Fine-grained PATs → Generate.
+#     Repository access: this repo only. Permissions: Contents = Read, Pull requests = Read/Write.
+#     Save it as a repo secret named FLOW_PAT (Settings → Secrets and variables → Actions).
+#   Until the secret exists the expression below falls back to GITHUB_TOKEN — behaviour is
+#   exactly as before (PR opens, but ungated), so adding the secret is a no-break enablement.
+
+on:
+  push:
+    branches:
+      - "flow/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # need base + branch history for rev-list
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Decide whether to open a PR
+        id: decide
+        env:
+          BRANCH: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch -q origin main
+          ahead="$(git rev-list --count origin/main..HEAD)"
+          has_open_pr="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
+          echo "has_open_pr=$has_open_pr" >> "$GITHUB_OUTPUT"
+
+          # Pure decision: opens only when the branch carries a task id, is ahead of base, and
+          # has no open PR. Emits {id,title,head,base} JSON, or nothing.
+          decision="$(node .flow/bin/flow-open-pr.mjs --branch "$BRANCH" --base main --ahead "$ahead" --has-open-pr "$has_open_pr")"
+          if [ -z "$decision" ]; then
+            echo "No PR to open for '$BRANCH' (already open, not ahead of base, or no parseable id)."
+            echo "open=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "open=1" >> "$GITHUB_OUTPUT"
+          id="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).id)' "$decision")"
+          title="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).title)' "$decision")"
+          # id is regex-constrained (no metachars); use the multiline-safe heredoc form for the
+          # title so an unexpected newline could never inject a second GITHUB_OUTPUT key.
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          { echo "title<<FLOW_EOF"; echo "$title"; echo "FLOW_EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Open the PR (draft)
+        # Belt-and-braces idempotency: the create step itself gates on "no existing open PR",
+        # on top of the helper's decision. A re-push can never open a duplicate.
+        if: steps.decide.outputs.open == '1' && steps.decide.outputs.has_open_pr == '0'
+        env:
+          BRANCH: ${{ github.ref_name }}
+          TASK_ID: ${{ steps.decide.outputs.id }}
+          TITLE: ${{ steps.decide.outputs.title }}
+          # FLOW_PAT (a real actor) makes the PR-opened event trigger flow-gates; falls back to
+          # GITHUB_TOKEN (ungated, the pre-CAN-58 behaviour) when the secret isn't set. See header.
+          GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
+        run: |
+          # Link the task file; do NOT invent acceptance text — the criteria checklist and DoD
+          # live in the task file and are completed by the worker / enforced by the gate.
+          task_path="$(grep -rl "^id: \"${TASK_ID}\"" .flow/tasks/ | head -1)"
+          body="$(printf '%s\n\n%s\n\n%s\n' \
+            "Auto-opened by **flow-open-pr** (CAN-50) on branch push — the worker pushed \`${BRANCH}\` but a PR did not yet exist." \
+            "Task: \`${task_path:-.flow/tasks/ (id ${TASK_ID})}\`" \
+            "Acceptance criteria, the proving tests, and the Definition-of-Done checklist live in the task file and are completed by the worker before this PR is ready for review.")"
+          gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$body" --draft

@@ -1,0 +1,69 @@
+# .flow/config.yml
+# The ONLY file that changes per stack. The protocol in CLAUDE.md is identical
+# across every project; it refers to the command names below.
+
+project:
+  name: "CAN"
+  language: "typescript"
+  description: "Nudge — AI executive assistant (email + WhatsApp + calendar)"
+
+# Commands — monorepo: all app code lives in app/
+# NOTE for lockfile stacks: `install` is strict (`npm ci`), so the lockfile must be exact.
+# Run the strict install once after adding any dependency and commit the resynced lockfile —
+# a half-updated lock passes a lenient local `npm install` but fails the gate's `npm ci`,
+# hiding until the first PR. Cross-platform footgun (CAN-30 scar): npm prunes optional deps
+# for the host OS, so a `package-lock.json` regenerated on macOS can omit the linux-only
+# `@emnapi`/`@rollup` optional packages that the Ubuntu CI runner's `npm ci` then can't find.
+# Regenerate the lock on the CI platform (linux) — or `npm install --force` after wiping
+# node_modules on linux — before committing, so the lock carries every platform's optionals.
+commands:
+  install:  "cd app && npm ci"
+  build:    "cd app && npm run build"
+  lint:     "cd app && npm run lint"
+  test:     "cd app && TZ=UTC npm test"
+  coverage: "cd app && TZ=UTC npx vitest run --coverage.enabled --coverage.thresholds.lines=92"
+  # Edge-function parse/import gate (CAN-32). The supabase/functions/ Deno tree is invisible
+  # to every command above (they all run in app/ under Node; vitest never imports index.ts).
+  # `deno bundle` builds each file's full module graph: syntax errors, duplicate declarations
+  # (the BOOT_ERROR class — esbuild scope analysis catches what `deno cache`'s parser doesn't),
+  # and unresolved imports all fail; the tree's ~38 pre-existing type errors don't. Deliberately
+  # NOT `deno check`: full type-check is red today and fixing edge-function source is outside
+  # CAN-32's scope — once the tree is type-clean (follow-up task), upgrade this to `deno check`.
+  # (`deno bundle` is experimental in Deno 2.x; if removed, that upgrade is the replacement.)
+  # __tests__/ and *.test.ts are excluded — they run under Node/vitest, not Deno.
+  check_edge: "find supabase/functions -name '*.ts' -not -path '*/__tests__/*' -not -name '*.test.ts' -print0 | xargs -0 deno bundle --outdir /tmp/edge-parse-check"
+
+# Coverage floor.
+# Actual measured lines: 97.53% (4 app/src files instrumented by v8 out of 79 source lines).
+# Note: supabase/functions/** are tested (1329 of 1332 tests) but excluded from v8
+# instrumentation because they live outside app/. The floor applies only to the 4
+# instrumented app-side files; raise it if/when coverage is wired for the functions too.
+# N = actual (97) minus 5 = 92.
+coverage_min: 92
+
+# Source-roots gate-coverage (CAN-33). Every top-level source tree must appear here.
+# flow-doctor fails if a top-level directory exists that is neither declared here nor in
+# ROOT_IGNORE. Add new runtimes (workers, additional apps, etc.) as they land — that's
+# the structural fix for the BOOT_ERROR class.
+source_roots:
+  - path: "app/"
+    check: "cd app && npm run lint"
+  - path: "supabase/functions/"
+    check: "find supabase/functions -name '*.ts' -not -path '*/__tests__/*' -not -name '*.test.ts' -print0 | xargs -0 deno bundle --outdir /tmp/edge-parse-check"
+
+# Security expectations — Nudge-specific battle scars wired in.
+security:
+  secrets_scan: true
+  dependency_audit: true
+  focus:
+    - "RLS policies on every table (user_id = auth.uid() — non-negotiable)"
+    - "OAuth token handling + Supabase Vault storage (never expose to frontend)"
+    - "Twilio webhook signature verification (process-inbound, twilio-events, twilio-status)"
+    - "Input validation on all inbound webhook payloads"
+    - "Prompt-injection surface on AI-processed email/WhatsApp content"
+    - "supabase env-var fallback: getSupabaseSecretKey() not process.env direct access"
+
+git:
+  base_branch: "main"
+  branch_prefix: "flow/"
+  protect_main: false   # personal repo — Actions bot can't be granted bypass; Dan is sole merger
