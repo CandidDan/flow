@@ -19,7 +19,7 @@ surface that *can* drift — and a check makes the rest non-skippable.
 | Piece | Today | Target | Why |
 |---|---|---|---|
 | `.github/workflows/flow-*.yml` | copied per repo | **Reference** — reusable workflows (`uses: CandidDan/flow/.github/workflows/_flow-gates.yml@v1`); each repo keeps a 3-line caller | Workflows were the worst drift surface; reusable workflows eliminate the copy entirely |
-| `.flow/bin/*.mjs` (flow-doctor, apply-board-edits, touches-guard, pick-task, flow-open-pr, flow-recover, parse-task-id) | copied per repo | **Decision:** versioned npm package (reference) **or** copy + version stamp + drift check | Package is the clean cure; copy+check is less change. See Decision 2 |
+| `.flow/bin/*.mjs` (flow-doctor, apply-board-edits, touches-guard, pick-task, flow-open-pr, flow-recover, parse-task-id, flow-sync) | copied per repo | **Resolved (Decision 2):** copy + version stamp + drift check, updated by `flow-sync`. npm package deferred as optional | Copy+check proved out; closes the drift surface without an npm-publish pipeline |
 | `.claude/skills/*` (task-writer, board-builder) | copied per repo | **Reference** — the Flow plugin (already underway) | Plugin already registers them; drop the repo copies once stable |
 | `.claude/agents/*` (qa/security/code reviewers, portfolio-manager) | copied per repo | **Mostly reference via plugin**; keep in-repo only if a CI step must read them without the plugin installed | Same as skills, modulo the CI-reads-repo constraint |
 | `CLAUDE.md` Flow-protocol section | copied per repo | Copy + drift check on the protocol block (or factor the protocol into a referenced doc the CLAUDE.md links to) | It must be one file per repo; can't be referenced cleanly |
@@ -48,23 +48,35 @@ surface that *can* drift — and a check makes the rest non-skippable.
   what makes "remember to adopt" non-skippable.
 
 ### Phase 3 — bin + skills reference *(per Decision 2 & 3)*
-- bin → npm package *or* keep copied under the Phase-2 drift check.
-- skills/agents → drop repo copies in favour of the plugin (where CI allows).
+- ✅ **bin → kept copied under the Phase-2 drift check** (Decision 2, resolved 2026-06-24): the
+  copy + version-stamp + `flow-doctor` drift-check path is the chosen model; the npm package is
+  deferred as optional. `flow-sync` (Phase 4) now actively updates the copy, closing the loop.
+- skills/agents → drop repo copies in favour of the plugin (where CI allows). *Still open — needs
+  the plugin stable + cross-repo; out of the canonical repo's reach.*
 
 ### Phase 4 — Adopt mechanism + governance
-- `flow-sync`: for whatever stays copied, a command/workflow that pulls canonical in and opens a
-  **reviewed PR** (Dependabot-style) — updates flow downstream but still pass the gate.
-- Write the governance rule into the protocol: **infra is authored in canonical; repos adopt. Stop
-  patching infra as project tasks.** A repo can *discover* a bug under load; the fix is committed to
-  canonical and the repo pulls it in.
+- ✅ **`flow-sync`** (`_flow-sync.yml` reusable + thin caller + `flow-sync.mjs` + tests): when a
+  repo's `.flow/VERSION` is behind canonical, it copies the updated `.flow/bin/*` + thin callers in,
+  bumps the stamp, and opens a **reviewed PR** (Dependabot-style). The sync PR isn't a `flow/<id>`
+  branch, so touches-guard skips it and the store-guard passes — but flow-gates' `flow-tooling` job
+  runs the *synced* tests + `flow-doctor`, so the gate validates each adoption for free. Complements
+  flow-doctor's drift *warning* (the warning says "behind"; flow-sync is the fix).
+- ✅ **Governance rule written into the protocol** (`project-template/CLAUDE.md` → Hard rules):
+  **infra is authored in canonical; repos adopt — never patch it as a project task.** A repo can
+  *discover* a bug under load; the fix is committed to canonical and pulled back in via `flow-sync`.
 
 ## Decisions (locked 2026-06-18)
 
 1. **Canonical lives in a dedicated `CandidDan/flow` repo.** The existing `~/Projects/flow` folder
    (already holding `project-template/`, `flow-plugin/`, `flightdeck/`, `docs/`) becomes that repo —
    `git init` + push. It hosts the reusable workflows, the bin package, and the template.
-2. **`.flow/bin` becomes a versioned npm package** (`@candid/flow-bin` or similar), published from
-   the `flow` repo, that the reusable workflows and repos call (`npx flow-doctor`, etc.).
+2. ~~**`.flow/bin` becomes a versioned npm package** (`@candid/flow-bin` or similar), published
+   from the `flow` repo, that the reusable workflows and repos call (`npx flow-doctor`, etc.).~~
+   **Superseded 2026-06-24 (Phase 3):** the bin stays **copied per repo, governed by the version
+   stamp + `flow-doctor` drift check, and actively updated by `flow-sync`** (Phase 4). The
+   copy+check path proved out and needs no npm-publish pipeline or `npx` indirection in CI; the
+   npm package is deferred as an optional later refactor, not a prerequisite. The drift surface is
+   already closed by the stamp+check+sync loop.
 3. **Committed scope = Phase 0 → 2** (reconcile + versioned canonical, reusable workflows, drift
    check). Phases 3–4 follow once proven. **First move: Phase 0 + 1 on Nudge.**
 
