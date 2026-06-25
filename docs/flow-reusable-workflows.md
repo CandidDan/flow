@@ -72,6 +72,12 @@ jobs:
 - **Permissions:** consuming repos need *default workflow permissions = read+write* (the status/done
   workflows push state to `main`). The reusable workflows declare their own `permissions:`; the
   effective token is the intersection, so the repo setting must allow write.
+- **`id-token: write` for the claude-code-action workflows** (`flow-queue-runner`, `flow-triage`,
+  `flow-review`): the action mints an OIDC token, but `id-token` is *never* in the default
+  `GITHUB_TOKEN` and a reusable workflow can't raise a permission above its caller's grant — so it's
+  declared on **both** the reusable file and the thin caller's job. Because a caller `permissions:`
+  block is exhaustive (anything unlisted drops to `none`), those callers re-list every permission
+  their reusable needs (`contents`, `pull-requests`/`issues`, `id-token`), not just `id-token`.
 
 ### Version stamp + drift check
 

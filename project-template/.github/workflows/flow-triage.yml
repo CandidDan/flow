@@ -14,5 +14,12 @@ on:
 
 jobs:
   flow-triage:
+    # id-token: write must be granted on the caller — OIDC is never in the default GITHUB_TOKEN,
+    # and a reusable workflow can't raise it above the caller's grant. A permissions block is
+    # exhaustive, so contents/issues are re-listed. See docs/flow-reusable-workflows.md.
+    permissions:
+      contents: write
+      issues: write
+      id-token: write
     uses: CandidDan/flow/.github/workflows/_flow-triage.yml@v1
     secrets: inherit
