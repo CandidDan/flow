@@ -30,6 +30,7 @@ on:
 permissions:
   contents: write
   issues: write
+  id-token: write          # OIDC token minting for claude-code-action
 
 jobs:
   triage:

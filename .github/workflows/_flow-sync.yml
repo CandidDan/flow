@@ -1,0 +1,117 @@
+name: _flow-sync (reusable)
+
+# Reusable form of the Flow infra adopt mechanism (propagation plan, Phase 4). Flow infra is
+# authored in canonical (CandidDan/flow) and repos *adopt* it; this is the "pull canonical in"
+# half of that contract — the complement to flow-doctor's version-drift *warning*. When the
+# calling repo's .flow/VERSION is behind canonical, this copies the updated infra in and opens a
+# REVIEWED PR (Dependabot-style), so the update still clears the gate before it lands. Repos call
+# it from a thin caller (project-template/.github/workflows/flow-sync.yml) that owns the schedule.
+# See docs/flow-reusable-workflows.md.
+#
+# What it syncs (the *copied* surface — everything else is referenced and can't drift):
+#   - .flow/bin/*            the tooling (flow-doctor, touches-guard, pick-task, … and this logic)
+#   - .github/workflows/flow-*.yml   the thin callers (in case canonical added/changed one)
+#   - .flow/VERSION          bumped to canonical's stamp
+# It never touches .flow/config.yml, .flow/tasks/, or the project's CLAUDE.md — those are
+# intentionally per-repo. The CLAUDE.md protocol block stays a manual adopt (it's interleaved
+# with project notes; auto-rewriting it is unsafe).
+#
+# Why a PR, not a push: adoption must clear the same Definition-of-Done gate as any change. A
+# flow-sync/<version> branch isn't a flow/<id> branch, so touches-guard skips it and the
+# store-guard (which only blocks .flow/tasks/ edits) passes — yet flow-gates' flow-tooling job
+# runs the *synced* tests + flow-doctor, so the gate validates the update for free.
+#
+# Opens with FLOW_PAT (CAN-58) so flow-gates fires on the sync PR too; falls back to GITHUB_TOKEN
+# when unset (the PR opens, just ungated). The thin caller passes it with `secrets: inherit`.
+
+on:
+  workflow_call:
+    inputs:
+      canonical_ref:
+        description: "Canonical ref to adopt from (tag/branch). Match your callers' pin. Default v1."
+        required: false
+        type: string
+    secrets:
+      FLOW_PAT:
+        required: false
+
+permissions:
+  contents: write          # push the sync branch
+  pull-requests: write     # open the sync PR
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Checkout canonical
+        uses: actions/checkout@v4
+        with:
+          repository: CandidDan/flow
+          ref: ${{ inputs.canonical_ref || 'v1' }}
+          path: .flow-canonical
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Adopt canonical infra if behind
+        env:
+          GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
+        run: |
+          set -euo pipefail
+          CANON_TPL=".flow-canonical/project-template"
+          # Use canonical's OWN flow-sync logic (the authority), never this repo's possibly-stale copy.
+          SYNC="node $CANON_TPL/.flow/bin/flow-sync.mjs"
+
+          if [ ! -f "$CANON_TPL/.flow/VERSION" ]; then
+            echo "Canonical checkout has no project-template/.flow/VERSION — nothing to adopt."; exit 0
+          fi
+          CANON_VER="$(cat "$CANON_TPL/.flow/VERSION" | tr -d '[:space:]')"
+          LOCAL_VER="$( [ -f .flow/VERSION ] && tr -d '[:space:]' < .flow/VERSION || echo '' )"
+
+          DECISION="$($SYNC decide --local "$LOCAL_VER" --canonical "$CANON_VER")"
+          echo "local='${LOCAL_VER:-<none>}' canonical='$CANON_VER' -> $DECISION"
+          case "$DECISION" in
+            current) echo "Up to date with canonical $CANON_VER — nothing to do."; exit 0 ;;
+            ahead)   echo "::warning::This repo (.flow/VERSION=$LOCAL_VER) is AHEAD of canonical $CANON_VER — a local infra edit, or a tag not yet cut. Reconcile it UPWARD into canonical; flow-sync won't sync backwards."; exit 0 ;;
+            behind)  : ;;
+            *)       echo "::error::Unexpected flow-sync decision '$DECISION'"; exit 1 ;;
+          esac
+
+          BRANCH="$($SYNC branch --canonical "$CANON_VER")"
+          if [ -n "$(git ls-remote --heads origin "$BRANCH")" ]; then
+            echo "Sync branch '$BRANCH' already exists — a sync PR for $CANON_VER is already open. Idempotent no-op."
+            exit 0
+          fi
+
+          # Copy the copied surface from canonical's template. bin: mirror exactly so files
+          # canonical deleted go away here too. Thin callers: refresh in case one changed/was added.
+          mkdir -p .flow/bin .github/workflows
+          rsync -a --delete "$CANON_TPL/.flow/bin/" .flow/bin/
+          for f in "$CANON_TPL"/.github/workflows/flow-*.yml; do
+            [ -e "$f" ] && cp "$f" .github/workflows/
+          done
+          printf '%s\n' "$CANON_VER" > .flow/VERSION
+
+          if git diff --quiet; then
+            echo "Versions differ but no file content changed — bumping the stamp only."
+          fi
+
+          CHANGED="$(git diff --name-only)"
+          git config user.name  "flow-bot"
+          git config user.email "flow-bot@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "flow: adopt canonical Flow infra $CANON_VER"
+          git push origin "$BRANCH"
+
+          TITLE="$($SYNC pr-title --local "$LOCAL_VER" --canonical "$CANON_VER")"
+          BODY="$($SYNC pr-body --local "$LOCAL_VER" --canonical "$CANON_VER" --files "$CHANGED")"
+          gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$BODY" \
+            || echo "gh pr create failed — branch is pushed; will retry next run."

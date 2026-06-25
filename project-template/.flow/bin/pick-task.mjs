@@ -1,63 +1,109 @@
 #!/usr/bin/env node
-// pick-task.mjs — the queue-runner's brain. Prints the id of the task a fresh worker should
-// claim next, or nothing if the queue is dry. Implements the protocol's selection rule:
-// the highest-priority `ready` task (priority 1 = most urgent) whose `touches` globs DON'T
-// overlap any currently `in_progress` task's `touches` — so the runner never dispatches work
-// that would collide with work already in flight. (First-push-wins is still the real safety
-// net for races; this just avoids obvious collisions up front.)
+// pick-task.mjs — the queue-runner's task selector. Pure, zero-dependency (Node >= 18).
 //
-//   node .flow/bin/pick-task.mjs            # prints e.g. "CAN-32" or nothing
+// Implements step 1 of the Flow loop (CLAUDE.md): pick the highest-priority `ready`
+// task whose declared `touches` blast radius does NOT overlap any currently
+// `in_progress` task. Prints that task's id to stdout and nothing else, or prints
+// nothing (exit 0) when there is no eligible task.
 //
-// Zero deps (Node >= 18). Exported pickTask() is unit-tested.
+//   node .flow/bin/pick-task.mjs        # prints e.g. "CAN-42" or nothing
+//
+// Two callers:
+//   - the scheduled queue-runner workflow reads this id to dispatch a fresh worker;
+//   - a human runs it at the repo root to sanity-check "what's next" against the board.
+//
+// Selection order: lowest `priority` NUMBER wins — P1 is most urgent, matching the
+// board's ascending sort and the PRI palette. Ties break by the task id's numeric
+// suffix ascending (older sequential ids first), then lexically by id. Determinism is
+// the point: two queue-runner ticks racing on the same store must agree on the same
+// next task, or the first-push-wins claim degenerates into churn.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-function field(head, k) {
-  const m = head.match(new RegExp(`^${k}:\\s*(.*)$`, "m"));
-  return m ? m[1].split("#")[0].trim().replace(/^"(.*)"$/, "$1") : "";
-}
-function touchesOf(head) {
-  const m = head.match(/^touches:\s*\[(.*?)\]/m);
-  if (!m) return [];
-  return [...m[1].matchAll(/"([^"]*)"|'([^']*)'/g)].map((x) => x[1] ?? x[2]).filter(Boolean);
-}
-// Literal prefix of a glob (portion before the first wildcard).
-const litPrefix = (g) => g.split(/[*?]/)[0];
-// Two globs overlap if one literal prefix contains the other.
-function globsOverlap(a, b) {
-  const pa = litPrefix(a), pb = litPrefix(b);
-  return pa.startsWith(pb) || pb.startsWith(pa);
-}
-function listsOverlap(a, b) {
-  return a.some((x) => b.some((y) => globsOverlap(x, y)));
+// Parse the YAML frontmatter we care about from a task file's text. Tolerant of the
+// inline-array `touches` form and `#` trailing comments — same shape flow-doctor and
+// touches-guard read. Returns null when there's no frontmatter block.
+export function parseTask(text) {
+  if (!text.startsWith("---")) return null;
+  const end = text.indexOf("\n---", 3);
+  if (end === -1) return null;
+  const head = text.slice(3, end);
+  const get = (k) => {
+    const m = head.match(new RegExp(`^${k}:\\s*(.*)$`, "m"));
+    return m ? m[1].split("#")[0].trim().replace(/^"(.*)"$/, "$1") : "";
+  };
+  const touchesRaw = (head.match(/^touches:\s*\[(.*?)\]/m) || [, ""])[1];
+  const touches = [...touchesRaw.matchAll(/"([^"]*)"|'([^']*)'/g)]
+    .map((x) => x[1] ?? x[2]).filter(Boolean);
+  const id = get("id");
+  if (!id) return null;
+  return { id, status: get("status"), priority: parseInt(get("priority"), 10), touches };
 }
 
-export function pickTask({ tasksDir }) {
-  const ready = [], inProgress = [];
-  for (const name of readdirSync(tasksDir)) {
+// The literal path prefix of a glob: everything up to (not including) the first wildcard.
+// "src/components/signup/**" -> "src/components/signup/", "app/vercel.json" -> "app/vercel.json",
+// "**" -> "". Overlap reasoning works off these prefixes — exact enough for the path-glob
+// vocabulary task files use, without pulling in a glob-intersection library.
+export function staticPrefix(glob) {
+  const star = glob.indexOf("*");
+  return star === -1 ? glob : glob.slice(0, star);
+}
+
+// Path-prefix test at a segment boundary: is `a` a prefix of `b` such that they share a
+// directory lineage? "src/" ⊑ "src/lib/x.ts" (true), "src" ⊑ "src/lib" (true), but
+// "src/lib/a.ts" ⋢ "src/lib/ab.ts" (false — not a segment boundary).
+function isPathPrefix(a, b) {
+  if (a === "") return true;            // "" comes from "**" — matches everything
+  if (!b.startsWith(a)) return false;
+  return a === b || a.endsWith("/") || b[a.length] === "/";
+}
+
+// Two globs overlap if either's static prefix is a path-prefix of the other's. Catches the
+// real cases task files produce: identical paths, a `dir/**` enclosing a file under it, and
+// `**` (empty prefix) matching anything. Conservative — it may call a pair overlapping when a
+// deep wildcard wouldn't actually collide, which is the safe direction for a claim guard.
+export function globsOverlap(a, b) {
+  const pa = staticPrefix(a), pb = staticPrefix(b);
+  return isPathPrefix(pa, pb) || isPathPrefix(pb, pa);
+}
+
+// Two `touches` lists overlap if any glob pair across them overlaps.
+export function touchesOverlap(aList, bList) {
+  return aList.some((a) => bList.some((b) => globsOverlap(a, b)));
+}
+
+// Pure selector: given the parsed tasks, return the id of the task to work next, or null.
+// A `ready` task is eligible unless its touches overlap any `in_progress` task's touches.
+export function pickTask(tasks) {
+  const inProgress = tasks.filter((t) => t.status === "in_progress");
+  const numId = (id) => { const m = String(id).match(/(\d+)\s*$/); return m ? parseInt(m[1], 10) : Infinity; };
+  const pri = (t) => (Number.isFinite(t.priority) ? t.priority : 999);
+
+  const eligible = tasks
+    .filter((t) => t.status === "ready")
+    .filter((t) => !inProgress.some((p) => touchesOverlap(t.touches, p.touches)))
+    .sort((a, b) => pri(a) - pri(b) || numId(a.id) - numId(b.id) || String(a.id).localeCompare(b.id));
+
+  return eligible.length ? eligible[0].id : null;
+}
+
+// Read and parse every task file in a tasks directory (skips _TEMPLATE.md and non-.md).
+export function readTasks(tasksDir) {
+  const out = [];
+  for (const name of readdirSync(tasksDir).sort()) {
     if (!name.endsWith(".md") || name === "_TEMPLATE.md") continue;
-    const src = readFileSync(join(tasksDir, name), "utf8");
-    if (!src.startsWith("---")) continue;
-    const end = src.indexOf("\n---", 3);
-    if (end === -1) continue;
-    const head = src.slice(0, end);
-    const t = { id: field(head, "id"), status: field(head, "status"),
-                priority: parseInt(field(head, "priority")) || 3, touches: touchesOf(head) };
-    if (t.status === "ready") ready.push(t);
-    else if (t.status === "in_progress") inProgress.push(t);
+    const t = parseTask(readFileSync(join(tasksDir, name), "utf8"));
+    if (t) out.push(t);
   }
-  ready.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
-  const busy = inProgress.flatMap((t) => t.touches);
-  for (const t of ready) {
-    if (!listsOverlap(t.touches, busy)) return t.id;
-  }
-  return "";   // queue dry, or every ready task overlaps something in flight
+  return out;
 }
 
+// ── CLI ── prints the chosen id (or nothing). Always exits 0; "no task" is not an error.
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const tasksDir = join(resolve(dirname(fileURLToPath(import.meta.url)), ".."), "tasks");
-  const id = pickTask({ tasksDir });
-  if (id) process.stdout.write(id);   // bare id, no newline — easy to capture in CI
+  const flowDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const id = pickTask(readTasks(join(flowDir, "tasks")));
+  if (id) process.stdout.write(id + "\n");
+  process.exit(0);
 }

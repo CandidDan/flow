@@ -52,12 +52,51 @@ export function checkTouches({ changedFiles, touches }) {
   return { outside, checked: candidates.length };
 }
 
-// Read a task file's `touches` list from YAML frontmatter (tolerant of inline-array form).
+// Parse a task file's `touches` from its YAML frontmatter. Handles BOTH shapes the
+// store actually uses, returning the same string[]:
+//   inline:      touches: ["a/**", "b.json"]
+//   multi-line:  touches:
+//                  - "a/**"
+//                  - 'b.json'
+// A genuinely empty declaration (`touches: []`, or no key) returns []. Dependency-free
+// (no YAML lib) — a tolerant scan of the two shapes the task files use is enough.
+// (CAN-57: the multi-line form previously never matched, silently disabling the guard
+// for the entire dashboard task family.)
+export function parseTouches(src) {
+  // Only look inside the YAML frontmatter (between the first two `---` fences), never the
+  // body — a task's prose can legitimately contain a `touches:` line (e.g. a code example,
+  // as CAN-57's own task file does). Falls back to the whole string if no fence is found.
+  const fence = src.match(/^---\n([\s\S]*?)\n---/);
+  const fm = fence ? fence[1] : src;
+
+  // Inline array — the `s` flag lets the bracket span lines (`touches: [\n "a",\n ]`).
+  const inline = fm.match(/^touches:\s*\[(.*?)\]/ms);
+  if (inline) {
+    return [...inline[1].matchAll(/"([^"]*)"|'([^']*)'/g)].map((x) => x[1] ?? x[2]).filter(Boolean);
+  }
+  // Multi-line YAML list: a bare `touches:` line followed by `  - <glob>` items.
+  const lines = fm.split(/\r?\n/);
+  const start = lines.findIndex((l) => /^touches:\s*$/.test(l));
+  if (start === -1) return [];
+  const out = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*$/.test(line) || /^\s*#/.test(line)) continue; // tolerate blank + full-line comments
+    const item = line.match(/^\s*-\s+(.*\S)\s*$/);
+    if (!item) break; // a non-item line is the next key — the list has ended
+    const raw = item[1];
+    // Quoted value: take what's inside the quotes, ignoring any trailing ` # comment`.
+    // Unquoted value: strip a trailing YAML comment (whitespace + `#…`).
+    const quoted = raw.match(/^"([^"]*)"|^'([^']*)'/);
+    const value = quoted ? (quoted[1] ?? quoted[2]) : raw.replace(/\s+#.*$/, "").trim();
+    if (value) out.push(value);
+  }
+  return out;
+}
+
+// Read a task file's `touches` list from YAML frontmatter (both inline + multi-line forms).
 function readTouches(file) {
-  const src = readFileSync(file, "utf8");
-  const m = src.match(/^touches:\s*\[(.*?)\]/m);
-  if (!m) return [];
-  return [...m[1].matchAll(/"([^"]*)"|'([^']*)'/g)].map((x) => x[1] ?? x[2]).filter(Boolean);
+  return parseTouches(readFileSync(file, "utf8"));
 }
 
 function findTaskFile(tasksDir, id) {
