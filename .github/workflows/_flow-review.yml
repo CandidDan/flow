@@ -46,6 +46,8 @@ jobs:
           # the CLAUDE_CODE_OAUTH_TOKEN repo secret. Uses your plan quota, not API credits.
           # (Token dies if you log out of Claude Code — regenerate with `claude setup-token`.)
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # GitHub API token for the action (read PR context, post the review comment).
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           # Pay-per-use alternative: comment the line above and use an API key instead.
           # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |

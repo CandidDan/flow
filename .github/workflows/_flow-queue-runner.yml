@@ -68,6 +68,10 @@ jobs:
         with:
           # Subscription auth (Pro/Max) — uses your plan quota, not API credits.
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # GitHub API token for the action's git/PR operations. NB: a PR the worker opens with
+          # GITHUB_TOKEN does NOT trigger flow-gates (CAN-58) — _flow-open-pr/_flow-recover catch
+          # and re-open it under FLOW_PAT so the gate still fires.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}   # pay-per-use alternative
           # The build role gets the strongest model — fewer blocks/kickbacks = fewer human
           # touchpoints, which is the whole point of the loop. Alias (not a pinned version) so it
