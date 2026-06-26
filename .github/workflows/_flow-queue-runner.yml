@@ -77,10 +77,18 @@ jobs:
           # touchpoints, which is the whole point of the loop. Alias (not a pinned version) so it
           # tracks the latest Opus. Note: heavier on Max-plan quota than Sonnet. The independent
           # reviewer (flow-review) is deliberately left on a different model for genuine diversity.
-          # (If the action renames this input, see anthropics/claude-code-action's README — could
-          # also be passed as `--model opus` inside claude_args.)
-          model: "opus"
-          claude_args: "--max-turns 60"
+          #
+          # model + permissions go through claude_args, NOT as top-level inputs. This action version
+          # has no `model` input — passing one emitted "Unexpected input(s) 'model'" and silently fell
+          # back to the default Sonnet (so `model: opus` never took effect). And a headless worker has
+          # nobody to approve tool prompts: without an explicit permission posture, every Bash call
+          # (the git claim-push, the branch, `gh pr create`, npm/gate commands) is DENIED — the worker
+          # burns its turns, claims nothing, and ends "successfully" having pushed no branch and opened
+          # no PR (observed on Nudge: 17 permission denials per run, all ready tasks left untouched).
+          # `--permission-mode bypassPermissions` makes the loop autonomous on an ephemeral, trusted CI
+          # runner; scope stays fenced by the task's `touches` + the touches-guard CI gate, not by
+          # per-tool prompts.
+          claude_args: "--max-turns 60 --model opus --permission-mode bypassPermissions"
           prompt: |
             You are the Flow worker for a single task. Read CLAUDE.md (the protocol) and the task
             file in .flow/tasks/ whose id is "${{ steps.pick.outputs.task_id }}". Run the full loop:
