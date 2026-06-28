@@ -50,6 +50,11 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           # Pay-per-use alternative: comment the line above and use an API key instead.
           # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Flow worker PRs are opened by github-actions[bot] (the worker uses GITHUB_TOKEN), so
+          # the reviewer must accept a bot-initiated run — without this the action aborts with
+          # "Workflow initiated by non-human actor". Safe here: the job is already fenced to
+          # FLOW_AI=true + a flow/ head branch, so only our own worker PRs reach it.
+          allowed_bots: "*"
           prompt: |
             You are the independent reviewer for this PR — you did not write this code and owe
             it nothing. Review the diff against its task:
