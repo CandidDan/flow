@@ -88,7 +88,12 @@ jobs:
           # `--permission-mode bypassPermissions` makes the loop autonomous on an ephemeral, trusted CI
           # runner; scope stays fenced by the task's `touches` + the touches-guard CI gate, not by
           # per-tool prompts.
-          claude_args: "--max-turns 60 --model opus --permission-mode bypassPermissions"
+          # --max-turns 120 (was 60): a full task is implement + tests-per-criterion + iterate to
+          # green build/lint/test + clear the coverage floor + three review subagents + open the PR.
+          # Heavier dashboard tasks consistently overran 60 (error_max_turns ~15-21min runs, no PR),
+          # so the cap was failing them after real work. 120 covers the hard ones; raise further if a
+          # task still caps. (Cost scales with turns — that's the trade for a finished PR over a wasted run.)
+          claude_args: "--max-turns 120 --model opus --permission-mode bypassPermissions"
           prompt: |
             You are the Flow worker for a single task. Read CLAUDE.md (the protocol) and the task
             file in .flow/tasks/ whose id is "${{ steps.pick.outputs.task_id }}". Run the full loop:
