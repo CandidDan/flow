@@ -24,6 +24,9 @@ concurrency:
 
 jobs:
   flow-recover:
+    permissions:
+      contents: write
+      pull-requests: write
     uses: CandidDan/flow/.github/workflows/_flow-recover.yml@v1
     with:
       threshold_minutes: ${{ inputs.threshold_minutes }}

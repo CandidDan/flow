@@ -10,4 +10,6 @@ on:
 
 jobs:
   flow-done:
+    permissions:
+      contents: write
     uses: CandidDan/flow/.github/workflows/_flow-done.yml@v1

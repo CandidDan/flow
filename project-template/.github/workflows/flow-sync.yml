@@ -25,6 +25,9 @@ concurrency:
 
 jobs:
   flow-sync:
+    permissions:
+      contents: write
+      pull-requests: write
     uses: CandidDan/flow/.github/workflows/_flow-sync.yml@v1
     with:
       canonical_ref: ${{ inputs.canonical_ref }}

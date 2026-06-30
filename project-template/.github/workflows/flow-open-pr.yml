@@ -15,5 +15,8 @@ on:
 
 jobs:
   flow-open-pr:
+    permissions:
+      contents: read
+      pull-requests: write
     uses: CandidDan/flow/.github/workflows/_flow-open-pr.yml@v1
     secrets: inherit
