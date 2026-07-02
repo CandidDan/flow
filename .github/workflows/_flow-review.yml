@@ -72,4 +72,10 @@ jobs:
 
             You review only. Never push commits, never edit files, never change labels or task
             state. If the branch has no matching task file, say so — that itself is a finding.
-          claude_args: "--max-turns 25"
+          # --max-turns 80 (was 25) + bypassPermissions: reviewing a real PR is read the task +
+          # read the diff + check tests + post one review comment. On a headless runner with no
+          # permission posture, every gh/read call was denied (observed: 11 permission_denials,
+          # error_max_turns at 25 with no review posted). bypassPermissions lets it run its
+          # read-only gh/file calls unattended; the prompt still constrains it to "review only,
+          # never push/edit/label". Ephemeral, trusted CI runner.
+          claude_args: "--max-turns 80 --permission-mode bypassPermissions"
