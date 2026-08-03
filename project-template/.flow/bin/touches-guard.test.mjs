@@ -1,6 +1,10 @@
 // Tests for touches-guard — the scope enforcer enforces its own scope honestly.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { globToRegExp, checkTouches, parseTouches } from "./touches-guard.mjs";
 
 // Fixture frontmatters mirroring the two shapes the task store actually uses.
@@ -143,4 +147,70 @@ test("checkTouches: ['**'] opts out entirely", () => {
     touches: ["**"],
   });
   assert.deepEqual(r.outside, []);
+});
+
+// ── CLI id-resolution ──────────────────────────────────────────────────────────
+// The guard used to match `flow/<id>-…` on the branch alone, so every cloud-session PR
+// (forced onto `claude/…` by the platform) skipped scope enforcement silently. These
+// exercise the real CLI end to end: a throwaway git repo, a task file, and a diff that
+// strays outside `touches`. The criterion is "the guard actually runs", so the assertion
+// is on the exit code and the drift being named — not on the parser in isolation.
+function cliFixture() {
+  const root = mkdtempSync(join(tmpdir(), "flow-tg-"));
+  const bin = join(root, ".flow", "bin");
+  mkdirSync(join(root, ".flow", "tasks"), { recursive: true });
+  mkdirSync(bin, { recursive: true });
+  for (const f of ["touches-guard.mjs", "parse-task-id.mjs"]) {
+    copyFileSync(join(import.meta.dirname, f), join(bin, f));
+  }
+  writeFileSync(join(root, ".flow", "tasks", "0030-x.md"),
+    '---\nid: "CAN-30"\ntouches: ["src/**"]\n---\nbody\n');
+
+  const git = (...a) => execFileSync("git", a, { cwd: root, stdio: "pipe" });
+  git("init", "-q", "-b", "main");
+  git("config", "user.email", "t@t.t");
+  git("config", "user.name", "t");
+  writeFileSync(join(root, "seed.txt"), "seed\n");
+  git("add", "-A"); git("commit", "-qm", "base");
+  // The drift: a file outside the declared `src/**` radius.
+  mkdirSync(join(root, "docs"), { recursive: true });
+  writeFileSync(join(root, "docs", "drift.md"), "drift\n");
+  git("add", "-A"); git("commit", "-qm", "drift");
+  return root;
+}
+
+function runGuard(root, env) {
+  try {
+    const stdout = execFileSync("node", [join(root, ".flow", "bin", "touches-guard.mjs")], {
+      cwd: root, encoding: "utf8", stdio: "pipe",
+      env: { ...process.env, BASE_REF: "HEAD~1", ...env },
+    });
+    return { code: 0, out: stdout };
+  } catch (e) {
+    return { code: e.status, out: `${e.stdout ?? ""}${e.stderr ?? ""}` };
+  }
+}
+
+test("CLI: a claude/… branch with an [id] PR title is enforced, not skipped", () => {
+  const root = cliFixture();
+  const r = runGuard(root, { HEAD_REF: "claude/blissful-edison-3srhxo", PR_TITLE: "[CAN-30] Do the thing" });
+  assert.equal(r.code, 1, "drift outside touches must fail the gate");
+  assert.match(r.out, /docs\/drift\.md/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("CLI: a flow/<id>-… branch still resolves from the branch alone", () => {
+  const root = cliFixture();
+  const r = runGuard(root, { HEAD_REF: "flow/CAN-30-x", PR_TITLE: "" });
+  assert.equal(r.code, 1);
+  assert.match(r.out, /docs\/drift\.md/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("CLI: no id in either branch or title still skips cleanly", () => {
+  const root = cliFixture();
+  const r = runGuard(root, { HEAD_REF: "dependabot/npm/x", PR_TITLE: "Bump x from 1 to 2" });
+  assert.equal(r.code, 0);
+  assert.match(r.out, /no task id in branch/);
+  rmSync(root, { recursive: true, force: true });
 });

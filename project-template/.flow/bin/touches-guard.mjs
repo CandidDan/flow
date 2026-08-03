@@ -3,7 +3,7 @@
 //
 // `touches` was added for concurrency (skip a ready task whose globs overlap an in_progress
 // one), but nothing mechanically checked that a PR's diff actually STAYS within it — only the
-// fallible code-reviewer agent. This guard closes that gap: on a flow/<id>-… PR, every changed
+// fallible code-reviewer agent. This guard closes that gap: on a task-carrying PR, every changed
 // file must match the task's `touches` globs, or the gate fails. (Found on CAN-30's first run:
 // the worker drifted into a file the task said not to touch and only the agent might have
 // caught it.)
@@ -13,8 +13,12 @@
 // (or `touches: ["**"]` to opt out entirely). Discovering mid-build that you need more is a
 // scope signal — block and let the orchestrator widen `touches` on main, don't drift silently.
 //
+// The task id is resolved from the branch OR the PR title (`[<id>] …`), so a PR from a cloud
+// session forced onto a non-`flow/` branch is still scope-checked rather than waved through.
+//
 //   node .flow/bin/touches-guard.mjs                 # CI: derives branch, base, changed files
 //   BASE_REF=origin/main HEAD_REF=flow/CAN-30-x node .flow/bin/touches-guard.mjs
+//   BASE_REF=origin/main HEAD_REF=claude/xyz PR_TITLE='[CAN-30] …' node .flow/bin/touches-guard.mjs
 //
 // Zero deps (Node >= 18). Exits non-zero when a changed file is outside touches.
 
@@ -22,6 +26,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseTaskId } from "./parse-task-id.mjs";
 
 // Translate a path glob to an anchored RegExp. Supports: `**` (any path span, incl. /),
 // `*` (anything except /), and literal `.`/path chars. Mirrors the globs used in task files
@@ -114,10 +119,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const tasksDir = join(flowDir, "tasks");
   const headRef = process.env.HEAD_REF
     || execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"]).toString().trim();
+  const prTitle = process.env.PR_TITLE || "";
 
-  const idMatch = headRef.match(/^flow\/(.+?-\d{1,4})(?=-)/);
-  if (!idMatch) { console.log(`touches-guard: '${headRef}' is not a flow/<id>-… branch — skipping.`); process.exit(0); }
-  const id = idMatch[1];
+  // Branch first, PR title second — the same resolution flow-status/flow-done use (CAN-52).
+  // Matching on the branch alone meant every cloud-session PR (forced onto `claude/…` by the
+  // platform) skipped the guard silently: scope enforcement was off for exactly the sessions
+  // most likely to drift, and the gate went green saying nothing.
+  const id = parseTaskId(headRef, prTitle);
+  if (!id) {
+    console.log(`touches-guard: no task id in branch '${headRef}' or title '${prTitle}' — skipping.`);
+    process.exit(0);
+  }
 
   const file = findTaskFile(tasksDir, id);
   if (!file) { console.log(`touches-guard: no task file for ${id} — skipping (store-guard / review will catch oddities).`); process.exit(0); }

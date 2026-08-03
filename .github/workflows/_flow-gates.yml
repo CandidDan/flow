@@ -109,7 +109,7 @@ jobs:
       - name: flow-doctor — store consistency
         run: node .flow/bin/flow-doctor.mjs
 
-  # Scope enforcement: a flow/<id> PR's diff must stay within the task's declared `touches`.
+  # Scope enforcement: a task-carrying PR's diff must stay within the task's declared `touches`.
   # Runs in the per-stack gate job (needs the PR diff + base). Mirrors the store-guard.
   touches:
     if: github.event_name == 'pull_request'
@@ -124,6 +124,9 @@ jobs:
       - name: touches-guard — diff stays within declared scope
         env:
           HEAD_REF: ${{ github.head_ref }}
+          # PR title is the id fallback when the platform forces a non-flow/ branch (CAN-52).
+          # Without it this guard silently skipped every cloud-session PR.
+          PR_TITLE: ${{ github.event.pull_request.title }}
           BASE_REF: origin/${{ github.base_ref }}
         run: |
           git fetch -q origin "${{ github.base_ref }}"
