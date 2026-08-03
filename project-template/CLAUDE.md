@@ -142,7 +142,46 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
    comment. Address it on the same branch, re-run gates, re-request review.
 
 Run **each task as a fresh session.** Do not carry one long thread across many tasks —
-context rot degrades quality across a backlog. Pull, work, PR, end.
+context rot degrades quality across a backlog. Pull, work, PR, end. See *Session hygiene*.
+
+## Session hygiene — context is a budget
+
+Context is a consumable, and it degrades well before it runs out: recall goes patchy,
+settled decisions get re-litigated, and files you already read get read again. It is also
+the dominant cost driver — a thread past ~150k tokens is billed at that size on *every*
+subsequent turn, so one all-day session can outspend a week of fresh ones. Ending a
+session is routine maintenance, not failure or lost work.
+
+**Trip conditions — hand off and end the session when any one is true:**
+
+- **Your PR is open** (step 8). The task is done; the thread is done. Non-negotiable.
+- **The harness signals compaction** — a warning, or an auto-compact that already fired.
+  Compaction means you are *already* over budget. It is a symptom, not a remedy: take it
+  as the instruction to hand off, not as permission to keep going.
+- **You re-read a file you already read this session**, or re-derive a decision you
+  already made. Both mean recall has started failing.
+- **Three kickback rounds** on one task. The thread is now longer than the problem.
+- **A tool result landed that you could not read in full** — a wide API response, a long
+  log. A single one of those can cost more context than the entire task body.
+
+Do not try to estimate your own context as a percentage — you cannot measure it and the
+guess will be wrong. Watch the conditions above; they are observable and they correlate.
+
+**Before you stop, write the handoff.** The task file *is* the handoff — never a separate
+doc (see *The store*). Append a `notes` entry on `main` covering:
+
+- what is genuinely done, and what only looks done,
+- the branch and PR if they exist,
+- any decision a fresh session would otherwise re-litigate, and why it went that way,
+- the exact next action — specific enough to execute without reading this thread.
+
+Commit it to `main` *before* you stop. A session that ends without this has spent its
+whole context for nothing: the next one pays all over again to learn what you already knew.
+
+**Orchestrator sessions are on the same budget.** An orchestrator that plans for hours and
+writes nothing down is the most expensive failure in this system — nothing survives the
+thread. Flush thinking into task files continuously, not at the end. Once the tasks are
+written, the session is over; the tasks are the handoff.
 
 ## The gate — Definition of Done (every task, every stack)
 
@@ -188,6 +227,11 @@ that is a `blocked` task with a `blocked_reason`, not a reason to skip the gate.
   something it didn't specify, that's a new `ready` task for the orchestrator to write, plus
   a note on the current one — not silent extra work.
 - **Never skip the gate** to "save time." A fast PR that fails review costs more than a slow one.
+- **One task per session, and hand off in writing before you stop.** Context degrades before
+  it exhausts, and a long thread is re-billed at its full size every turn — the two failure
+  modes compound. See *Session hygiene* for the trip conditions and what the handoff must
+  contain. Ending a session early is cheap; a sprawling thread that re-derives its own
+  decisions is not.
 - **Flow infra is authored in canonical; repos adopt — never patch it as a project task.** The
   `.flow/bin/*` tooling, the `flow-*` workflows, and this protocol block come from canonical
   (`CandidDan/flow`); a repo *adopts* them by reference (thin callers) or by `flow-sync` (which
