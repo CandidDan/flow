@@ -121,12 +121,19 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
    that task file and push to `main`. If the push is rejected, rebase and go back to step 1.
    Then regenerate the board.
 3. **Branch.** `git checkout -b flow/<task-id>-<slug>` off latest `main`. One branch per task.
+   **If the platform has already put you on a branch you didn't choose** — a cloud/web session
+   is handed a `claude/…` branch by its harness, and that instruction outranks this file — stay
+   on it. Do not fight it and do not rename. The branch name is a convenience, not the contract:
+   the task id travels in the **PR title** (step 7), which is what the automation actually reads.
 4. **Build.** Implement against the acceptance criteria in the task body. Nothing more, and
    nothing outside the task's declared `touches`.
 5. **Gate** (all must pass before a PR — see below). If any fails, fix; don't open the PR.
 6. **Rebase.** `git pull --rebase origin main` onto your branch; re-run the gate if `main`
    moved. Unresolvable conflict → `blocked`/kickback, surfaced.
-7. **PR.** Open it, title `[<task-id>] <title>`, link the task file path in the description,
+7. **PR.** Open it, title `[<task-id>] <title>` — **this exact prefix is load-bearing**, not
+   cosmetic: `flow-status`, `flow-done` and `touches-guard` all resolve the task id from the
+   branch first and this title second, so on a non-`flow/` branch it is the only thing standing
+   between your PR and a silently skipped transition. Link the task file path in the description,
    paste the acceptance-criteria checklist with each item ticked + the test that proves it.
 8. **Hand off.** The `flow-status` workflow flips the task to `in_review` and records
    `branch` + `pr` when the PR opens — you don't write that transition. Regenerate the board.
@@ -168,7 +175,12 @@ that is a `blocked` task with a `blocked_reason`, not a reason to skip the gate.
   This is what stops a merge from clobbering newer state on `main`.
 - **Never hand-write a PR-event transition.** `flow-status` owns `in_review` (PR open) and the
   return to `ready` (PR closed unmerged); `flow-done` owns `done` (PR merged) — both read the
-  task id from the `flow/<id>-…` branch name. You write only the claim and `blocked`.
+  task id from the `flow/<id>-…` branch name, falling back to the `[<id>]` PR-title prefix.
+  You write only the claim and `blocked`.
+- **The task id must appear in the PR title.** It is the one identifier you always control —
+  the branch name you may not. A PR with neither a `flow/<id>-…` branch nor an `[<id>]` title
+  is invisible to the automation: no `in_review`, no `done`, no scope check. It will look like
+  it worked and leave the task stranded on `main`.
 - **`touches` is enforced, not advisory.** CI (`touches-guard`) fails any PR whose diff strays
   outside the task's declared `touches` globs. Discovering you need a wider radius is a scope
   signal: block the task and let the orchestrator widen `touches` on `main` — never drift silently.

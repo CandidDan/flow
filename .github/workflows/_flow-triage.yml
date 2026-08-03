@@ -70,4 +70,14 @@ jobs:
             existing task file; never work on an issue yourself; if a proposal would require
             guessing the human's intent, ask the question in the issue comment instead of
             proposing. Apply the readiness bar honestly — a vague proposal is worse than none.
-          claude_args: "--max-turns 30"
+          # --max-turns 150 (was 30) + bypassPermissions: same headless-runner failure that hit
+          # flow-review and the queue-runner, and triage was the one caller left unfixed. With no
+          # permission posture every gh issue-list / comment / label call was denied, so the sweep
+          # burned its turns on denials and exited clean without proposing anything — the action
+          # reports success either way, so it looked healthy for weeks (observed 2026-07-31:
+          # Nudge 8 denials in 13 turns, meadow 11 in 20; zero `proposed` labels across 42 runs).
+          # The turn budget matters too: a real inbox is ~20 issues x (read + draft + comment +
+          # label), which 30 turns cannot cover even unblocked. bypassPermissions grants the gh
+          # calls; the prompt's hard limits (never touch code, never work an issue, only .flow/
+          # tasks/) remain the actual constraint. Ephemeral, trusted CI runner.
+          claude_args: "--max-turns 150 --permission-mode bypassPermissions"
