@@ -1,0 +1,74 @@
+name: release-tag
+
+# Keeps the floating major tag (v1) pointing at the tip of main, so adopting repos
+# that pin `@v1` pick up a canonical fix the moment it merges.
+#
+# Why this exists: the tag WAS moved by hand, and that made every flow fix a two-step
+# release — merge, then remember to retag from a clone with tag-push rights. It was
+# forgotten, and #5's triage fix sat on main for hours while Nudge and meadow kept
+# running the broken v1. Worse, the failure is silent: consumers resolve @v1 happily,
+# they just resolve it to the old commit. Automating the retag removes the step that
+# can be forgotten, and removes the need for anyone to hold tag-push credentials
+# locally — GITHUB_TOKEN has contents:write here, which is enough to move a tag.
+#
+# The major is derived from VERSION rather than hardcoded, so bumping VERSION to
+# 2.0.0 starts publishing v2 and leaves v1 frozen at the last 1.x commit. That is
+# the behaviour consumers pinned to @v1 should get from a major bump: nothing moves
+# under them until they opt in by repinning.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write          # required to force-update the tag ref
+
+# Never let two pushes race to move the same tag. Not cancel-in-progress: a cancelled
+# run could leave the tag on an older commit than a run that already finished.
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+jobs:
+  retag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move the major tag to this commit
+        run: |
+          set -euo pipefail
+
+          if [ ! -f VERSION ]; then
+            echo "::error::No VERSION file at the repo root — cannot derive the major tag."
+            exit 1
+          fi
+
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::VERSION is '$VERSION', expected MAJOR.MINOR.PATCH."; exit 1 ;;
+          esac
+
+          MAJOR="v${VERSION%%.*}"
+          echo "VERSION=$VERSION -> moving $MAJOR to $GITHUB_SHA"
+
+          # Report what we're moving away from, so the run log is an audit trail of
+          # which commit each repo was resolving @v1 to before this push.
+          PREV="$(git rev-parse -q --verify "refs/tags/$MAJOR" || true)"
+          echo "previous $MAJOR: ${PREV:-<none>}"
+
+          if [ "$PREV" = "$GITHUB_SHA" ]; then
+            echo "$MAJOR already at $GITHUB_SHA — nothing to do."
+            exit 0
+          fi
+
+          git tag -f "$MAJOR" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$MAJOR"
+
+          echo "### \`$MAJOR\` -> \`${GITHUB_SHA:0:7}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Adopting repos pinned to \`@$MAJOR\` now resolve to this commit." >> "$GITHUB_STEP_SUMMARY"
