@@ -17,3 +17,12 @@ npm-debug.log*
 
 # Flow board-edits scratch (never committed)
 **/.flow/board-edits.json
+
+# --- kept local: private registry, business scaffolding, Cowork mount ---
+flightdeck/projects.yml
+NUDGE-RETROFIT-NOTES.md
+nudge-migration/
+flow-validation/
+flow-plugin/
+flow-release.sh
+flow-publish.sh

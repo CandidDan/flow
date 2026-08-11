@@ -15,23 +15,8 @@
 #   enabled  — false to keep a project registered but hidden from the digest/board.
 
 projects:
-  - name: "nudge"
-    repo: "CandidDan/Nudge"
-    path: "~/Projects/nudge"
-    enabled: true
-
-  - name: "roost"
-    repo: "CandidDan/Roost"
-    path: "~/Projects/roost"
-    enabled: true
-
-  - name: "meadow"
-    repo: "CandidDan/meadow"
-    path: "~/Projects/meadow"
-    enabled: true
-
-  # Register a new project by appending a block here (INIT.md / RETROFIT.md step "Register"):
-  # - name: "REPLACE-ME"
-  #   repo: "owner/REPLACE-ME"
-  #   path: ""
+  # Register a project by appending a block here (see project-template/INIT.md step 8):
+  # - name: "my-project"
+  #   repo: "owner/my-project"
+  #   path: "~/Projects/my-project"   # or "" if not shared into a Cowork workspace
   #   enabled: true
