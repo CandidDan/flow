@@ -90,6 +90,9 @@ surface that *can* drift — and a check makes the rest non-skippable.
   - [ ] `parse-task-id.mjs` (PR-title fallback) + test + the `flow-status`/`flow-done` wiring (CAN-52)
   - [ ] `flow-doctor` uncommitted-task guard (CAN-41) — merge with canonical's touches-overlap check
   - [ ] keep canonical's ahead-bits: touches-overlap, Opus worker, task-writer pre-flight checklist
+- [ ] **Retire the two Nudge ahead-of-canonical deltas — make them config, not patches** (feedback from the Nudge cutover):
+  - [ ] Port the **CAN-57 multi-line `touches-guard` parser** into canonical's `touches-guard` (so it reads multi-line `touches:` lists, not just inline) and re-sync — retires the Nudge parser patch.
+  - [ ] Add a **per-project gate-extension hook in config**: canonical reads (a) extra source checks — e.g. Nudge's `edge-parse`/`check_edge` deno step — and (b) `ROOT_IGNORE` additions (Nudge's `docs`/`holding`/`scripts`/`tests`) from `config.yml`, so a project declares them as *data* instead of editing shared infra. Generalises the `source_roots` idea; retires both Nudge infra patches.
 - [ ] Add `FLOW_VERSION` (e.g. `flow/VERSION` + the bin package version); tag `v1`
 
 **Phase 1 — reusable workflows**

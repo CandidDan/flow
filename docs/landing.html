@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flow — autonomous software delivery you can trust</title>
+<style>
+  :root{
+    --bg:#faf7f2; --ink:#1c1a17; --muted:#6b6358; --line:#e7ddcd; --card:#fff;
+    --accent:#c2410c; --accent-soft:#fff1e9; --ok:#15803d; --code:#3a3023;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:17px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  .wrap{max-width:920px;margin:0 auto;padding:0 22px;}
+  a{color:var(--accent);}
+  h1,h2,h3{letter-spacing:-.02em;line-height:1.15;}
+  code{background:var(--accent-soft);color:var(--code);padding:1px 6px;border-radius:5px;font-size:.86em;}
+
+  /* hero */
+  header{padding:74px 0 50px;border-bottom:1px solid var(--line);}
+  .kicker{font-size:13px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 14px;}
+  h1{font-size:clamp(34px,6vw,56px);margin:0 0 18px;}
+  .lede{font-size:clamp(18px,2.4vw,22px);color:var(--muted);max-width:660px;margin:0 0 26px;}
+  .lede b{color:var(--ink);}
+  .cta{display:inline-block;background:var(--accent);color:#fff;font-weight:600;text-decoration:none;
+    padding:12px 22px;border-radius:10px;}
+  .cta.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent);margin-left:10px;}
+
+  section{padding:52px 0;border-bottom:1px solid var(--line);}
+  section h2{font-size:clamp(24px,3.4vw,32px);margin:0 0 8px;}
+  section .sub{color:var(--muted);margin:0 0 30px;max-width:640px;}
+
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+  .step{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;}
+  .step .n{font-size:13px;font-weight:700;color:var(--accent);letter-spacing:.08em;}
+  .step h3{font-size:18px;margin:8px 0 6px;}
+  .step p{margin:0;color:var(--muted);font-size:15px;}
+
+  .feat{display:grid;grid-template-columns:repeat(2,1fr);gap:16px 28px;}
+  .feat .f h3{font-size:17px;margin:0 0 4px;display:flex;gap:8px;align-items:baseline;}
+  .feat .f h3::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block;flex:none;transform:translateY(-1px);}
+  .feat .f p{margin:0;color:var(--muted);font-size:15px;}
+
+  .quote{font-size:clamp(20px,3vw,26px);line-height:1.4;font-weight:500;max-width:720px;}
+  .quote .em{color:var(--accent);}
+
+  .scars{display:grid;grid-template-columns:1fr;gap:14px;}
+  .scar{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;background:var(--card);
+    border:1px solid var(--line);border-radius:12px;padding:16px 18px;}
+  .scar .bad{color:var(--muted);font-size:15px;}
+  .scar .fix{font-size:15px;}
+  .scar .fix b{color:var(--ok);}
+  .scar .arrow{display:none;}
+
+  footer{padding:46px 0 70px;color:var(--muted);font-size:14px;}
+  .who{background:var(--accent-soft);border:1px solid #f3d8c6;border-radius:14px;padding:22px 24px;}
+  .who b{color:var(--ink);}
+  @media(max-width:680px){ .steps,.feat,.scar{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <p class="kicker">Flow</p>
+    <h1>Delegate the work, not the watching.</h1>
+    <p class="lede">Flow turns Claude into a software team you supervise at exactly two points — the <b>spec</b> going in and the <b>pull request</b> coming out. Everything in between runs itself, and nothing reaches you until it’s genuinely done.</p>
+    <a class="cta" href="#how">How it works</a>
+    <a class="cta ghost" href="#why">Why it’s different</a>
+  </header>
+
+  <section>
+    <h2>AI can write code. It can’t be trusted to ship it — yet.</h2>
+    <p class="sub">So you babysit: re-reading every diff, re-running every check, re-feeding context. The bottleneck was never the model’s ability. It’s the missing system that makes “done” actually mean done — and without it, autonomy quietly collapses back into supervision.</p>
+    <p class="quote">Flow is that system. <span class="em">You approve the spec and the PR.</span> The rest is the machine’s job.</p>
+  </section>
+
+  <section id="how">
+    <h2>How it works</h2>
+    <p class="sub">A thin protocol that lives inside your repo — not another platform to log into.</p>
+    <div class="steps">
+      <div class="step"><div class="n">01 — SPEC</div><h3>Write the task as a contract</h3><p>You and Claude turn direction into a real spec: observable acceptance criteria, the exact files it may touch, and the boundary. Vague isn’t allowed — a task is only “ready” when a fresh session could finish it with no further questions.</p></div>
+      <div class="step"><div class="n">02 — BUILD</div><h3>A worker builds behind a hard gate</h3><p>A fresh Claude Code worker claims it, builds on a branch, and <b>cannot open a PR</b> until every criterion has a passing test that proves it — plus security review, code review, and the full build / lint / test / coverage.</p></div>
+      <div class="step"><div class="n">03 — MERGE</div><h3>You review and merge</h3><p>You read the PR — criteria ticked, each with the test that proves it — and merge. Two touchpoints, start to finish. Several workers run in parallel without colliding, coordinated by nothing but git.</p></div>
+    </div>
+  </section>
+
+  <section id="why">
+    <h2>Why it’s different</h2>
+    <p class="sub">Most tools help an agent write code faster. Flow is about making its “finished” trustworthy.</p>
+    <div class="feat">
+      <div class="f"><h3>Done means done</h3><p>No PR opens on “looks good to me.” Every acceptance criterion is mapped to a test that proves it, checked by name before the gate lets the PR through.</p></div>
+      <div class="f"><h3>The model refuses to guess</h3><p>Hit an under-specified spot or a real decision, and the worker <em>blocks and asks</em> instead of fabricating. A block is integrity, not failure.</p></div>
+      <div class="f"><h3>Plain files, not a platform</h3><p>Your tasks are Markdown in your own repo, on <code>main</code>. Nothing to log into, nothing to migrate off, no lock-in. The board is just a generated view.</p></div>
+      <div class="f"><h3>Coordinated by git alone</h3><p>Many workers at once. Claiming a task is an atomic first-push-wins commit; a <code>touches</code> list keeps two of them out of the same files. No daemon, no lock server.</p></div>
+      <div class="f"><h3>It hardens itself</h3><p>Every incident becomes a permanent guardrail. The system gets safer the more it’s used — failures turn into checks, not folklore.</p></div>
+      <div class="f"><h3>Stack-agnostic</h3><p>The same protocol runs a static site and a full app. Only a small per-project config and the project’s own context file differ.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Every failure becomes a guardrail</h2>
+    <p class="sub">Flow wasn’t designed on a whiteboard — it was hardened by getting burned, and each scar became a rule the system now enforces for you.</p>
+    <div class="scars">
+      <div class="scar"><div class="bad">A parse error in an unchecked file silently dropped messages for ~7 days.</div><div class="fix"><b>→</b> The gate now refuses to merge any source tree it doesn’t actually parse.</div></div>
+      <div class="scar"><div class="bad">A worker did all the work, then ended its turn without opening the PR.</div><div class="fix"><b>→</b> PR creation moved off the model and onto a workflow — a stall can’t strand the work.</div></div>
+      <div class="scar"><div class="bad">A task was written but never pushed, so a cloud worker couldn’t see it.</div><div class="fix"><b>→</b> A store check fails loudly the moment a task exists on disk but not on <code>main</code>.</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="who">
+      <h2 style="margin-top:0">Who it’s for</h2>
+      <p style="margin:0;color:var(--muted)"><b>Solo builders and small teams running several projects at once</b> who want to hand real work to AI without losing the thread — and want the safety to come from the system, not from their own vigilance. If you already use Git and CI, you already have everything Flow needs.</p>
+    </div>
+  </section>
+
+  <footer>
+    Flow — a git-native protocol for trustworthy, parallel, AI-driven delivery. Built on Claude Code. Your work stays in your repo.
+  </footer>
+
+</div>
+</body>
+</html>

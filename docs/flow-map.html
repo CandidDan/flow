@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flow — System Map</title>
+<style>
+  :root{
+    --bg:#faf7f2; --ink:#1f1c18; --muted:#6f675c; --line:#e6dccd; --card:#fff;
+    --accent:#c2410c; --accent2:#2f6f9f; --ok:#15803d; --warn:#b45309; --soft:#fff1e9;
+    --canon:#eef4f9; --plugin:#f3eefb; --repo:#fdf6e6; --engine:#eaf4ec; --local:#f4f1ec;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1000px;margin:0 auto;padding:30px 22px 70px;}
+  h1{font-size:27px;margin:0 0 4px;letter-spacing:-.02em;}
+  .sub{color:var(--muted);margin:0 0 6px;max-width:720px;}
+  .stamp{color:var(--muted);font-size:12px;margin:0 0 24px;}
+  code{background:var(--soft);color:#7a3410;padding:1px 5px;border-radius:5px;font-size:.85em;}
+  h2{font-size:15px;letter-spacing:.13em;text-transform:uppercase;color:var(--accent);margin:34px 0 12px;}
+
+  /* layer bands */
+  .band{border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin:0 0 12px;}
+  .band h3{margin:0 0 3px;font-size:16px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;}
+  .band h3 .tag{font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--muted);background:#fff;border:1px solid var(--line);padding:1px 7px;border-radius:20px;}
+  .band .role{color:var(--muted);font-size:13px;margin:0 0 9px;}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;}
+  .chip{background:#fff;border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:12.5px;}
+  .chip b{font-weight:600;}
+  .chip .d{color:var(--muted);}
+  .b-canon{background:var(--canon)} .b-plugin{background:var(--plugin)} .b-repo{background:var(--repo)}
+  .b-engine{background:var(--engine)} .b-local{background:var(--local)} .b-people{background:var(--soft)}
+
+  /* pipeline */
+  .pipe{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;margin:4px 0 8px;}
+  .step{flex:1 1 120px;min-width:120px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 10px;position:relative;}
+  .step .k{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+  .step .v{font-size:13px;margin-top:2px;}
+  .step.you{border-color:var(--accent);background:var(--soft);}
+  .step.you .k{color:var(--accent);font-weight:700;}
+  .arrow{align-self:center;color:var(--muted);font-size:16px;flex:0 0 auto;}
+  .note{font-size:12.5px;color:var(--muted);margin:4px 0 0;}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top;}
+  th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+  td code{white-space:nowrap;}
+  .ok{color:var(--ok);font-weight:600;} .warn{color:var(--warn);font-weight:600;}
+  .legend{font-size:12.5px;color:var(--muted);margin-top:8px;}
+  .two{display:grid;grid-template-columns:1fr;gap:0;}
+  footer{margin-top:30px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:14px;}
+  @media(max-width:640px){ .arrow{display:none} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Flow — System Map</h1>
+  <p class="sub">One picture of the moving parts: the layers, who controls what, and the path a piece of work takes. The promise underneath it all — <b>you approve the spec and the PR; everything between runs itself.</b></p>
+  <p class="stamp">Snapshot · 2026-06-18 · canonical = <code>CandidDan/flow @v1</code> · this is a hand-drawn map, not generated — re-check against canonical when it moves.</p>
+
+  <h2>The layers</h2>
+
+  <div class="band b-canon">
+    <h3>Canonical <span class="tag">CandidDan/flow · versioned, tagged @v1</span></h3>
+    <p class="role">The single source of truth for all Flow <em>infrastructure</em>. Everything else references or is seeded from here.</p>
+    <div class="chips">
+      <div class="chip"><b>_flow-*.yml</b> <span class="d">— reusable workflows (the CI logic)</span></div>
+      <div class="chip"><b>.flow/bin/*.mjs</b> <span class="d">— flow-doctor, touches-guard, pick-task, apply-board-edits, flow-open-pr, flow-recover, parse-task-id, flow-sync</span></div>
+      <div class="chip"><b>project-template/</b> <span class="d">— seed for new repos (thin callers + config + CLAUDE.md)</span></div>
+      <div class="chip"><b>flightdeck/</b> <span class="d">— projects.yml registry + portfolio-manager</span></div>
+      <div class="chip"><b>docs/</b> <span class="d">— plan, ADR-0001, this map</span></div>
+    </div>
+  </div>
+
+  <div class="band b-plugin">
+    <h3>Plugin <span class="tag">CandidDan/flow-plugin · installed in Cowork</span></h3>
+    <p class="role">The Cowork-facing skills, so an orchestrator session can drive Flow. Registers + auto-triggers once installed.</p>
+    <div class="chips">
+      <div class="chip"><b>task-writer</b> <span class="d">— direction → ready tasks</span></div>
+      <div class="chip"><b>issue-intake</b> <span class="d">— discuss a bug → well-formed GitHub issue</span></div>
+      <div class="chip"><b>board-builder</b> <span class="d">— regenerate a repo's board</span></div>
+      <div class="chip"><b>portfolio-manager</b> <span class="d">— cross-project flightdeck digest</span></div>
+    </div>
+  </div>
+
+  <div class="band b-repo">
+    <h3>Per-project repos <span class="tag">Nudge · Roost · Meadow</span></h3>
+    <p class="role">Where work happens. Carries the store + the project-specific bits; <em>references</em> canonical for the rest.</p>
+    <div class="chips">
+      <div class="chip"><b>.github/workflows/flow-*.yml</b> <span class="d">— thin callers → <code>uses: CandidDan/flow/...@v1</code></span></div>
+      <div class="chip"><b>.flow/tasks/*.md</b> <span class="d">— the store (on <code>main</code>)</span></div>
+      <div class="chip"><b>.flow/config.yml</b> <span class="d">— commands + source_roots (the one project-specific knob)</span></div>
+      <div class="chip"><b>.flow/board.html</b> <span class="d">— the human's view</span></div>
+      <div class="chip"><b>CLAUDE.md</b> <span class="d">— protocol + project notes</span></div>
+    </div>
+  </div>
+
+  <div class="band b-people">
+    <h3>Orchestrator <span class="tag">Cowork — you + Claude</span></h3>
+    <p class="role">Writes the work and keeps the views honest. Reads <code>origin/main</code> (kept fresh by the local agent below).</p>
+    <div class="chips">
+      <div class="chip">writes tasks (<b>task-writer</b>) → commits to <code>main</code></div>
+      <div class="chip">triages bugs (<b>issue-intake</b>) → GitHub issues</div>
+      <div class="chip">regenerates board + flightdeck</div>
+    </div>
+  </div>
+
+  <div class="band b-engine">
+    <h3>Engine <span class="tag">GitHub Actions — per repo, calling canonical @v1</span></h3>
+    <p class="role">The automation. Each is a thin caller; the logic lives in canonical. AI ones are gated by <code>FLOW_AI</code>.</p>
+    <div class="chips">
+      <div class="chip"><b>flow-queue-runner</b> <span class="d">— cron → pick-task → dispatch a worker</span></div>
+      <div class="chip"><b>flow-open-pr</b> <span class="d">— on branch push → opens the PR</span></div>
+      <div class="chip"><b>flow-gates</b> <span class="d">— the Definition of Done (the wall)</span></div>
+      <div class="chip"><b>flow-review</b> <span class="d">— independent AI review</span></div>
+      <div class="chip"><b>flow-status / flow-done</b> <span class="d">— PR events → status transitions</span></div>
+      <div class="chip"><b>flow-recover</b> <span class="d">— rescues stranded tasks</span></div>
+      <div class="chip"><b>flow-triage</b> <span class="d">— issues → proposed tasks</span></div>
+      <div class="chip"><b>flow-sync</b> <span class="d">— adopt canonical updates as a PR</span></div>
+    </div>
+  </div>
+
+  <div class="band b-local">
+    <h3>Local agents <span class="tag">your Mac</span></h3>
+    <p class="role">Keep the local picture current so Cowork never reads stale state.</p>
+    <div class="chips">
+      <div class="chip"><b>flow-fetch</b> <span class="d">— launchd, every 5 min: <code>git fetch</code> each repo so <code>origin/*</code> is fresh</span></div>
+      <div class="chip"><b>flow-views-refresh</b> <span class="d">— scheduled Cowork task: rebuilds boards + flightdeck</span></div>
+    </div>
+  </div>
+
+  <h2>The path a task takes</h2>
+  <div class="pipe">
+    <div class="step you"><div class="k">You</div><div class="v">Approve the spec (a ready task)</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="k">queue-runner</div><div class="v">Picks top ready task, dispatches a worker</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="k">worker</div><div class="v">Claims, branches, builds, runs the gate locally</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="k">flow-open-pr</div><div class="v">Opens the PR on push</div></div>
+  </div>
+  <div class="pipe">
+    <div class="step"><div class="k">flow-gates + review</div><div class="v">DoD must pass: every criterion has a proving test; security + code review</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="k">flow-status</div><div class="v">→ in_review</div></div>
+    <div class="arrow">→</div>
+    <div class="step you"><div class="k">You</div><div class="v">Review &amp; merge the PR</div></div>
+    <div class="arrow">→</div>
+    <div class="step"><div class="k">flow-done</div><div class="v">→ done</div></div>
+  </div>
+  <p class="note"><b>Two touchpoints</b> (the orange steps): the spec in, the PR out. Side paths that add a touchpoint only when reality demands it: a <b>kickback</b> (you ask for changes) and a <b>blocked</b> task (the worker refuses to guess). <b>flow-recover</b> auto-rescues a stalled task; <b>flow-triage</b> feeds GitHub issues into the ready queue; the <b>flightdeck</b> shows all of it across projects.</p>
+
+  <h2>What controls what</h2>
+  <table>
+    <tr><th>Relationship</th><th>How</th></tr>
+    <tr><td>Repos → canonical</td><td>Thin workflows <code>uses: CandidDan/flow/_flow-*.yml@v1</code>. Fix canonical once, every repo on <code>@v1</code> gets it. No local copy to drift.</td></tr>
+    <tr><td>Canonical → repos (updates)</td><td><code>flow-sync</code> opens an adopt PR (Dependabot-style). A <code>FLOW_VERSION</code> drift-check (planned) flags a repo that's behind — detect &amp; propose, never silent self-update.</td></tr>
+    <tr><td>New repo → canonical</td><td>Seeded from <code>project-template/</code> (INIT/RETROFIT), then registered in <code>flightdeck/projects.yml</code>.</td></tr>
+    <tr><td>Store ↔ code</td><td>Two planes: task-state changes commit straight to <code>main</code>; feature code goes branch → PR → gate. <code>store-guard</code> + <code>touches-guard</code> enforce it.</td></tr>
+    <tr><td>Orchestrator ↔ store</td><td>Reads <code>origin/main</code> (fresh via <code>flow-fetch</code>); writes tasks to <code>main</code>; views regenerated by the scheduled task.</td></tr>
+  </table>
+
+  <h2>Per-repo switches (secrets &amp; variables)</h2>
+  <table>
+    <tr><th>Name</th><th>Type</th><th>Controls</th><th>If missing</th></tr>
+    <tr><td><code>FLOW_AI</code></td><td>Variable</td><td>Gates all AI workflows (queue-runner, review, triage). <span class="ok">Must be a Variable, not a Secret.</span></td><td>AI jobs skip silently (~1-2s "skipped").</td></tr>
+    <tr><td><code>CLAUDE_CODE_OAUTH_TOKEN</code></td><td>Secret</td><td>Worker / review / triage auth (uses your Max plan).</td><td>The action can't run.</td></tr>
+    <tr><td><code>FLOW_PAT</code></td><td>Secret</td><td>Makes <code>flow-open-pr</code>'s PR trigger <code>flow-gates</code> (a default-token PR doesn't).</td><td class="warn">Auto-opened PRs merge ungated.</td></tr>
+  </table>
+  <p class="legend">id-token: write is also required in each AI workflow's <code>permissions</code> (caller-side) or the action fails with "Could not fetch an OIDC token."</p>
+
+  <footer>
+    Flow is a git-native protocol: data is files, views are HTML, infra is referenced from canonical. This map is a snapshot — when canonical moves, it should move too (ideally generated next). See <code>docs/flow-infra-propagation-plan.md</code> and <code>docs/adr/0001-…</code>.
+  </footer>
+
+</div>
+</body>
+</html>
