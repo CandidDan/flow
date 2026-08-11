@@ -28,6 +28,11 @@ full output. If the turn leaves **actions for the human to take**, follow the TL
 Omit the checklist entirely when there's nothing for them to do (don't pad it with things you've
 already handled or future "maybe" work).
 
+This applies to **Claude Code worker** sessions too — they auto-load this file. For a worker, the
+"response" is its end-of-run summary and its **PR description**: close those with the same TL;DR and,
+where the human needs to act (review/merge, a kickback to address, or a `blocked` reason), the same
+short ordered checklist.
+
 ---
 
 ## The store
