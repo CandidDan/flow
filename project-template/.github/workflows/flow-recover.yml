@@ -10,7 +10,7 @@ name: flow-recover
 
 on:
   schedule:
-    - cron: "*/30 * * * *"     # every 30 min; the threshold (in the reusable) is the real gate
+    - cron: "0 */3 * * *"      # every 3h; the threshold (in the reusable) is the real gate
   workflow_dispatch:
     inputs:
       threshold_minutes:
