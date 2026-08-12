@@ -84,7 +84,7 @@ jobs:
           # nobody to approve tool prompts: without an explicit permission posture, every Bash call
           # (the git claim-push, the branch, `gh pr create`, npm/gate commands) is DENIED — the worker
           # burns its turns, claims nothing, and ends "successfully" having pushed no branch and opened
-          # no PR (observed on Nudge: 17 permission denials per run, all ready tasks left untouched).
+          # no PR (observed on the canary repo: 17 permission denials per run, all ready tasks left untouched).
           # `--permission-mode bypassPermissions` makes the loop autonomous on an ephemeral, trusted CI
           # runner; scope stays fenced by the task's `touches` + the touches-guard CI gate, not by
           # per-tool prompts.

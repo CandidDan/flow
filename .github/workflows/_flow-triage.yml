@@ -75,7 +75,7 @@ jobs:
           # permission posture every gh issue-list / comment / label call was denied, so the sweep
           # burned its turns on denials and exited clean without proposing anything — the action
           # reports success either way, so it looked healthy for weeks (observed 2026-07-31:
-          # Nudge 8 denials in 13 turns, meadow 11 in 20; zero `proposed` labels across 42 runs).
+          # the canary repo 8 denials in 13 turns, another consuming repo 11 in 20; zero `proposed` labels across 42 runs).
           # The turn budget matters too: a real inbox is ~20 issues x (read + draft + comment +
           # label), which 30 turns cannot cover even unblocked. bypassPermissions grants the gh
           # calls; the prompt's hard limits (never touch code, never work an issue, only .flow/

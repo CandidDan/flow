@@ -13,7 +13,7 @@ into `ready` task files. The two are deliberately separate: Issues are raw mater
 files are the curated, spec'd, `ready` queue the worker pulls from.
 
 This ADR exists because an incident exposed the central weakness of the files-as-store
-choice, and we want to decide deliberately — three projects in (Nudge, Roost, Meadow), before
+choice, and we want to decide deliberately — three projects in, before
 backfilling more — whether to keep it or move the store into GitHub Issues.
 
 **The triggering incident.** Six task files (CAN-35 … CAN-40) were authored into a local

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// flow-doctor.mjs — drift detection for the work store, back-ported from Nudge's
+// flow-doctor.mjs — drift detection for the work store, back-ported from the canary repo's
 // `state:check` pattern: a validated store beats a trusted one. Checks that the task
 // files are internally consistent and that the board snapshot hasn't drifted from them.
 // Run on demand or in CI (flow-tooling job). Exits non-zero on PROBLEMS; WARNINGS report only.

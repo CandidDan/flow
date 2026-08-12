@@ -1,12 +1,12 @@
 # Adopting Flow in a consuming repo (the cutover runbook)
 
 **Status:** Phase 1 cutover of `flow-infra-propagation-plan.md` — the step it lists as deferred
-("cut the consuming repos over, Nudge first"). Canonical is done through Phase 4; this is the
+("cut the consuming repos over, the canary repo first"). Canonical is done through Phase 4; this is the
 per-repo procedure to move a repo off **copied** Flow infra onto the **referenced** reusable
-workflows + the version stamp + `flow-sync`. Worked example: **`CandidDan/Nudge`** (dogfood first),
-then Roost/Meadow.
+workflows + the version stamp + `flow-sync`. Worked example: **`<owner>/<canary-repo>`** (dogfood first),
+then the rest of the fleet.
 
-> Run this **from a session scoped to the consuming repo** (e.g. Nudge). It can't be done from the
+> Run this **from a session scoped to the consuming repo** (e.g. the canary repo). It can't be done from the
 > canonical (`CandidDan/flow`) session — that session's GitHub access is restricted to the flow
 > repo. Do the work on a branch and open a PR; the gate validates the cutover before it lands.
 
@@ -38,7 +38,7 @@ them**: `.flow/config.yml`, `.flow/tasks/`, and the project-specific notes in `C
    repo `flow-*.yml` that no longer has a canonical counterpart.
 2. **Sync `.flow/bin/`** to canonical's `project-template/.flow/bin/` (8 helpers + their tests):
    `flow-doctor`, `apply-board-edits`, `touches-guard`, `pick-task`, `parse-task-id`, `flow-open-pr`,
-   `flow-recover`, `flow-sync`. Mirror exactly (drop any local helper canonical doesn't have) — Nudge
+   `flow-recover`, `flow-sync`. Mirror exactly (drop any local helper canonical doesn't have) — the canary repo
    carried diverged copies of `pick-task`/`touches-guard` that the reconciliation already corrected
    in canonical, so this is the step that retires the drift.
 3. **Add the version stamp.** Write `.flow/VERSION` = canonical's `VERSION` (currently `1.0.0`),
@@ -58,8 +58,8 @@ them**: `.flow/config.yml`, `.flow/tasks/`, and the project-specific notes in `C
    both clean against the synced bins.
 2. **Gate fires end-to-end on a real PR (the whole point).** Open the cutover PR and confirm
    `flow-gates` actually runs and enforces build/lint/test/coverage + the store-guard + touches-guard
-   from *Nudge's* `.flow/config.yml`. A green required check on a real PR is the proof the plan asks
-   for — the reusable workflow reads the consuming repo's store because checkout pulls Nudge's repo.
+   from *the canary repo's* `.flow/config.yml`. A green required check on a real PR is the proof the plan asks
+   for — the reusable workflow reads the consuming repo's store because checkout pulls the canary repo's repo.
 3. **Status transitions:** open/close a throwaway `flow/<id>-…` PR and confirm `flow-status` flips
    the task `in_review` ↔ `ready`, and `flow-done` flips it `done` on merge (CAN-52 branch/title id).
 4. **flow-sync dry-run:** trigger `flow-sync` via `workflow_dispatch`. With `.flow/VERSION` level at
@@ -71,7 +71,7 @@ them**: `.flow/config.yml`, `.flow/tasks/`, and the project-specific notes in `C
 The cutover is one PR; revert it. The reusable workflows are pinned `@v1`, so canonical can't move
 under the repo without a deliberate tag bump or a `flow-sync` PR — there's no silent-change exposure.
 
-## After Nudge
+## After the canary repo
 
-Repeat for Roost and Meadow. Once all three are on the thin callers, the `flow-*.yml` copy surface
+Repeat for the rest of the fleet. Once all three are on the thin callers, the `flow-*.yml` copy surface
 is gone owner-wide; what remains is governed by the stamp + drift check + `flow-sync`.

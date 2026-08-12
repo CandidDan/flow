@@ -5,7 +5,7 @@
 ## Problem (one line)
 
 Flow infra is *copied* into each repo at onboarding and then never re-synced, so fixes made in a
-live repo (Nudge, under load) and edits made in the template drift apart in both directions — with
+live repo (the canary repo, under load) and edits made in the template drift apart in both directions — with
 no guard to catch it. We fix the *project's* code with a gate; Flow's *own* infra has no gate.
 
 ## Principle
@@ -29,7 +29,7 @@ surface that *can* drift — and a check makes the rest non-skippable.
 
 ### Phase 0 — Make canonical real + reconcile *(prerequisite)*
 - Turn the canonical source into a **real versioned git repo** (recommend `CandidDan/flow`; today it's just a folder in `~/Projects/flow`). Tag releases (`v1`, …).
-- **One-time reconciliation:** bring every Nudge-evolved piece into canonical in corrected form —
+- **One-time reconciliation:** bring every field-evolved piece into canonical in corrected form —
   `flow-open-pr` (non-draft) + its helper, `flow-recover` + helper, `parse-task-id` (PR-title fallback),
   the CAN-41 uncommitted-task guard, the **CAN-58 `FLOW_PAT` gate-trigger fix** — *and* keep canonical's
   ahead-bits (touches-overlap check, Opus worker, task-writer pre-flight checklist). Result: canonical is
@@ -39,7 +39,7 @@ surface that *can* drift — and a check makes the rest non-skippable.
 ### Phase 1 — Reusable workflows *(highest leverage)*
 - Convert the `flow-*` workflows in canonical to **reusable** (`on: workflow_call`).
 - Each consuming repo's workflow shrinks to a thin caller pinned to a tag (`@v1`).
-- Migrate **Nudge first** (dogfood), then Roost/Meadow. Kills the workflow drift surface outright.
+- Migrate **the canary repo first** (dogfood), then the rest of the fleet. Kills the workflow drift surface outright.
 
 ### Phase 2 — Version stamp + drift check *(the guard)*
 - Stamp a `FLOW_VERSION` in canonical and in each repo.
@@ -78,39 +78,39 @@ surface that *can* drift — and a check makes the rest non-skippable.
    npm package is deferred as an optional later refactor, not a prerequisite. The drift surface is
    already closed by the stamp+check+sync loop.
 3. **Committed scope = Phase 0 → 2** (reconcile + versioned canonical, reusable workflows, drift
-   check). Phases 3–4 follow once proven. **First move: Phase 0 + 1 on Nudge.**
+   check). Phases 3–4 follow once proven. **First move: Phase 0 + 1 on the canary repo.**
 
 ## Phase 0–1 execution checklist
 
 **Phase 0 — stand up canonical + reconcile**
 - [ ] `git init` `~/Projects/flow`; create empty private `CandidDan/flow` on GitHub; first push *(Dan: create the repo)*
-- [ ] Reconcile the **superset** into canonical — bring the corrected Nudge-evolved infra in:
+- [ ] Reconcile the **superset** into canonical — bring the corrected field-evolved infra in:
   - [ ] `flow-open-pr` workflow (drop `--draft`) + `flow-open-pr.mjs` helper + test + the **CAN-58 `FLOW_PAT`** gate-trigger pattern
   - [ ] `flow-recover` workflow + `flow-recover.mjs` helper + test
   - [ ] `parse-task-id.mjs` (PR-title fallback) + test + the `flow-status`/`flow-done` wiring (CAN-52)
   - [ ] `flow-doctor` uncommitted-task guard (CAN-41) — merge with canonical's touches-overlap check
   - [ ] keep canonical's ahead-bits: touches-overlap, Opus worker, task-writer pre-flight checklist
-- [ ] **Retire the two Nudge ahead-of-canonical deltas — make them config, not patches** (feedback from the Nudge cutover):
-  - [ ] Port the **CAN-57 multi-line `touches-guard` parser** into canonical's `touches-guard` (so it reads multi-line `touches:` lists, not just inline) and re-sync — retires the Nudge parser patch.
-  - [ ] Add a **per-project gate-extension hook in config**: canonical reads (a) extra source checks — e.g. Nudge's `edge-parse`/`check_edge` deno step — and (b) `ROOT_IGNORE` additions (Nudge's `docs`/`holding`/`scripts`/`tests`) from `config.yml`, so a project declares them as *data* instead of editing shared infra. Generalises the `source_roots` idea; retires both Nudge infra patches.
+- [ ] **Retire the two the canary repo ahead-of-canonical deltas — make them config, not patches** (feedback from the the canary repo cutover):
+  - [ ] Port the **CAN-57 multi-line `touches-guard` parser** into canonical's `touches-guard` (so it reads multi-line `touches:` lists, not just inline) and re-sync — retires the the canary repo parser patch.
+  - [ ] Add a **per-project gate-extension hook in config**: canonical reads (a) extra source checks — e.g. the canary repo's `edge-parse`/`check_edge` deno step — and (b) `ROOT_IGNORE` additions (the canary repo's `docs`/`holding`/`scripts`/`tests`) from `config.yml`, so a project declares them as *data* instead of editing shared infra. Generalises the `source_roots` idea; retires both the canary repo infra patches.
 - [ ] Add `FLOW_VERSION` (e.g. `flow/VERSION` + the bin package version); tag `v1`
 
 **Phase 1 — reusable workflows**
 - [ ] Convert each `flow-*.yml` in canonical to `on: workflow_call` (reusable), under `.github/workflows/_flow-*.yml`
 - [ ] Build the **thin caller** template (`project-template/.github/workflows/flow-*.yml` = 3-line `uses: CandidDan/flow/...@v1`)
 - [ ] `.flow/bin` → the npm package; reusable workflows call `npx`
-- [ ] Cut **Nudge** over to the thin callers + the package (dogfood); then Roost/Meadow
-- [ ] Confirm the gate still fires end-to-end on a real Nudge PR
+- [ ] Cut **the canary repo** over to the thin callers + the package (dogfood); then the rest of the fleet
+- [ ] Confirm the gate still fires end-to-end on a real the canary repo PR
 
 **Phase 2 — drift check** *(after 0–1 prove out)*
 - [ ] `flow-doctor`/CI check: fail/warn when a repo's `FLOW_VERSION` is behind canonical's latest tag
 
 ## Recommended first move
 
-Phase 0 + Phase 1 on Nudge: stand up `CandidDan/flow` as the versioned canonical repo with the
-reconciled superset, convert the workflows to reusable, and cut Nudge's `.github/workflows/` over to
+Phase 0 + Phase 1 on the canary repo: stand up `CandidDan/flow` as the versioned canonical repo with the
+reconciled superset, convert the workflows to reusable, and cut the canary repo's `.github/workflows/` over to
 thin callers. That single change eliminates the surface that just bit us (the workflows), and proves
-the model before touching Roost/Meadow or the bin/skills layers.
+the model before touching the rest of the fleet or the bin/skills layers.
 
 ## Non-goals / risks
 

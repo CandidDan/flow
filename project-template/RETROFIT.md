@@ -4,7 +4,7 @@ Adopting Flow into an **existing** repo that already has history, code, CI of it
 populated CLAUDE.md, and probably a tracker (Linear/Jira/issues/markdown lists). This route adds
 a migration prefix to the clean route (steps 1-4 below); from step 5 it converges with INIT.md.
 
-Generalized from the first real migration (Nudge). The placeholders `<TRACKER>`, `<ID-PREFIX>`,
+Generalized from the first real migration (the canary repo). The placeholders `<TRACKER>`, `<ID-PREFIX>`,
 `<app-dir>`, `<other-runtime-dir>` mark what changes per project; the lessons are baked in - they
 each cost a detour the first time and shouldn't again.
 

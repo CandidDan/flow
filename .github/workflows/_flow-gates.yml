@@ -104,7 +104,7 @@ jobs:
       - name: Test flow tooling
         run: node --test .flow/bin/*.test.mjs
 
-      # Drift detection (back-ported from Nudge's state:check): a validated store beats a
+      # Drift detection (back-ported from the canary repo's state:check): a validated store beats a
       # trusted one. Problems fail; warnings (e.g. stale board snapshot) just report.
       - name: flow-doctor — store consistency
         run: node .flow/bin/flow-doctor.mjs

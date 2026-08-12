@@ -32,7 +32,7 @@ Ask for all of these in one pass, then proceed without further interruption unti
 Offer the defaults in brackets; only the first four have no sensible default.
 
 **Project identity**
-- `project.name` — short slug, also the task-id prefix (e.g. `nudge` → tasks `nudge-0001`).
+- `project.name` — short slug, also the task-id prefix (e.g. `acme` → tasks `acme-0001`).
 - `project.language` — e.g. typescript, python, swift, go, ruby.
 - `project.description` — one line.
 - **GitHub `owner/repo`** for this new repo.

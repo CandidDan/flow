@@ -124,10 +124,10 @@ test("checkTouches: in-scope files pass, out-of-scope reported", () => {
 });
 
 test("checkTouches: the CAN-30 drift would have failed", () => {
-  // Real case: task touched CLAUDE.md/state.yml/ARCHITECTURE/Nudge-Context but drifted into the generator.
+  // Real case: task touched CLAUDE.md/state.yml/ARCHITECTURE/Project-Context but drifted into the generator.
   const r = checkTouches({
     changedFiles: ["CLAUDE.md", "docs/state.yml", "docs/ARCHITECTURE.md", "app/scripts/generate-state.mjs", "docs/DESIGN-SYNOPSIS.md"],
-    touches: ["CLAUDE.md", "docs/state.yml", "docs/ARCHITECTURE.md", "Nudge-Context.md"],
+    touches: ["CLAUDE.md", "docs/state.yml", "docs/ARCHITECTURE.md", "Project-Context.md"],
   });
   assert.deepEqual(r.outside.sort(), ["app/scripts/generate-state.mjs", "docs/DESIGN-SYNOPSIS.md"]);
 });

@@ -26,3 +26,7 @@ flow-validation/
 flow-plugin/
 flow-release.sh
 flow-publish.sh
+
+# --- kept local, never published ---
+_private/
+flow-catchup.sh

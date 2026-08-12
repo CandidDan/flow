@@ -28,7 +28,7 @@ CLAUDE.md                     The protocol. The contract Code reads every sessio
   bin/
     apply-board-edits.mjs     The ONLY writer of task frontmatter from a board edit: reads
     apply-board-edits.test.mjs  board-edits.json, patches status/priority, leaves a git diff.
-    flow-doctor.mjs           Drift detection for the store (back-ported from Nudge's
+    flow-doctor.mjs           Drift detection for the store (back-ported from the canary repo's
     flow-doctor.test.mjs      state:check): consistency problems fail CI; drift warns.
     touches-guard.mjs         Fails a PR whose diff strays outside the task's declared
     touches-guard.test.mjs    `touches` globs — scope enforced, not just agent-reviewed.
@@ -120,7 +120,7 @@ entirely. Don't force them through the readiness bar at capture time, and don't 
 `.flow/tasks/` raw; both break the discipline that makes the queue trustworthy. Instead:
 
 - **Capture → GitHub Issues** on the relevant repo, with whatever context you have in the moment.
-  From any Cowork session that's one sentence ("log these three against Nudge: …") once the GitHub
+  From any Cowork session that's one sentence ("log these three against the canary repo: …") once the GitHub
   connector is live — no context switch, no leaving the topic you're on.
 - **Triage proposes; you approve.** The scheduled `flow-triage` sweep (weekday mornings, before
   the digest) drafts a full ready-task spec *as a comment on each issue* and labels it

@@ -4,7 +4,7 @@
 reconciliation (see *Reconciled in* below), Phase 1 reusable workflows, Phase 2 version stamp +
 drift check, Phase 3 bin-delivery decision (copy + check, npm package deferred), and Phase 4
 (`flow-sync` adopt mechanism + the governance rule). `v1` is tagged. Remaining: **cut the
-consuming repos over** (Nudge first, dogfood) and the plugin-based skills/agents adoption (see
+consuming repos over** (the canary repo first, dogfood) and the plugin-based skills/agents adoption (see
 *What's deferred*).
 
 ## Why
@@ -124,13 +124,13 @@ tarball checkouts and fixtures are unaffected.
 
 ## Reconciled in (Phase 0)
 
-The Nudge-evolved infra the plan called for has been brought into canonical as the corrected
+The field-evolved infra the plan called for has been brought into canonical as the corrected
 superset:
 
 - **`parse-task-id.mjs` + branch-or-title id resolution (CAN-52)** in `_flow-status` / `_flow-done`,
   so cloud sessions forced onto non-`flow/` branches still transition.
 - **`flow-open-pr.mjs` + `_flow-open-pr.yml` (CAN-50)** — auto-open the PR on branch push. Per the
-  plan, canonical opens it **non-draft** (Nudge's version still used `--draft`).
+  plan, canonical opens it **non-draft** (the canary repo's version still used `--draft`).
 - **`flow-recover.mjs` + `_flow-recover.yml` (CAN-51)** — self-heal stranded tasks.
 - **The CAN-41 uncommitted-task guard** merged into `flow-doctor`, alongside canonical's existing
   ahead-bits (the touches-overlap check, multi-line `touches` parsing, and the version-drift check —
@@ -144,7 +144,7 @@ All helpers ship with their proving tests (`node --test .flow/bin/*.test.mjs`).
 1. **Tag `v1`** (`git tag v1 && git push origin v1`) — a release action left to the maintainer.
    Only after the tag exists do the `@v1` caller pins resolve; until then the callers are the
    documented end-state.
-2. **Cut the consuming repos over** to the thin callers (Nudge first, dogfood; then Roost/Meadow),
+2. **Cut the consuming repos over** to the thin callers (the canary repo first, dogfood; then the rest of the fleet),
    and **confirm the gate fires end-to-end** on a real PR. This is cross-repo work, out of the
    canonical repo's reach.
 3. ~~**The `.flow/bin` npm package** (Decision 2)~~ — **resolved 2026-06-24:** the bin stays copied
@@ -154,5 +154,5 @@ All helpers ship with their proving tests (`node --test .flow/bin/*.test.mjs`).
 4. **A reusable-gate toolchain story for non-Node stacks** beyond the `setup_node_version` input —
    best settled by the dogfooding in (2).
 5. **Further drift found but not in the plan's Phase 0 list:** `pick-task.mjs` and the
-   `touches-guard.mjs` multi-line `touches` fix (CAN-57) have also diverged between Nudge and
+   `touches-guard.mjs` multi-line `touches` fix (CAN-57) have also diverged between the canary repo and
    canonical. Left for a follow-up reconciliation to keep this change scoped to the plan.
