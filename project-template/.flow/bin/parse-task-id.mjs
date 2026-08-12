@@ -22,6 +22,25 @@
 // The id shape Flow uses: a letter-led prefix, a dash, and a numeric suffix (e.g. CAN-30).
 // Project-agnostic on the prefix — it is NOT hard-coded to "CAN" — so a back-port to another
 // repo keeps working. 1–4 trailing digits matches the existing flow-status/flow-done regex.
+import { realpathSync as __realpathSync } from "node:fs";
+import { fileURLToPath as __fileURLToPath } from "node:url";
+
+// --- main-module detection (do not simplify back to a string compare) -------------------
+// `import.meta.url` is the RESOLVED realpath; `process.argv[1]` is the path AS INVOKED.
+// When the script is reached through a symlink they differ, the comparison is false, and the
+// CLI block below silently never runs — no output, exit 0, nothing to debug. macOS hits this
+// routinely because os.tmpdir() (/var/folders/...) is a symlink to /private/var/folders/...,
+// and any symlinked checkout or bind-mount does the same. For touches-guard that means the
+// scope check silently does not run and the gate goes green: it fails OPEN, which is the
+// wrong direction for a guard. Compare realpaths on both sides.
+const __isMain = (() => {
+  try {
+    return !!process.argv[1] &&
+      __realpathSync(process.argv[1]) === __realpathSync(__fileURLToPath(import.meta.url));
+  } catch { return false; }
+})();
+// ---------------------------------------------------------------------------------------
+
 const ID = "[A-Za-z][A-Za-z0-9]*-\\d{1,4}";
 
 // Canonical source: a `flow/<id>-<slug>` branch. The id is the portion up to the slug dash,
@@ -48,7 +67,7 @@ export function parseTaskId(branch, prTitle) {
 }
 
 // ── CLI ── argv[2] = branch, argv[3] = pr title. Prints the id or nothing; always exit 0.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (__isMain) {
   const id = parseTaskId(process.argv[2], process.argv[3]);
   if (id) process.stdout.write(id + "\n");
   process.exit(0);

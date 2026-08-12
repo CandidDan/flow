@@ -48,6 +48,25 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { STATUSES } from "./apply-board-edits.mjs";
 
+
+import { realpathSync as __realpathSync } from "node:fs";
+import { fileURLToPath as __fileURLToPath } from "node:url";
+
+// --- main-module detection (do not simplify back to a string compare) -------------------
+// `import.meta.url` is the RESOLVED realpath; `process.argv[1]` is the path AS INVOKED.
+// When the script is reached through a symlink they differ, the comparison is false, and the
+// CLI block below silently never runs — no output, exit 0, nothing to debug. macOS hits this
+// routinely because os.tmpdir() (/var/folders/...) is a symlink to /private/var/folders/...,
+// and any symlinked checkout or bind-mount does the same. For touches-guard that means the
+// scope check silently does not run and the gate goes green: it fails OPEN, which is the
+// wrong direction for a guard. Compare realpaths on both sides.
+const __isMain = (() => {
+  try {
+    return !!process.argv[1] &&
+      __realpathSync(process.argv[1]) === __realpathSync(__fileURLToPath(import.meta.url));
+  } catch { return false; }
+})();
+// ---------------------------------------------------------------------------------------
 const REQUIRED = ["id", "title", "status", "priority"];
 
 // Dirs never treated as source trees (build output, deps, VCS, Flow's own plumbing).
@@ -365,7 +384,7 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
 }
 
 // ── CLI ──
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (__isMain) {
   const flowDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const canonicalVersion = process.env.FLOW_CANONICAL_VERSION || undefined;
   const { problems, warnings, notes, count } = runDoctor({ flowDir, canonicalVersion });

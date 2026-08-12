@@ -23,6 +23,25 @@
 
 import { compareVersions } from "./flow-doctor.mjs";
 
+
+import { realpathSync as __realpathSync } from "node:fs";
+import { fileURLToPath as __fileURLToPath } from "node:url";
+
+// --- main-module detection (do not simplify back to a string compare) -------------------
+// `import.meta.url` is the RESOLVED realpath; `process.argv[1]` is the path AS INVOKED.
+// When the script is reached through a symlink they differ, the comparison is false, and the
+// CLI block below silently never runs — no output, exit 0, nothing to debug. macOS hits this
+// routinely because os.tmpdir() (/var/folders/...) is a symlink to /private/var/folders/...,
+// and any symlinked checkout or bind-mount does the same. For touches-guard that means the
+// scope check silently does not run and the gate goes green: it fails OPEN, which is the
+// wrong direction for a guard. Compare realpaths on both sides.
+const __isMain = (() => {
+  try {
+    return !!process.argv[1] &&
+      __realpathSync(process.argv[1]) === __realpathSync(__fileURLToPath(import.meta.url));
+  } catch { return false; }
+})();
+// ---------------------------------------------------------------------------------------
 // Decide what a repo at `local` should do relative to canonical at `canonical`:
 //   "behind"  — local < canonical (or no stamp at all): open a sync PR.
 //   "current" — equal: nothing to do.
@@ -72,7 +91,7 @@ function arg(flags, name) {
   return i >= 0 && i + 1 < flags.length ? flags[i + 1] : undefined;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (__isMain) {
   const [cmd, ...rest] = process.argv.slice(2);
   const local = arg(rest, "local") || "";
   const canonical = arg(rest, "canonical") || "";

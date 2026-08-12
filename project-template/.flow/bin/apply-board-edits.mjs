@@ -28,6 +28,25 @@ import { readFileSync, writeFileSync, readdirSync, existsSync, unlinkSync } from
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+
+import { realpathSync as __realpathSync } from "node:fs";
+import { fileURLToPath as __fileURLToPath } from "node:url";
+
+// --- main-module detection (do not simplify back to a string compare) -------------------
+// `import.meta.url` is the RESOLVED realpath; `process.argv[1]` is the path AS INVOKED.
+// When the script is reached through a symlink they differ, the comparison is false, and the
+// CLI block below silently never runs — no output, exit 0, nothing to debug. macOS hits this
+// routinely because os.tmpdir() (/var/folders/...) is a symlink to /private/var/folders/...,
+// and any symlinked checkout or bind-mount does the same. For touches-guard that means the
+// scope check silently does not run and the gate goes green: it fails OPEN, which is the
+// wrong direction for a guard. Compare realpaths on both sides.
+const __isMain = (() => {
+  try {
+    return !!process.argv[1] &&
+      __realpathSync(process.argv[1]) === __realpathSync(__fileURLToPath(import.meta.url));
+  } catch { return false; }
+})();
+// ---------------------------------------------------------------------------------------
 export const STATUSES = new Set(["ready", "in_progress", "in_review", "done", "blocked"]);
 
 // Patch a single frontmatter field in a task-file's text, touching nothing else.
@@ -125,4 +144,4 @@ function main(argv) {
   process.exit(problems.length ? 1 : 0);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main(process.argv);
+if (__isMain) main(process.argv);
