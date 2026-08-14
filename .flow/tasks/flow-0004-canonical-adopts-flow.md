@@ -15,6 +15,7 @@ touches: [".flow/config.yml", ".flow/bin/**", "package.json", "package-lock.json
 labels: [infra, dogfood]
 notes:
   - "2026-08-14: touches widened to include `.flow/bin/**`. Two reasons, both discovered by reading the reusables rather than the Scope section. (1) The build and lint criteria each need a proving test, and a test file has nowhere in-scope to live. (2) `_flow-status.yml` and `_flow-done.yml` invoke `.flow/bin/parse-task-id.mjs` and `.flow/bin/apply-board-edits.mjs` in the *consuming* repo, and `_flow-gates.yml` invokes `.flow/bin/touches-guard.mjs`, `.flow/bin/flow-doctor.mjs` and `node --test .flow/bin/*.test.mjs` — all guarded so they no-op silently when absent. Without `.flow/bin/` in canonical the last acceptance criterion (PR opens -> in_review, merges -> done) cannot pass, and the gate would go green while enforcing nothing. Widened on main by the orchestrator before the claim, per the protocol's scope rule."
+  - "2026-08-14: acceptance criterion 7 corrected. It named `node project-template/.flow/bin/flow-doctor.mjs`, which resolves its store as `dirname(realpath(import.meta.url))/..` and therefore validates the TEMPLATE's fixture store — one placeholder task — not canonical's. It fails permanently on the template's own `REPLACE-ME` source_root, so the criterion was unsatisfiable as written and would have stayed that way. Now names `.flow/bin/flow-doctor.mjs`, which is what `_flow-gates.yml` actually invokes in a consuming repo. The 'no undeclared top-level source tree' clause was also dropped: flow-doctor's scan skips dot-directories, and every one of canonical's source trees is under one, so that clause could never fire here. Replaced with the part that is genuinely checkable — every declared source_root exists and names a check."
 ---
 
 ## Context
@@ -75,7 +76,7 @@ board-builder wiring (the flightdeck work in flow-0001..0003 supersedes it for t
 - [ ] Given a deliberately broken `.mjs` helper, when the `lint` command runs, then it exits non-zero and names the file.
 - [ ] Given the repo as-is, when the `test` command runs, then every existing `.flow/bin` and `flightdeck/bin` test executes and passes.
 - [ ] Given the coverage command, when it runs, then it prints a percentage and exits non-zero if below `coverage_min`, and the committed `coverage_min` equals the measured value minus the stated margin.
-- [ ] Given `.flow/config.yml`, when `node project-template/.flow/bin/flow-doctor.mjs` runs against this repo, then it reports no consistency failures — including no undeclared top-level source tree.
+- [ ] Given `.flow/config.yml`, when `node .flow/bin/flow-doctor.mjs` runs against this repo, then it reports no consistency failures, and every declared `source_root` exists on disk and names a check.
 - [ ] Given a PR from a `flow/<id>-…` branch, when it opens, then `flow-gates` runs and the task flips to `in_review` with `branch` and `pr` recorded; when it merges, the task flips to `done` on `main`.
 
 ## Definition of done (inherited — do not edit)
@@ -98,3 +99,14 @@ test named.
   disagree — it is the one place in the fleet where "always latest" is the safer choice.
 - `flow-validation/` and `flow-plugin/` are untracked after the public split; make sure the
   `source_roots` floor does not trip over directories git no longer knows about.
+- **The gate-coverage floor's automatic half cannot fire in canonical**, and that is worth knowing
+  before trusting it here. `flow-doctor` finds undeclared source trees by scanning top-level
+  directories, skipping any whose name starts with `.` — and every canonical source tree is under
+  one (`.flow/bin/`, `.github/workflows/`, `project-template/.flow/bin/`). So the declarations in
+  `source_roots` carry the whole weight, unbacked by the discovery check that makes them honest in
+  a normal repo. The `lint` command is the compensating control: it runs `node --check` over every
+  *tracked* `.mjs`, so a new helper is parsed wherever someone puts it. If a future task adds a
+  source tree in a non-dot directory, the discovery check starts working again for free.
+- `flightdeck/bin/` does not exist until flow-0001 lands, and a declared `source_root` that is
+  missing from disk is a `flow-doctor` **failure**, not a warning. Declare `flightdeck/` instead;
+  it covers `bin/` the moment that task ships.
