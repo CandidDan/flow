@@ -1,0 +1,20 @@
+name: flow-done
+
+# Canonical's own caller of the merge-closes-the-task transition. Referenced from `main` rather
+# than a tag — see flow-gates.yml in this directory for why canonical is the one repo where
+# that is the safer pin.
+#
+# A task's `done` transition is owned by the merge, not by the worker: the worker only ever
+# goes as far as opening the PR. When a PR carrying a task id merges into main, this flips the
+# matching task to `done` on main, where the store lives.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  flow-done:
+    permissions:
+      contents: write
+    uses: CandidDan/flow/.github/workflows/_flow-done.yml@main

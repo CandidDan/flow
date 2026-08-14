@@ -1,0 +1,26 @@
+name: flow-gates
+
+# Canonical's own caller of canonical's own gate. Every other repo references these reusables
+# from a tag; canonical references them from `main`, deliberately.
+#
+# WHY @main HERE AND @v1 EVERYWHERE ELSE. A consuming repo wants a stable gate that only moves
+# when someone advances the channel. Canonical is the opposite case: it is the repo where the
+# reusables are authored, and pinning it to the last release would mean it gates against a
+# version of itself it has already moved past — a bug fixed on main would keep failing
+# canonical's own PRs, and a bug introduced on main would not be noticed here at all.
+#
+# The cost is real and worth naming: a broken reusable on main breaks canonical's own gate,
+# and there is no second repo watching. That is what `npm run build` (parse every workflow) is
+# for, and it runs inside this gate.
+#
+# Not `./.github/workflows/_flow-gates.yml`: a local reference would gate each PR against its
+# own edited copy of the gate, which is the one thing a gate must not do.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  flow-gates:
+    uses: CandidDan/flow/.github/workflows/_flow-gates.yml@main
