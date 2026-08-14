@@ -11,9 +11,10 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: ""
-touches: [".flow/config.yml", "package.json", "package-lock.json", ".github/workflows/flow-gates.yml", ".github/workflows/flow-status.yml", ".github/workflows/flow-done.yml"]
+touches: [".flow/config.yml", ".flow/bin/**", "package.json", "package-lock.json", ".github/workflows/flow-gates.yml", ".github/workflows/flow-status.yml", ".github/workflows/flow-done.yml"]
 labels: [infra, dogfood]
-notes: []
+notes:
+  - "2026-08-14: touches widened to include `.flow/bin/**`. Two reasons, both discovered by reading the reusables rather than the Scope section. (1) The build and lint criteria each need a proving test, and a test file has nowhere in-scope to live. (2) `_flow-status.yml` and `_flow-done.yml` invoke `.flow/bin/parse-task-id.mjs` and `.flow/bin/apply-board-edits.mjs` in the *consuming* repo, and `_flow-gates.yml` invokes `.flow/bin/touches-guard.mjs`, `.flow/bin/flow-doctor.mjs` and `node --test .flow/bin/*.test.mjs` — all guarded so they no-op silently when absent. Without `.flow/bin/` in canonical the last acceptance criterion (PR opens -> in_review, merges -> done) cannot pass, and the gate would go green while enforcing nothing. Widened on main by the orchestrator before the claim, per the protocol's scope rule."
 ---
 
 ## Context
