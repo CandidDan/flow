@@ -1,0 +1,79 @@
+# .flow/config.yml — canonical's own Flow calibration.
+#
+# Canonical is not a normal project. Most of it is Markdown: the protocol, the ADRs, the two
+# adoption runbooks. A coverage floor over prose is theatre, and a build/lint/coverage stack
+# bolted onto a docs repo is the kind of ceremony that gets switched off within a month and
+# then lies about being enforced.
+#
+# But canonical is also the repo whose actual product is `.mjs` helpers and reusable workflows,
+# and those deserve a stricter gate than most application code, because a bug in them
+# propagates to every adopting repo at once, silently, at whatever ref they pinned.
+#
+# So the commands below gate the code and the workflows properly, and do not pretend to gate
+# the prose. Every one of them is measured against this repo, not inherited from a stack
+# convention — see the flow-0004 PR for the numbers.
+
+project:
+  name: "flow"
+  language: "javascript"
+  description: "Canonical Flow — the protocol, the reusable workflows, and the .flow/bin tooling that consuming repos adopt by reference."
+
+commands:
+  install: "npm ci"
+  # `build` here means "prove every workflow parses". Canonical's product IS workflows; a
+  # malformed reusable breaks the whole fleet and GitHub only reports it in the *consuming*
+  # repo, after the bad ref has been adopted. Nothing else catches that before it ships.
+  build: "npm run build"
+  # `lint` is `node --check` over every tracked .mjs — no linter dependency, and it cannot
+  # disagree with the runtime because it is the runtime's own parser.
+  lint: "npm run lint"
+  test: "npm test"
+  coverage: "npm run coverage"
+
+# MEASURED, not chosen. `npm run coverage` reported 85.31% line coverage (1696/1988) on the
+# commit that introduced this file. Margin: 1.81 points. Floor: 83.5 — low enough that an
+# unrelated refactor does not fail the gate on noise, high enough that a real collapse does.
+# Raise it as coverage rises; never lower it silently. Sitting exactly at the floor proves
+# nothing on its own — the real correctness check is the criterion-to-test mapping.
+#
+# This number is duplicated as `c8.lines` in package.json, because the gate runs the coverage
+# COMMAND and c8 reads its threshold from there. `.flow/bin/config.test.mjs` fails if the two
+# ever disagree, so the duplication cannot drift silently.
+coverage_min: 83.5
+
+# Gate-coverage floor. Note an honest limitation, recorded rather than papered over: every one
+# of canonical's source trees lives under a dot-directory (`.flow/bin/`, `.github/workflows/`,
+# `project-template/.flow/bin/`), and flow-doctor's undeclared-tree scan skips dot-directories.
+# So the automatic half of this check cannot fire here, and the declarations below carry the
+# weight on their own. `npm run lint` is the backstop that makes that safe: it checks every
+# tracked .mjs in the repo, so a new helper is parsed wherever someone puts it.
+#
+# `flightdeck/` is declared as the whole tree rather than `flightdeck/bin/` (which flow-0001
+# creates) — a declared root that does not exist on disk is a flow-doctor failure, and the
+# broader path covers the bin directory the moment it lands.
+source_roots:
+  - path: ".flow/bin/"
+    check: "npm run lint"
+  - path: "project-template/.flow/bin/"
+    check: "npm run lint"
+  - path: "flightdeck/"
+    check: "npm run lint"
+  - path: ".github/workflows/"
+    check: "npm run build"
+
+security:
+  secrets_scan: true
+  dependency_audit: true
+  focus:
+    # Canonical's real risk is not its own runtime — it barely has one. It is that a mistake in
+    # a reusable workflow executes with the caller's credentials, in every repo that adopted it.
+    - "workflow `permissions:` blocks in .github/workflows/_flow-*.yml — least privilege, and never a repo-wide default"
+    - "secret handling in the reusables: FLOW_PAT and GITHUB_TOKEN must never be echoed, interpolated into a shell string, or passed to an untrusted action"
+    - "untrusted input reaching `run:` blocks — PR titles and branch names are attacker-controlled and are interpolated by flow-status/flow-done"
+    - "the `uses:` pins consuming repos inherit — an unpinned or moved third-party action is a supply-chain hole in every adopting repo at once"
+    - "dependency footprint: canonical ships as source that others copy, so every dependency added here is a dependency imposed downstream"
+
+git:
+  base_branch: "main"
+  branch_prefix: "flow/"
+  protect_main: true

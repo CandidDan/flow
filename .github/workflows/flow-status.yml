@@ -1,0 +1,25 @@
+name: flow-status
+
+# Canonical's own caller of the PR-event status sync. Referenced from `main` rather than a tag
+# — see flow-gates.yml in this directory for why canonical is the one repo where that is the
+# safer pin.
+#
+# opened / reopened     -> in_review (+ branch & pr recorded)
+# closed without merge  -> back to ready (owner/branch/pr cleared for re-claim)
+# closed by merge       -> flow-done.yml owns it; this job no-ops
+#
+# The reusable resolves the task id from the head branch first and the `[<id>]` PR title
+# second, then runs `.flow/bin/parse-task-id.mjs` and `.flow/bin/apply-board-edits.mjs` from
+# THIS repo. Both now exist here (they are adapters over project-template/.flow/bin/), which is
+# what makes these transitions fire in canonical rather than no-op silently.
+
+on:
+  pull_request:
+    types: [opened, reopened, closed]
+    branches: [main]
+
+jobs:
+  flow-status:
+    permissions:
+      contents: write
+    uses: CandidDan/flow/.github/workflows/_flow-status.yml@main
