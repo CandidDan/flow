@@ -20,26 +20,32 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parse as parseYaml } from "yaml";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const FLOW = resolve(BIN, "..");
 const REPO = resolve(FLOW, "..");
 
-const config = parseYaml(readFileSync(join(FLOW, "config.yml"), "utf8"));
+// DEPENDENCY NOTE — see check-workflows.test.mjs for the full reasoning. `_flow-gates.yml`'s
+// `flow-tooling` job runs `node --test .flow/bin/*.test.mjs` with no install step; these tests
+// need `yaml` (to parse config.yml the way CI does) and `c8` (to prove the floor is enforced).
+// They skip visibly there and run for real in the per-stack job, after `npm ci`.
+const yamlMod = await import("yaml").then((m) => m, () => null);
+const skip = yamlMod ? false : "needs `npm ci` (yaml, c8) — runs in the per-stack gate job";
+
+const config = yamlMod ? yamlMod.parse(readFileSync(join(FLOW, "config.yml"), "utf8")) : {};
 const pkg = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8"));
 
-test("config.yml itself parses — the file CI reads with yq must be valid YAML", () => {
+test("config.yml itself parses — the file CI reads with yq must be valid YAML", { skip }, () => {
   assert.ok(config.project?.name, "project.name must be set");
   assert.ok(config.commands, "commands block must be present");
   assert.equal(config.project.name, "flow");
 });
 
-test("no REPLACE-ME survives — a placeholder here is a gate that proves nothing", () => {
+test("no REPLACE-ME survives — a placeholder here is a gate that proves nothing", { skip }, () => {
   assert.doesNotMatch(readFileSync(join(FLOW, "config.yml"), "utf8"), /REPLACE-ME/);
 });
 
-test("every command in config.yml names a script that actually exists", () => {
+test("every command in config.yml names a script that actually exists", { skip }, () => {
   for (const key of ["install", "build", "lint", "test", "coverage"]) {
     const cmd = config.commands[key];
     assert.ok(cmd, `commands.${key} must be set`);
@@ -52,7 +58,7 @@ test("every command in config.yml names a script that actually exists", () => {
   }
 });
 
-test("coverage_min matches the threshold c8 actually enforces", () => {
+test("coverage_min matches the threshold c8 actually enforces", { skip }, () => {
   // The gate runs the coverage COMMAND, so c8's own threshold is what fails a PR. If it drifts
   // below config.yml's declared floor, the repo advertises a floor it does not hold.
   assert.equal(pkg.c8.lines, config.coverage_min,
@@ -61,7 +67,7 @@ test("coverage_min matches the threshold c8 actually enforces", () => {
     "without check-coverage, c8 prints a percentage and exits 0 no matter how low it is");
 });
 
-test("the coverage floor sits below the measured value, with the margin the config states", () => {
+test("the coverage floor sits below the measured value, with the margin the config states", { skip }, () => {
   const text = readFileSync(join(FLOW, "config.yml"), "utf8");
   const measured = Number(text.match(/reported ([\d.]+)% line coverage/)[1]);
   const margin = Number(text.match(/Margin: ([\d.]+) points/)[1]);
@@ -74,7 +80,7 @@ test("the coverage floor sits below the measured value, with the margin the conf
   assert.ok(config.coverage_min < measured, "a floor at or above the measured value fails the gate on day one");
 });
 
-test("c8 exits non-zero when line coverage is below the floor", () => {
+test("c8 exits non-zero when line coverage is below the floor", { skip }, () => {
   // Proves the enforcement half of the criterion without re-running the whole suite: a file
   // with a deliberately unexercised branch, checked against an unreachable floor.
   const dir = mkdtempSync(join(tmpdir(), "flow-cov-"));
@@ -106,7 +112,7 @@ test("c8 exits non-zero when line coverage is below the floor", () => {
   }
 });
 
-test("the lockfile is committed and npm ci has something to install against", () => {
+test("the lockfile is committed and npm ci has something to install against", { skip }, () => {
   const lock = join(REPO, "package-lock.json");
   assert.ok(existsSync(lock), "npm ci fails outright without a committed lockfile");
   const parsed = JSON.parse(readFileSync(lock, "utf8"));
@@ -114,7 +120,7 @@ test("the lockfile is committed and npm ci has something to install against", ()
   assert.ok(parsed.packages?.[""], "the lockfile must describe the root package");
 });
 
-test("the dependency footprint stays at c8 plus the one justified addition", () => {
+test("the dependency footprint stays at c8 plus the one justified addition", { skip }, () => {
   // Canonical ships as source that other repos copy, so every dependency added here is a
   // dependency imposed downstream. c8 buys the coverage floor; yaml buys a real workflow parse
   // (Node has none, and a hand-rolled scan would only look like a parser). A third needs the
@@ -124,7 +130,7 @@ test("the dependency footprint stays at c8 plus the one justified addition", () 
   assert.equal(pkg.private, true, "canonical is not a published package");
 });
 
-test("every declared source_root exists on disk and names a check", () => {
+test("every declared source_root exists on disk and names a check", { skip }, () => {
   assert.ok(config.source_roots?.length, "source_roots must be declared");
   for (const root of config.source_roots) {
     assert.ok(root.path, "a source_root with no path fails flow-doctor");
@@ -134,7 +140,7 @@ test("every declared source_root exists on disk and names a check", () => {
   }
 });
 
-test("the trees holding canonical's actual code are all declared", () => {
+test("the trees holding canonical's actual code are all declared", { skip }, () => {
   const declared = config.source_roots.map((r) => r.path.replace(/\/+$/, ""));
   for (const required of [".flow/bin", "project-template/.flow/bin", ".github/workflows"]) {
     assert.ok(declared.includes(required), `${required}/ holds source and must be declared`);

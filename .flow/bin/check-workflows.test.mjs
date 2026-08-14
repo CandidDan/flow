@@ -12,18 +12,27 @@ import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DEFAULT_WORKFLOW_DIR, checkWorkflows } from "./check-workflows.mjs";
+// DEPENDENCY NOTE. `_flow-gates.yml` has a `flow-tooling` job that runs
+// `node --test .flow/bin/*.test.mjs` with NO install step — it exists so a consuming repo's
+// Flow tooling is tested independently of its stack. canonical's build helper needs `yaml`,
+// so these tests skip *visibly* there ("# skipped") rather than crashing the job on a missing
+// module. They still run for real in the per-stack gate job, which does `npm ci` first and
+// then `npm test`. A printed skip is not a silent no-op; a module-not-found crash is not a
+// gate result at all.
+const mod = await import("./check-workflows.mjs").then((m) => m, () => null);
+const skip = mod ? false : "needs `npm ci` (yaml) — runs in the per-stack gate job";
+const { DEFAULT_WORKFLOW_DIR, checkWorkflows } = mod ?? {};
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
 const SCRIPT = join(BIN, "check-workflows.mjs");
-const WORKFLOWS = join(REPO, DEFAULT_WORKFLOW_DIR);
+const WORKFLOWS = join(REPO, DEFAULT_WORKFLOW_DIR ?? ".github/workflows");
 
 const tmp = (name) => mkdtempSync(join(tmpdir(), `flow-cw-${name}-`));
 const run = (args, cwd = REPO) =>
   spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: "utf8" });
 
-test("the repo as-is: every workflow file parses, and the count matches what is on disk", () => {
+test("the repo as-is: every workflow file parses, and the count matches what is on disk", { skip }, () => {
   const { checked, failures } = checkWorkflows(WORKFLOWS);
   const onDisk = readdirSync(WORKFLOWS).filter((n) => /\.ya?ml$/.test(n));
 
@@ -33,13 +42,13 @@ test("the repo as-is: every workflow file parses, and the count matches what is 
   assert.ok(checked.length > 0, "the fixture is meaningless if the directory is empty");
 });
 
-test("CLI: the repo as-is exits 0 and reports how many files it parsed", () => {
+test("CLI: the repo as-is exits 0 and reports how many files it parsed", { skip }, () => {
   const r = run([]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /check-workflows: \d+ workflow file\(s\) parsed/);
 });
 
-test("a malformed _flow-gates.yml fails and names the offending file", () => {
+test("a malformed _flow-gates.yml fails and names the offending file", { skip }, () => {
   const dir = tmp("malformed");
   try {
     cpSync(WORKFLOWS, dir, { recursive: true });
@@ -60,7 +69,7 @@ test("a malformed _flow-gates.yml fails and names the offending file", () => {
   }
 });
 
-test("a valid file alongside a malformed one still parses — only the broken file is blamed", () => {
+test("a valid file alongside a malformed one still parses — only the broken file is blamed", { skip }, () => {
   const dir = tmp("mixed");
   try {
     writeFileSync(join(dir, "good.yml"), "name: fine\non: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n");
@@ -75,7 +84,7 @@ test("a valid file alongside a malformed one still parses — only the broken fi
   }
 });
 
-test("an empty workflow directory FAILS — a build that parses nothing must not report success", () => {
+test("an empty workflow directory FAILS — a build that parses nothing must not report success", { skip }, () => {
   const dir = tmp("empty");
   try {
     const { checked, failures } = checkWorkflows(dir);
@@ -90,7 +99,7 @@ test("an empty workflow directory FAILS — a build that parses nothing must not
   }
 });
 
-test("a missing workflow directory fails rather than throwing", () => {
+test("a missing workflow directory fails rather than throwing", { skip }, () => {
   const base = tmp("missing");
   try {
     const dir = join(base, "does-not-exist");
@@ -103,7 +112,7 @@ test("a missing workflow directory fails rather than throwing", () => {
   }
 });
 
-test("non-YAML files in the directory are ignored, not counted as parsed", () => {
+test("non-YAML files in the directory are ignored, not counted as parsed", { skip }, () => {
   const dir = tmp("mixedext");
   try {
     mkdirSync(join(dir, "nested"));
