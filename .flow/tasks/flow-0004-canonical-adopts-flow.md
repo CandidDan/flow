@@ -1,7 +1,7 @@
 ---
 id: "flow-0004"
 title: "Adopt Flow in canonical, gating the code without pretending to gate the prose"
-status: "in_progress"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude/next-tasks-ahnx30"
