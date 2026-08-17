@@ -311,3 +311,76 @@ sequence D3 after it (or fold the vision check into flow-0010's scope and re-app
 
 Items 1–4 gate task-writing. 5–8 can be answered while D1/D2/D4/D6 are being built, since those
 four are collision-free.
+
+---
+
+## 9. Build triage
+
+### 9.1 Buildable now — no open decision, no `touches` collision
+
+| | Deliverable | Carry these corrections in |
+|---|---|---|
+| **D1** | `VISION.md` template + `vision-writer` skill | Ship at `project-template/VISION.md` and add `serves: ["G1"]` to `0001-newsletter-signup.md`, or the template's own doctor fails (§2.3) |
+| **D2** | `serves` on `_TEMPLATE.md` + task-writer additions | None — the supplied template is this repo's file plus the field, verified clean |
+| **D4** | `flow-compass` skill + `_flow-compass.yml` + thin caller | The four workflow corrections (§3.1); create the `compass` label as part of the deliverable (§3.5) |
+| **D6** | ADR-0004 | Core-layer sections only. Its addenda consequences (visibility surfaces, watchdog residual risk) depend on decisions 1–2 in §8 — leave them for an amendment rather than writing them speculatively |
+
+These four are the whole core layer minus the check itself. They are also the half that
+`flow-sync` does **not** propagate (§4), so shipping them changes nothing downstream until
+that is settled — which is fine: they are the enabling half, and nothing enforces against
+them yet.
+
+### 9.2 Buildable after one small decision each
+
+| | Deliverable | The one thing in the way |
+|---|---|---|
+| **D3** | doctor `vision-serves` check | Same two files as `flow-0010` (`ready`). Fold the check into that task's scope and re-approve, or sequence after it. Also: resolve §3.3-vs-spec (§3.3) and fix the em-dash regex (§3.2) |
+| **D5** | adoption docs | Overlaps `flow-0006` (CLAUDE.md, INIT, RETROFIT) and `flow-0005` (INIT). Sequence after both, or split `RETROFIT-VISION.md` — a new file, collision-free — out as its own task and hold the edits to existing docs |
+| **D7** | versioning | Process, not files. Blocked only by D3 existing; note the canary can't prove this check until a repo has a `VISION.md` |
+
+### 9.3 Not buildable as written
+
+| | Deliverable | Why |
+|---|---|---|
+| **D8, D11** | Project fields, goal items, projection sync | Not separate work — they are amendments to `flow-0003`, and as written they reverse its `FLOW_PROJECT_PAT` and no-round-trip decisions (§1.3) |
+| **D10** | compass per-goal `Reading` | Needs D8's goal items to write into. Cheap once they exist; the reading itself is well-specified |
+| **D9** | org-level Project | Superseded by D12 in addendum 2. Dead unless D12 is dropped |
+| **D12, D13** | mission control + watchdog | Contradicts `flow-0001`/`flow-0002` (§1.2); topic query matches most of GitHub (§5.1); the enrolment story doesn't survive fine-grained PAT scoping; and as specified the logic sits untested inside an HTML file in a declared source root (§5.2) |
+
+### 9.4 Needs a thinking pass, not a task
+
+These are design questions the handoff either assumes settled or doesn't raise. None is
+answerable by an implementer.
+
+1. **The migration premise.** Is the Projects/flightdeck migration real? It is the root of
+   §1.1–1.4 and needs an ADR-0002 amendment either way. Until it exists, addendum 1 and 2
+   are describing infrastructure that isn't decided.
+2. **Is store-wide failure the right teeth?** `vision-serves` as specified reddens every open
+   PR over one unanchored `ready` task — including PRs whose authors can't fix it, since the
+   store is main-only. The alternatives (fail only for the PR's own task; fail only for tasks
+   created after the vision landed; warn in the gate and fail in the sweep) each trade
+   enforcement against blast radius, and the handoff's teeth-budget principle doesn't settle
+   it because the field *is* mechanical — the question is scope, not judgment.
+3. **What `flow-sync` should propagate at all.** Extending it to `_TEMPLATE.md` and
+   `.claude/skills/**` is bigger than this layer: skills are a surface repos customise, and
+   the current copy set looks like a deliberate line (things repos shouldn't edit) rather than
+   an oversight. Worth deciding as a versioning-policy question.
+4. **Canonical's own vision.** Not a task — an interview. Running `vision-writer` on canonical
+   is the honest first test of D1, and it produces the artifact §2.2 needs.
+5. **The mission-control architecture.** Whether liveness and derivation live in tested `.mjs`
+   with a thin HTML shell (recommended, §5.2) decides whether D12/D13 share code or a spec,
+   and whether `flow-0001` is rescoped or cancelled.
+6. **The enrolment/PAT model.** All-repos read-only token vs per-repo grants changes what R4
+   ("near-zero ceremony") can honestly promise.
+
+### 9.5 Suggested order
+
+1. Answer §8 items 1–4 (the migration premise, `flow-0001`/`0002`, the PAT, canonical's vision).
+2. Build **D2 → D1 → D6-core** — the field, the artifact and its skill, the record.
+3. Fold **D3** into `flow-0010` and build it; canonical's own `VISION.md` lands in the same
+   window, backfill before merge (§2.1).
+4. Build **D4** once the cadence is confirmed; the layer is now closed-loop on canonical.
+5. Settle §9.4 items 3 and 5, then take the addenda: **D11/D8 as a `flow-0003` amendment**,
+   then **D10**, then **D13 → D12**.
+6. **D7** last: advance `v1` only after the check has run clean on a real repo with a vision,
+   which by then is canonical itself.
