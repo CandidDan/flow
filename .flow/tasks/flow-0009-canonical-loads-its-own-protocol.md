@@ -1,14 +1,14 @@
 ---
 id: "flow-0009"
 title: "Give canonical the protocol layer it skipped, by reference rather than by copy"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude/next-tasks-ahnx30"
 created: "2026-08-14"
 started: "2026-08-14"
-branch: ""
-pr: ""
+branch: "claude/next-tasks-ahnx30"
+pr: "https://github.com/CandidDan/flow/pull/9"
 issue: ""
 blocked_reason: ""
 touches: ["CLAUDE.md", ".gitattributes", ".flow/bin/protocol-docs.test.mjs"]
