@@ -7,7 +7,9 @@ priority: 3               # 1 = drop everything … 5 = whenever
 project: ""               # project slug, lets the flightdeck aggregate across repos
 owner: ""                 # session id once claimed; empty while ready
 created: ""               # YYYY-MM-DD
-started: ""               # YYYY-MM-DD, set on claim
+started: ""               # full UTC ISO-8601 datetime (2026-08-14T09:23:00Z), set on claim.
+                          # NOT a bare date: flow-recover ages the claim off this field and
+                          # reads a date-only value as that day's midnight.
 branch: ""                # flow/<id>-<slug>, recorded by flow-status when the PR opens
 pr: ""                    # PR url, recorded by flow-status when the PR opens
 issue: ""                 # origin GitHub issue url, if this task was triaged from the inbox

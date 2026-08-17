@@ -76,9 +76,19 @@ export function buildResetEdit(id) {
 // Whole minutes elapsed between a timestamp (ISO datetime, or a date-only `started` like
 // "2026-06-18") and `now`. Negative clamps to 0. Returns null for an unparseable/empty value
 // so the caller can decide (a task with no `started` shouldn't be aged out on a bad parse).
+//
+// A date-only value is anchored to the END of that day (23:59:59.999Z), NOT its midnight.
+// `Date.parse("2026-06-18")` gives 00:00Z, which makes a task claimed at 09:23Z read as 563
+// minutes old at the instant of the claim — already past the 75-minute strand threshold. The
+// sweep then resets a live claim back to `ready` about a minute after it is taken, the next
+// queue-runner re-picks the same task from zero, and no run's work carries forward. Anchoring
+// to end-of-day errs the only safe way for a destructive sweep: it can delay a genuine
+// recovery by up to a day, but it can never cancel a claim that is still being worked.
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
 export function minutesSince(when, now = Date.now()) {
   if (!when) return null;
-  const t = Date.parse(when);
+  const t = Date.parse(DATE_ONLY.test(when) ? `${when}T23:59:59.999Z` : when);
   if (Number.isNaN(t)) return null;
   return Math.max(0, Math.floor((now - t) / 60000));
 }
