@@ -299,6 +299,12 @@ sequence D3 after it (or fold the vision check into flow-0010's scope and re-app
 
 ## 8. What needs Dan, in one list
 
+> **Resolved 2026-08-18 — items 1, 2 and 3.** ADR-0002 Amendment 1 records the decision: the
+> primary view is the computed mission-control page, `flow-0003` is deferred until a
+> non-operator needs a board (auth decision preserved), `flow-0001` is rescoped to the page's
+> tested module and `flow-0002` is superseded. There is no Projects migration, so D8/D10/D11
+> are not built and the `FLOW_PAT` question dissolves with them. Items 4–8 stand.
+
 1. Is the Projects/flightdeck migration in addendum 1's premise a real decision? If yes it needs
    an ADR-0002 amendment; if no, the addenda's framing changes. (§1.1)
 2. `flow-0001` and `flow-0002`: cancel, rescope, or keep alongside D12? (§1.2, §5.2)
@@ -342,10 +348,10 @@ them yet.
 
 | | Deliverable | Why |
 |---|---|---|
-| **D8, D11** | Project fields, goal items, projection sync | Not separate work — they are amendments to `flow-0003`, and as written they reverse its `FLOW_PROJECT_PAT` and no-round-trip decisions (§1.3) |
-| **D10** | compass per-goal `Reading` | Needs D8's goal items to write into. Cheap once they exist; the reading itself is well-specified |
+| **D8, D11** | Project fields, goal items, projection sync | **Not built** (ADR-0002 Amendment 1 — the vision drawer carries their purpose). Were they revived they would still not be separate work — they are amendments to `flow-0003`, and as written they reverse its `FLOW_PROJECT_PAT` and no-round-trip decisions (§1.3) |
+| **D10** | compass per-goal `Reading` | Retargeted by Amendment 1: the reading now lands in the page's vision drawer and the workflow job summary, not a Project field. The reading itself is well-specified and still wanted |
 | **D9** | org-level Project | Superseded by D12 in addendum 2. Dead unless D12 is dropped |
-| **D12, D13** | mission control + watchdog | Contradicts `flow-0001`/`flow-0002` (§1.2); topic query matches most of GitHub (§5.1); the enrolment story doesn't survive fine-grained PAT scoping; and as specified the logic sits untested inside an HTML file in a declared source root (§5.2) |
+| **D12, D13** | mission control + watchdog | **Now the chosen path** (Amendment 1), so §1.2 is settled — but three build blockers remain: topic query matches most of GitHub (§5.1); the enrolment story doesn't survive fine-grained PAT scoping; and as specified the logic sits untested inside an HTML file in a declared source root (§5.2) |
 
 ### 9.4 Needs a thinking pass, not a task
 
