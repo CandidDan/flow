@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0011"
 title: "Ship the vision artifact and the skill that writes it, so a repo can have an anchor at all"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude/flow-0011-i70940"
 created: "2026-08-18"
-started: ""
+started: "2026-08-18T13:56:46Z"
 branch: ""
 pr: ""
 issue: ""
