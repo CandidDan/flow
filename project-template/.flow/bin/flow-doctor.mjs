@@ -276,7 +276,7 @@ function newSubsystemRoots(touchesList, repoRoot) {
 // returned flagged, so a task still pointing at one gets a warning rather than an unknown-id
 // failure. Anything that looks like a goal heading but doesn't parse comes back in
 // `malformed`, so one mistyped heading can't vanish while the repo-level check stays quiet.
-const GOAL_HEADING = /^###\s+(NG|G)(\d+)\s*[—–-]\s*(\S.*?)\s*$/i;
+const GOAL_HEADING = /^###\s+(NG|G)(\d+)\s*[—–-]\s*(\S.*)$/i;   // greedy: no lazy backtracking
 const GOALISH_HEADING = /^###\s+N?G\d+/i;
 export const MAINTENANCE_SERVES = "maintenance";
 export function parseVisionGoals(text) {
@@ -290,7 +290,7 @@ export function parseVisionGoals(text) {
     const m = line.match(GOAL_HEADING);
     if (m) {
       const id = (m[1] + m[2]).toUpperCase();
-      if (!goals.has(id)) goals.set(id, { id, kind: m[1].toUpperCase() === "NG" ? "non-goal" : "goal", retired, title: m[3] });
+      if (!goals.has(id)) goals.set(id, { id, kind: m[1].toUpperCase() === "NG" ? "non-goal" : "goal", retired, title: m[3].trim() });
       continue;
     }
     if (GOALISH_HEADING.test(line)) malformed.push(line.trim());

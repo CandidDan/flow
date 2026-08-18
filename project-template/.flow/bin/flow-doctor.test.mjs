@@ -573,6 +573,8 @@ test("serves naming a retired goal → WARNING, not a problem", () => {
 });
 
 test('serves: ["maintenance"] reports nothing and looks nothing up', () => {
+  // The fixture VISION.md declares no goal called "maintenance" — so a silent run is the proof
+  // that the reserved id short-circuits before the lookup, not that the lookup happened to hit.
   const d = fixture({ "0001-a.md": task("P-0001", { serves: '["maintenance"]' }) });
   const r = runDoctor({ flowDir: d });
   assert.deepEqual(r.problems, []);
