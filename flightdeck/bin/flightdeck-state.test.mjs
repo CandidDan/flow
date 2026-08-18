@@ -232,9 +232,23 @@ test("gitProvenance returns the origin/main tip as a full SHA and strict ISO-860
 
     assert.ok(prov, "origin/main must be readable in a seeded repo");
     assert.match(prov.commit, /^[0-9a-f]{40}$/, "the full commit SHA, not an abbreviation");
-    assert.match(prov.committed_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/);
+
+    // BOTH ISO-8601 zone forms are valid and git's choice depends on its VERSION, not the
+    // timezone: `%cI` renders UTC as `+00:00` on git 2.43 and as `Z` on git 2.54. An earlier
+    // draft of this test accepted only the offset form — green on this container, red on the
+    // runner, with identical TZ. Same environment-split shape as the symlink bug in flow-0008:
+    // the assertion, not the code, was wrong.
+    assert.match(prov.committed_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$/);
     assert.ok(!Number.isNaN(Date.parse(prov.committed_at)), "committed_at must actually parse as a date");
     assert.equal(prov.commit, git(dir, "rev-parse", "origin/main").trim(), "it must be origin/main's tip");
+
+    // Pin both forms explicitly, so this cannot silently narrow back to whichever one the git
+    // that happens to be installed here emits.
+    const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$/;
+    assert.match("2026-08-18T12:55:10Z", ISO, "git >= 2.54 renders UTC as Z");
+    assert.match("2026-08-18T13:02:03+00:00", ISO, "git 2.43 renders UTC as +00:00");
+    assert.match("2026-08-18T14:02:03+01:00", ISO, "a non-UTC offset is still valid");
+    assert.doesNotMatch("2026-08-18 13:02:03", ISO, "a non-ISO datetime must still be rejected");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
