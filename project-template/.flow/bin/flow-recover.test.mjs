@@ -98,6 +98,62 @@ test("minutesSince computes whole minutes, clamps negatives, nulls on bad input"
   assert.equal(minutesSince(undefined, now), null);
 });
 
+// The regression that made the sweep hostile to live claims: a date-only `started` parsed as
+// that day's MIDNIGHT, so a task claimed at 09:23Z was "563 minutes old" the instant it was
+// claimed and the next sweep reset it out from under a running worker.
+test("a date-only started anchors to end-of-day, not midnight", () => {
+  const claimedAt = "2026-08-14";
+
+  // Same-day, well past the 75m threshold measured from midnight — must NOT be sweepable.
+  const justAfterClaim = Date.parse("2026-08-14T09:24:00Z");
+  assert.equal(minutesSince(claimedAt, justAfterClaim), 0);
+  assert.equal(
+    classifyStranded(inProgress, { ageMinutes: minutesSince(claimedAt, justAfterClaim) }, TH),
+    "ok",
+    "a task claimed this morning must never be swept the same morning",
+  );
+
+  // Late the same evening is still inside the day — still not sweepable.
+  assert.equal(minutesSince(claimedAt, Date.parse("2026-08-14T23:00:00Z")), 0);
+
+  // Past end-of-day the clock finally starts, and the threshold is crossed on the far side.
+  assert.equal(minutesSince(claimedAt, Date.parse("2026-08-15T01:00:00Z")), 60);
+  assert.equal(
+    classifyStranded(
+      inProgress,
+      { ageMinutes: minutesSince(claimedAt, Date.parse("2026-08-15T01:00:00Z")) },
+      TH,
+    ),
+    "ok",
+  );
+  assert.equal(minutesSince(claimedAt, Date.parse("2026-08-15T02:00:00Z")), 120);
+  assert.equal(
+    classifyStranded(
+      inProgress,
+      { ageMinutes: minutesSince(claimedAt, Date.parse("2026-08-15T02:00:00Z")) },
+      TH,
+    ),
+    "reset-to-ready",
+    "a genuinely abandoned date-only claim still self-heals — just a day later",
+  );
+});
+
+test("a full ISO started ages from the exact claim instant", () => {
+  // The precise path new claims take: no end-of-day rounding, no early sweep, and recovery
+  // lands exactly one threshold after the claim rather than a day later.
+  const claimedAt = "2026-08-14T09:23:00Z";
+  assert.equal(minutesSince(claimedAt, Date.parse("2026-08-14T09:24:00Z")), 1);
+  assert.equal(
+    classifyStranded(inProgress, { ageMinutes: minutesSince(claimedAt, Date.parse("2026-08-14T09:24:00Z")) }, TH),
+    "ok",
+  );
+  assert.equal(minutesSince(claimedAt, Date.parse("2026-08-14T10:43:00Z")), 80);
+  assert.equal(
+    classifyStranded(inProgress, { ageMinutes: minutesSince(claimedAt, Date.parse("2026-08-14T10:43:00Z")) }, TH),
+    "reset-to-ready",
+  );
+});
+
 // ── readTasks: only in_progress surfaces for the sweep ──
 
 test("readTasks parses id/status/started and skips the template", () => {

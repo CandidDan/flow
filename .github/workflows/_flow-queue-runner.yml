@@ -63,6 +63,7 @@ jobs:
           fi
 
       - name: Work the task (fresh worker session)
+        id: work
         if: ${{ steps.pick.outputs.task_id != '' }}
         uses: anthropics/claude-code-action@v1
         with:
@@ -93,14 +94,26 @@ jobs:
           # Heavier dashboard tasks consistently overran 60 (error_max_turns ~15-21min runs, no PR),
           # so the cap was failing them after real work. 120 covers the hard ones; raise further if a
           # task still caps. (Cost scales with turns — that's the trade for a finished PR over a wasted run.)
+          # Before raising it again, check that the run was not fighting something else: a repeating
+          # error_max_turns on the SAME task is a symptom, not a verdict on the cap. The date-only
+          # `started` bug (fixed in _flow-recover.yml) had flow-recover un-claiming live tasks about a
+          # minute after every claim, so each worker built against a task main said was unowned and each
+          # hourly run restarted from zero — three capped runs on one task, ~$13 each, before anyone
+          # suspected the cap. Raising the cap there would only have bought more expensive failures.
+          # Confirm work is actually carrying forward (a branch pushed, a `notes` entry on main) before
+          # concluding the task genuinely needs more turns. A task that truly cannot fit is oversized:
+          # splitting it beats buying turns.
           claude_args: "--max-turns 120 --model opus --permission-mode bypassPermissions"
           prompt: |
             You are the Flow worker for a single task. Read CLAUDE.md (the protocol) and the task
             file in .flow/tasks/ whose id is "${{ steps.pick.outputs.task_id }}". Run the full loop:
 
             1. CLAIM: git pull --rebase; set the task to in_progress with owner + started; commit
-               that task file to main and push. If the push is rejected, another worker claimed
-               it — stop, do nothing further.
+               that task file to main and push. `started` must be the full UTC ISO datetime
+               (`date -u +%Y-%m-%dT%H:%M:%SZ`), never a bare date — flow-recover ages your claim
+               off that field and a date-only value reads as that morning's midnight, so the
+               sweep resets the task out from under you minutes after you claim it. If the push
+               is rejected, another worker claimed it — stop, do nothing further.
             2. BRANCH off latest main: flow/${{ steps.pick.outputs.task_id }}-<slug>.
             3. BUILD strictly against the task's acceptance criteria and within its declared
                `touches` — nothing more, nothing outside those globs.
@@ -113,3 +126,45 @@ jobs:
 
             If a real decision is needed that the task didn't settle, set the task `blocked` with
             a `blocked_reason` and stop rather than guessing. Never widen scope past `touches`.
+
+            PUSH EARLY, AND LEAVE A HANDOFF. You are running under a hard turn cap; when you hit
+            it the session is killed mid-thought, with no chance to save anything. Two habits
+            make that survivable instead of total loss, and CLAUDE.md's *Session hygiene* rule
+            requires both of you:
+              - Push your branch as soon as it has one meaningful commit, and keep pushing as you
+                go. Do not save it all for PR time. A pushed branch is what flow-recover needs to
+                reopen the work instead of resetting the task to `ready`; an unpushed branch dies
+                with the runner.
+              - Append a `notes` entry to the task file on `main` whenever you finish a
+                substantial step, covering what is genuinely done, what only looks done, the
+                branch name, and the exact next action. Commit it to `main` as you go — a note
+                you were planning to write at the end is a note that never gets written.
+            A capped run that pushed a branch and left a note costs one cycle. A capped run that
+            pushed nothing costs the whole run, and the next worker starts from zero.
+
+      # A capped/failed worker exits non-zero having opened no PR, and the raw log says only
+      # "Claude execution failed". State the consequence explicitly so the run is diagnosable
+      # from the summary alone: the claim is NOT released here, and must not be — releasing it
+      # from the failure path would race a worker that is still finishing. flow-recover owns
+      # that decision, on its own schedule, from the evidence on the remote.
+      - name: Explain what happens to the claim
+        if: ${{ failure() && steps.pick.outputs.task_id != '' }}
+        env:
+          TASK_ID: ${{ steps.pick.outputs.task_id }}
+        run: |
+          {
+            echo "### Worker run failed for \`$TASK_ID\`"
+            echo
+            echo "No PR was opened. The claim on \`$TASK_ID\` is left as-is — **flow-recover**"
+            echo "resolves it on the next sweep, and which way it goes depends on what this run"
+            echo "managed to push:"
+            echo
+            echo "- **branch pushed, ahead of \`main\`** → the PR is re-opened from that branch,"
+            echo "  and the work survives."
+            echo "- **nothing pushed** → the task resets to \`ready\` once it passes the staleness"
+            echo "  threshold, and the next queue-runner starts it over from zero."
+            echo
+            echo "If this is the same task capping repeatedly, the cap is the symptom to look"
+            echo "past, not the thing to raise: check that a branch and a \`notes\` entry are"
+            echo "actually landing between runs, then consider splitting the task."
+          } >> "$GITHUB_STEP_SUMMARY"

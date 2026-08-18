@@ -72,7 +72,12 @@ ready  →  in_progress  →  in_review  →  done
 
 - `ready` — fully specified, you may start it. Set by the orchestrator, not by you. (A PR
   closed without merging also returns its task here automatically, cleared for re-claim.)
-- `in_progress` — you have claimed it. Set `owner` to your session id and `started` to today.
+- `in_progress` — you have claimed it. Set `owner` to your session id and `started` to the
+  **current UTC instant** as a full ISO-8601 datetime (`2026-08-14T09:23:00Z` — `date -u
+  +%Y-%m-%dT%H:%M:%SZ`), not a bare date. `flow-recover` ages a claim off this field to decide
+  whether the task is stranded, and a date-only value it can only read as that day's midnight
+  makes an hours-old claim look like a many-hours-old one — the sweep resets a task you are
+  actively working. Time-of-day is what stops that.
 - `in_review` — a PR is open. Set **automatically by the `flow-status` workflow** when the PR
   opens (you only open PRs after the gate passes, so PR-open implies gates-green). You never
   write this transition.
@@ -108,7 +113,7 @@ before opening the PR and re-run the gate. If the rebase produces a material con
 can't resolve mechanically, that's a `blocked` (or a kickback if a PR is already open) —
 surface it rather than forcing a merge.
 
-**The store is `main`-only — branches must never modify `.flow/`.** This is the invariant
+**The store is `main`-only — branches must never modify `.flow/tasks/`.** This is the invariant
 that keeps the two planes from corrupting each other. A branch is cut *after* the claim, so
 it carries a frozen snapshot of the task file (at `in_progress`); meanwhile its real state on
 `main` advances to `in_review` and later `done`. If the branch also committed `.flow/` changes,
@@ -122,7 +127,8 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
 
 1. **Pick.** Take the highest-`priority` task in `ready` with no `touches` overlap against
    anything `in_progress`. If none, stop — do not invent work.
-2. **Claim (atomic).** `git pull --rebase`; set `in_progress` + `owner` + `started`; commit
+2. **Claim (atomic).** `git pull --rebase`; set `in_progress` + `owner` + `started` (full UTC
+   ISO datetime, see *Status lifecycle*); commit
    that task file and push to `main`. If the push is rejected, rebase and go back to step 1.
    Then regenerate the board.
 3. **Branch.** `git checkout -b flow/<task-id>-<slug>` off latest `main`. One branch per task.
@@ -214,9 +220,21 @@ that is a `blocked` task with a `blocked_reason`, not a reason to skip the gate.
 - **Never push *code* to `main`.** Feature code is always a branch + PR. The only direct
   commits to `main` are task-state transitions in `.flow/tasks/` (claim, hand-off, block) —
   metadata, not implementation.
-- **Never modify `.flow/` on a feature branch.** State transitions are commits to `main`, not
-  to your branch — the branch is code only. A PR that touches `.flow/tasks/` fails the gate.
-  This is what stops a merge from clobbering newer state on `main`.
+- **Never modify `.flow/tasks/` on a feature branch.** State transitions are commits to `main`,
+  not to your branch. A PR that touches `.flow/tasks/` fails the gate. This is what stops a
+  merge from clobbering newer state on `main`.
+  The rest of `.flow/` splits three ways, and the distinction is load-bearing — a task that
+  legitimately needs a config change (a new `source_roots` entry for a new app directory, say)
+  must have a move that isn't "block":
+  - `.flow/tasks/` — **`main` only.** Enforced by the store-guard.
+  - `.flow/config.yml` — repo-owned config. It **may** travel on your branch *if and only if*
+    the task's `touches` declares it; otherwise it is out of scope like any other undeclared
+    path. It carries no per-task state, so a merge cannot clobber anything.
+  - `.flow/bin/**` and `.github/workflows/flow-*` — canonical's, never yours. See the flow-infra
+    rule below: fix upstream and adopt, don't patch here.
+  Note that `touches-guard` ignores all of `.flow/**` and the store-guard checks only
+  `.flow/tasks/`, so a stray `.flow/config.yml` edit will **not** be caught by CI. That makes
+  declaring it in `touches` your discipline, not the gate's.
 - **Never hand-write a PR-event transition.** `flow-status` owns `in_review` (PR open) and the
   return to `ready` (PR closed unmerged); `flow-done` owns `done` (PR merged) — both read the
   task id from the `flow/<id>-…` branch name, falling back to the `[<id>]` PR-title prefix.

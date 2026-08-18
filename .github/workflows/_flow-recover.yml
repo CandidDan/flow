@@ -94,10 +94,23 @@ jobs:
               age=$(( (now - tip_epoch) / 60 ))
             else
               branch_exists=0; ahead=0; has_open_pr=0
-              # No branch: age from the `started` date (date-only granularity is fine — the
-              # threshold is ~hours, and a task with no branch has clearly produced nothing).
-              if [ -n "$started" ] && start_epoch="$(date -d "$started" +%s 2>/dev/null)"; then
+              # No branch: age from `started`. A date-only value must be read as the END of that
+              # day, not its midnight. `date -d 2026-08-14` resolves to 00:00Z, so a task claimed
+              # at 09:23Z measured "563 minutes old" the moment it was claimed — past the 75m
+              # threshold before the worker had cut a branch. The sweep then reset the live claim
+              # to `ready` within a minute of every claim, the next queue-runner re-picked the
+              # same task from zero, and no run's work ever carried forward (observed: three
+              # consecutive error_max_turns runs on one task, ~$13 each, no PR). Anchoring to
+              # 23:59:59Z errs the only safe way for a destructive sweep: it can delay a genuine
+              # recovery, never cancel a live one. New claims write a full ISO datetime (see
+              # CLAUDE.md) and take the exact path; this branch covers legacy date-only values.
+              start_at="$started"
+              case "$start_at" in
+                [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) start_at="$start_at 23:59:59" ;;
+              esac
+              if [ -n "$start_at" ] && start_epoch="$(date -u -d "$start_at" +%s 2>/dev/null)"; then
                 age=$(( (now - start_epoch) / 60 ))
+                [ "$age" -lt 0 ] && age=0
               else
                 age=0
               fi
