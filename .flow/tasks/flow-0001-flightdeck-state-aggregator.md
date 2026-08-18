@@ -1,14 +1,14 @@
 ---
 id: "flow-0001"
 title: "Aggregate portfolio state in tested code, sourced only from flow-state"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude/next-tasks-ahnx30"
 created: "2026-08-11"
 started: "2026-08-18"
-branch: ""
-pr: ""
+branch: "claude/next-tasks-ahnx30"
+pr: "https://github.com/CandidDan/flow/pull/13"
 issue: ""
 blocked_reason: ""
 serves: ["G5"]            # the flightdeck data layer — knowing where the work is
