@@ -1,12 +1,12 @@
 ---
 id: "flow-0001"
 title: "Aggregate portfolio state in tested code, sourced only from flow-state"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude/next-tasks-ahnx30"
 created: "2026-08-11"
-started: ""
+started: "2026-08-18"
 branch: ""
 pr: ""
 issue: ""
