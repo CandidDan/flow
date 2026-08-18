@@ -1,7 +1,7 @@
 ---
 id: "flow-0009"
 title: "Give canonical the protocol layer it skipped, by reference rather than by copy"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude/next-tasks-ahnx30"
