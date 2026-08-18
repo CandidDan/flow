@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0011"
 title: "Ship the vision artifact and the skill that writes it, so a repo can have an anchor at all"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude/flow-0011-i70940"
 created: "2026-08-18"
 started: "2026-08-18T13:56:46Z"
-branch: ""
-pr: ""
+branch: "claude/flow-0011-i70940"
+pr: "https://github.com/CandidDan/flow/pull/14"
 issue: ""
 blocked_reason: ""
 serves: ["G3"]            # direction survives the work — this is the anchor it survives against
