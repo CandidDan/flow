@@ -11,6 +11,7 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: ""
+serves: ["G5"]            # provenance and disagreement — knowing how much to trust it
 touches: ["flightdeck/bin/render-flightdeck.mjs", "flightdeck/bin/render-flightdeck.test.mjs", "flightdeck/.claude/agents/portfolio-manager.md"]
 labels: [flightdeck, ux]
 notes: []

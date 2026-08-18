@@ -11,6 +11,7 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: ""
+serves: ["G2"]            # a guard that can't pass on silence
 touches: [".github/workflows/_flow-gates.yml", "project-template/.flow/bin/touches-guard.mjs", "project-template/.flow/bin/main-module.test.mjs"]
 labels: [infra, integrity]
 notes:

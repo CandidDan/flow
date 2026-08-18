@@ -11,6 +11,7 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: ""
+serves: ["G4"]            # the protocol any agent can run, so the fleet runs one protocol
 touches: ["project-template/.flow/PROTOCOL.md", "project-template/CLAUDE.md", "project-template/AGENTS.md", "project-template/INIT.md", "project-template/RETROFIT.md"]
 labels: [infra, portability]
 notes: []

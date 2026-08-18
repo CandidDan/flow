@@ -11,6 +11,7 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: ""
+serves: ["G5"]            # the projection; deferred per ADR-0002 Amendment 1, goal unchanged
 touches: [".github/workflows/_flow-project-sync.yml", "project-template/.github/workflows/flow-project-sync.yml", "project-template/.flow/bin/project-sync.mjs", "project-template/.flow/bin/project-sync.test.mjs", "docs/adr/0002-flightdeck-projection-github-projects.md"]
 labels: [flightdeck, infra, integration]
 notes: []
