@@ -390,3 +390,129 @@ answerable by an implementer.
    then **D10**, then **D13 → D12**.
 6. **D7** last: advance `v1` only after the check has run clean on a real repo with a vision,
    which by then is canonical itself.
+
+---
+
+## 10. Decisions taken, 2026-08-18
+
+Recorded here so the next session inherits them rather than re-deriving them. Items 1–3 of §8
+were settled by ADR-0002 Amendment 1; these settle the rest.
+
+### 10.1 Audience — solo-first, option preserved
+
+Flow is for one operator running several projects. The repo stays public, Apache-licensed and
+vendor-neutral, and nothing in the design forecloses a second person — but no feature is built
+*for* an employee or client until one exists. Written into `VISION.md` as the purpose paragraph's
+explicit decision and as **NG4**, because an audience assumption nobody made is pre-loaded drift.
+
+This is the same premise Amendment 1 leans on to defer `flow-0003`; the two now agree in writing.
+
+### 10.2 Canonical has a vision — `VISION.md` at root
+
+Five goals (two touchpoints hold · a green gate worth believing · direction survives the work ·
+canonical and the fleet run the same protocol · always knowing where the work is and whether the
+machinery is alive) and five non-goals taken from decisions already recorded across the README and
+ADR-0001..0003. G3 and G5 are aspirational by design — the vision layer and the mission-control
+view do not exist yet, and an anchor written only from what exists is the as-built failure mode
+`RETROFIT-VISION.md` §1 warns about.
+
+**Ordering consequence, corrected from §2.1.** The gate fires only when *both* the rule and the
+anchor exist, so the constraint is narrower than first stated: `serves` must be backfilled on the
+eight `ready` tasks **before the doctor check merges**, not before `VISION.md` merges.
+
+**And a mechanical constraint on that backfill:** it cannot ride a PR. `_flow-gates.yml`'s
+store-guard fails any PR touching `.flow/tasks/`, so the backfill is a direct commit to `main`,
+the same path triage and claim transitions already use.
+
+### 10.3 The doctor check folds into `flow-0010`
+
+Rather than a separate D3 task colliding on the same two files. The fit is exact: `flow-0010`
+already extends the template's doctor, already applies checks only to `ready` tasks (the same
+adoption grace `vision-serves` needs), already records that canonical's adapter inherits the
+change for free, and already carries the rollout note about softening a PROBLEM to a WARNING if
+adopting repos fail widely on first sync.
+
+Boundaries preserved: the fold adds **only** the check. `_TEMPLATE.md` and the `task-writer` skill
+stay out of scope — `flow-0010` explicitly excludes them, and they are D2's, which remains its own
+task.
+
+A property worth noticing: `flow-0010`'s existing final criterion — *every existing `ready` task
+in canonical's store passes the new checks* — mechanically enforces §10.2's ordering. If the
+backfill hasn't happened, the task cannot pass its own acceptance criteria. The constraint doesn't
+need documenting into a runbook; it is already a test.
+
+### 10.4 D5 splits
+
+`RETROFIT-VISION.md` is a new file and ships now, collision-free. The edits to
+`project-template/CLAUDE.md`, `INIT.md` and `RETROFIT.md` wait behind `flow-0006`, which claims all
+three.
+
+### 10.5 The handoff's three open decisions (§6 of `HANDOFF.md`)
+
+1. **Compass cadence:** weekly, findings filed as issues like every other run. No first-run
+   special case — the retrofit's first audit is `workflow_dispatch`, not the schedule.
+2. **Goal id format:** `G1`/`NG1` confirmed. The fragility is the separator, not the letter — the
+   extraction regex accepts `[—–-]` and WARNs on a `### G<n>` line that doesn't match the strict
+   form, so one mistyped heading can't silently vanish while rule 7 stays quiet.
+3. **`touches-guard` × `serves` cross-check:** no. `maintenance` has no declared file surface, so
+   the check could only be a heuristic, and heuristics don't belong in the tier that hard-fails.
+   Recorded in ADR-0004 as future work.
+
+### 10.6 flow-sync copies `_TEMPLATE.md`; skills get drift *detection*, not copying
+
+The task template joins the synced surface — canonical shape, rarely customised, and it is what
+the new rule validates against. `.claude/skills/**` stays out, because it is a surface repos
+customise and a copy-on-sync would clobber local edits with only PR review to catch it.
+
+**But skills currently don't propagate at all, and there are two copies that disagree.** The
+committed `.claude/` is merged into a repo once at onboarding (`RETROFIT.md`:24) and never updated:
+`flow-sync` copies `.flow/bin/` and `flow-*.yml`, `.flow/VERSION` stamps only that surface, and
+`flow-doctor` doesn't look at skills. Meanwhile `.claude/settings.json` points at the Flow plugin
+marketplace, which *does* update — but it serves **Cowork**, which doesn't auto-discover a repo's
+local `.claude/`. So a plugin update reaches planning sessions and never reaches the committed
+copy, and the committed copy is the one automation runs: `_flow-triage.yml`:56 instructs the action
+to follow **the consuming repo's** `.claude/skills/task-writer/SKILL.md`.
+
+The fix keeps the copy manual and makes the fork visible. Canonical ships a skills manifest inside
+`.flow/bin/` (which does sync); `flow-doctor` compares the repo's committed skills against it and
+**WARNs**, naming the file and the fix. Detect and propose, never silently self-update — the
+posture `docs/flow-versioning-policy.md` already states for infra.
+
+**Store git blob SHAs in the manifest, not content hashes.** Git's SHA-1 is what the GitHub trees
+API already returns for every blob in a listing, so the mission-control page can compare with zero
+extra fetches, and `flow-doctor` can compute the same value locally with `git hash-object`. One
+manifest, two surfaces, no second hashing scheme.
+
+This serves **G4** directly, and it is live today independent of the vision layer.
+
+### 10.7 Mission control shows infra drift — against the pinned channel, not against latest
+
+A scope addition to D12. The page already fetches each repo's `.flow/` tree, so `.flow/VERSION`
+costs one blob and canonical's current version is a single fetch shared across every repo.
+
+**The comparison that matters is "behind the channel you pinned."** `docs/flow-versioning-policy.md`
+defines three pin types — `@v1` for the fleet, `@v1-edge` for the canary, an exact `@v1.3.0` for a
+repo deliberately frozen. A `@v1` repo behind `v1-edge` is correct, not drifted; a frozen repo is
+not drifted at all. So the cell renders the pinned ref, the local stamp, and what that ref
+currently resolves to, and flags only a genuine lag — otherwise the pane cries wolf at every repo
+that is behaving exactly as designed.
+
+The page reads the pinned ref from the caller workflows' `uses: …@ref` lines in the same tree
+fetch, which also catches a drift the version stamp cannot: callers pinning *different* refs
+within one repo, or a repo that never adopted a MAJOR caller-level change.
+
+Why the page rather than the existing check: `flow-doctor`'s version-drift warning is opt-in (it
+only fires when `FLOW_CANONICAL_VERSION` is set) and is only visible in the output of a run that
+happened. D12's whole premise is not depending on a workflow having remembered to run.
+
+**No fix button.** Detection only, linking to the repo's `flow-sync` workflow. Acting on the pane
+would be a write scope, which Amendment 1's first tripwire forbids.
+
+### 10.8 Mission-control auth — one all-repos read-only fine-grained PAT
+
+Contents, Actions, Issues, Pull requests; read-only across all owned repos. This is what makes
+topic discovery work as advertised — add the topic, appear on next load — because a per-repo grant
+list would become the real registry, and a forgotten re-scope would silently omit a project from
+the pane whose purpose is stopping projects being forgotten. The cost, recorded rather than
+glossed: the token can read every repo the owner has, not only the `flow`-topic ones. Its worst
+failure remains a blank pane, never a corrupted store, because it holds no write scope.
