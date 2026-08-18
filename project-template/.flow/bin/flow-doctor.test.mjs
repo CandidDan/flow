@@ -1,17 +1,70 @@
 // Tests for flow-doctor — the store validator validates itself.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
-import { runDoctor, compareVersions, findUncommittedTasks } from "./flow-doctor.mjs";
+import { spawnSync } from "node:child_process";
+import { runDoctor, compareVersions, findUncommittedTasks, parseVisionGoals, readinessFindings } from "./flow-doctor.mjs";
 
-function fixture(files) {
-  const flowDir = mkdtempSync(join(tmpdir(), "flow-doc-"));
-  mkdirSync(join(flowDir, "tasks"));
-  for (const [name, body] of Object.entries(files)) writeFileSync(join(flowDir, "tasks", name), body);
-  return flowDir;
+// The vision every fixture gets unless it asks for none: two live goals, one non-goal, one
+// retired goal. Written in the shape flow-doctor's line regex reads, deliberately mixing the
+// em dash and the hyphen — humans type both, and the checker has to survive that.
+const VISION = `# Vision — the fixture repo
+
+## Goals
+
+### G1 — Ship the thing
+Because the thing is the point.
+
+### G2 - Ship the other thing
+
+## Non-goals
+
+### NG1 — Become a project-management product
+
+## Retired
+
+### G9 — The thing we stopped doing
+Retired 2026-08-18: superseded by G1.
+`;
+
+// A body that meets the readiness bar: the three required sections and one real criterion.
+const READY_BODY = `
+## Context
+
+Why this task exists, in enough detail that a fresh session doesn't have to ask.
+
+## Scope
+
+What it changes, and what it deliberately leaves alone.
+
+## Acceptance criteria
+
+- [ ] Given a drifted store, when flow-doctor runs, then it names the task and the drift.
+
+## Notes / open questions
+
+None.
+`;
+
+// A repo-shaped fixture — <repo>/.flow/tasks/… — so every check that keys off the repo root
+// (VISION.md, the new-subsystem tell, source_roots) sees only what the test created, and not
+// whatever happens to sit in the system temp dir.
+//   dirs    top-level dirs to materialise. Defaults to the root the default `touches` points
+//           at, so the new-subsystem warning fires only where a test deliberately omits one.
+//   vision  VISION.md content, or null for a repo that has no vision at all.
+function fixture(files, { dirs = ["src"], vision = VISION } = {}) {
+  const repo = mkdtempSync(join(tmpdir(), "flow-doc-"));
+  mkdirSync(join(repo, ".flow", "tasks"), { recursive: true });
+  for (const d of dirs) mkdirSync(join(repo, d), { recursive: true });
+  if (vision !== null) writeFileSync(join(repo, "VISION.md"), vision);
+  for (const [name, body] of Object.entries(files)) writeFileSync(join(repo, ".flow", "tasks", name), body);
+  return join(repo, ".flow");
 }
+// Removes the whole fixture repo, not just the `.flow` inside it.
+const cleanup = (flowDir) => rmSync(dirname(flowDir), { recursive: true, force: true });
+
 const task = (id, f = {}) => `---
 id: "${id}"
 title: "${f.title ?? "x"}"
@@ -22,10 +75,10 @@ started: "${f.started ?? ""}"
 branch: "${f.branch ?? ""}"
 pr: "${f.pr ?? ""}"
 blocked_reason: "${f.blocked_reason ?? ""}"
+serves: ${f.serves ?? '["G1"]'}
 touches: ${f.touches ?? '["src/**"]'}
 ---
-body
-`;
+${f.body ?? READY_BODY}`;
 
 test("healthy store: no problems, no warnings", () => {
   const d = fixture({ "0001-a.md": task("P-0001") });
@@ -33,7 +86,7 @@ test("healthy store: no problems, no warnings", () => {
   assert.deepEqual(r.problems, []);
   assert.deepEqual(r.warnings, []);
   assert.equal(r.count, 1);
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 test("duplicate ids and illegal status are problems", () => {
@@ -45,7 +98,7 @@ test("duplicate ids and illegal status are problems", () => {
   const r = runDoctor({ flowDir: d });
   assert.ok(r.problems.some((p) => p.includes("duplicate id")));
   assert.ok(r.problems.some((p) => p.includes('illegal status "shipping"')));
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 test("in_review without pr, blocked without reason, incomplete claim — all problems", () => {
@@ -56,7 +109,7 @@ test("in_review without pr, blocked without reason, incomplete claim — all pro
   });
   const r = runDoctor({ flowDir: d });
   assert.equal(r.problems.length, 3);
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 test("ready with stale owner or empty touches — warnings, not problems", () => {
@@ -67,7 +120,7 @@ test("ready with stale owner or empty touches — warnings, not problems", () =>
   const r = runDoctor({ flowDir: d });
   assert.deepEqual(r.problems, []);
   assert.equal(r.warnings.length, 2);
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 test("board snapshot drift is a warning", () => {
@@ -78,7 +131,7 @@ test("board snapshot drift is a warning", () => {
   assert.deepEqual(r.problems, []);
   assert.ok(r.warnings.some((w) => w.includes("P-0001=ready, files say in_progress")));
   assert.ok(r.warnings.some((w) => w.includes("P-9999 but no task file")));
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 test("malformed frontmatter and missing fields are problems", () => {
@@ -89,7 +142,7 @@ test("malformed frontmatter and missing fields are problems", () => {
   const r = runDoctor({ flowDir: d });
   assert.ok(r.problems.some((p) => p.includes("malformed frontmatter")));
   assert.ok(r.problems.some((p) => p.includes("missing required field(s): title")));
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 // ── touches overlap (false "parallel-safe" detection) ──
@@ -102,7 +155,7 @@ test("overlapping touches on two ready tasks → warning naming both, not a prob
   const r = runDoctor({ flowDir: d });
   assert.deepEqual(r.problems, []);
   assert.ok(r.warnings.some((w) => w.includes("P-0001") && w.includes("P-0002") && w.includes("overlapping touches")));
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 test("overlapping touches on two in_progress tasks → problem (atomic-claim bypassed)", () => {
@@ -112,7 +165,7 @@ test("overlapping touches on two in_progress tasks → problem (atomic-claim byp
   });
   const r = runDoctor({ flowDir: d });
   assert.ok(r.problems.some((p) => p.includes("P-0001") && p.includes("P-0002") && p.includes("in_progress")));
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 test("disjoint touches → no overlap warning (different trees are genuinely parallel-safe)", () => {
@@ -122,7 +175,7 @@ test("disjoint touches → no overlap warning (different trees are genuinely par
   });
   const r = runDoctor({ flowDir: d });
   assert.ok(!r.warnings.some((w) => w.includes("overlapping touches")));
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 test("multi-line touches form parses (not misread as empty) AND feeds overlap — the CAN-42/43 case", () => {
@@ -136,17 +189,17 @@ started: ""
 branch: ""
 pr: ""
 blocked_reason: ""
+serves: ["G1"]
 touches:
   - "${p}"
 labels: [x]
 ---
-body
-`;
+${READY_BODY}`;
   const d = fixture({ "0001-a.md": ml("P-0001", "app/focus/page.tsx"), "0002-b.md": ml("P-0002", "app/focus/page.tsx") });
   const r = runDoctor({ flowDir: d });
   assert.ok(!r.warnings.some((w) => w.includes("empty touches")), "multi-line touches must not read as empty");
   assert.ok(r.warnings.some((w) => w.includes("P-0001") && w.includes("P-0002") && w.includes("overlapping")), "shared file must be flagged");
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 // ── gate-coverage floor (source_roots) ──
@@ -221,7 +274,7 @@ test("version drift: no canonical version supplied → check is inert (no versio
   const r = runDoctor({ flowDir: d });               // canonicalVersion undefined
   assert.deepEqual(r.problems, []);
   assert.ok(!r.warnings.some((w) => w.includes("behind canonical") || w.includes("VERSION stamp")));
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 test("version drift: repo behind canonical → warning, not a problem", () => {
@@ -230,7 +283,7 @@ test("version drift: repo behind canonical → warning, not a problem", () => {
   const r = runDoctor({ flowDir: d, canonicalVersion: "0.2.0" });
   assert.deepEqual(r.problems, []);
   assert.ok(r.warnings.some((w) => w.includes("behind canonical") && w.includes("0.1.0") && w.includes("0.2.0")));
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 test("version drift: repo level with canonical → no warning", () => {
@@ -238,7 +291,7 @@ test("version drift: repo level with canonical → no warning", () => {
   writeFileSync(join(d, "VERSION"), "1.0.0\n");
   const r = runDoctor({ flowDir: d, canonicalVersion: "1.0.0" });
   assert.ok(!r.warnings.some((w) => w.includes("behind canonical")));
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 test("version drift: canonical known but no .flow/VERSION stamp → adoption warning", () => {
@@ -246,7 +299,7 @@ test("version drift: canonical known but no .flow/VERSION stamp → adoption war
   const r = runDoctor({ flowDir: d, canonicalVersion: "0.2.0" });
   assert.deepEqual(r.problems, []);
   assert.ok(r.warnings.some((w) => w.includes("no .flow/VERSION stamp")));
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 // ── uncommitted-task guard (CAN-41) ──
@@ -279,7 +332,7 @@ test("runDoctor: an uncommitted task file (injected git status) is a PROBLEM", (
   const gitStatus = () => ({ inRepo: true, porcelain: "?? .flow/tasks/0099-x.md\n" });
   const r = runDoctor({ flowDir: d, gitStatus });
   assert.ok(r.problems.some((p) => p.includes("0099-x.md") && p.includes("not committed")));
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 test("runDoctor: clean git status → no uncommitted-task problem, no skip note", () => {
@@ -287,7 +340,7 @@ test("runDoctor: clean git status → no uncommitted-task problem, no skip note"
   const r = runDoctor({ flowDir: d, gitStatus: () => ({ inRepo: true, porcelain: "" }) });
   assert.deepEqual(r.problems, []);
   assert.ok(!r.notes.some((n) => n.includes("uncommitted-task check skipped")));
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
 });
 
 test("runDoctor: outside a git work tree → uncommitted-task check is skipped (a note, not a failure)", () => {
@@ -295,5 +348,322 @@ test("runDoctor: outside a git work tree → uncommitted-task check is skipped (
   const r = runDoctor({ flowDir: d, gitStatus: () => ({ inRepo: false, porcelain: "" }) });
   assert.deepEqual(r.problems, []);
   assert.ok(r.notes.some((n) => n.includes("uncommitted-task check skipped")));
-  rmSync(d, { recursive: true, force: true });
+  cleanup(d);
+});
+
+// ── readiness bar: the body shape a `ready` task must have (flow-0010) ──
+// The bar `task-writer` is supposed to enforce, re-applied where it can't be skipped. Every
+// test here is the "skipped task-writer" shape: legal frontmatter, unspecified body.
+
+const NO_CRITERIA = `
+## Context
+
+Why.
+
+## Scope
+
+What.
+`;
+
+test("ready task with no ## Acceptance criteria section → PROBLEM naming the task and the section", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { body: NO_CRITERIA }) });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(r.problems.some((p) => p.includes("P-0001") && p.includes("## Acceptance criteria")),
+    `expected a missing-criteria PROBLEM, got ${JSON.stringify(r.problems)}`);
+  cleanup(d);
+});
+
+test("ready task whose Acceptance criteria section has no `- [ ]` items → PROBLEM", () => {
+  const body = `
+## Context
+
+Why.
+
+## Scope
+
+What.
+
+## Acceptance criteria
+
+It should work well and feel fast.
+`;
+  const d = fixture({ "0001-a.md": task("P-0001", { body }) });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(r.problems.some((p) => p.includes("P-0001") && p.includes('no "- [ ]" items')));
+  cleanup(d);
+});
+
+test("ready task whose only criteria are _TEMPLATE.md's placeholders → PROBLEM", () => {
+  const body = `
+## Context
+
+Why.
+
+## Scope
+
+What.
+
+## Acceptance criteria
+
+- [ ] Given <situation>, when <action>, then <observable outcome>.
+- [ ] …
+`;
+  const d = fixture({ "0001-a.md": task("P-0001", { body }) });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(r.problems.some((p) => p.includes("P-0001") && p.includes("placeholders")),
+    `an uncustomised template is not a specified task, got ${JSON.stringify(r.problems)}`);
+  cleanup(d);
+});
+
+test("ready task missing ## Context or ## Scope → PROBLEM naming which section is absent", () => {
+  const noScope = `
+## Context
+
+Why.
+
+## Acceptance criteria
+
+- [ ] Given a store, when the doctor runs, then it reports drift.
+`;
+  const noContext = `
+## Scope
+
+What.
+
+## Acceptance criteria
+
+- [ ] Given a store, when the doctor runs, then it reports drift.
+`;
+  const d = fixture({
+    "0001-a.md": task("P-0001", { body: noScope }),
+    "0002-b.md": task("P-0002", { body: noContext }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(r.problems.some((p) => p.includes("P-0001") && p.includes('"## Scope"')));
+  assert.ok(r.problems.some((p) => p.includes("P-0002") && p.includes('"## Context"')));
+  assert.ok(!r.problems.some((p) => p.includes("P-0001") && p.includes('"## Context"')),
+    "the finding must name the section that is actually absent");
+  cleanup(d);
+});
+
+test("ready task with all sections and one real criterion → no new problem or warning", () => {
+  const d = fixture({ "0001-a.md": task("P-0001") });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.warnings, []);
+  cleanup(d);
+});
+
+test("a criterion that merely quotes an <angle-bracket> token is real, not a placeholder", () => {
+  // This task's own criteria quote `### G<n> — ` — "contains a <slot>" must not read as unedited.
+  const body = `
+## Context
+
+Why.
+
+## Scope
+
+What.
+
+## Acceptance criteria
+
+- [ ] Given a heading \`### G<n> — <title>\`, when the extractor runs, then the id is returned.
+`;
+  const d = fixture({ "0001-a.md": task("P-0001", { body }) });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  cleanup(d);
+});
+
+test("body absent entirely (frontmatter only) on a ready task → PROBLEM, not a throw", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { body: "" }) });
+  const r = runDoctor({ flowDir: d });                       // must not throw
+  assert.ok(r.problems.some((p) => p.includes("P-0001") && p.includes("empty body")),
+    `expected an empty-body PROBLEM, got ${JSON.stringify(r.problems)}`);
+  cleanup(d);
+});
+
+test("body-shape checks do NOT fire for in_progress / in_review / done / blocked tasks", () => {
+  // The bar applies where a task is offered to a worker. flow-doctor fails store-wide, so a
+  // retroactive rule would redden every open PR in the repo, including PRs that can't fix it.
+  const d = fixture({
+    "0001-a.md": task("P-0001", { status: "in_progress", owner: "s", started: "2026-08-18", body: "" }),
+    "0002-b.md": task("P-0002", { status: "in_review", branch: "flow/P-0002-x", pr: "http://pr/2", body: "" }),
+    "0003-c.md": task("P-0003", { status: "done", body: "" }),
+    "0004-d.md": task("P-0004", { status: "blocked", blocked_reason: "needs a decision", body: "" }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, [], "no body-shape problem may fire outside `ready`");
+  assert.ok(!r.warnings.some((w) => w.includes("Acceptance criteria") || w.includes("empty body")));
+  cleanup(d);
+});
+
+test("readinessFindings: pure, and returns one finding per absent section", () => {
+  assert.deepEqual(readinessFindings({ id: "P-1", body: READY_BODY }), []);
+  const bare = readinessFindings({ id: "P-1", body: "" });
+  assert.equal(bare.length, 1);
+  assert.ok(bare[0].includes("empty body"));
+  assert.equal(readinessFindings({ id: "P-1", body: "## Notes\n\nnothing\n" }).length, 3);
+});
+
+// ── new-subsystem tell (a task that stands up a tree the repo doesn't have) ──
+
+test("touches rooted at a top-level dir that doesn't exist → WARNING, never a problem", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { touches: '["mobile/**", "mobile/app/index.tsx"]' }) });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  const hits = r.warnings.filter((w) => w.includes("mobile/") && w.includes("subsystem"));
+  assert.equal(hits.length, 1, "one warning per missing root, not one per glob");
+  cleanup(d);
+});
+
+test("new-subsystem tell exempts ROOT_IGNORE dirs and globs with no directory component", () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", { touches: '[".github/workflows/flow-gates.yml", "CLAUDE.md", ".flow/bin/x.mjs"]' }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(!r.warnings.some((w) => w.includes("subsystem")),
+    `Flow's own plumbing and root files are not new subsystems, got ${JSON.stringify(r.warnings)}`);
+  cleanup(d);
+});
+
+// ── vision-serves: a ready task must name the goal it advances (flow-0010) ──
+
+test("no VISION.md → exactly one warning, no per-task serves finding, and exit-0 shape", () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", { serves: "[]" }),
+    "0002-b.md": task("P-0002", { serves: '["G404"]' }),
+  }, { vision: null });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, [], "an adopting repo without a vision stays green");
+  const vision = r.warnings.filter((w) => w.includes("VISION.md"));
+  assert.equal(vision.length, 1, `expected one vision-inactive warning, got ${JSON.stringify(r.warnings)}`);
+  assert.ok(vision[0].includes("inactive"));
+  assert.ok(!r.warnings.some((w) => w.includes("serves")  && w.includes("P-0002")));
+  cleanup(d);
+});
+
+test("VISION.md present + ready task with missing or empty serves → PROBLEM naming the task", () => {
+  const noField = task("P-0002").replace(/^serves:.*$/m, "");
+  const d = fixture({ "0001-a.md": task("P-0001", { serves: "[]" }), "0002-b.md": noField });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(r.problems.some((p) => p.includes("P-0001") && p.includes("no serves")));
+  assert.ok(r.problems.some((p) => p.includes("P-0002") && p.includes("no serves")));
+  cleanup(d);
+});
+
+test("serves naming an unknown id, or a non-goal, is a PROBLEM in each case", () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", { serves: '["G404"]' }),
+    "0002-b.md": task("P-0002", { serves: '["NG1"]' }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(r.problems.some((p) => p.includes("P-0001") && p.includes("does not declare")));
+  assert.ok(r.problems.some((p) => p.includes("P-0002") && p.includes("NON-GOAL")),
+    "a task advancing a declared non-goal is drift with a paper trail");
+  cleanup(d);
+});
+
+test("serves naming a retired goal → WARNING, not a problem", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { serves: '["G9"]' }) });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.ok(r.warnings.some((w) => w.includes("P-0001") && w.includes("Retired")));
+  cleanup(d);
+});
+
+test('serves: ["maintenance"] reports nothing and looks nothing up', () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { serves: '["maintenance"]' }) });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.warnings, []);
+  cleanup(d);
+});
+
+test("non-ready tasks: empty serves is silent, and a bad id warns instead of failing", () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", { status: "done", serves: "[]" }),
+    "0002-b.md": task("P-0002", { status: "in_progress", owner: "s", started: "2026-08-18", serves: '["G404"]' }),
+    "0003-c.md": task("P-0003", { status: "blocked", blocked_reason: "waiting", serves: '["NG1"]' }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, [], "adopting the check must not retroactively fail history");
+  assert.ok(!r.warnings.some((w) => w.includes("P-0001") && w.includes("serves")));
+  assert.ok(r.warnings.some((w) => w.includes("P-0002") && w.includes("does not declare")));
+  assert.ok(r.warnings.some((w) => w.includes("P-0003") && w.includes("NON-GOAL")));
+  cleanup(d);
+});
+
+test("a VISION.md with zero extractable goals → repo-level PROBLEM naming the heading format", () => {
+  const d = fixture({ "0001-a.md": task("P-0001") }, { vision: "# Vision\n\n## Goals\n\n* Be good\n* Be fast\n" });
+  const r = runDoctor({ flowDir: d });
+  const fmt = r.problems.filter((p) => p.includes("VISION.md declares no goals"));
+  assert.equal(fmt.length, 1, `expected the format problem, got ${JSON.stringify(r.problems)}`);
+  assert.ok(fmt[0].includes("### G<n>"));
+  assert.ok(!r.problems.some((p) => p.includes("P-0001")),
+    "with no goals extractable, per-task serves checks would be vacuous — report the format once instead");
+  cleanup(d);
+});
+
+test("goal headings: hyphen and en-dash separators still extract; a malformed one warns by name", () => {
+  const vision = `# Vision
+
+## Goals
+
+### G1 — Em dash
+### G2 - Hyphen
+### G3 – En dash
+### G4 No separator at all
+`;
+  const d = fixture({ "0001-a.md": task("P-0001", { serves: '["G2", "G3"]' }) }, { vision });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, [], "G2 and G3 must resolve — a mistyped dash can't drop a goal");
+  assert.ok(r.warnings.some((w) => w.includes("G4 No separator at all") && w.includes("### G<n>")),
+    `one mistyped heading must not vanish silently, got ${JSON.stringify(r.warnings)}`);
+  cleanup(d);
+});
+
+test("parseVisionGoals: ids, kinds, retirement — by line regex, never a Markdown parser", () => {
+  const { goals, malformed } = parseVisionGoals(VISION);
+  assert.deepEqual([...goals.keys()], ["G1", "G2", "NG1", "G9"]);
+  assert.equal(goals.get("G1").kind, "goal");
+  assert.equal(goals.get("G1").title, "Ship the thing");
+  assert.equal(goals.get("NG1").kind, "non-goal");
+  assert.equal(goals.get("G9").retired, true);
+  assert.equal(goals.get("G1").retired, false);
+  assert.deepEqual(malformed, []);
+});
+
+// ── the CLI contract: PROBLEM exits 1, WARNING exits 0 ──
+// Run the real CLI over a fixture store, because the exit code is the half of the bar CI
+// actually reads — `runDoctor` returning findings proves nothing if the process exits 0.
+
+function cliFixture(files, opts) {
+  const flowDir = fixture(files, opts);
+  mkdirSync(join(flowDir, "bin"), { recursive: true });
+  for (const f of ["flow-doctor.mjs", "apply-board-edits.mjs"])
+    copyFileSync(join(import.meta.dirname, f), join(flowDir, "bin", f));
+  return flowDir;
+}
+function runCli(flowDir) {
+  // spawnSync, not execFileSync: warnings are written to stderr and the run still exits 0,
+  // so a stdout-only reader would see an empty page and call the check silent.
+  const r = spawnSync("node", [join(flowDir, "bin", "flow-doctor.mjs")], { encoding: "utf8" });
+  return { code: r.status, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
+}
+
+test("CLI: an unready ready-task exits 1 and names the task", () => {
+  const d = cliFixture({ "0001-a.md": task("P-0001", { body: "" }) });
+  const { code, out } = runCli(d);
+  assert.equal(code, 1, out);
+  assert.match(out, /FAIL.*P-0001/);
+  cleanup(d);
+});
+
+test("CLI: warnings alone (new subsystem, no vision) still exit 0", () => {
+  const d = cliFixture({ "0001-a.md": task("P-0001", { touches: '["mobile/**"]', serves: "[]" }) }, { vision: null });
+  const { code, out } = runCli(d);
+  assert.equal(code, 0, out);
+  assert.match(out, /WARN.*subsystem/);
+  cleanup(d);
 });
