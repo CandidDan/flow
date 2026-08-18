@@ -24,6 +24,59 @@ flightdeck artifact iterates the same list — one registry, two consumers.
 - **Git:** with the GitHub connector live, the agent (and the live artifact) read each registered
   `repo` directly — no local checkout needed.
 
+## State aggregation (`bin/flightdeck-state.mjs`)
+
+Cross-project state is produced by tested code, not by a prompt:
+
+```bash
+node flightdeck/bin/flightdeck-state.mjs                    # every enabled project, as JSON
+node flightdeck/bin/flightdeck-state.mjs --registry <path>  # a different registry file
+node flightdeck/bin/flightdeck-state.mjs --no-pr            # skip gh reconciliation
+```
+
+**It never reads task files.** For each enabled project it invokes *that project's own*
+`.flow/bin/flow-state.mjs --json`, which resolves state from `origin/main` and reconciles each
+task against its PR via `gh`. This matters: a local clone lags `origin` — cloud workers merge to
+`origin/main` and the working copy only catches up when someone fetches — so a working-tree read
+produces numbers that look fresh and are not. There is no working-tree fallback anywhere in the
+aggregator, and a test asserts that against its source.
+
+A project that cannot be resolved is reported explicitly rather than dropped, so the portfolio
+never quietly shrinks. The causes: no registered `path`, the path is missing, the project has no
+`.flow/bin/flow-state.mjs` (it predates the resolver), `origin/main` is unreadable, or
+`flow-state` itself fell back to the working tree. The process still exits 0 — an unreachable
+project is data you need to see, not a failure of the run. The one non-zero exit is an unreadable
+registry, because "no registry" and "no projects" look identical in the output and mean opposite
+things.
+
+### Output shape
+
+```jsonc
+{
+  "registry": "/abs/path/to/projects.yml",
+  "projects": [
+    {
+      "name": "alpha",
+      "repo": "owner/alpha",
+      "path": "/abs/path/to/alpha",
+      "status": "ok",
+      "provenance": {
+        "commit": "<full 40-char origin/main SHA>",
+        "committed_at": "2026-08-18T09:12:44+01:00",   // strict ISO-8601
+        "pr_reconciled": false                          // was `gh` available?
+      },
+      "tasks": [ /* flow-state rows, each stamped with "project": "alpha" */ ]
+    },
+    { "name": "beta", "status": "unavailable", "reason": "path does not exist: …", "tasks": [] }
+  ],
+  "summary": { "total": 2, "ok": 1, "unavailable": 1, "tasks": 12 }
+}
+```
+
+`provenance` is what makes the number trustworthy: it names the exact commit the state was read
+from, when that commit landed, and whether PR reconciliation actually ran. Rendering that — and
+showing disagreements rather than hiding them — is flow-0002's job; this layer only produces it.
+
 ## Use
 - "Where is everything / what needs me / portfolio status" → the `portfolio-manager` builds the
   digest and refreshes `flightdeck.html`.
@@ -41,6 +94,8 @@ It recommends; it never reprioritises or invents work. Direction stays yours.
 ```
 CLAUDE.md                          how the cross-project layer works
 projects.yml                       the registry: every project the flightdeck reads across
+bin/flightdeck-state.mjs           cross-project state aggregation (tested; origin/main only)
+bin/flightdeck-state.test.mjs      its proving tests
 .claude/agents/portfolio-manager.md the master read-across agent
 flightdeck.html                    (generated) the cross-project board + "needs you" lane
 ```
