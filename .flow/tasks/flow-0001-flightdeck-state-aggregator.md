@@ -1,7 +1,7 @@
 ---
 id: "flow-0001"
 title: "Aggregate portfolio state in tested code, sourced only from flow-state"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude/next-tasks-ahnx30"
