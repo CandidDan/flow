@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0010"
 title: "Make the task readiness bar mechanical, so a skipped task-writer can't ship an unready task"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude/flow-0010-readiness-bar-pward7"
