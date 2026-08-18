@@ -11,6 +11,7 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: ""
+serves: ["G4"]            # adoption as an executable command rather than folklore
 touches: ["project-template/.flow/bin/flow-init.mjs", "project-template/.flow/bin/flow-init.test.mjs", "project-template/INIT.md"]
 labels: [infra, adoption]
 notes: []

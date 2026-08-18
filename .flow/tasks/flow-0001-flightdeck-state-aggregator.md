@@ -11,6 +11,7 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: ""
+serves: ["G5"]            # the flightdeck data layer — knowing where the work is
 touches: ["flightdeck/bin/flightdeck-state.mjs", "flightdeck/bin/flightdeck-state.test.mjs", "flightdeck/README.md"]
 labels: [flightdeck, infra]
 notes: []

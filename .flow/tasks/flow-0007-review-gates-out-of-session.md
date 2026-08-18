@@ -11,6 +11,7 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: ""
+serves: ["G2"]            # a reviewer that can't review its own work
 touches: [".github/workflows/_flow-review.yml", "project-template/.github/workflows/flow-review.yml", "project-template/.claude/agents/qa-verifier.md", "project-template/.claude/agents/security-reviewer.md", "project-template/.claude/agents/code-reviewer.md", "project-template/.flow/config.yml"]
 labels: [infra, integrity, portability]
 notes: []
