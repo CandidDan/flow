@@ -7,7 +7,7 @@ priority: 2
 project: "flow"
 owner: "claude/flow-0010-readiness-bar-pward7"
 created: "2026-08-17"
-started: "2026-08-18"
+started: "2026-08-18T12:36:00Z"
 branch: ""
 pr: ""
 issue: ""
