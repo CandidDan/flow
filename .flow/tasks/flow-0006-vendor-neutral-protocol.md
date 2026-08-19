@@ -1,12 +1,12 @@
 ---
 id: "flow-0006"
 title: "Make the protocol vendor-neutral so any coding agent can work a Flow task"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-code:flow-006-sbtit3"
 created: "2026-08-11"
-started: ""
+started: "2026-08-19T01:01:47Z"
 branch: ""
 pr: ""
 issue: ""
