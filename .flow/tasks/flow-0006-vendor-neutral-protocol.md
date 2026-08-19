@@ -1,14 +1,14 @@
 ---
 id: "flow-0006"
 title: "Make the protocol vendor-neutral so any coding agent can work a Flow task"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-code:flow-006-sbtit3"
 created: "2026-08-11"
 started: "2026-08-19T01:01:47Z"
-branch: ""
-pr: ""
+branch: "claude/flow-006-sbtit3"
+pr: "https://github.com/CandidDan/flow/pull/15"
 issue: ""
 blocked_reason: ""
 serves: ["G4"]            # the protocol any agent can run, so the fleet runs one protocol
