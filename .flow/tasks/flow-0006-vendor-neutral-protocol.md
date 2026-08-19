@@ -1,7 +1,7 @@
 ---
 id: "flow-0006"
 title: "Make the protocol vendor-neutral so any coding agent can work a Flow task"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude-code:flow-006-sbtit3"
