@@ -74,8 +74,26 @@ cp -R /tmp/flow-canonical/project-template/.claude        .
 mkdir -p .github/workflows
 cp    /tmp/flow-canonical/project-template/.github/workflows/flow-*.yml .github/workflows/
 cp    /tmp/flow-canonical/project-template/CLAUDE.md      .
+cp    /tmp/flow-canonical/project-template/AGENTS.md      .
 cp    /tmp/flow-canonical/project-template/.gitattributes .
 ```
+
+**The protocol itself is not either of those two files.** It ships as `.flow/PROTOCOL.md` and
+arrives with the `.flow/` copy above. `CLAUDE.md` and `AGENTS.md` are thin pointers to that one
+copy — Claude Code imports it, other agents are told to read it — so the protocol is never
+duplicated and never diverges between hosts. Keep both host files: an agent reads whichever one
+its own convention names, and dropping one silently strands that agent with no protocol.
+
+**Verify the Claude Code import actually resolved** — a pointer that fails does so silently, which
+is the one failure mode worse than having no pointer:
+
+```bash
+grep -qx '@.flow/PROTOCOL.md' CLAUDE.md && test -f .flow/PROTOCOL.md && echo "pointer OK"
+```
+
+The import must sit outside backticks and outside code fences; Claude Code skips both when it
+parses imports. In a live session, `/context` lists `.flow/PROTOCOL.md` under **Memory files**
+once it has loaded.
 
 Merge (don't clobber) `.gitignore` — it needs the `.flow/board-edits.json` line.
 
@@ -216,7 +234,7 @@ claude plugin install flow@flow
 This registers `task-writer`, `board-builder`, and the `portfolio-manager` agent in **Cowork**,
 which does *not* auto-discover a repo's local `.claude/` the way a Claude Code worker does. The
 worker needs nothing here — the gate runs from the repo's committed `.claude/` regardless. Skipping
-the install still leaves task creation working via the `CLAUDE.md` pointer; the plugin just removes
+the install still leaves task creation working via the `.flow/PROTOCOL.md` pointer; the plugin just removes
 a step.
 
 ---
@@ -272,4 +290,4 @@ machine user and org-level Anthropic billing, or the fleet stops the day that pe
 ## Human-only steps (recap)
 
 Create the repo · everything in step 5 · merge PRs · decide when `FLOW_AI` goes on · approve the
-`CLAUDE.md` merge if this was Route B.
+`CLAUDE.md` / `AGENTS.md` project-notes merge if this was Route B.
