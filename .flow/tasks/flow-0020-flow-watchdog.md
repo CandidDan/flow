@@ -1,6 +1,6 @@
 ---
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
-id: "flow-0018"
+id: "flow-0020"
 title: "Turn silent automation death into an issue that finds the human, because a dead scheduler emits no event"
 status: "ready"
 priority: 3
@@ -16,13 +16,13 @@ serves: ["G5"]            # whether the machinery is alive — the half a pane c
 touches: ["flightdeck/bin/watchdog.mjs", "flightdeck/bin/watchdog.test.mjs", ".github/workflows/flow-watchdog.yml"]
 labels: [flightdeck, infra, integrity]
 notes:
-  - "2026-08-19: deliverable D13 of handoff addendum 2. Imports the liveness rules from flightdeck/bin/liveness.mjs, which flow-0017 creates — sequence 0017 -> 0018. Importing is not touching, so the touches stay disjoint, but this cannot start until 0017 lands."
+  - "2026-08-19: deliverable D13 of handoff addendum 2. Imports the liveness rules from flightdeck/bin/liveness.mjs, which flow-0019 creates — sequence 0019 -> 0020. Importing is not touching, so the touches stay disjoint, but this cannot start until flow-0019 lands."
   - "2026-08-19: canonical-only. NOT a reusable with a template caller — one watchdog, one schedule, one place. Recorded in Scope so nobody 'fixes' the missing pair."
 ---
 
 ## Context
 
-`flow-0017` answers "is the machinery alive?" when the human looks at it. This covers when they
+`flow-0019` answers "is the machinery alive?" when the human looks at it. This covers when they
 don't.
 
 The asymmetry is the whole point. GitHub notifies on **failure**; it has no notion of **absence**.
@@ -42,7 +42,7 @@ GitHub's own subscription. **The inbox is the pager.**
 **Does:**
 
 - Add `flightdeck/bin/watchdog.mjs`, importing the liveness rules from
-  `flightdeck/bin/liveness.mjs` (flow-0017) rather than restating them. One implementation, two
+  `flightdeck/bin/liveness.mjs` (flow-0019) rather than restating them. One implementation, two
   consumers — a mirrored spec would drift, in the one component whose entire job is detecting
   drift.
 - Add `.github/workflows/flow-watchdog.yml`, a scheduled workflow in **canonical only**, running

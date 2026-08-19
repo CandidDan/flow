@@ -1,6 +1,6 @@
 ---
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
-id: "flow-0017"
+id: "flow-0019"
 title: "Answer 'where is every project up to' in one page that cannot be stale, including whether the automation is alive"
 status: "ready"
 priority: 2
@@ -18,7 +18,7 @@ labels: [flightdeck, infra, ux]
 notes:
   - "2026-08-19: deliverable D12 of handoff addendum 2, scoped per ADR-0002 Amendment 1. A reference mock ships in the handoff package (flow-mission-control-mock.html) — it is the render contract, not the implementation."
   - "2026-08-19: module and page ship in ONE task deliberately. flow-0001/flow-0002 split a producer from its only consumer, the consumer was superseded mid-flight, and the producer landed with nothing to feed. Not repeating that."
-  - "2026-08-19: flow-0018 (the watchdog) imports liveness.mjs from this task. Sequence 0017 -> 0018. This inverts addendum 2's suggested order because the shared rules have to exist somewhere first, and the page is what is actually wanted."
+  - "2026-08-19: flow-0020 (the watchdog) imports liveness.mjs from this task. Sequence 0019 -> 0020. This inverts addendum 2's suggested order because the shared rules have to exist somewhere first, and the page is what is actually wanted."
 ---
 
 ## Context
