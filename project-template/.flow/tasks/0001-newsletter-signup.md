@@ -11,6 +11,8 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: ""
+serves: ["G1"]           # the VISION.md goal id this advances (or "maintenance");
+                         # flow-doctor fails a ready task whose serves does not resolve there
 touches: ["src/components/signup/**", "src/lib/validation/email.*"]
 labels: [frontend, forms]
 notes: []
