@@ -74,8 +74,15 @@ things.
 ```
 
 `provenance` is what makes the number trustworthy: it names the exact commit the state was read
-from, when that commit landed, and whether PR reconciliation actually ran. Rendering that — and
-showing disagreements rather than hiding them — is flow-0002's job; this layer only produces it.
+from, when that commit landed, and whether PR reconciliation actually ran. This layer only
+produces it; rendering it — and showing disagreements rather than hiding them — belongs to the
+cross-repo view, which per [ADR-0002 Amendment 1](../docs/adr/0002-flightdeck-projection-github-projects.md)
+is now a page computed on open rather than a rendered artifact. `flow-0002` was that renderer
+and is `blocked` as superseded; its disclosure obligation transferred, it did not lapse.
+
+This command is unaffected by that change and is the portfolio's **offline** read: it needs a
+local clone and `git`, not the network or a token, which is exactly what the computed page
+cannot offer.
 
 ## Use
 - "Where is everything / what needs me / portfolio status" → the `portfolio-manager` builds the
