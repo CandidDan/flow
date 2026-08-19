@@ -1,7 +1,7 @@
 ---
 id: "flow-0002"
 title: "Show the flightdeck's freshness and its disagreements instead of hiding them"
-status: "ready"
+status: "blocked"
 priority: 3
 project: "flow"
 owner: ""
@@ -10,11 +10,12 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
+blocked_reason: "Superseded by ADR-0002 Amendment 1 (2026-08-18): the primary cross-repo view is a computed static page, not a rendered artifact, so render-flightdeck.mjs has no target. Its disclosure principle is inherited by the mission-control task, not lost. Held rather than deleted because whether to rescope it into that task or retire it is the human's call."
 serves: ["G5"]            # provenance and disagreement — knowing how much to trust it
 touches: ["flightdeck/bin/render-flightdeck.mjs", "flightdeck/bin/render-flightdeck.test.mjs", "flightdeck/.claude/agents/portfolio-manager.md"]
 labels: [flightdeck, ux]
-notes: []
+notes:
+  - "2026-08-18: blocked, not cancelled. flow-0001's PR (#13) closed with 'unblocking flow-0002, which consumes this JSON shape as a contract' — written before Amendment 1 merged, and the next session to read the queue would have built the superseded renderer on the strength of it. The JSON contract flow-0001 produces is still good; what changed is that nothing renders it to HTML any more. Two live options for the human: rescope this task to the mission-control page's render shell, or retire it and let the page task carry its provenance-disclosure criteria."
 ---
 
 ## Context
