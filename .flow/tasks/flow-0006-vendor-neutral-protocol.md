@@ -14,7 +14,8 @@ blocked_reason: ""
 serves: ["G4"]            # the protocol any agent can run, so the fleet runs one protocol
 touches: ["project-template/.flow/PROTOCOL.md", "project-template/CLAUDE.md", "project-template/AGENTS.md", "project-template/INIT.md", "project-template/RETROFIT.md"]
 labels: [infra, portability]
-notes: []
+notes:
+  - "2026-08-19: SEQUENCED BEFORE flow-0005 — do this one first. Both tasks edit project-template/INIT.md and the edits interleave rather than sit in separate regions, so the shared path cannot be split: INIT.md line ~76 (`cp .../CLAUDE.md .` inside Step 1) is the very line this task must repoint at .flow/PROTOCOL.md, and it is inside the Step 1-4 block flow-0005 deletes wholesale. Order is not arbitrary: if flow-0005 landed first, flow-init.mjs would be written copying CLAUDE.md, and this task would then have to reopen flow-init.mjs to add PROTOCOL.md/AGENTS.md to its copy list - a file outside this task's touches, i.e. a mid-build block. Landing this first costs only a few wasted lines in a cp list flow-0005 then replaces. Enforced by priority: this is P2, flow-0005 is now P3, and pick-task takes the lowest priority number."
 ---
 
 ## Context

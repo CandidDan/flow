@@ -2,7 +2,7 @@
 id: "flow-0005"
 title: "Make project adoption an executable command instead of a runbook an agent improvises"
 status: "ready"
-priority: 2
+priority: 3
 project: "flow"
 owner: ""
 created: "2026-08-11"
@@ -14,7 +14,8 @@ blocked_reason: ""
 serves: ["G4"]            # adoption as an executable command rather than folklore
 touches: ["project-template/.flow/bin/flow-init.mjs", "project-template/.flow/bin/flow-init.test.mjs", "project-template/INIT.md"]
 labels: [infra, adoption]
-notes: []
+notes:
+  - "2026-08-19: DEPENDS ON flow-0006 - do not claim this until flow-0006 has merged. Dropped from P2 to P3 to make that mechanical (pick-task takes the lowest priority number; at equal priority the id tiebreak picked this one FIRST, which was the wrong order). Reason: both tasks edit project-template/INIT.md with interleaved edits, and flow-0006 moves the protocol body to .flow/PROTOCOL.md and adds AGENTS.md. Writing flow-init.mjs before that move means writing its file-copy list against a file set that is about to change, and fixing it afterwards would need an edit to flow-init.mjs from inside flow-0006 - outside that task's touches. Land flow-0006 first and flow-init.mjs is written once, against the final file set. Restore to P2 once flow-0006 is done."
 ---
 
 ## Context
