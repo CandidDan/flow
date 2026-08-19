@@ -19,7 +19,8 @@ store-guard would otherwise block its own birth PR). No application code changes
 
 ## 1. Overlay the Flow files (merge, don't clobber)
 
-Copy from `project-template/`: `.flow/` (config, _TEMPLATE, board, `VERSION`, **all of** `bin/`),
+Copy from `project-template/`: `.flow/` (config, `PROTOCOL.md`, _TEMPLATE, board, `VERSION`,
+**all of** `bin/`), both host pointers (`CLAUDE.md`, `AGENTS.md` — see step 3),
 `.github/workflows/flow-*.yml` (thin callers of canonical's reusable workflows — see
 `docs/flow-reusable-workflows.md` in the flow repo), and **merge** `.claude/` (agents + skills)
 into any existing `.claude/` - list collisions first; if a same-named file differs, stop and show
@@ -39,18 +40,33 @@ Same as INIT.md step 2, against the real repo:
   locally but fails the gate's `npm ci`.
 - `security.focus` from the codebase's actual scars (read the existing CLAUDE.md / incident notes).
 
-## 3. Merge CLAUDE.md  [STOP for human approval]
+## 3. Add the protocol pointer, keep the project knowledge  [STOP for human approval]
 
-The existing CLAUDE.md is dense project knowledge; the template's is the protocol. Merge, don't
-replace:
-1. Flow protocol section (from template CLAUDE.md): store, lifecycle, concurrency, loop, gate,
-   hard rules - adapt id prefix + monorepo command notes.
-2. Keep the project's rules / routing / implementation notes.
-3. **Shipped-state tables** (deployed components, build status) -> point to wherever the project's
+**There is no protocol merge any more.** The protocol arrives as its own file, `.flow/PROTOCOL.md`,
+in step 1. The existing CLAUDE.md is dense project knowledge and it stays that way — you are adding
+a pointer to it, not folding a second document into it:
+
+1. **Add the import to the existing `CLAUDE.md`.** A line reading `@.flow/PROTOCOL.md`, on its own,
+   outside backticks and outside any code fence (Claude Code skips both when parsing imports). Put
+   it near the top so the protocol is in context before the project's own rules qualify it.
+2. **Add `AGENTS.md`** from the template if the repo has none, or add the same plain-English
+   "read `.flow/PROTOCOL.md` first" instruction to the top of the existing one. That convention has
+   no import mechanism, so the instruction is the whole mechanism.
+3. Keep the project's rules / routing / implementation notes exactly where they are. Do not adapt
+   the protocol per project — id prefix and monorepo command notes belong in `.flow/config.yml`
+   and in the project notes, not in a forked copy of the protocol.
+4. **Shipped-state tables** (deployed components, build status) -> point to wherever the project's
    manifest/source-of-truth lives; don't duplicate. In-flight work -> `.flow/tasks/` + issues.
-4. **Hard size budget: <= 25k chars** (`wc -c CLAUDE.md`). Past ~40k, Claude Code truncates the
+5. **Hard size budget: <= 25k chars** (`wc -c CLAUDE.md`). Past ~40k, Claude Code truncates the
    tail and every session pays the tax. Move per-version changelogs / long notes into a manifest
-   or architecture doc and leave summaries + pointers.
+   or architecture doc and leave summaries + pointers. The protocol no longer counts against this
+   budget, so the whole allowance is available for real project knowledge.
+
+Verify the pointer resolved before you call this done — it fails silently otherwise:
+
+```bash
+grep -qx '@.flow/PROTOCOL.md' CLAUDE.md && test -f .flow/PROTOCOL.md && echo "pointer OK"
+```
 
 Present the diff + final char count. **Wait for approval before committing.**
 
