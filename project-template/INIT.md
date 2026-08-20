@@ -13,12 +13,16 @@ or merges is the human's; everything else is yours.
 
 ## Rules for the agent running this
 
-1. **Never invent a config value.** Every `REPLACE-ME` in `.flow/config.yml` is either derived from
+1. **Never invent a config value.** Every value in `.flow/config.yml` is either derived from
    something observable in the repo or asked for. A guessed test command produces a green gate that
-   proves nothing — the single worst failure mode in this system.
+   proves nothing — the single worst failure mode in this system. `flow-init` enforces this rather
+   than trusting it: a missing command, source root or coverage floor is a non-zero exit naming the
+   field, and nothing is written.
 2. **Stop where the runbook says STOP.** Those are human decisions or human-only actions.
 3. **Measure, don't assume.** `coverage_min` comes from running the coverage command once. The
-   `source_roots` list comes from listing the repo, not from the stack's convention.
+   `source_roots` list comes from listing the repo, not from the stack's convention. `flow-init`
+   rejects a `source_root` that does not exist in the repo, but it cannot tell a measured floor
+   from a round number you liked — that half is still yours.
 4. **Do not skip step 7.** A red baseline turns the first task's author into an involuntary
    CI-plumber, and you will not find out until a PR is already open.
 5. **Report progress as a TL;DR + an ordered checklist of what the human still has to do**, per the
@@ -58,31 +62,64 @@ after the first few tasks land. Default off; recommend turning it on once the lo
 
 ---
 
-## Step 1 — Get the files in
+## Step 1 — Run `flow-init`
 
-Copy from canonical's `project-template/` at the ref you pinned (**not** from a working copy on
-someone's laptop — it may hold uncommitted drift):
+The mechanical half of adoption — copy the tree, re-pin the callers, stamp the version, write
+`.flow/config.yml`, point the board at this repo — is a tested command, not a sequence you retype.
+Prose has one structural weakness: nothing fails when a step is skipped. `flow-init` fails.
+
+**Read step 2 before you run it.** Every config value is a *required input*: the five commands,
+`source_roots` and `coverage_min` have no defaults, and a run missing one exits non-zero naming the
+field instead of guessing. That refusal is the feature — a guessed test command produces a green
+gate that proves nothing, which is the worst failure mode in this system.
+
+Get canonical at the ref you pinned in step 0 (**not** a working copy on someone's laptop — it may
+hold uncommitted drift), then run the tool out of it:
 
 ```bash
-# from the new repo's root
 CANON_REPO="CandidDan/flow"   # from step 0
 CANON_REF="v1"                # from step 0
 git clone --depth 1 --branch "$CANON_REF" "https://github.com/$CANON_REPO" /tmp/flow-canonical
 
-cp -R /tmp/flow-canonical/project-template/.flow          .
-cp -R /tmp/flow-canonical/project-template/.claude        .
-mkdir -p .github/workflows
-cp    /tmp/flow-canonical/project-template/.github/workflows/flow-*.yml .github/workflows/
-cp    /tmp/flow-canonical/project-template/CLAUDE.md      .
-cp    /tmp/flow-canonical/project-template/AGENTS.md      .
-cp    /tmp/flow-canonical/project-template/.gitattributes .
+# from the new repo's root. --config <file.json> takes the same fields if you prefer JSON.
+node /tmp/flow-canonical/project-template/.flow/bin/flow-init.mjs \
+  --from /tmp/flow-canonical \
+  --canonical-repo "$CANON_REPO" --canonical-ref "$CANON_REF" \
+  --repo "<owner/repo>" \
+  --name "<slug>" --language "<language>" --description "<one line>" \
+  --install "<install>" --build "<build>" --lint "<lint>" \
+  --test "<test>" --coverage "<coverage>" \
+  --coverage-min <measured, from step 2> \
+  --source-root "<path/>=<the command that parses it>" \
+  --security-focus "<a project-specific scrutiny area>" \
+  --dry-run
 ```
 
-**The protocol itself is not either of those two files.** It ships as `.flow/PROTOCOL.md` and
-arrives with the `.flow/` copy above. `CLAUDE.md` and `AGENTS.md` are thin pointers to that one
-copy — Claude Code imports it, other agents are told to read it — so the protocol is never
-duplicated and never diverges between hosts. Keep both host files: an agent reads whichever one
-its own convention names, and dropping one silently strands that agent with no protocol.
+`--dry-run` prints the whole plan and writes nothing — read it, then re-run without the flag.
+`--source-root` and `--security-focus` repeat, once per entry. Drop `--from` and it clones canonical
+itself; passing it just reuses the checkout you already have. `--help` lists every flag.
+
+| It does | It does not |
+|---|---|
+| copy `.flow/`, `.claude/`, `CLAUDE.md`, `AGENTS.md`, `.gitattributes` | copy the template's sample task, or `VISION.md` — see below |
+| copy **every** `flow-*.yml` caller canonical ships — the count comes from the tree, never from a number written in a doc | run the gate, seed tasks, register with the flightdeck or touch repo settings (steps 5–9) |
+| re-pin every `uses:` line **and** the `flow-sync` caller's `canonical_ref` | overwrite anything that already differs, unless you pass `--force` |
+| stamp `.flow/VERSION` from the ref you pinned | replace an existing `.gitignore` — it appends only the lines you lack |
+| write `.flow/config.yml` from your values, and set `REPO` in `.flow/board.html` (step 4) | invent a config value, ever |
+
+**The protocol is not `CLAUDE.md` or `AGENTS.md`.** It ships as `.flow/PROTOCOL.md` and arrives with
+the `.flow/` copy; those two are thin pointers to that one copy — Claude Code imports it, other
+agents are told to read it — so it is never duplicated and never diverges between hosts. Both host
+files ship: dropping one silently strands whichever agent follows that convention.
+
+Two omissions are deliberate, and both are the same principle. The template's **sample task** does
+not travel — copied in it becomes a genuinely dispatchable `ready` task pointing at files that do
+not exist (the board's snapshot is emptied to match). **`VISION.md`** does not either: it ships as a
+shape full of placeholder goals, and a placeholder vision is worse than none. Write it with the
+`vision-writer` skill when you seed the store (step 6).
+
+Re-running is safe. Identical inputs are a byte-level no-op; anything that differs is reported and
+left alone unless you pass `--force`.
 
 **Verify the Claude Code import actually resolved** — a pointer that fails does so silently, which
 is the one failure mode worse than having no pointer:
@@ -95,38 +132,20 @@ The import must sit outside backticks and outside code fences; Claude Code skips
 parses imports. In a live session, `/context` lists `.flow/PROTOCOL.md` under **Memory files**
 once it has loaded.
 
-Merge (don't clobber) `.gitignore` — it needs the `.flow/board-edits.json` line.
-
-**Verify you have all nine workflows.** A short copy here is a silent hole later:
-
-```bash
-ls .github/workflows/flow-*.yml | wc -l   # must be 9
-```
-
-They are: `flow-gates`, `flow-status`, `flow-done`, `flow-open-pr`, `flow-recover`, `flow-sync`,
-`flow-triage`, `flow-review`, `flow-queue-runner`.
-
-**Re-point the callers** if you are not using the default canonical repo/ref:
+Then eyeball the pins. It is one command, and it is the only thing standing between you and a
+"workflow not found" on the first PR:
 
 ```bash
-# only if CANON_REPO/CANON_REF differ from the shipped default
-sed -i '' "s|uses: CandidDan/flow/|uses: $CANON_REPO/|g"            .github/workflows/flow-*.yml
-sed -i '' "s|_flow-\(.*\)\.yml@v1|_flow-\1.yml@$CANON_REF|g"        .github/workflows/flow-*.yml
-grep -h "uses:" .github/workflows/flow-*.yml | sort -u              # eyeball the result
+grep -h "uses:" .github/workflows/flow-*.yml | sort -u   # all on <owner>/<repo>@<ref>
+grep -n "canonical_ref" .github/workflows/flow-sync.yml  # the same ref, not a stale 'v1'
 ```
-
-**Stamp the version** from the ref you actually pinned, so the drift check and `flow-sync` have a
-truthful baseline:
-
-```bash
-cp /tmp/flow-canonical/VERSION .flow/VERSION
-```
-
----
 
 ## Step 2 — Calibrate `.flow/config.yml`
 
-The one genuinely per-project file. Replace every `REPLACE-ME`:
+The one genuinely per-project file — and the reason `flow-init` refuses to run without these
+values. **Derive them before step 1**, which takes them as required inputs and writes the file for
+you; there is no `REPLACE-ME` left behind to find later. To change one afterwards, edit the file
+(it is a normal file) or re-run `flow-init --force`:
 
 - `project.name` / `language` / `description` — from step 0.
 - **The five commands** — from step 0. Monorepo: prefix with `cd <app-dir> && …`.
@@ -160,10 +179,12 @@ The `flow-*.yml` files are thin callers; the gate logic lives in canonical. The 
 
 ## Step 4 — Set the board's repo
 
-In `.flow/board.html`, set `const REPO = "owner/repo";` so each task's "Work this →" link targets
-this repo's queue-runner.
+**Done by `flow-init`** in step 1, from `--repo`. Verify it, because an empty value doesn't error —
+it just silently drops each task's "Work this →" link:
 
----
+```bash
+grep -n 'const REPO' .flow/board.html    # must show your owner/repo, not ""
+```
 
 ## Step 5 — Repo settings  [STOP — human only]
 
