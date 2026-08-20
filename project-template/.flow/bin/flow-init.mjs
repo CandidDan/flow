@@ -42,7 +42,7 @@
 // stdin is a tool that hangs a CI job until it times out.
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -197,6 +197,17 @@ export function loadInputs(argv, readFile = (p) => readFileSync(p, "utf8")) {
   };
 }
 
+// A source root must be a path INSIDE the repo, expressed relative to its root. Two reasons, and
+// the second is the load-bearing one: `join(target, "../src")` normalises to a directory OUTSIDE
+// the target, so the existence check would happily confirm a tree this repo does not contain; and
+// the same string is written into `.flow/config.yml`, where flow-doctor resolves it against the
+// repo root on every later run. A root that climbs out is a gate aimed at another repo's files.
+//
+// An absolute path does NOT escape `join` — it nests under the target — but it is meaningless in a
+// config file that travels to other checkouts, so it is refused here by name rather than left to
+// resurface later as a puzzling missing directory.
+const escapesRepo = (p) => isAbsolute(p) || p.split(/[\\/]/).includes("..");
+
 // A usable single-line value. Control characters are rejected rather than escaped: they would
 // travel into config.yml (which flow-doctor parses by line scan), and a newline inside a
 // "command" is not a command, it is two.
@@ -232,6 +243,12 @@ export function validateInputs(inputs, { targetDir, exists = existsSync } = {}) 
     for (const [i, r] of inputs.source_roots.entries()) {
       if (!isScalar(r.path)) { errors.push(`source_roots[${i}].path is required`); continue; }
       if (!isScalar(r.check)) errors.push(`source_roots[${i}] ("${r.path}") has no check — name the command that parses this tree`);
+      if (escapesRepo(r.path)) {
+        errors.push(`source_root "${r.path}" must be a repo-relative path inside the target — an absolute ` +
+          `path, or one climbing out with "..", declares a tree this repo does not contain, and config.yml ` +
+          `carries it to every later flow-doctor run`);
+        continue;
+      }
       if (targetDir && !exists(join(targetDir, r.path)))
         errors.push(`source_root "${r.path}" does not exist in the target repo — a root that isn't there cannot be gated`);
     }

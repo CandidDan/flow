@@ -329,6 +329,41 @@ test("a source_root that does not exist in the target exits non-zero naming that
   rmSync(canonical, { recursive: true, force: true }); rmSync(target, { recursive: true, force: true });
 });
 
+test("a source_root that climbs out of the repo is refused, existence check or not", () => {
+  // Found by review on PR #20. `join(target, "../src")` normalises to a directory OUTSIDE the
+  // target, so the existence check alone would confirm a tree this repo does not contain — and
+  // the same string then lands in config.yml, where every later flow-doctor run resolves it
+  // against the repo root. `exists: () => true` here is deliberate: it proves the containment
+  // rule is doing the work, not the filesystem happening to disagree.
+  const base = {
+    project: { name: "a", language: "b", description: "c" }, repo: "o/r",
+    commands: Object.fromEntries(["install", "build", "lint", "test", "coverage"].map((k) => [k, "x"])),
+    coverage_min: 80, security: { focus: [] }, canonical: { repo: "o/r", ref: "v1" },
+  };
+  for (const bad of ["../src/", "a/../../src/", "/etc/", "/tmp/x"]) {
+    const errors = validateInputs({ ...base, source_roots: [{ path: bad, check: "x" }] },
+      { targetDir: "/repo", exists: () => true });
+    assert.ok(errors.some((e) => e.includes(bad) && /repo-relative path inside the target/.test(e)),
+      `"${bad}" was accepted as a source root: ${JSON.stringify(errors)}`);
+  }
+  assert.deepEqual(validateInputs({ ...base, source_roots: [{ path: "src/", check: "x" }] },
+    { targetDir: "/repo", exists: () => true }), [], "an ordinary relative root must still pass");
+});
+
+test("the CLI refuses an escaping source_root and writes nothing", () => {
+  const canonical = canonicalFixture(), target = targetFixture();
+  const before = snapshot(target);
+  const flags = INPUT_FLAGS.map((f) => (f === "src/=npm run lint" ? "../src/=npm run lint" : f));
+
+  const r = spawnSync(process.execPath,
+    [CLI, ...flags, "--from", canonical, "--target", target], { encoding: "utf8", stdio: "pipe" });
+
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /must be a repo-relative path inside the target/);
+  assert.ok(sameTree(before, snapshot(target)), "nothing may be written when the inputs are wrong");
+  rmSync(canonical, { recursive: true, force: true }); rmSync(target, { recursive: true, force: true });
+});
+
 // ── the deliberate omissions, and the merges ───────────────────────────────────────────
 test("the template's sample task does not travel, and the board snapshot is emptied to match", () => {
   const canonical = canonicalFixture(), target = targetFixture();
