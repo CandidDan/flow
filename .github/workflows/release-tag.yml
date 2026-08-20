@@ -17,6 +17,18 @@ name: release-tag
 # The major is derived from VERSION rather than hardcoded, so bumping VERSION to 2.0.0 starts
 # publishing v2-edge and leaves v1-edge and v1 frozen at the last 1.x commit — what a repo
 # pinned to @v1 should get from a major bump: nothing moves until it opts in.
+#
+# NOTHING MOVES UNTIL THE STAMP IS TRUE. `release-guard` runs first and fails the job when the
+# tree about to be published carries a stamp that disagrees with itself or with the newest
+# release tag. On 2026-08-19 v1.1.1 was cut onto a commit still stamped 1.1.0, flow-sync
+# compared 1.1.0 against 1.1.0, called it `current`, and the fix reached nobody while every
+# nightly run reported success. The guard is a tested module and this file only calls it —
+# deliberately, because four earlier tasks ended up with criteria unprovable outside a workflow
+# run, purely because their logic lived in inline shell. Keep the YAML to invocation.
+#
+# Alias rot (`v1` behind main) comes back as a WARNING with a number, never a failure: moving
+# `v1` is the deliberate human step this file's canary split exists to preserve, and a release
+# path that hard-fails on a deliberate manual step just teaches people to bypass it.
 
 on:
   push:
@@ -39,6 +51,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Invocation only — every decision (which tag is under scrutiny, what is a problem and
+      # what is a warning) lives in .flow/bin/release-guard.mjs and is proved by its own tests.
+      # Exits 1 on a stamp that lies, which stops the tag move below.
+      - name: release-guard — the stamp must match the tree it stamps
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: node .flow/bin/release-guard.mjs
 
       - name: Move the edge tag to this commit
         run: |
