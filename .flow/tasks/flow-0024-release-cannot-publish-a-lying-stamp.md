@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0024"
 title: "Make it impossible to publish a version stamp that disagrees with the tree it stamps"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude/next-task-br2olx"
 created: "2026-08-19"
-started: ""
+started: "2026-08-20T05:02:27Z"
 branch: ""
 pr: ""
 issue: ""
