@@ -40,6 +40,40 @@ notes:
       flow-0015 (canonical runs its own automation) respectively, and called out in the PR.
       If the human disagrees with the widening, the fix is to narrow `touches` here on main and
       kick the PR back.
+  - date: "2026-08-20"
+    by: "flow/flow-0007-review-gates-out-of-session"
+    text: >
+      HANDOFF — branch `flow/flow-0007-review-gates-out-of-session`, draft PR
+      https://github.com/CandidDan/flow/pull/21 (two commits: the change, then a security
+      hardening from the self-review).
+      GENUINELY DONE: all seven acceptance criteria implemented with proving tests. Full gate
+      green locally — npm ci / build (14 workflows) / lint (43 .mjs) / test (378 pass, 1 opt-in
+      skip) / coverage 92.55% vs a floor of 83.5 — plus flow-doctor clean and touches-guard
+      checked against main's widened list (14 feature files, 12 globs, none outside).
+      LOOKS DONE BUT IS NOT: criterion 1's RUNTIME half. Canonical has no `flow-review.yml`
+      caller (flow-0015 owns that) and FLOW_AI is not set here, so the new checks do NOT run on
+      PR #21 — the wiring is proved structurally by .flow/bin/flow-review-workflow.test.mjs, and
+      the live proof arrives with the first repo that adopts the new tag. Stated plainly in the
+      PR; do not let a later session quietly upgrade it to "verified".
+      DECISIONS NOT TO RE-LITIGATE. (1) `touches` widened by the worker rather than blocking —
+      reasons per glob in the note above; the human accepts or rejects on the PR. (2) The
+      security job has NO job-level `if`: it always runs and reports the skip, because a job-level
+      condition makes the check vanish from the PR, which is indistinguishable from a broken gate.
+      (3) Each reviewer re-runs `flow-review.mjs plan` instead of passing an artifact between
+      jobs — two git diffs beat an upload/download round trip and keep two more third-party
+      actions out of every adopting repo's supply chain. (4) The verdict step is FAIL-CLOSED and
+      runs with `always()`: a missing, empty or unparseable verdict fails the check. (5) The two
+      protocol section digests in .flow/bin/protocol-portability.test.mjs were recomputed in the
+      same commit as the protocol edit — that is the prescribed procedure, not a relaxed test.
+      (6) Portability is claimed narrowly on purpose: the reviewer is still a Claude model call;
+      what moves is that the WORKER need not be.
+      NEXT ACTION: none for a worker. The PR is open and driven; the human reviews the widened
+      `touches` first, then the diff, then undrafts and merges. Follow-ups for the ORCHESTRATOR
+      (do not do them here, they are outside this task's touches): flow-init's `renderConfig()`
+      emits no `review:` block, so a scaffolded repo runs the security review on every PR;
+      project-template/FLOW-handoff.html and .claude/settings.json still describe the deleted
+      agents; canonical's own .flow/config.yml needs a `review:` block when flow-0015 wires its
+      caller.
 ---
 
 ## Context
