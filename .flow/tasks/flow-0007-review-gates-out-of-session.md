@@ -1,14 +1,14 @@
 ---
 id: "flow-0007"
 title: "Move the review gates out of the worker's session so they can't review their own work"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "flow/flow-0007-review-gates-out-of-session"
 created: "2026-08-11"
 started: "2026-08-20T07:26:47Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0007-review-gates-out-of-session"
+pr: "https://github.com/CandidDan/flow/pull/21"
 issue: ""
 blocked_reason: ""
 serves: ["G2"]            # a reviewer that can't review its own work
