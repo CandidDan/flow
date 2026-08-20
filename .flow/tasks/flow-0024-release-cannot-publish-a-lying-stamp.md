@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0024"
 title: "Make it impossible to publish a version stamp that disagrees with the tree it stamps"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude/next-task-br2olx"
 created: "2026-08-19"
 started: "2026-08-20T05:02:27Z"
-branch: ""
-pr: ""
+branch: "claude/next-task-br2olx"
+pr: "https://github.com/CandidDan/flow/pull/19"
 issue: ""
 blocked_reason: ""
 serves: ["G4"]            # what canonical says is what the fleet runs — the stamp is what it says
