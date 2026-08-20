@@ -12,9 +12,34 @@ pr: ""
 issue: ""
 blocked_reason: ""
 serves: ["G2"]            # a reviewer that can't review its own work
-touches: [".github/workflows/_flow-review.yml", "project-template/.github/workflows/flow-review.yml", "project-template/.claude/agents/qa-verifier.md", "project-template/.claude/agents/security-reviewer.md", "project-template/.claude/agents/code-reviewer.md", "project-template/.flow/config.yml"]
+touches: [".github/workflows/_flow-review.yml", ".github/workflows/_flow-queue-runner.yml", "project-template/.github/workflows/flow-review.yml", "project-template/.claude/agents/**", "project-template/.flow/bin/flow-review.mjs", "project-template/.flow/bin/flow-review.test.mjs", "project-template/.flow/config.yml", "project-template/.flow/PROTOCOL.md", "project-template/.flow/tasks/_TEMPLATE.md", "project-template/README.md", "CLAUDE.md", "docs/flow-reusable-workflows.md"]
 labels: [infra, integrity, portability]
-notes: []
+notes:
+  - date: "2026-08-20"
+    by: "flow/flow-0007-review-gates-out-of-session"
+    text: >
+      SCOPE SIGNAL — `touches` widened by the worker, pending orchestrator ratification.
+      The declared list omitted paths this task's own body mandates, and two acceptance
+      criteria are unreachable without them. Added, with the reason for each:
+      `project-template/.flow/PROTOCOL.md` (Scope says "update the protocol's gate section";
+      criterion 4 — "a worker invokes no review subagent" — is contradicted while the protocol
+      still tells workers to run them);
+      `project-template/.flow/tasks/_TEMPLATE.md` (Notes says the inherited DoD block "names the
+      subagents this task removes. Update the inherited block in the template as part of this work");
+      `.github/workflows/_flow-queue-runner.yml` (its worker prompt is the other place that
+      instructs a worker to run the three subagents — criterion 4 again);
+      `CLAUDE.md` (root — `.flow/bin/protocol-docs.test.mjs` asserts every path the doc names
+      exists, so deleting `project-template/.claude/agents/` FAILS the gate until the doc is updated);
+      `project-template/README.md` and `docs/flow-reusable-workflows.md` (both index files that
+      this change deletes or rewrites);
+      `project-template/.flow/bin/flow-review.{mjs,test.mjs}` (the testable core: the security-trigger
+      decision and the verdict gate have to be real code with proving tests, not shell in a workflow);
+      `project-template/.claude/agents/**` replaces the three individually-named agent files it covers.
+      Deliberately NOT added: `project-template/FLOW-handoff.html` (narrative essay, 6 stale
+      references) and canonical's own `.flow/config.yml` — left to flow-0016 (doc drift) and
+      flow-0015 (canonical runs its own automation) respectively, and called out in the PR.
+      If the human disagrees with the widening, the fix is to narrow `touches` here on main and
+      kick the PR back.
 ---
 
 ## Context
