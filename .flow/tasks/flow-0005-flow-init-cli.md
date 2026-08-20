@@ -1,7 +1,7 @@
 ---
 id: "flow-0005"
 title: "Make project adoption an executable command instead of a runbook an agent improvises"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude/next-task-tjqgta"
