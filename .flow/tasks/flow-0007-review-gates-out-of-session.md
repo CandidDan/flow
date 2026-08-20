@@ -1,12 +1,12 @@
 ---
 id: "flow-0007"
 title: "Move the review gates out of the worker's session so they can't review their own work"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "flow/flow-0007-review-gates-out-of-session"
 created: "2026-08-11"
-started: ""
+started: "2026-08-20T07:26:47Z"
 branch: ""
 pr: ""
 issue: ""
