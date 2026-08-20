@@ -62,6 +62,21 @@ export const CHECKS = ["qa", "code-review", "security"];
 
 export class ReviewError extends Error {}
 
+// A model name reaches the reviewer as command-line text (`--model <x>`). config.yml is
+// repo-owned, so this is not a privilege boundary — but a value carrying a space or a quote
+// would splice extra flags into the invocation and the run would fail somewhere far from the
+// typo. Reject it here, where the message can name the file and the key.
+const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+function checkModel(value, key) {
+  if (!MODEL_RE.test(value)) {
+    throw new ReviewError(
+      `review.${key} = ${JSON.stringify(value)} is not a usable model name. It is passed to the ` +
+      `reviewer as \`--model <value>\`, so it must be a bare identifier (letters, digits, ` +
+      `\`.\`, \`_\`, \`-\`) — e.g. "sonnet" or "claude-opus-5".`);
+  }
+  return value;
+}
+
 // ── config ────────────────────────────────────────────────────────────────────────────────
 // Pull the `review:` block out of config.yml without a YAML dependency. Handles the two shapes
 // the file actually uses — inline arrays and `-` lists — and treats anything it does not
@@ -133,9 +148,9 @@ export function parseReviewConfig(src) {
   const securityModel = stringAt(b, "security_model");
   const securityPaths = listAt(b, "security_paths");
   return {
-    model: model || DEFAULT_MODEL,
+    model: checkModel(model || DEFAULT_MODEL, "model"),
     // A repo that wants a deeper model on security diffs says so; otherwise one model, one knob.
-    securityModel: securityModel || model || DEFAULT_MODEL,
+    securityModel: checkModel(securityModel || model || DEFAULT_MODEL, "security_model"),
     securityPaths,
     configured: block !== null,
     warnings,

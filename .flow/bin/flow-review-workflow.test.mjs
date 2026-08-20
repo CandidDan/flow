@@ -115,7 +115,8 @@ test("the security job always runs, so the check is never silently absent", { sk
   const report = (job.steps ?? [])[0];
   assert.equal(report.if, undefined, "the applicability report must run unconditionally");
   assert.match(String(report.run), /GITHUB_STEP_SUMMARY/, "the decision must reach the run summary");
-  assert.match(String(report.run), /security_reason/, "and it must carry the reason, not just the verdict");
+  assert.match(String(report.run), /SECURITY_REASON/,
+    "and it must carry the reason, not just the verdict (through env — see the injection test)");
 });
 
 test("the security reviewer itself is gated on the config-driven decision", { skip }, () => {
@@ -147,6 +148,22 @@ test("no model name leaks into the workflow by any other route", { skip }, () =>
     assert.doesNotMatch(code, new RegExp(`\\b${name}\\b`),
       `"${name}" appears in _flow-review.yml. The model is config, not infra.`);
   }
+});
+
+test("attacker-controlled review text never reaches a shell through ${{ }}", { skip }, () => {
+  // `security_reason` names the changed files that matched (or did not match) the trigger
+  // globs, and a PR author picks file names. Interpolating it into a `run:` block splices
+  // chosen text into the script — the class .flow/config.yml lists for these reusables.
+  const runBlocks = Object.values(wf.jobs ?? {})
+    .flatMap((j) => j.steps ?? [])
+    .map((s) => String(s.run ?? ""));
+  for (const block of runBlocks) {
+    assert.doesNotMatch(block, /\$\{\{[^}]*security_reason[^}]*\}\}/,
+      "security_reason must reach the shell through `env:`, where it is data, not script");
+  }
+  const report = (wf.jobs.security.steps ?? [])[0];
+  assert.equal(report.env?.SECURITY_REASON, "${{ needs.plan.outputs.security_reason }}",
+    "…and it must still actually be reported — passing it safely is not the same as dropping it");
 });
 
 // ── criterion 6: identical checks whoever opened the PR ───────────────────────────────────

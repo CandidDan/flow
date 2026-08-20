@@ -135,6 +135,23 @@ test("an unconfigured trigger list runs the security review on EVERY PR — fail
   assert.match(d.reason, /no `review\.security_paths` configured/);
 });
 
+test("a model name that would splice extra flags into the reviewer is rejected at the config", () => {
+  // Whole config lines, not values: a quote character only survives in the unquoted form.
+  for (const line of [
+    `model: "sonnet --dangerously-skip-permissions"`,
+    `model: a"b`,
+    `model: "-leading-dash"`,
+    `model: "x y"`,
+    `security_model: "opus --print"`,
+  ]) {
+    assert.throws(() => parseReviewConfig(`review:\n  ${line}\n`),
+      (e) => e instanceof ReviewError && /not a usable model name/.test(e.message),
+      `${JSON.stringify(line)} reaches the reviewer as \`--model <value>\` and must not pass`);
+  }
+  // A real model id is a bare identifier and must keep working.
+  assert.equal(parseReviewConfig(`review:\n  model: "claude-opus-5"\n`).model, "claude-opus-5");
+});
+
 test("securityDecision survives an empty diff and a `**` trigger", () => {
   assert.equal(securityDecision({ changedFiles: [], securityPaths: ["src/**"] }).run, false);
   assert.equal(securityDecision({ changedFiles: ["x"], securityPaths: ["**"] }).run, true);

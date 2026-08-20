@@ -88,6 +88,11 @@ jobs:
           git fetch -q origin "${{ github.base_ref }}"
           node .flow/bin/flow-review.mjs plan
 
+  # Each reviewer below re-runs `plan` to materialise its own .flow-review/ rather than taking
+  # an artifact from the plan job. Two git diffs are cheaper than an upload/download round trip,
+  # and it keeps two more third-party actions out of the supply chain every adopting repo
+  # inherits — the concern .flow/config.yml lists under `uses:` pins.
+
   # ── qa ─────────────────────────────────────────────────────────────────────────────────
   # The real correctness gate: every acceptance criterion has a test that asserts its OUTCOME.
   # Coverage and the command exits are backstops — a green coverage number with an unproven
@@ -225,11 +230,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Security review applicability
+        # `security_reason` names the changed files that did (or did not) match the trigger
+        # globs, and a PR author controls file names. Interpolating it into the shell with
+        # ${{ }} would splice attacker-chosen text into the script — the exact class
+        # .flow/config.yml calls out for these reusables. It goes through the environment,
+        # where it is data and never parsed as shell.
+        env:
+          SECURITY_RUN: ${{ needs.plan.outputs.security_run }}
+          SECURITY_REASON: ${{ needs.plan.outputs.security_reason }}
         run: |
+          if [ "$SECURITY_RUN" = "true" ]; then verdict="RUNNING"; else verdict="SKIPPED"; fi
           {
-            echo "### Security review — ${{ needs.plan.outputs.security_run == 'true' && 'RUNNING' || 'SKIPPED' }}"
-            echo
-            echo "${{ needs.plan.outputs.security_reason }}"
+            printf '### Security review — %s\n\n' "$verdict"
+            printf '%s\n' "$SECURITY_REASON"
           } | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v4
         if: ${{ needs.plan.outputs.security_run == 'true' }}
