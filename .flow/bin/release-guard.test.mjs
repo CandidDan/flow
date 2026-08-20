@@ -21,7 +21,6 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse as parseYaml } from "yaml";
 
 import { canonicalRepoRoot, canonicalVersionFiles, checkRelease, RELEASE_TAG } from "./release-guard.mjs";
 
@@ -162,15 +161,43 @@ test("the adapter runs against canonical itself without crashing", () => {
 
 // ── the workflow wiring ────────────────────────────────────────────────────────────────
 
+// Read the retag job's steps WITHOUT a YAML parser, on purpose. `_flow-gates.yml`'s flow-tooling
+// job runs `node --test .flow/bin/*.test.mjs` with no `npm ci` in front of it, so a test in this
+// directory that imports `yaml` cannot resolve it and the job dies before a single test runs —
+// which is how this file first failed CI. `_flow-gates.yml` is flow-0008's to change, not this
+// task's, so the dependency goes rather than the workflow.
+//
+// The assumption this makes, stated plainly: steps in this file are list items at six-space
+// indent under a job at two-space indent. That holds because `npm run build` parses every
+// workflow on every gate, so a malformed one never reaches here.
+//
+// Comment lines are dropped before blocks are cut. A comment ABOVE a step sits at the step's
+// own indent, so keeping it would append it to the PREVIOUS step — and since the comment above
+// the guard step names `release-guard.mjs`, every search below would match the setup-node step
+// instead. That is not hypothetical: it is what these tests did on the first run.
 function retagSteps() {
-  const wf = parseYaml(readFileSync(WORKFLOW, "utf8"));
-  return wf.jobs.retag.steps;
+  const lines = readFileSync(WORKFLOW, "utf8").split("\n");
+  const job = lines.findIndex((l) => /^ {2}retag:/.test(l));
+  assert.ok(job >= 0, "release-tag.yml must still have a `retag` job");
+  const start = lines.findIndex((l, i) => i > job && /^ {4}steps:/.test(l));
+  assert.ok(start >= 0, "the retag job must still have steps");
+
+  const steps = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^ {0,2}\S/.test(lines[i])) break;            // a new job (or top-level key) — done
+    if (/^\s*#/.test(lines[i])) continue;             // a comment belongs to no step (see below)
+    if (/^ {6}- /.test(lines[i])) steps.push([]);      // a new list item at step indent
+    if (steps.length) steps[steps.length - 1].push(lines[i]);
+  }
+  return steps.map((block) => block.join("\n"));
 }
+
+const stepWith = (steps, needle) => steps.findIndex((s) => s.includes(needle));
 
 test("release-tag.yml runs the guard BEFORE it moves the edge tag", () => {
   const steps = retagSteps();
-  const guard = steps.findIndex((s) => String(s.run ?? "").includes(".flow/bin/release-guard.mjs"));
-  const move = steps.findIndex((s) => s.name === "Move the edge tag to this commit");
+  const guard = stepWith(steps, ".flow/bin/release-guard.mjs");
+  const move = stepWith(steps, "name: Move the edge tag to this commit");
 
   assert.ok(guard >= 0, "release-tag.yml must invoke the guard at all");
   assert.ok(move >= 0, "the retag step must still be there");
@@ -180,33 +207,47 @@ test("release-tag.yml runs the guard BEFORE it moves the edge tag", () => {
 
 test("the workflow only INVOKES the guard — no branching logic in YAML", () => {
   const steps = retagSteps();
-  const guard = steps.find((s) => String(s.run ?? "").includes("release-guard.mjs"));
-  assert.equal(guard.run.trim(), "node .flow/bin/release-guard.mjs",
-    "four earlier tasks ended up with criteria unprovable outside a workflow run because their " +
-    "logic lived in inline shell; if this grows an `if`, move it into the module");
-  assert.deepEqual(guard.env, { GITHUB_REF_NAME: "${{ github.ref_name }}" },
-    "argument passing only");
+  const guard = steps[stepWith(steps, "release-guard.mjs")];
+
+  // The whole `run:` is one line and is exactly the invocation. An `if`, a `case`, or a second
+  // command would all break this — four earlier tasks ended up with criteria unprovable outside
+  // a workflow run because their logic lived in inline shell.
+  const runLines = guard.split("\n").filter((l) => /^\s*run:/.test(l));
+  assert.deepEqual(runLines.map((l) => l.trim()), ["run: node .flow/bin/release-guard.mjs"],
+    "if this grows any logic, move it into the module");
+  assert.ok(!/^\s+(if|for|while|case)\b/m.test(guard), "no shell branching in the step");
+  assert.ok(guard.includes("GITHUB_REF_NAME: ${{ github.ref_name }}"),
+    "the ref reaches the guard as an ENV VAR — never interpolated into a shell string");
 });
 
 test("the guard calls the ADAPTER, not the template's copy", () => {
   const steps = retagSteps();
-  const guard = steps.find((s) => String(s.run ?? "").includes("release-guard.mjs"));
-  assert.ok(!guard.run.includes("project-template"),
+  assert.ok(!steps[stepWith(steps, "release-guard.mjs")].includes("project-template"),
     "running the template's CLI would default the repo to process.cwd() and check nothing pinned");
 });
 
 test("the happy path is unchanged: the edge alias still moves, and v1 is still left alone", () => {
-  const move = retagSteps().find((s) => s.name === "Move the edge tag to this commit").run;
+  const steps = retagSteps();
+  const move = steps[stepWith(steps, "name: Move the edge tag to this commit")];
   assert.match(move, /git tag -f "\$EDGE"/, "the edge alias must still be moved");
   assert.match(move, /git push -f origin "refs\/tags\/\$EDGE"/, "and still pushed");
-  assert.ok(!/git (tag|push).*"\$STABLE"/.test(move),
+  assert.ok(!/git (tag|push)[^\n]*"\$STABLE"/.test(move),
     "the guard must not have turned the canary split into an automatic v1 move — that is the " +
     "decision release-tag.yml's header records, and this task must not reverse it");
 });
 
 test("the guard step has a node runtime to run on", () => {
   const steps = retagSteps();
-  const setup = steps.findIndex((s) => String(s.uses ?? "").startsWith("actions/setup-node"));
-  const guard = steps.findIndex((s) => String(s.run ?? "").includes("release-guard.mjs"));
+  const setup = stepWith(steps, "uses: actions/setup-node");
+  const guard = stepWith(steps, "release-guard.mjs");
   assert.ok(setup >= 0 && setup < guard, "setup-node must precede the guard step");
+});
+
+test("the step reader actually found the retag job's steps (guards the assertions above)", () => {
+  // Every assertion above is a findIndex over this list. If the reader silently returned [] —
+  // an indentation change, a renamed job — `stepWith` returns -1 and `guard < move` is false,
+  // which would fail loudly. This pins the reader itself so a failure names the real cause.
+  const steps = retagSteps();
+  assert.ok(steps.length >= 4, `expected the retag job's steps, got ${steps.length}`);
+  assert.ok(steps[0].includes("uses: actions/checkout"), "first step should still be the checkout");
 });
