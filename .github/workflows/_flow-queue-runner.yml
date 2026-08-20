@@ -117,9 +117,11 @@ jobs:
             2. BRANCH off latest main: flow/${{ steps.pick.outputs.task_id }}-<slug>.
             3. BUILD strictly against the task's acceptance criteria and within its declared
                `touches` — nothing more, nothing outside those globs.
-            4. GATE: run the project's build/lint/test/coverage from .flow/config.yml plus the
-               qa-verifier, security-reviewer and code-reviewer subagents. Fix failures; do not
-               open the PR until all pass.
+            4. GATE: run the project's build/lint/test/coverage from .flow/config.yml. Fix
+               failures; do not open the PR until all four pass. Do NOT run any review subagent
+               — the qa, security and code-review gates are checks on the PR (flow-review.yml),
+               deliberately outside your session so the work and its reviewer are not the same
+               context. Your job is to make them pass, not to run them.
             5. PR: open it titled "[${{ steps.pick.outputs.task_id }}] <title>", link the task
                file, paste the acceptance checklist with the proving test for each item. STOP —
                do not merge.

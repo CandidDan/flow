@@ -33,17 +33,20 @@ what it deliberately does **not** touch. Out-of-scope discoveries become new tas
 ## Acceptance criteria
 
 The contract for "done." Each line must be **observable and testable** — the worker
-writes at least one test per criterion, and the qa-verifier checks the mapping.
+writes at least one test per criterion, and the qa check on the PR verifies the mapping.
 
 - [ ] Given <situation>, when <action>, then <observable outcome>.
 - [ ] …
 
 ## Definition of done (inherited — do not edit)
 
-Every criterion has a proving test (qa-verifier pass) · security-reviewer no high/critical ·
-code-reviewer blocking items resolved · build + lint + test pass · coverage ≥ `coverage_min`
-(a floor, not the gate) · PR open, task linked, criteria checklist ticked with the proving
-test named.
+Every criterion has a proving test (qa check passes) · security check no high/critical, or
+visibly skipped as out of its trigger paths · code-review check blocking items resolved ·
+build + lint + test pass · coverage ≥ `coverage_min` (a floor, not the gate) · PR open, task
+linked, criteria checklist ticked with the proving test named.
+
+The first three are **checks on the PR**, not subagents the worker runs — it does not certify
+its own work. Build, lint, test and coverage are the worker's, and are owed before the PR opens.
 
 ## Notes / open questions
 

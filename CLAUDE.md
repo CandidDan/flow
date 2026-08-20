@@ -75,28 +75,29 @@ only the CLI shell plus canonical's own store location.
   store as `dirname(realpath(import.meta.url))/..`, so a symlink would silently read the
   *template's* fixture store instead of canonical's — with every command still exiting 0.
 
-## Skills and agents
+## Skills, and the reviewers that are no longer agents
 
-They live under `project-template/.claude/`, and are readable there:
+Skills live under `project-template/.claude/`, and are readable there:
 
 - `project-template/.claude/skills/task-writer/SKILL.md` — the procedure for writing a task. The
   orchestrator follows it; the worker never creates tasks.
 - `project-template/.claude/skills/board-builder/SKILL.md` — regenerates a board. Not used in this
   repo; the flightdeck supersedes it here.
-- `project-template/.claude/agents/` — the qa-verifier, security-reviewer and code-reviewer
-  definitions.
 
-**Caveat:** Claude Code auto-discovers agents only from a **root** `.claude/agents/`, which
-canonical does not have. That is deliberate, not an oversight — flow-0007 moves those three agents
-out of the worker's session and into CI, and canonical adopts whatever that lands rather than
-taking a copy that is about to be rewritten. Until then, read the definitions above and apply them
-yourself.
+**There are no review agents to run, here or anywhere.** flow-0007 moved the three
+Definition-of-Done reviewers — qa, security, code-review — out of the worker's session and onto
+the PR as checks (`.github/workflows/_flow-review.yml`). A worker that spawns a review subagent is
+doing the one thing this system otherwise refuses to do: certifying its own work from inside the
+context that produced it. Run `build`, `lint`, `test` and `coverage`; the reviewers meet you on the
+PR. Their model and the paths that trigger the conditional security review are data, in the
+consuming repo's `.flow/config.yml` under `review:`.
 
 ## Things that are absent on purpose
 
 Do not "fix" these:
 
-- **No root `.claude/agents/`** — see above; flow-0007 owns it.
+- **No root `.claude/agents/`** — and none in the template either. The review gates are PR
+  checks now (see above), so there is nothing for Claude Code to auto-discover.
 - **No `.flow/VERSION`** — that stamp exists so an *adopting* repo can detect it has fallen behind
   canonical. Canonical is the thing being compared against; the root `VERSION` file is the single
   source, and a second stamp inside `.flow/` would have nothing to compare to.
