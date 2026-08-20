@@ -1,14 +1,14 @@
 ---
 id: "flow-0005"
 title: "Make project adoption an executable command instead of a runbook an agent improvises"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude/next-task-tjqgta"
 created: "2026-08-11"
 started: "2026-08-20T05:40:29Z"
-branch: ""
-pr: ""
+branch: "claude/next-task-tjqgta"
+pr: "https://github.com/CandidDan/flow/pull/20"
 issue: ""
 blocked_reason: ""
 serves: ["G4"]            # adoption as an executable command rather than folklore
