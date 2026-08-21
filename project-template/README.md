@@ -36,10 +36,6 @@ CLAUDE.md                     The protocol. The contract Code reads every sessio
     pick-task.test.mjs
                               All tooling ships with tests (node --test) — the DoD applies to it too.
 .claude/
-  agents/                     The quality gates, run before any PR:
-    qa-verifier.md              every criterion has a proving test (the real gate) + coverage floor
-    security-reviewer.md        secrets, deps, authz, input validation, + project focus areas
-    code-reviewer.md            correctness, scope adherence, maintainability
   skills/
     task-writer/                orchestrator discipline: how to write a *ready* task
     board-builder/              regenerate board.html from the task files
@@ -51,7 +47,11 @@ CLAUDE.md                     The protocol. The contract Code reads every sessio
   flow-done.yml               On PR merge, flips the matching task to `done` on main.
   flow-triage.yml             Scheduled issue triage: propose → approve → ready task. Off by
                               default (FLOW_AI variable + CLAUDE_CODE_OAUTH_TOKEN secret to enable).
-  flow-review.yml             Independent Claude review on flow PRs. Same off-by-default gate.
+  flow-review.yml             The three Definition-of-Done review checks on every PR — qa,
+                              code-review, and (conditionally) security. They run HERE, not in
+                              the worker's session, so the work and its reviewer are never the
+                              same context. Model + security trigger paths come from the
+                              `review:` block in config.yml. Same off-by-default gate.
   flow-queue-runner.yml       Scheduled/dispatchable: picks a ready task → dispatches a fresh
                               worker through the loop. The board's "Work this" link targets it.
 .gitattributes                Marks board.html / board-edits.json as generated (diff hygiene).
@@ -197,12 +197,15 @@ state. When something feels stuck:
 
 ## What it costs
 The gate isn't free, and that's deliberate — but spend it where it pays:
-- **Per PR** you pay for up to three review agents plus a CI run. The agents review the **diff and
-  its blast radius, not the whole repo** (see each agent's prompt), which is what keeps per-PR cost
-  bounded as the codebase grows.
-- **Scope the heavy agents.** `security-reviewer` earns its keep on diffs touching auth, external
-  input, data access, or dependencies; on a pure copy/styling change it has little to chew on. The
-  agents run on `sonnet` by design — capable enough to be hard to fool, cheap enough to run every PR.
+- **Per PR** you pay for up to three review checks plus a CI run. Each reviewer reads the **diff
+  and its blast radius, not the whole repo** — a bound `.flow/bin/flow-review.mjs` materialises
+  rather than merely asks for, which is what keeps per-PR cost bounded as the codebase grows.
+- **Scope the heavy reviewer.** The security check earns its keep on diffs touching auth, external
+  input, data access, or dependencies; on a pure copy/styling change it has little to chew on. List
+  those paths in `review.security_paths` and it runs only when they change, saying so on the ones
+  where it doesn't. Leave the list empty and it runs on every PR — unscoped is not off.
+- **The model is config.** `review.model` (and optionally `review.security_model`) decide it, so
+  tuning cost is a one-line edit here, never a patch to shared infra.
 - **CI minutes** scale with PR volume, not project size, because each gate runs the same fixed
   command set from `config.yml`. Small, frequent, disjoint tasks (which the model already wants for
   concurrency) are also the cheapest to gate.

@@ -8,7 +8,7 @@ project:
   language: "REPLACE-ME"        # e.g. typescript, python, swift, go, ruby
   description: "REPLACE-ME"
 
-# Commands. Each must exit non-zero on failure so CI and the qa-verifier can trust them.
+# Commands. Each must exit non-zero on failure so CI and the qa review check can trust them.
 # Examples are illustrative — set the real ones for this repo.
 #
 # COVER EVERY SOURCE TREE. The gate only validates what these commands actually reach. If the
@@ -34,7 +34,7 @@ commands:
 
 # The coverage FLOOR — a backstop, not the real gate. It's a blunt, game-able signal
 # (lines executed, not behaviour proven), so the actual correctness check is the
-# qa-verifier's criterion->test mapping; this just stops coverage quietly collapsing.
+# qa check's criterion->test mapping; this just stops coverage quietly collapsing.
 # The gate fails if coverage drops below this, regardless of stack. Pick a real number;
 # raise it over time, never lower it silently. Sitting exactly at the floor proves nothing.
 coverage_min: 80
@@ -54,7 +54,7 @@ source_roots:
   # - path: "supabase/functions/"
   #   check: "deno check supabase/functions/**/*.ts"
 
-# Security expectations the security-reviewer enforces on top of its general review.
+# Security expectations the security review check enforces on top of its general review.
 # List anything stack- or project-specific that has bitten you before.
 security:
   secrets_scan: true            # no credentials, tokens, keys committed
@@ -64,6 +64,36 @@ security:
     - "input validation on all external entry points"
     - "secret storage (vaults/env, never source)"
     # e.g. for a Supabase project you might add: "row-level security policies", "OAuth token handling"
+
+# The review gate — the three Definition-of-Done reviewers that run as CHECKS ON THE PR
+# (flow-review.yml), not as subagents inside the worker's session. The worker no longer
+# certifies its own work; these are the only things that do.
+#
+# Everything here is DATA. Nothing in the reusable workflow names a model or a path, so a
+# project tunes its review by editing this block rather than by patching shared infra.
+review:
+  # The model the qa and code-review checks run on. Capable enough to be hard to fool, cheap
+  # enough to run on every PR. Omit it and the gate falls back to a default AND says so in the
+  # run summary — an unconfigured repo should look unconfigured.
+  model: "sonnet"
+
+  # Optional: a deeper model for the security check only, since it runs on a minority of PRs.
+  # Omit to use `model` for all three.
+  security_model: "opus"
+
+  # The security review is CONDITIONAL: it runs when the diff touches one of these globs, and
+  # is skipped — visibly, with the reason on the run — when it does not. It earns its keep on
+  # auth, external input, data access and dependency diffs, and has little to chew on in a copy
+  # change; per-PR cost is what keeps the gate affordable enough to leave switched on.
+  #
+  # Same glob syntax as a task's `touches` (`**` spans directories, `*` does not).
+  #
+  # LEAVING THIS EMPTY IS NOT "off" — an unscoped repo runs the security review on EVERY PR.
+  # "Nobody scoped it yet" must never read as "nothing here needs review."
+  security_paths:                       # REPLACE-ME — the paths that warrant a security review
+    - "REPLACE-ME/auth/**"              # e.g. "src/auth/**", "app/api/**"
+    - "package.json"                    # dependency changes, whatever the lockfile stack
+    - "package-lock.json"
 
 # Branch + PR conventions (kept here so agents and CI agree).
 git:

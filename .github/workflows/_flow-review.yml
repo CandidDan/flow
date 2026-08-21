@@ -1,26 +1,49 @@
 name: _flow-review (reusable)
 
-# Reusable form of the independent AI review. Repos call it from a thin caller that owns the
-# pull_request trigger; the logic is authored once in canonical. See
-# docs/flow-reusable-workflows.md.
+# The three Definition-of-Done reviewers — qa, code-review, security — as CHECKS ON THE PR
+# (flow-0007). They used to run as subagents inside the worker's own session, which made the
+# worker the certifier of its own work: same context, same assumptions, same blind spots. Every
+# other guard in Flow refuses to take the worker's word for it — touches-guard enforces scope in
+# CI, the store-guard fails a PR that edits task state, flow-doctor validates the store rather
+# than trusting it. These now work the same way.
 #
-# The three gate agents (qa/security/code-review) run as subagents OF THE WORKER'S SESSION —
-# same lineage, same context, the worker grading homework it helped set. This review runs
-# server-side with fresh eyes and no session state, which is what makes it independent. It
-# matters most on the auto-ok lane, where no human approved the spec going in.
+# Portability follows from the integrity fix rather than the other way round: the reviewer is
+# still a model call and still Claude. What changes is that THE WORKER no longer has to be the
+# same vendor as the reviewer — a PR from any agent, or from a human, gets the identical checks.
 #
-# Blocking semantics: this review posts findings; the human (or branch protection, if you make
-# it a required check) decides what blocks. For true MODEL diversity, also enable GitHub
-# Copilot code review as an advisory second opinion in repo settings → rulesets (needs a
-# Copilot seat; it's a GitHub-side setting, not a workflow).
+# Repos call this from a thin caller that owns the pull_request trigger; the logic is authored
+# once in canonical. See docs/flow-reusable-workflows.md.
 #
-# DISABLED BY DEFAULT. Enable with repo variable FLOW_AI=true + CLAUDE_CODE_OAUTH_TOKEN secret
-# (from `claude setup-token` — uses your Max plan quota, not API credits). The thin caller
-# passes the secret with `secrets: inherit`.
-# (Check anthropics/claude-code-action's current README for input names when enabling.)
+# WHAT IS NOT A MODEL CALL. A model call always exits 0, so the two pieces that actually block
+# live in `.flow/bin/flow-review.mjs`, with proving tests:
+#   · `plan`    — reads `review:` from the CALLER's .flow/config.yml (model, security trigger
+#                 paths), decides whether the conditional security review applies to this diff,
+#                 and materialises the bounded context the reviewers may read.
+#   · `verdict` — turns each reviewer's written verdict into an exit code, FAIL-CLOSED: a
+#                 missing, empty or unparseable verdict fails the check. A reviewer that died
+#                 mid-run must never read as an approval.
+#
+# NO MODEL IS NAMED IN THIS FILE. `review.model` / `review.security_model` in the consuming
+# repo's .flow/config.yml decide it — data the project tunes, not shared infra it has to patch.
+#
+# BLOCKING. These three block, in the same way a failed test blocks. Keep advisory reviewers
+# (e.g. GitHub Copilot code review, enabled repo-side) advisory: two blocking AI reviewers
+# deadlock on nitpicks, which the README already warns about.
+#
+# DISABLED BY DEFAULT. Enable with repo variable FLOW_AI=true + the CLAUDE_CODE_OAUTH_TOKEN
+# secret (from `claude setup-token` — uses your Max plan quota, not API credits). The thin
+# caller passes it with `secrets: inherit`. Note GitHub's own boundary: a PR from a FORK gets
+# no secrets, so the reviewers cannot run there. That is GitHub's rule, not Flow's — review
+# fork contributions on a branch in the repo.
 
 on:
   workflow_call:
+    inputs:
+      node_version:
+        description: "Node used to run .flow/bin/flow-review.mjs (the helper is dependency-free)."
+        required: false
+        type: string
+        default: "22"
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: false
@@ -32,50 +55,256 @@ permissions:
   id-token: write          # OIDC token minting for claude-code-action
 
 jobs:
-  review:
-    if: ${{ vars.FLOW_AI == 'true' && startsWith(github.event.pull_request.head.ref, 'flow/') }}
+  # ── plan ───────────────────────────────────────────────────────────────────────────────
+  # Reads the repo's own review config and decides the conditional security review, once, so
+  # every reviewer below runs on the same decision and the human sees it in the run summary.
+  plan:
+    if: ${{ vars.FLOW_AI == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      model: ${{ steps.plan.outputs.model }}
+      security_model: ${{ steps.plan.outputs.security_model }}
+      security_run: ${{ steps.plan.outputs.security_run }}
+      security_reason: ${{ steps.plan.outputs.security_reason }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+      - name: Plan the review — model, security trigger, bounded context
+        id: plan
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          # An adopting repo that bumped the workflow tag but has not run flow-sync yet has the
+          # new workflow and the old .flow/bin/. Say so, instead of failing on "node: not found".
+          if [ ! -f .flow/bin/flow-review.mjs ]; then
+            echo "::error::.flow/bin/flow-review.mjs is missing. This repo adopted a newer" \
+                 "_flow-review.yml than its .flow/bin/ — run the flow-sync workflow to adopt the" \
+                 "helper, then re-run these checks."
+            exit 1
+          fi
+          git fetch -q origin "${{ github.base_ref }}"
+          node .flow/bin/flow-review.mjs plan
+
+  # Each reviewer below re-runs `plan` to materialise its own .flow-review/ rather than taking
+  # an artifact from the plan job. Two git diffs are cheaper than an upload/download round trip,
+  # and it keeps two more third-party actions out of the supply chain every adopting repo
+  # inherits — the concern .flow/config.yml lists under `uses:` pins.
+
+  # ── qa ─────────────────────────────────────────────────────────────────────────────────
+  # The real correctness gate: every acceptance criterion has a test that asserts its OUTCOME.
+  # Coverage and the command exits are backstops — a green coverage number with an unproven
+  # criterion is still a FAIL.
+  qa:
+    needs: plan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
         with:
-          fetch-depth: 0
-
+          node-version: ${{ inputs.node_version }}
+      - name: Bounded context — the diff and the files it changes
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          git fetch -q origin "${{ github.base_ref }}"
+          node .flow/bin/flow-review.mjs plan
       - uses: anthropics/claude-code-action@v1
+        continue-on-error: true          # the verdict step below decides; never this action's exit
         with:
-          # Subscription auth (Pro/Max): run `claude setup-token` locally, save the result as
-          # the CLAUDE_CODE_OAUTH_TOKEN repo secret. Uses your plan quota, not API credits.
-          # (Token dies if you log out of Claude Code — regenerate with `claude setup-token`.)
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # GitHub API token for the action (read PR context, post the review comment).
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          # Pay-per-use alternative: comment the line above and use an API key instead.
-          # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Flow worker PRs are opened by github-actions[bot] (the worker uses GITHUB_TOKEN), so
-          # the reviewer must accept a bot-initiated run — without this the action aborts with
-          # "Workflow initiated by non-human actor". Safe here: the job is already fenced to
-          # FLOW_AI=true + a flow/ head branch, so only our own worker PRs reach it.
+          # Flow worker PRs are opened by a bot, so the reviewer must accept a bot-initiated run.
+          # This is also what makes criterion 6 true: the checks do not care who authored the PR.
           allowed_bots: "*"
+          # The model comes from the repo's .flow/config.yml. Nothing here names one.
+          claude_args: "--max-turns 60 --model ${{ needs.plan.outputs.model }} --permission-mode bypassPermissions"
           prompt: |
-            You are the independent reviewer for this PR — you did not write this code and owe
-            it nothing. Review the diff against its task:
+            You are the QA gate for this pull request. You did not write this code and owe it
+            nothing. You do not write feature code; you decide pass/fail, and you are hard to fool.
 
-            1. Parse the task id from the branch name (flow/<id>-…) and read the matching file
-               in .flow/tasks/ — its acceptance criteria, scope boundaries, and touches globs.
-            2. Verify the diff: satisfies each acceptance criterion (name the evidence), stays
-               inside the declared scope and touches, handles edge cases and failure paths, and
-               introduces no security concerns (secrets, injection, authz, unvalidated input).
-            3. Check the tests actually assert the criteria's outcomes — not merely that code
-               runs. A criterion without a proving test is a blocking finding.
-            4. Post ONE review comment: verdict (APPROVE / CHANGES NEEDED), blocking findings
-               with file:line and the concrete fix, then non-blocking notes. Be specific and
-               brief; no boilerplate praise.
+            YOUR CONTEXT IS BOUNDED — this is a cost control, not a suggestion. Read:
+              · .flow-review/diff.patch  — the full PR diff
+              · .flow-review/files.txt   — the files it changes
+              · the task file in .flow/tasks/ whose id is in the branch name (flow/<id>-…) or
+                the PR title prefix ([<id>] …), for its acceptance criteria
+              · .flow/config.yml for this project's commands
+              · the specific test files the diff adds or changes
+            Do NOT read the repository at large. If the diff says it was truncated, say so in
+            your verdict rather than approving what you could not read.
 
-            You review only. Never push commits, never edit files, never change labels or task
-            state. If the branch has no matching task file, say so — that itself is a finding.
-          # --max-turns 80 (was 25) + bypassPermissions: reviewing a real PR is read the task +
-          # read the diff + check tests + post one review comment. On a headless runner with no
-          # permission posture, every gh/read call was denied (observed: 11 permission_denials,
-          # error_max_turns at 25 with no review posted). bypassPermissions lets it run its
-          # read-only gh/file calls unattended; the prompt still constrains it to "review only,
-          # never push/edit/label". Ephemeral, trusted CI runner.
-          claude_args: "--max-turns 80 --permission-mode bypassPermissions"
+            Your verdict turns on ONE thing above all: does every acceptance criterion in the
+            task have a test that proves its OUTCOME? Coverage is a backstop — a green coverage
+            number with an unproven criterion is still a FAIL. For each criterion, name the
+            test (file::name) that exercises it, and check the test asserts the criterion's
+            outcome rather than merely that the code runs without throwing. A test that calls a
+            function and asserts nothing meaningful does not prove anything.
+
+            If the branch has no matching task file, say so — that itself is a finding.
+
+            THEN DO BOTH OF THESE:
+            1. Post ONE pull-request comment: the verdict, the criterion→test table, and for a
+               FAIL the smallest set of concrete things needed to pass. No boilerplate praise.
+            2. Write .flow-review/qa.json — this is what blocks or clears the check:
+               {"verdict":"PASS"|"FAIL",
+                "unproven":["<the criterion text, verbatim, for each with no proving test>"],
+                "summary":"<one line>"}
+               `unproven` must quote the criterion so the worker knows which one to fix.
+
+            You review only. Never push commits, never edit source files, never change labels or
+            task state. The only file you write is .flow-review/qa.json.
+      - name: Enforce the qa verdict
+        if: always()
+        run: node .flow/bin/flow-review.mjs verdict .flow-review/qa.json --check qa
+
+  # ── code-review ────────────────────────────────────────────────────────────────────────
+  code-review:
+    needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+      - name: Bounded context — the diff and the files it changes
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          git fetch -q origin "${{ github.base_ref }}"
+          node .flow/bin/flow-review.mjs plan
+      - uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_bots: "*"
+          claude_args: "--max-turns 60 --model ${{ needs.plan.outputs.model }} --permission-mode bypassPermissions"
+          prompt: |
+            You are the code-quality gate for this pull request. You did not write this code and
+            owe it nothing. Separate findings into blocking (must fix) and non-blocking.
+
+            YOUR CONTEXT IS BOUNDED — read .flow-review/diff.patch, .flow-review/files.txt, the
+            task file in .flow/tasks/ resolved from the branch name (flow/<id>-…) or the PR title
+            prefix ([<id>] …), and the specific files the diff touches. Do NOT read the
+            repository at large.
+
+            Review for:
+            1. Correctness — does it satisfy each acceptance criterion? Logic errors, off-by-one,
+               wrong conditionals, mishandled async, race conditions.
+            2. Scope — does the diff do EXACTLY what the task specified? Flag scope creep
+               (unasked-for changes) and scope gaps (criteria not met). Creep is blocking even
+               when the extra code is nice; it belongs in its own task.
+            3. Edge cases and errors — empty/null/boundary inputs, failure paths, error handling
+               and messaging. Are failures surfaced, not swallowed?
+            4. Maintainability — naming, dead code, duplication, needless complexity, leaked
+               abstractions. Would the next person understand this in six months?
+            5. Consistency — follows the patterns already in this codebase, not a new dialect.
+
+            THEN DO BOTH OF THESE:
+            1. Post ONE pull-request comment: verdict, blocking findings (file:line · what is
+               wrong · the fix), then non-blocking notes. If it passes, one line on what the
+               change does well — calibration matters, do not only ever criticise.
+            2. Write .flow-review/code-review.json:
+               {"verdict":"PASS"|"FAIL",
+                "blocking":[{"file":"…","line":0,"issue":"…","fix":"…"}],
+                "summary":"<one line>"}
+               Non-blocking notes belong in the comment, not in `blocking`.
+
+            You review only. Never push commits, never edit source files, never change labels or
+            task state. The only file you write is .flow-review/code-review.json.
+      - name: Enforce the code-review verdict
+        if: always()
+        run: node .flow/bin/flow-review.mjs verdict .flow-review/code-review.json --check code-review
+
+  # ── security ───────────────────────────────────────────────────────────────────────────
+  # CONDITIONAL, and the condition comes from the repo's `review.security_paths`. This job
+  # always RUNS so the check is always present on the PR: when the diff touches none of the
+  # configured trigger paths it reports the skip and why. A skip that leaves no trace is
+  # indistinguishable from a gate that broke.
+  security:
+    needs: plan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Security review applicability
+        # `security_reason` names the changed files that did (or did not) match the trigger
+        # globs, and a PR author controls file names. Interpolating it into the shell with
+        # ${{ }} would splice attacker-chosen text into the script — the exact class
+        # .flow/config.yml calls out for these reusables. It goes through the environment,
+        # where it is data and never parsed as shell.
+        env:
+          SECURITY_RUN: ${{ needs.plan.outputs.security_run }}
+          SECURITY_REASON: ${{ needs.plan.outputs.security_reason }}
+        run: |
+          if [ "$SECURITY_RUN" = "true" ]; then verdict="RUNNING"; else verdict="SKIPPED"; fi
+          {
+            printf '### Security review — %s\n\n' "$verdict"
+            printf '%s\n' "$SECURITY_REASON"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@v4
+        if: ${{ needs.plan.outputs.security_run == 'true' }}
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        if: ${{ needs.plan.outputs.security_run == 'true' }}
+        with:
+          node-version: ${{ inputs.node_version }}
+      - name: Bounded context — the diff and the files it changes
+        if: ${{ needs.plan.outputs.security_run == 'true' }}
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          git fetch -q origin "${{ github.base_ref }}"
+          node .flow/bin/flow-review.mjs plan
+      - uses: anthropics/claude-code-action@v1
+        if: ${{ needs.plan.outputs.security_run == 'true' }}
+        continue-on-error: true
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_bots: "*"
+          # A repo that wants a deeper model on security diffs sets review.security_model;
+          # otherwise this is review.model. Either way it comes from config, not from here.
+          claude_args: "--max-turns 60 --model ${{ needs.plan.outputs.security_model }} --permission-mode bypassPermissions"
+          prompt: |
+            You are the security gate for this pull request. Findings are rated, and the gate is
+            binary on High/Critical.
+
+            YOUR CONTEXT IS BOUNDED — review the DIFF and its immediate blast radius, not the
+            whole repo. Read .flow-review/diff.patch, .flow-review/files.txt, the `security`
+            block of .flow/config.yml (`secrets_scan`, `dependency_audit`, `focus[]`), and the
+            specific files the diff touches. Do NOT read the repository at large.
+
+            Always check:
+            1. Secrets — no keys, tokens, passwords, connection strings or private certs in the
+               diff, including in tests and fixtures.
+            2. Dependencies — new dependencies are real, maintained, and not typosquats; run the
+               stack's audit command if one is configured.
+            3. Authn/authz — any new endpoint, query or action: is it access-controlled? Can a
+               user reach data that is not theirs? Watch for MISSING checks, not just wrong ones.
+            4. Input validation — every external entry point (request bodies, params, uploads,
+               webhook payloads, env) validated and bounded before use. Watch injection.
+            5. Secret storage — read from env/vault, never hard-coded, never logged, never
+               echoed in an error.
+
+            Then do a targeted pass for each item in config.yml → `security.focus`. Those are
+            listed because they have mattered in this repo before; treat them as first-class.
+
+            THEN DO BOTH OF THESE:
+            1. Post ONE pull-request comment: verdict, then a findings table — severity
+               (Critical/High/Medium/Low) · file:line · issue · fix. For each High/Critical give
+               the concrete remediation, not "consider reviewing".
+            2. Write .flow-review/security.json:
+               {"verdict":"PASS"|"FAIL",
+                "blocking":[{"file":"…","line":0,"issue":"…","fix":"…"}],
+                "summary":"<one line>"}
+               FAIL iff there is a High or Critical finding, and `blocking` holds exactly those.
+               Medium/Low go in the comment; they do not block.
+
+            You review only. Never push commits, never edit source files, never change labels or
+            task state. The only file you write is .flow-review/security.json.
+      - name: Enforce the security verdict
+        if: ${{ always() && needs.plan.outputs.security_run == 'true' }}
+        run: node .flow/bin/flow-review.mjs verdict .flow-review/security.json --check security

@@ -140,7 +140,9 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
    the task id travels in the **PR title** (step 7), which is what the automation actually reads.
 4. **Build.** Implement against the acceptance criteria in the task body. Nothing more, and
    nothing outside the task's declared `touches`.
-5. **Gate** (all must pass before a PR — see below). If any fails, fix; don't open the PR.
+5. **Gate** — run the local half (`build`, `lint`, `test`, `coverage`) and fix what it finds;
+   don't open the PR until it is clean. The three review checks are not yours to run: they run
+   on the PR (see *The gate* below).
 6. **Rebase.** `git pull --rebase origin main` onto your branch; re-run the gate if `main`
    moved. Unresolvable conflict → `blocked`/kickback, surfaced.
 7. **PR.** Open it, title `[<task-id>] <title>` — **this exact prefix is load-bearing**, not
@@ -149,8 +151,9 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
    between your PR and a silently skipped transition. Link the task file path in the description,
    paste the acceptance-criteria checklist with each item ticked + the test that proves it.
 8. **Hand off.** The `flow-status` workflow flips the task to `in_review` and records
-   `branch` + `pr` when the PR opens — you don't write that transition. Regenerate the board.
-   Stop. The human validates.
+   `branch` + `pr` when the PR opens — you don't write that transition. The qa, code-review and
+   security checks run on the PR and post their verdicts there. Regenerate the board. Stop. The
+   human validates.
 9. **Kickback** (if the human comments) arrives as a new `notes` entry on the task or a PR
    comment. Address it on the same branch, re-run gates, re-request review.
 
@@ -202,12 +205,14 @@ A PR may not open until **all** of these are true. This is non-negotiable and st
 They are ordered by how much they actually prove, not by convenience:
 
 1. **Every acceptance criterion has at least one test that exercises it, and the test asserts
-   the criterion's *outcome*.** This is the real correctness gate — the **qa-verifier**
-   subagent checks the criterion→test mapping by name. New behaviour ships with new tests;
+   the criterion's *outcome*.** This is the real correctness gate — the **qa check** on the PR
+   verifies the criterion→test mapping by name. New behaviour ships with new tests;
    no exceptions for "trivial" changes. A criterion with no proving test fails the gate even
    if coverage is green.
-2. The **security-reviewer** subagent has run and reported no high/critical findings.
-3. The **code-reviewer** subagent has run and its blocking findings are resolved.
+2. The **security check** has run and reported no high/critical findings — or has recorded, in
+   the open, that this diff touches none of the repo's `review.security_paths` and so did not
+   warrant one. A skip is a decision on the record, never an absence.
+3. The **code-review check** has run and its blocking findings are resolved.
 4. `build` succeeds, `lint` is clean (no errors; warnings noted in the PR), `test` passes.
 5. `coverage` is at or above `coverage_min` in `config.yml`. **Treat this as a floor, not a
    target** — it's a blunt, game-able signal (lines hit, not behaviour proven), so it backs
@@ -216,6 +221,25 @@ They are ordered by how much they actually prove, not by convenience:
 
 If a project genuinely cannot meet a gate (e.g. coverage tooling missing for the stack),
 that is a `blocked` task with a `blocked_reason`, not a reason to skip the gate.
+
+**Where these run, and why it is not in your session.** 1–3 are **checks on the pull request**
+(`flow-review.yml`), not subagents you invoke. **You never run a review agent.** If you find
+yourself about to spawn one, stop: that is the old shape, and it is the one place this system
+used to take the worker's word for its own work — same session, same context, same blind spots
+as the code being judged. Everything else here refuses that (`touches-guard` enforces scope in
+CI, the store-guard fails a PR that edits task state, `flow-doctor` validates the store), and
+the most consequential check should not be the exception.
+
+4 and 5 are yours, and they are what you owe before opening: run them locally, fix what they
+find, and only then open the PR. 1–3 then run against the diff, post their reasoning in the PR
+conversation, and block it the way a failed test blocks it. A red review check is a kickback
+(step 9), not a new task.
+
+Two consequences worth stating plainly. **You cannot self-certify** — opening a PR is a request
+for the definition of done to be checked, not a claim that it has been. And **the reviewer no
+longer has to be your vendor**: it is still a model call, but it is a model call in CI, so an
+agent of any lineage can do the work and get the identical checks. That is the portability this
+buys — not a vendor-neutral reviewer.
 
 ## Hard rules
 
