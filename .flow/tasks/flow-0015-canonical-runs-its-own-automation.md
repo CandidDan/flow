@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0015"
 title: "Make canonical run the automation it ships, so the repo defining the protocol isn't the one exempt from it"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "flow/flow-0015-canonical-runs-its-own-automation"
 created: "2026-08-18"
 started: "2026-08-21T15:52:37Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0015-canonical-runs-its-own-automation"
+pr: "https://github.com/CandidDan/flow/pull/24"
 issue: ""
 blocked_reason: ""
 serves: ["G4"]            # what canonical says is what the fleet runs — starting with canonical
