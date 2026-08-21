@@ -1,7 +1,7 @@
 ---
 id: "flow-0007"
 title: "Move the review gates out of the worker's session so they can't review their own work"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "flow/flow-0007-review-gates-out-of-session"
