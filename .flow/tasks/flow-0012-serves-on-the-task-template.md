@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0012"
 title: "Give every task a goal to name, so the anchor exists before the check enforces it"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "flow/flow-0012-serves-on-the-task-template"
 created: "2026-08-18"
-started: ""
+started: "2026-08-21T15:39:52Z"
 branch: ""
 pr: ""
 issue: ""
