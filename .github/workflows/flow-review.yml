@@ -1,0 +1,38 @@
+name: flow-review
+
+# Canonical's own caller of the three Definition-of-Done review checks (qa, code-review,
+# security). Referenced from `main` rather than a tag — see flow-gates.yml in this directory for
+# why canonical is the one repo where that is the safer pin.
+#
+# These reviewers used to run as subagents inside the worker's own session. They run here now so
+# the thing being reviewed and the thing reviewing it are no longer the same session (flow-0007).
+# A worker in this repo runs build/lint/test/coverage and nothing else; the definition of done is
+# certified only by these checks. Until this caller existed, that sentence was true of every repo
+# adopting Flow and false of the repo writing it — canonical's PRs were self-certified.
+#
+# The reviewer model and the paths that trigger the conditional security review are DATA, in
+# this repo's .flow/config.yml under `review:` — tune them there, never by editing shared infra.
+#
+# DORMANT until repo variable FLOW_AI=true and the CLAUDE_CODE_OAUTH_TOKEN secret is set. The
+# reusable's `plan` job is gated on `vars.FLOW_AI == 'true'` and the three checks need it, so
+# wiring this caller turns nothing on. Once enabled, make these checks REQUIRED in branch
+# protection: a blocking gate that nothing enforces is the failure mode flow-0007 exists to
+# remove.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main]
+
+jobs:
+  flow-review:
+    # id-token: write must be granted on the caller — OIDC is never in the default GITHUB_TOKEN,
+    # and a reusable workflow can't raise it above the caller's grant. A permissions block is
+    # exhaustive, so contents/pull-requests/issues are re-listed.
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    uses: CandidDan/flow/.github/workflows/_flow-review.yml@main
+    secrets: inherit

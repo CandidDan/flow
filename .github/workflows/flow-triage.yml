@@ -1,0 +1,37 @@
+name: flow-triage
+
+# Canonical's own caller of the issue-inbox triage sweep. Referenced from `main` rather than a
+# tag — see flow-gates.yml in this directory for why canonical is the one repo where that is
+# the safer pin.
+#
+# GitHub Issues are Flow's capture inbox, not its work queue. This sweep is what turns a raw
+# issue into a `ready` task in `.flow/tasks/` with the origin recorded in the task's `issue`
+# field. Canonical has an issue inbox like every other repo and, until now, no sweep over it.
+#
+# DORMANT until repo variable FLOW_AI=true and the CLAUDE_CODE_OAUTH_TOKEN secret is set. The
+# reusable's `triage` job is gated on `vars.FLOW_AI == 'true'`, so wiring this caller turns
+# nothing on — the cron below runs a job that immediately skips.
+#
+# WORTH KNOWING BEFORE ENABLING IT HERE. This grants an agent session `contents: write` on the
+# repo whose reusables every other repo executes. The mitigations are the ones that apply
+# anywhere — the gate, and the human merge — but canonical is the one repo where a bad merge
+# reaches the whole fleet at whatever ref they pinned. Note also that the sweep writes task
+# files to `main` directly, because that is where the store lives, and opens no PR: the human
+# merge is not a touchpoint on this path. Enable it deliberately.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1-5"   # weekday mornings, before the portfolio digest — adjust to taste
+  workflow_dispatch:
+
+jobs:
+  flow-triage:
+    # id-token: write must be granted on the caller — OIDC is never in the default GITHUB_TOKEN,
+    # and a reusable workflow can't raise it above the caller's grant. A permissions block is
+    # exhaustive, so contents/issues are re-listed.
+    permissions:
+      contents: write
+      issues: write
+      id-token: write
+    uses: CandidDan/flow/.github/workflows/_flow-triage.yml@main
+    secrets: inherit

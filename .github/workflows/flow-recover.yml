@@ -1,0 +1,43 @@
+name: flow-recover
+
+# Canonical's own caller of the stranded-task self-heal sweep. Referenced from `main` rather
+# than a tag — see flow-gates.yml in this directory for why canonical is the one repo where
+# that is the safer pin.
+#
+# A task claimed by a worker that then died sits at `in_progress` forever, holding its `touches`
+# against every other session's pick. The sweep ages a claim off `started` and returns it to
+# `ready`. Conservative by construction: it only acts past a staleness threshold, which is why
+# `started` must be a full UTC datetime and not a bare date.
+#
+# DORMANT until repo variable FLOW_AI=true. The reusable's `sweep` job is gated on
+# `vars.FLOW_AI == 'true' || github.event_name == 'workflow_dispatch'`, so wiring this caller
+# turns nothing on: the cron below is a no-op until the variable is set, and the sweep is
+# runnable on demand today. That is the right shape for canonical, whose store is currently
+# being restructured by hand.
+#
+# The `threshold_minutes` input is forwarded with `with:` rather than left to the reusable's
+# default so a human can widen it for one run without editing shared infra.
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"      # every 3h; the threshold (in the reusable) is the real gate
+  workflow_dispatch:
+    inputs:
+      threshold_minutes:
+        description: "Minutes of no movement before a task is considered stranded (default 75)."
+        required: false
+        type: string
+
+concurrency:
+  group: flow-recover
+  cancel-in-progress: false
+
+jobs:
+  flow-recover:
+    permissions:
+      contents: write          # reset commit to main
+      pull-requests: write     # reopen-pr path
+    uses: CandidDan/flow/.github/workflows/_flow-recover.yml@main
+    with:
+      threshold_minutes: ${{ inputs.threshold_minutes }}
+    secrets: inherit
