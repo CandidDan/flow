@@ -1,0 +1,52 @@
+name: flow-queue-runner
+
+# Canonical's own caller of the worker dispatcher. Referenced from `main` rather than a tag —
+# see flow-gates.yml in this directory for why canonical is the one repo where that is the
+# safer pin.
+#
+# Each run is a FRESH worker session that claims the top `ready` task (or the one named in
+# `task_id`) and works it to a PR.
+#
+# WORKFLOW_DISPATCH ONLY — THERE IS DELIBERATELY NO `schedule:` BLOCK HERE, and its absence is
+# asserted by a test. Every other caller in this directory keeps the template's cron; this one
+# does not, and the reason is cadence rather than permissions. `flow-triage` above holds the
+# same `contents: write` on `main` and both are bounded by the same review, so a permissions
+# argument would not distinguish them. Canonical's store is being actively restructured by hand
+# right now — the vision layer, the ADR-0002 amendment, tasks being blocked and rescoped — and
+# an unattended dispatcher claiming tasks against a queue that is moving underneath it produces
+# exactly the wasted-worker-run failure flow-0010 was written about. Adding the cron later is
+# one line; it should be a deliberate act taken once the queue is stable, not a default
+# inherited from the template.
+#
+# DORMANT until repo variable FLOW_AI=true and the CLAUDE_CODE_OAUTH_TOKEN secret is set. The
+# reusable's `dispatch` job is gated on `vars.FLOW_AI == 'true'`, so wiring this caller turns
+# nothing on — a manual dispatch today runs a job that immediately skips.
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: "Task id to work (e.g. flow-0015). Leave blank to auto-pick the top ready task."
+        required: false
+        type: string
+
+# One runner at a time: don't dispatch two workers in the same beat (first-push-wins still
+# protects the store, but this avoids burning a session on a task another just claimed).
+concurrency:
+  group: flow-queue-runner
+  cancel-in-progress: false
+
+jobs:
+  flow-queue-runner:
+    # id-token: write must be granted HERE, on the caller — OIDC permission is never in the
+    # default GITHUB_TOKEN, and a reusable workflow can't raise it above the caller's grant. A
+    # permissions block is exhaustive, so contents/pull-requests are re-listed too (the reusable
+    # needs both: state commits to main + PR open).
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    uses: CandidDan/flow/.github/workflows/_flow-queue-runner.yml@main
+    with:
+      task_id: ${{ inputs.task_id }}
+    secrets: inherit

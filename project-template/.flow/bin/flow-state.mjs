@@ -172,7 +172,13 @@ function trySh(cmd, args, opts = {}) {
 
 // Read every task on origin/main (NOT the working tree). Returns { tasks, source }.
 // Falls back to the working tree only if origin/main is unreadable, and says so loudly.
-function readTasksFromOrigin(repoRoot) {
+//
+// Exported because canonical adopts this file through a `.flow/bin/` adapter rather than a
+// copy, and the adapter needs the same reader pointed at a different repo root. The `WORKING
+// TREE` prefix on `source` is a CONTRACT, not a cosmetic string: flightdeck-state refuses any
+// project whose resolver fell back to it. Two implementations of that could drift apart
+// silently, so there is one.
+export function readTasksFromOrigin(repoRoot) {
   const inGit = trySh("git", ["-C", repoRoot, "rev-parse", "--is-inside-work-tree"]);
   if (inGit && inGit.trim() === "true") {
     const listing = trySh("git", ["-C", repoRoot, "ls-tree", "-r", "--name-only", "origin/main", ".flow/tasks"]);
@@ -202,7 +208,8 @@ function readTasksFromOrigin(repoRoot) {
 }
 
 // Pull every PR via one gh call. Returns [] and a note if gh is unavailable/unauthed.
-function readPrs(repoRoot) {
+// Exported alongside readTasksFromOrigin, for the same reason.
+export function readPrs(repoRoot) {
   if (!trySh("gh", ["--version"])) return { prs: [], ok: false, why: "gh not installed" };
   const out = trySh("gh", ["pr", "list", "--state", "all", "--limit", "300",
     "--json", "number,state,headRefName,url,title"], { cwd: repoRoot });
@@ -211,15 +218,21 @@ function readPrs(repoRoot) {
   catch { return { prs: [], ok: false, why: "could not parse gh output" }; }
 }
 
-// ── CLI ────────────────────────────────────────────────────────────────────
-if (__isMain) {
-  const argv = process.argv.slice(2);
+// ── the CLI shell, as a function ───────────────────────────────────────────
+// Everything the command does, with the two things that vary injected: WHICH repo root to
+// resolve state from, and where to write. Canonical's `.flow/bin/flow-state.mjs` adapter calls
+// this with its own repo root — the reason this is a function and not an inline `if (__isMain)`
+// block. Returns the exit code; it never calls process.exit, so a test can drive it directly.
+//
+// The repo root is a REQUIRED argument on purpose. Defaulting it to this file's own location
+// would make the adapter's whole job optional, and getting it wrong is silent: every command
+// still exits 0, having reported the template's fixture store as if it were the real one.
+export function runStateCli({ repoRoot, argv = [], out = process.stdout } = {}) {
   const asJson = argv.includes("--json");
   const noPr = argv.includes("--no-pr");
   const doFetch = argv.includes("--fetch");
   const idArg = argv.find((a) => !a.startsWith("--"));
 
-  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
   if (doFetch) trySh("git", ["-C", repoRoot, "fetch", "origin", "main", "--quiet"]);
 
   const { tasks, source } = readTasksFromOrigin(repoRoot);
@@ -229,20 +242,28 @@ if (__isMain) {
   if (idArg) rows = rows.filter((r) => r.id.toLowerCase() === idArg.toLowerCase() || String(idNum(r.id)) === idArg.replace(/\D/g, ""));
 
   if (asJson) {
-    process.stdout.write(JSON.stringify({ source, prReconciled: prOk, prNote: prOk ? undefined : prWhy, tasks: rows }, null, 2) + "\n");
-    process.exit(0);
+    out.write(JSON.stringify({ source, prReconciled: prOk, prNote: prOk ? undefined : prWhy, tasks: rows }, null, 2) + "\n");
+    return 0;
   }
 
-  process.stdout.write(`state source: ${source}\n`);
-  process.stdout.write(`PR reconcile: ${prOk ? `${prs.length} PRs` : `off — ${prWhy}`}\n\n`);
-  if (!rows.length) { process.stdout.write(idArg ? `No task '${idArg}' found on ${source}.\n` : "No tasks found.\n"); process.exit(0); }
+  out.write(`state source: ${source}\n`);
+  out.write(`PR reconcile: ${prOk ? `${prs.length} PRs` : `off — ${prWhy}`}\n\n`);
+  if (!rows.length) { out.write(idArg ? `No task '${idArg}' found on ${source}.\n` : "No tasks found.\n"); return 0; }
 
   const pad = (s, n) => (s + " ".repeat(n)).slice(0, n);
   const warns = [];
   for (const r of rows) {
-    process.stdout.write(`${pad(r.id, 9)} ${pad(r.resolved, 12)} ${r.detail}\n`);
+    out.write(`${pad(r.id, 9)} ${pad(r.resolved, 12)} ${r.detail}\n`);
     if (r.disagreement) warns.push(`  ⚠ ${r.id}: ${r.disagreement}`);
   }
-  if (warns.length) { process.stdout.write("\n" + warns.join("\n") + "\n"); }
-  process.exit(0);
+  if (warns.length) { out.write("\n" + warns.join("\n") + "\n"); }
+  return 0;
+}
+
+// ── CLI ────────────────────────────────────────────────────────────────────
+// The template's own root: `.flow/bin` -> `.flow` -> repo. In an adopting repo that IS the
+// repo; in canonical it is `project-template/`, which is why canonical adapts (see above).
+if (__isMain) {
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  process.exit(runStateCli({ repoRoot, argv: process.argv.slice(2) }));
 }
