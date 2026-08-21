@@ -1,12 +1,12 @@
 ---
 id: "flow-0008"
 title: "Make the guards prove they ran, so a silent no-op can't pass for a green gate"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude/task-queue-workflow-fm939h"
 created: "2026-08-11"
-started: ""
+started: "2026-08-21T06:00:50Z"
 branch: ""
 pr: ""
 issue: ""
