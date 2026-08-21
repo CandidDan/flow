@@ -35,18 +35,49 @@ jobs:
       # The store is main-only: feature branches carry code, never task-state. A branch
       # that also edited .flow/tasks/ would clobber main's newer state when it merges.
       # Reject it here so the rule isn't trust-based.
+      #
+      # flow-0008: the guard writes a decision line to $DECISION_LOG on every run, and the step
+      # after it fails the job when that line is absent. Previously this step could no-op — a
+      # bad `base`, an empty diff, a shell that died before the `if` — and exit 0, at which
+      # point "the guard found nothing wrong" and "the guard never ran" were indistinguishable.
+      # Branch names reach the script through `env:`, never through `${{ }}` interpolation.
       - name: Guard — store is main-only
         if: github.event_name == 'pull_request'
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+          DECISION_LOG: ${{ runner.temp }}/store-guard.log
         run: |
-          base="origin/${{ github.base_ref }}"
-          changed="$(git diff --name-only "$base"...HEAD)"
-          if echo "$changed" | grep -qE '^\.flow/tasks/'; then
+          set -euo pipefail
+          changed="$(git diff --name-only "origin/$BASE_BRANCH"...HEAD)"
+          offenders="$(printf '%s\n' "$changed" | grep -E '^\.flow/tasks/' || true)"
+          n="$(printf '%s' "$offenders" | grep -c . || true)"
+          if [ "$n" -gt 0 ]; then reason=store-modified; else reason=clean; fi
+          echo "store-guard: decision=enforced reason=$reason files=$n" | tee "$DECISION_LOG"
+          if [ "$n" -gt 0 ]; then
             echo "::error::This PR modifies .flow/tasks/. Task state lives on main only —"
             echo "::error::feature branches carry code, not store changes. Move the state"
             echo "::error::transition to a commit on main and drop it from this branch."
-            echo "$changed" | grep -E '^\.flow/tasks/' | sed 's/^/  offending: /'
+            printf '%s\n' "$offenders" | sed 's/^/  offending: /'
             exit 1
           fi
+
+      # flow-0008: absence of evidence is not evidence of absence. This step is the whole point
+      # of the decision line — it is what makes a silent guard fail instead of pass.
+      - name: Assert — the store-guard proved it ran
+        if: github.event_name == 'pull_request'
+        env:
+          DECISION_LOG: ${{ runner.temp }}/store-guard.log
+          DECISION_PREFIX: 'store-guard: decision='
+        run: |
+          # Anchored prefix match on a fixed token, never a loose substring: the guards' prose
+          # is free to be reworded, the `<name>: decision=` prefix is a CI contract that is not.
+          if [ ! -s "${DECISION_LOG:-}" ] || ! grep -qE "^${DECISION_PREFIX}" "$DECISION_LOG"; then
+            echo "::error::No '${DECISION_PREFIX}...' line was produced — the guard did not run."
+            echo "::error::Silence is not a pass: a guard that can be quiet and still be reported"
+            echo "::error::as green is a guard-shaped hole. Failing the gate (flow-0008)."
+            exit 1
+          fi
+          grep -E "^${DECISION_PREFIX}" "$DECISION_LOG"
 
       # Language toolchain. Node by default (the common Flow stack); non-Node callers pass
       # setup_node_version: "" and provision their toolchain inside the config commands.
@@ -127,7 +158,31 @@ jobs:
           # PR title is the id fallback when the platform forces a non-flow/ branch (CAN-52).
           # Without it this guard silently skipped every cloud-session PR.
           PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_BRANCH: ${{ github.base_ref }}
           BASE_REF: origin/${{ github.base_ref }}
+          DECISION_LOG: ${{ runner.temp }}/touches-guard.log
         run: |
-          git fetch -q origin "${{ github.base_ref }}"
-          node .flow/bin/touches-guard.mjs
+          # pipefail is NOT on by default in `bash -e {0}`. Without it `tee` would swallow the
+          # guard's exit code and out-of-scope drift would pass the gate — the exact fail-open
+          # shape flow-0008 exists to close, reintroduced by the capture that detects it.
+          set -o pipefail
+          git fetch -q origin "$BASE_BRANCH"
+          node .flow/bin/touches-guard.mjs 2>&1 | tee "$DECISION_LOG"
+
+      # flow-0008: identical in body to the store-guard's assertion above — one rule, applied to
+      # both guards. `.flow/bin/gate-assertion.test.mjs` pins that they stay byte-identical and
+      # that this script fails against a guard that produced nothing.
+      - name: Assert — the touches-guard proved it ran
+        env:
+          DECISION_LOG: ${{ runner.temp }}/touches-guard.log
+          DECISION_PREFIX: 'touches-guard: decision='
+        run: |
+          # Anchored prefix match on a fixed token, never a loose substring: the guards' prose
+          # is free to be reworded, the `<name>: decision=` prefix is a CI contract that is not.
+          if [ ! -s "${DECISION_LOG:-}" ] || ! grep -qE "^${DECISION_PREFIX}" "$DECISION_LOG"; then
+            echo "::error::No '${DECISION_PREFIX}...' line was produced — the guard did not run."
+            echo "::error::Silence is not a pass: a guard that can be quiet and still be reported"
+            echo "::error::as green is a guard-shaped hole. Failing the gate (flow-0008)."
+            exit 1
+          fi
+          grep -E "^${DECISION_PREFIX}" "$DECISION_LOG"
