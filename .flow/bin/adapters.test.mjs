@@ -21,7 +21,7 @@
 // without the adoption quietly pointing at the wrong tree.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -189,23 +189,31 @@ test("findTaskFile ignores the template placeholder and returns null for an unkn
 // authoritative layer explicitly: copy the repo, commit it, point `refs/remotes/origin/main` at
 // that commit. It is canonical's actual adapter and actual store, in the state a fresh clone is
 // in — which is the state every consumer of the resolver is in.
-let _fixture = null;
-function canonicalClone() {
-  if (_fixture) return _fixture;
-  const dir = join(mkdtempSync(join(tmpdir(), "flow-clone-")), "flow");
+// Always built from REPO, never by copying an existing fixture: git writes loose objects mode
+// 0444, and copying a tree that already contains them fails with EACCES for any user that does
+// not own them — invisible to a root shell, red on a CI runner.
+function buildClone({ omit = null } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "flow-clone-"));
+  const dir = join(root, "flow");
+  const excluded = omit ? join(REPO, omit) : null;
   cpSync(REPO, dir, {
     recursive: true,
-    filter: (src) => !/(^|[\\/])(\.git|node_modules)$/.test(src),
+    filter: (src) => !/(^|[\\/])(\.git|node_modules)$/.test(src) && src !== excluded,
   });
   const git = (...a) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   git("init", "--quiet", "-b", "main");
   git("add", "-A");
   git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "--quiet", "-m", "fixture");
   git("update-ref", "refs/remotes/origin/main", "HEAD");
-  _fixture = dir;
-  return dir;
+  return { root, dir };
 }
-process.on("exit", () => { if (_fixture) rmSync(resolve(_fixture, ".."), { recursive: true, force: true }); });
+
+let _fixture = null;
+function canonicalClone() {
+  if (!_fixture) _fixture = buildClone();
+  return _fixture.dir;
+}
+process.on("exit", () => { if (_fixture) rmSync(_fixture.root, { recursive: true, force: true }); });
 
 // The ids canonical's store actually holds, read straight off disk — the answer the resolver
 // must reproduce, derived independently of the resolver.
@@ -285,14 +293,18 @@ test("flightdeck-state resolves canonical as ok, closing the 'unavailable' findi
 });
 
 test("removing the adapter reproduces PR #13's exact failure — the test that would have caught it", () => {
-  const dir = canonicalClone();
-  const registry = join(dir, "..", "registry-missing.yml");
-  const bare = join(mkdtempSync(join(tmpdir(), "flow-bare-")), "repo");
+  // Same repo, same origin/main — only `.flow/bin/flow-state.mjs` is absent, which is exactly
+  // what canonical was before this task. The omission is matched by absolute path, so the
+  // template's own flow-state.mjs (same trailing path) stays put and the missing file really
+  // is the adapter.
+  const { root, dir } = buildClone({ omit: join(".flow", "bin", "flow-state.mjs") });
   try {
-    // Same repo, same origin/main — only the resolver is absent, which is what canonical was.
-    cpSync(dir, bare, { recursive: true, filter: (src) => !src.endsWith(join(".flow", "bin", "flow-state.mjs")) });
-    cpSync(join(dir, ".git"), join(bare, ".git"), { recursive: true });
-    writeFileSync(registry, `projects:\n  - name: "canonical"\n    path: "${bare}"\n    enabled: true\n`);
+    assert.ok(existsSync(join(dir, "project-template", ".flow", "bin", "flow-state.mjs")),
+      "only the adapter is removed — the template's resolver must survive, or this proves nothing");
+    assert.ok(!existsSync(join(dir, ".flow", "bin", "flow-state.mjs")));
+
+    const registry = join(root, "registry-missing.yml");
+    writeFileSync(registry, `projects:\n  - name: "canonical"\n    path: "${dir}"\n    enabled: true\n`);
 
     const r = spawnSync(process.execPath,
       [join(REPO, "flightdeck", "bin", "flightdeck-state.mjs"), "--registry", registry, "--no-pr"],
@@ -300,7 +312,7 @@ test("removing the adapter reproduces PR #13's exact failure — the test that w
     const p = JSON.parse(r.stdout).projects[0];
     assert.equal(p.status, "unavailable");
     assert.match(p.reason, /flow-state\.mjs/, "the reason must name the resolver that is missing");
-  } finally { rmSync(resolve(bare, ".."), { recursive: true, force: true }); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 // ══ the workflow callers (flow-0015) ══════════════════════════════════════════════════════
