@@ -253,8 +253,12 @@ test("the adapter's CLI block actually runs against this checkout — silence is
   const r = run("flow-state.mjs", ["--no-pr"]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^state source: /m, "the CLI must produce its header, not nothing");
-  assert.match(r.stdout, /flow-0015\s+in_progress/,
-    "this task, claimed on main, must appear in canonical's own resolved state");
+
+  // Assert the ROW EXISTS with some lifecycle value, never a particular one: `flow-status` and
+  // `flow-done` move this task's status while the branch sits open, so pinning it to
+  // `in_progress` writes a test that the automation invalidates the moment the PR opens.
+  assert.match(r.stdout, /^flow-0015\s+(ready|in_progress|in_review|done|blocked)\s+\S/m,
+    "this task must appear in canonical's own resolved state, whatever the lifecycle has done to it");
 });
 
 test("flightdeck-state resolves canonical as ok, closing the 'unavailable' finding from PR #13", () => {
