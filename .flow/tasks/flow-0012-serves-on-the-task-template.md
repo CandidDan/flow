@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0012"
 title: "Give every task a goal to name, so the anchor exists before the check enforces it"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "flow/flow-0012-serves-on-the-task-template"
 created: "2026-08-18"
 started: "2026-08-21T15:39:52Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0012-serves-on-the-task-template"
+pr: "https://github.com/CandidDan/flow/pull/23"
 issue: ""
 blocked_reason: ""
 serves: ["G3"]            # direction survives the work — this is the field that carries it
