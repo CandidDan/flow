@@ -22,15 +22,26 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse as parseYaml } from "yaml";
+
+// DEPENDENCY NOTE — same shape as check-workflows.test.mjs, for the same reason. The
+// `flow-tooling` job in `_flow-gates.yml` runs `node --test .flow/bin/*.test.mjs` with NO
+// install step, so `yaml` is not there. These tests skip *visibly* ("# SKIP") in that job and
+// run for real in the per-stack gate job, which does `npm ci` and then `npm test`.
+//
+// A printed skip is not a silent no-op; a module-not-found crash is not a gate result at all —
+// which is precisely the distinction this whole task exists to draw, so a static import here
+// would have been the task contradicting itself in its own test file.
+const yamlMod = await import("yaml").then((m) => m, () => null);
+const skip = yamlMod ? false : "needs `npm ci` (yaml) — runs in the per-stack gate job";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const WORKFLOW = join(REPO, ".github", "workflows", "_flow-gates.yml");
-const wf = parseYaml(readFileSync(WORKFLOW, "utf8"));
+const wf = yamlMod ? yamlMod.parse(readFileSync(WORKFLOW, "utf8")) : null;
 
 // The `run:` script of the uniquely-named step in `job`. Fails loudly rather than returning
 // undefined: a renamed step must break this file, not quietly stop testing anything.
 function stepScript(job, name) {
+  if (!wf) return null;                       // skipped runs never reach the assertions
   const steps = wf.jobs?.[job]?.steps ?? [];
   const found = steps.filter((s) => s.name === name);
   assert.equal(found.length, 1,
@@ -75,14 +86,14 @@ function withLog(contents, prefix) {
 // ── One rule, both guards ────────────────────────────────────────────────────────────────
 // Task scope: "apply the same treatment to the store-guard step, which shares the fail-open
 // shape". Two copies that drift are two different rules wearing one name, so pin them equal.
-test("both guards are asserted by the identical script (one rule, not two)", () => {
+test("both guards are asserted by the identical script (one rule, not two)", { skip }, () => {
   assert.equal(TOUCHES_ASSERT, STORE_ASSERT,
     "the store-guard and touches-guard assertions have diverged — the fail-open shape is only " +
     "closed for whichever one is stricter.");
 });
 
 // ── AC#3 / AC#6 — absence of a decision is a FAILURE, not a pass ─────────────────────────
-test("AC#6: the assertion FAILS against a deliberately no-op'd guard (empty output)", () => {
+test("AC#6: the assertion FAILS against a deliberately no-op'd guard (empty output)", { skip }, () => {
   const { dir, env } = withLog("", "touches-guard: decision=");
   const r = runScript(TOUCHES_ASSERT, env);
   assert.equal(r.code, 1,
@@ -92,7 +103,7 @@ test("AC#6: the assertion FAILS against a deliberately no-op'd guard (empty outp
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("AC#3: the assertion FAILS when the guard produced no log at all", () => {
+test("AC#3: the assertion FAILS when the guard produced no log at all", { skip }, () => {
   const { dir, env } = withLog(null, "touches-guard: decision=");
   const r = runScript(TOUCHES_ASSERT, env);
   assert.equal(r.code, 1, "a missing log must fail, not error out or pass");
@@ -100,7 +111,7 @@ test("AC#3: the assertion FAILS when the guard produced no log at all", () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("AC#3: prose without a decision line still fails — the old output is not enough", () => {
+test("AC#3: prose without a decision line still fails — the old output is not enough", { skip }, () => {
   // Exactly what the pre-flow-0008 guard printed on its happy path. It must no longer satisfy
   // the gate on its own, or adopting repos would silently keep the old contract.
   const { dir, env } = withLog(
@@ -112,7 +123,7 @@ test("AC#3: prose without a decision line still fails — the old output is not 
 });
 
 // ── AC#1 / AC#2 — a stated decision passes, enforced or skipped ──────────────────────────
-test("AC#1: an `enforced` decision line satisfies the assertion", () => {
+test("AC#1: an `enforced` decision line satisfies the assertion", { skip }, () => {
   const { dir, env } = withLog(
     "touches-guard: decision=enforced reason=in-scope task=flow-0008 checked=4 globs=5 outside=0\n",
     "touches-guard: decision=");
@@ -122,7 +133,7 @@ test("AC#1: an `enforced` decision line satisfies the assertion", () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("AC#2: a `skipped` decision naming its reason passes — a legitimate skip stays green", () => {
+test("AC#2: a `skipped` decision naming its reason passes — a legitimate skip stays green", { skip }, () => {
   const { dir, env } = withLog(
     "touches-guard: no task id in branch 'dependabot/npm/x' or title 'Bump x' — skipping.\n" +
     "touches-guard: decision=skipped reason=no-task-id task=- checked=0 globs=0 outside=0\n",
@@ -134,7 +145,7 @@ test("AC#2: a `skipped` decision naming its reason passes — a legitimate skip 
 });
 
 // ── AC#5 — the parse is anchored on a fixed token ────────────────────────────────────────
-test("AC#5: the match is anchored — the token mid-line does not count", () => {
+test("AC#5: the match is anchored — the token mid-line does not count", { skip }, () => {
   const { dir, env } = withLog(
     "note: we print touches-guard: decision=enforced when we get around to it\n",
     "touches-guard: decision=");
@@ -145,7 +156,7 @@ test("AC#5: the match is anchored — the token mid-line does not count", () => 
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("AC#5: the prefix is a fixed token, so a reworded guard message alone cannot satisfy it", () => {
+test("AC#5: the prefix is a fixed token, so a reworded guard message alone cannot satisfy it", { skip }, () => {
   const { dir, env } = withLog(
     "touches-guard: DECISION = enforced\n", "touches-guard: decision=");
   const r = runScript(TOUCHES_ASSERT, env);
@@ -172,7 +183,7 @@ function storeFixture(extraFile) {
   return root;
 }
 
-test("store-guard states `clean` on a code-only diff, and passes", () => {
+test("store-guard states `clean` on a code-only diff, and passes", { skip }, () => {
   const root = storeFixture("src/app.mjs");
   const log = join(root, "store.log");
   const r = runScript(STORE_GUARD, { BASE_BRANCH: "main", DECISION_LOG: log }, root);
@@ -181,7 +192,7 @@ test("store-guard states `clean` on a code-only diff, and passes", () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test("store-guard states `store-modified` and FAILS when a branch edits .flow/tasks/", () => {
+test("store-guard states `store-modified` and FAILS when a branch edits .flow/tasks/", { skip }, () => {
   const root = storeFixture(".flow/tasks/flow-0008-x.md");
   const log = join(root, "store.log");
   const r = runScript(STORE_GUARD, { BASE_BRANCH: "main", DECISION_LOG: log }, root);
@@ -191,7 +202,7 @@ test("store-guard states `store-modified` and FAILS when a branch edits .flow/ta
   rmSync(root, { recursive: true, force: true });
 });
 
-test("the store-guard's decision line satisfies its own assertion end to end", () => {
+test("the store-guard's decision line satisfies its own assertion end to end", { skip }, () => {
   const root = storeFixture("src/app.mjs");
   const log = join(root, "store.log");
   runScript(STORE_GUARD, { BASE_BRANCH: "main", DECISION_LOG: log }, root);
@@ -210,7 +221,7 @@ function touchesStepWithStub(script, exitCode) {
     .replace(/node \.flow\/bin\/touches-guard\.mjs/, `sh -c 'echo stub; exit ${exitCode}'`);
 }
 
-test("a failing touches-guard fails the step despite being piped through tee", () => {
+test("a failing touches-guard fails the step despite being piped through tee", { skip }, () => {
   const dir = mkdtempSync(join(tmpdir(), "flow-pipe-"));
   const r = runScript(touchesStepWithStub(TOUCHES_STEP, 1),
     { BASE_BRANCH: "main", DECISION_LOG: join(dir, "t.log") });
@@ -218,7 +229,7 @@ test("a failing touches-guard fails the step despite being piped through tee", (
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("without `set -o pipefail` that same failure would pass — the line is load-bearing", () => {
+test("without `set -o pipefail` that same failure would pass — the line is load-bearing", { skip }, () => {
   const dir = mkdtempSync(join(tmpdir(), "flow-pipe-"));
   const stripped = touchesStepWithStub(TOUCHES_STEP, 1).replace(/^\s*set -o pipefail\s*$/m, "");
   assert.notEqual(stripped, touchesStepWithStub(TOUCHES_STEP, 1),
