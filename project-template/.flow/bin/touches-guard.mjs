@@ -21,6 +21,17 @@
 //   BASE_REF=origin/main HEAD_REF=claude/xyz PR_TITLE='[CAN-30] …' node .flow/bin/touches-guard.mjs
 //
 // Zero deps (Node >= 18). Exits non-zero when a changed file is outside touches.
+//
+// ── The decision line (flow-0008) ──────────────────────────────────────────────────────
+// Every run — enforcing OR skipping — prints exactly one line beginning with
+// `touches-guard: decision=`. `_flow-gates.yml` captures the guard's output and fails the job
+// when that line is absent, so "the guard printed nothing" can no longer be read as "the guard
+// found nothing wrong". That distinction is the whole bug this closes: the guard used to FAIL
+// OPEN, exiting 0 with scope enforcement silently off while the gate went green.
+//
+// The line is a CONTRACT between this file and the gate, not log prose. Changing its prefix or
+// its `decision=` / `reason=` vocabulary is a breaking change to CI in every adopting repo.
+// The human-readable lines around it stay free to reword; those are not parsed.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -123,7 +134,9 @@ function readTouches(file) {
   return parseTouches(readFileSync(file, "utf8"));
 }
 
-function findTaskFile(tasksDir, id) {
+// The task file in `tasksDir` whose frontmatter `id` is `id`, or null. Exported so an adapter
+// (canonical's `.flow/bin/` thin wrapper) can reuse the scan instead of re-implementing it.
+export function findTaskFile(tasksDir, id) {
   for (const name of readdirSync(tasksDir)) {
     if (!name.endsWith(".md") || name === "_TEMPLATE.md") continue;
     const file = join(tasksDir, name);
@@ -133,12 +146,47 @@ function findTaskFile(tasksDir, id) {
   return null;
 }
 
-if (__isMain) {
-  const flowDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const tasksDir = join(flowDir, "tasks");
-  const headRef = process.env.HEAD_REF
+// ── The decision line ────────────────────────────────────────────────────────────────────
+// A fixed token the gate anchors on. Kept as an exported constant so the guard, its tests and
+// (via import) any adapter all name the same string — a typo becomes a test failure here
+// rather than a silently-skipped assertion in CI.
+export const DECISION_PREFIX = "touches-guard: decision=";
+
+// The two decisions and the reasons each admits. Enumerated rather than free text so a new
+// exit path cannot invent an unrecognised reason without this list changing with it.
+export const DECISIONS = Object.freeze({
+  enforced: ["in-scope", "out-of-scope"],
+  skipped: ["no-task-id", "no-task-file", "no-touches-declared"],
+});
+
+// Render the single decision line. Shape (one line, no leading whitespace, stable key order):
+//   touches-guard: decision=enforced reason=out-of-scope task=flow-0008 checked=4 globs=3 outside=1
+//   touches-guard: decision=skipped reason=no-task-id task=-
+// `task=-` rather than an empty value, so every field is present on every line and a parser
+// never has to distinguish "absent" from "empty".
+export function decisionLine({ decision, reason, id = "", checked = 0, globs = 0, outside = 0 }) {
+  const reasons = DECISIONS[decision];
+  if (!reasons) throw new Error(`touches-guard: unknown decision '${decision}'`);
+  if (!reasons.includes(reason)) {
+    throw new Error(`touches-guard: reason '${reason}' is not valid for decision '${decision}'`);
+  }
+  return `${DECISION_PREFIX}${decision} reason=${reason} task=${id || "-"} ` +
+    `checked=${checked} globs=${globs} outside=${outside}`;
+}
+
+// ── The guard proper ─────────────────────────────────────────────────────────────────────
+// Shared by this file's CLI and by canonical's adapter, so there is exactly one place where a
+// decision is reached and exactly one place where it is announced. `tasksDir` is the only thing
+// that differs between the two callers — the store an adapter resolves is its whole reason to
+// exist (see the adapter's own header).
+//
+// Returns the process exit code. EVERY return path prints a decision line first, including the
+// failure path: the gate must be able to tell "enforced and rejected" from "never ran", and
+// those look identical from an exit code alone.
+export function runGuard({ tasksDir, env = process.env, log = console.log, err = console.error }) {
+  const headRef = env.HEAD_REF
     || execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"]).toString().trim();
-  const prTitle = process.env.PR_TITLE || "";
+  const prTitle = env.PR_TITLE || "";
 
   // Branch first, PR title second — the same resolution flow-status/flow-done use (CAN-52).
   // Matching on the branch alone meant every cloud-session PR (forced onto `claude/…` by the
@@ -146,33 +194,52 @@ if (__isMain) {
   // most likely to drift, and the gate went green saying nothing.
   const id = parseTaskId(headRef, prTitle);
   if (!id) {
-    console.log(`touches-guard: no task id in branch '${headRef}' or title '${prTitle}' — skipping.`);
-    process.exit(0);
+    log(`touches-guard: no task id in branch '${headRef}' or title '${prTitle}' — skipping.`);
+    log(decisionLine({ decision: "skipped", reason: "no-task-id" }));
+    return 0;
   }
 
   const file = findTaskFile(tasksDir, id);
-  if (!file) { console.log(`touches-guard: no task file for ${id} — skipping (store-guard / review will catch oddities).`); process.exit(0); }
+  if (!file) {
+    log(`touches-guard: no task file for ${id} — skipping (store-guard / review will catch oddities).`);
+    log(decisionLine({ decision: "skipped", reason: "no-task-file", id }));
+    return 0;
+  }
 
   const touches = readTouches(file);
   if (touches.length === 0) {
-    console.warn(`touches-guard: ${id} declares no touches — cannot enforce a blast radius. ` +
+    err(`touches-guard: ${id} declares no touches — cannot enforce a blast radius. ` +
       `flow-doctor flags this; add touches to make scope checkable. Passing for now.`);
-    process.exit(0);
+    log(decisionLine({ decision: "skipped", reason: "no-touches-declared", id }));
+    return 0;
   }
 
-  const base = process.env.BASE_REF || "origin/main";
+  const base = env.BASE_REF || "origin/main";
   const changedFiles = execFileSync("git", ["diff", "--name-only", `${base}...HEAD`])
     .toString().split("\n").map((s) => s.trim()).filter(Boolean);
 
   const { outside, checked } = checkTouches({ changedFiles, touches });
-  console.log(`touches-guard: ${id} — ${checked} feature file(s) checked against ${touches.length} glob(s).`);
+  log(`touches-guard: ${id} — ${checked} feature file(s) checked against ${touches.length} glob(s).`);
+  log(decisionLine({
+    decision: "enforced",
+    reason: outside.length ? "out-of-scope" : "in-scope",
+    id, checked, globs: touches.length, outside: outside.length,
+  }));
+
   if (outside.length) {
-    console.error("::error::Changed files fall outside this task's declared `touches`:");
-    for (const f of outside) console.error(`  outside touches: ${f}`);
-    console.error("Either narrow the change to the declared scope, or — if the wider radius is " +
+    err("::error::Changed files fall outside this task's declared `touches`:");
+    for (const f of outside) err(`  outside touches: ${f}`);
+    err("Either narrow the change to the declared scope, or — if the wider radius is " +
       "real — block the task and have the orchestrator update `touches` on main before continuing. " +
       "Do not widen scope silently.");
-    process.exit(1);
+    return 1;
   }
-  console.log("touches-guard: all changed files are within scope ✓");
+  log("touches-guard: all changed files are within scope ✓");
+  return 0;
+}
+
+// ── CLI ── one call, so the CLI shell holds no decision logic of its own.
+if (__isMain) {
+  const flowDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  process.exit(runGuard({ tasksDir: join(flowDir, "tasks"), env: process.env }));
 }
