@@ -13,10 +13,11 @@ pr: ""
 issue: ""
 blocked_reason: ""
 serves: ["G3"]            # direction survives the work — this is the field that carries it
-touches: ["project-template/.flow/tasks/_TEMPLATE.md", "project-template/.claude/skills/task-writer/SKILL.md"]
+touches: ["project-template/.flow/tasks/_TEMPLATE.md", "project-template/.claude/skills/task-writer/SKILL.md", ".flow/bin/serves-template.test.mjs"]
 labels: [infra, vision, docs]
 notes:
   - "2026-08-18: deliverable D2 of the vision-layer handoff. flow-0010 carries the matching doctor check and explicitly excludes these two files, so the two are parallel-safe. Order does not matter: the check is graceful when a repo has no VISION.md, and the field is inert until a check reads it."
+  - "2026-08-21: WORKER-INITIATED touches widening, NEEDS RATIFICATION. Added .flow/bin/serves-template.test.mjs. The declared radius was the two template files only, and canonical's Definition of Done wants a proving test per criterion — with no path to put one on, the task could only ship uncertified. The precedent is flow-0011, whose worker landed .flow/bin/vision-template.test.mjs under the same constraint without widening; touches-guard excludes all of .flow/** by design, so neither was caught, and declaring it is discipline rather than enforcement. Recorded rather than relied on. NOTE the tension with this task's own Notes section, which says not to invent a test that asserts on Markdown wording: the tests written are section-scoped and concept-level (does the rule exist), plus an integration test that runs the shipped _TEMPLATE.md frontmatter through flow-0010's flow-doctor — that half is not prose-testing at all. If the human disagrees, the skill-prose assertions are the ones to drop."
 ---
 
 ## Context
