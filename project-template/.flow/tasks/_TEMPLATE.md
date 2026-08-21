@@ -14,6 +14,18 @@ branch: ""                # flow/<id>-<slug>, recorded by flow-status when the P
 pr: ""                    # PR url, recorded by flow-status when the PR opens
 issue: ""                 # origin GitHub issue url, if this task was triaged from the inbox
 blocked_reason: ""        # required iff status is blocked
+serves: []                # the VISION.md goal ids this task advances, e.g. ["G1", "G3"].
+                          # Ids come from the repo's own VISION.md — never invented here.
+                          # `maintenance` is a reserved id (it is never declared in VISION.md
+                          # and always resolves): repo, infra and protocol health that no
+                          # product goal names.
+                          # Once the repo has a VISION.md, a `ready` task needs at least one
+                          # entry — flow-doctor fails a ready task that names none.
+                          # Can't name a goal? It is exactly one of three things, and saying
+                          # WHICH is the work: (a) maintenance — use the reserved id; (b) the
+                          # vision is missing a goal — amend VISION.md first (branch + PR);
+                          # (c) drift being born — don't write the task. Surface which one.
+                          # Never reach for the nearest plausible id to fill the field.
 touches: []               # path globs this task expects to modify, e.g. ["src/signup/**", "api/subscribe.*"]
                           # concurrency: a ready task is skipped while its touches overlap an in_progress one
 labels: []                # optional, e.g. [frontend, infra, spike]
