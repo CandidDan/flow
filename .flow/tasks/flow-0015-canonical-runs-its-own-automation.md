@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0015"
 title: "Make canonical run the automation it ships, so the repo defining the protocol isn't the one exempt from it"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "flow/flow-0015-canonical-runs-its-own-automation"
 created: "2026-08-18"
-started: ""
+started: "2026-08-21T15:52:37Z"
 branch: ""
 pr: ""
 issue: ""
