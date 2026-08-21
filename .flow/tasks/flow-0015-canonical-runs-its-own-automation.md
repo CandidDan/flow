@@ -13,10 +13,11 @@ pr: ""
 issue: ""
 blocked_reason: ""
 serves: ["G4"]            # what canonical says is what the fleet runs — starting with canonical
-touches: [".github/workflows/flow-open-pr.yml", ".github/workflows/flow-recover.yml", ".github/workflows/flow-triage.yml", ".github/workflows/flow-review.yml", ".github/workflows/flow-queue-runner.yml", ".flow/bin/flow-state.mjs", ".flow/bin/adapters.test.mjs"]
+touches: [".github/workflows/flow-open-pr.yml", ".github/workflows/flow-recover.yml", ".github/workflows/flow-triage.yml", ".github/workflows/flow-review.yml", ".github/workflows/flow-queue-runner.yml", ".flow/bin/flow-state.mjs", ".flow/bin/adapters.test.mjs", "project-template/.flow/bin/flow-state.mjs", "project-template/.flow/bin/flow-state.test.mjs"]
 labels: [infra, dogfood, integrity]
 notes:
   - "2026-08-18: two independent findings, one root cause. Canonical publishes nine reusables and wires three. And PR #13 found canonical has no flow-state.mjs adapter, so the flightdeck cannot read the repo that authors it. Both trace to flow-0004 scoping adoption to what CI already invoked."
+  - "2026-08-21: WORKER-INITIATED touches widening, NEEDS RATIFICATION. Added project-template/.flow/bin/flow-state.mjs and its test. The declared radius cannot deliver a thin adapter: unlike flow-doctor (runDoctor), touches-guard (runGuard) and release-guard (runReleaseGuard), the template's flow-state.mjs exports ONLY its pure core — readTasksFromOrigin, readPrs and the CLI render loop are module-private. Staying inside the declared touches would mean copying ~95 lines of git/gh plumbing into the adapter, which is the one thing CLAUDE.md forbids for this directory and the flow-0008 hazard in miniature (flightdeck's contract depends on the exact 'WORKING TREE' source string, so two implementations that drift break the aggregator silently). The widening is pure code motion plus new exports in the template; no template behaviour changes, and the template CLI keeps resolving its own repo root. Scope says 'does NOT change project-template/' on the grounds that the template already ships all nine WORKFLOWS — that reasoning is about .github/workflows/, not about .flow/bin/."
   - "2026-08-18: queue-runner is deliberately wired dispatch-only, no cron. Not a permissions argument — flow-triage holds the same contents: write. See Scope."
 ---
 
