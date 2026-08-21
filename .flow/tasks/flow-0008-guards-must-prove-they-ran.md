@@ -12,10 +12,11 @@ pr: ""
 issue: ""
 blocked_reason: ""
 serves: ["G2"]            # a guard that can't pass on silence
-touches: [".github/workflows/_flow-gates.yml", "project-template/.flow/bin/touches-guard.mjs", "project-template/.flow/bin/main-module.test.mjs"]
+touches: [".github/workflows/_flow-gates.yml", "project-template/.flow/bin/touches-guard.mjs", "project-template/.flow/bin/main-module.test.mjs", ".flow/bin/touches-guard.mjs", ".flow/bin/gate-assertion.test.mjs"]
 labels: [infra, integrity]
 notes:
   - "2026-08-11: the symlink root cause is FIXED and has a regression test. This task is the hardening that incident argues for, not the fix itself."
+  - "2026-08-21: WORKER-INITIATED touches widening — NEEDS RATIFICATION. The declared radius could not deliver the task. `_flow-gates.yml` runs the *consuming* repo's `.flow/bin/touches-guard.mjs`, and in canonical that is the adapter, which duplicates the template's CLI shell. A gate assertion that demands a decision line would therefore fail on canonical's own PR unless the adapter emits one too, so `.flow/bin/touches-guard.mjs` is added (it becomes a 3-line delegation to the template's new `runGuard`, which removes the duplication CLAUDE.md warns about). `.flow/bin/gate-assertion.test.mjs` is added because acceptance criterion 6 — the assertion must fail against a deliberately no-op'd guard — tests a shell snippet that lives in canonical's `_flow-gates.yml`; a test for it in `project-template/` would read a path that does not exist in an adopting repo. No other path is touched."
 ---
 
 ## Context
