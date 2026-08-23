@@ -1,0 +1,39 @@
+name: flow-open-pr
+
+# Canonical's own caller of the auto-PR-on-push safety net. Referenced from `main` rather than
+# a tag — see flow-gates.yml in this directory for why canonical is the one repo where that is
+# the safer pin.
+#
+# Opens a PR automatically when a worker pushes a `flow/<id>-…` branch ahead of main with no PR
+# yet, so a worker that does the whole job and then stops short of `gh pr create` no longer
+# strands the task. Idempotent — it no-ops when a PR already exists.
+#
+# This one is not dormant. Unlike the other four callers added alongside it, `_flow-open-pr.yml`
+# invokes no agent and so carries no `vars.FLOW_AI` gate: wiring it here turns it on. That is
+# the point. The reusable exists BECAUSE a worker once pushed and never opened the PR, and until
+# now canonical — the repo that authors the protection — was the one repo without it.
+#
+# `secrets: inherit` passes FLOW_PAT through, which is what makes the PR this opens trigger
+# flow-gates: a PR opened with the default GITHUB_TOKEN does not fire downstream workflows
+# (GitHub's loop prevention). Without FLOW_PAT the PR still opens; it just arrives ungated,
+# which the reusable's own header explains.
+#
+# WHY THERE IS NO flow-sync.yml IN THIS DIRECTORY. Eight of canonical's nine reusables have a
+# caller here; `_flow-sync.yml` deliberately has none. Sync is how an adopting repo catches up
+# to canonical, and canonical IS canonical: `flow-sync.mjs` refuses to sync backwards and
+# reports `ahead` for any repo newer than the source, so a self-sync can only ever be a no-op
+# reporting that canonical is up to date with itself. The absence is a decision, not an
+# oversight — see .flow/tasks/flow-0015.
+
+on:
+  push:
+    branches:
+      - "flow/**"
+
+jobs:
+  flow-open-pr:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: CandidDan/flow/.github/workflows/_flow-open-pr.yml@main
+    secrets: inherit
