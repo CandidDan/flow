@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0013"
 title: "Add the scheduled drift audit, with its read-only boundary proved by a test"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "flow/flow-0013-flow-compass"
 created: "2026-08-18"
-started: ""
+started: "2026-08-24T07:34:37Z"
 branch: ""
 pr: ""
 issue: ""
