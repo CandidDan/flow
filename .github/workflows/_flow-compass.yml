@@ -1,0 +1,83 @@
+name: _flow-compass (reusable)
+
+# Reusable form of the scheduled vision-drift audit. Repos call it from a thin caller that owns
+# the schedule; the logic is authored once in canonical. See docs/flow-reusable-workflows.md.
+#
+# Answers the question the per-PR gate never asks: does the SUM of the work still match the
+# vision? Compass surveys the record on a cadence and files one issue per material divergence —
+# it never fixes, never edits the vision, never touches code. That boundary is the whole design,
+# so it is encoded here, in `permissions:`, not only in the prompt: this job is granted
+# `contents: read` and nothing that could write code, a task, or VISION.md. See
+# .flow/bin/check-workflows.test.mjs for the tests that fail if this ever drifts.
+#
+# DISABLED BY DEFAULT. Enable by setting repo variable FLOW_AI=true and adding the
+# CLAUDE_CODE_OAUTH_TOKEN secret (from `claude setup-token` — uses your Max plan quota). (Check
+# anthropics/claude-code-action's current README for input names when you first enable this —
+# the action evolves.) The thin caller passes the secret with `secrets: inherit`.
+
+on:
+  workflow_call:
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+  id-token: write          # OIDC token minting for claude-code-action
+
+jobs:
+  compass:
+    if: ${{ vars.FLOW_AI == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Idempotent: `--force` updates the label if it already exists instead of erroring, so a
+      # first run on a repo with no `compass` label yet still succeeds.
+      - name: Ensure the compass label exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create compass \
+            --color 5319e7 \
+            --description "Filed by the flow-compass vision-drift audit" \
+            --force
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          # Subscription auth (Pro/Max): run `claude setup-token` locally, save the result as
+          # the CLAUDE_CODE_OAUTH_TOKEN repo secret. Uses your plan quota, not API credits.
+          # (Token dies if you log out of Claude Code — regenerate with `claude setup-token`.)
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # GitHub API token for the action (list tasks/PRs, file issues, apply the compass label).
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Pay-per-use alternative: comment the line above and use an API key instead.
+          # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Run the vision-drift audit for this repository, following
+            .claude/skills/flow-compass/SKILL.md exactly. Concretely:
+
+            1. Read VISION.md. If it does not exist, file (or update) one roll-up issue saying
+               the vision layer is inactive and stop — there is nothing to audit against.
+            2. Survey the record: recent `done` tasks in .flow/tasks/, the current `ready` queue,
+               merged PR titles in the audit window, and the codebase's top-level shape.
+            3. Classify divergences per the skill's calibration: unanchored work, starved goals,
+               non-goal encroachment, `maintenance` share, vision staleness. Only file what is
+               material — a human should spend a decision on it. Batch trivia into one roll-up
+               issue instead of filing one issue per minor item.
+            4. For each material divergence, file ONE GitHub issue, labelled `compass`, carrying
+               evidence a human can check from the issue alone (task ids, PR links, goal ids) and
+               a proposed lane: fix, amend, or accept. Do not re-file a finding the human already
+               closed as accepted unless the divergence has materially grown.
+            5. Emit a one-line summary of what you found (or "no material divergence") to the
+               job's step summary.
+
+            Hard limits, mechanically enforced by this job's `permissions:` block (contents:
+            read only) so they are not just instructions: never commit, never open a PR, never
+            edit .flow/tasks/, never edit VISION.md, never edit any source file. Your only output
+            is GitHub issues. If you cannot tell whether something is material, file it as a
+            question rather than silently skipping it.
+          claude_args: "--max-turns 150 --permission-mode bypassPermissions"

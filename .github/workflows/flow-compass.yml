@@ -1,0 +1,32 @@
+name: flow-compass
+
+# Canonical's own caller of the vision-drift audit. Referenced from `main` rather than a tag —
+# see flow-gates.yml in this directory for why canonical is the one repo where that is the safer
+# pin.
+#
+# Canonical runs the same gate it imposes on everyone else (CLAUDE.md), and that now includes
+# compass: it already runs flow-review.yml and flow-triage.yml on itself, so a repo whose own
+# work never gets audited against its own VISION.md would be the one exception to that rule.
+#
+# DORMANT until repo variable FLOW_AI=true and the CLAUDE_CODE_OAUTH_TOKEN secret is set. The
+# reusable's `compass` job is gated on `vars.FLOW_AI == 'true'`, so wiring this caller turns
+# nothing on. The audit's whole output surface is a filed GitHub issue — see
+# .github/workflows/_flow-compass.yml's `permissions:` block, which is `contents: read` and
+# nothing that could write code, a task, or VISION.md.
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"   # weekly, Monday mornings — adjust to taste
+  workflow_dispatch:
+
+jobs:
+  flow-compass:
+    # id-token: write must be granted on the caller — OIDC is never in the default GITHUB_TOKEN,
+    # and a reusable workflow can't raise it above the caller's grant. A permissions block is
+    # exhaustive, so contents/issues are re-listed.
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    uses: CandidDan/flow/.github/workflows/_flow-compass.yml@main
+    secrets: inherit
