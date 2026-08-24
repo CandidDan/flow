@@ -13,11 +13,12 @@ pr: ""
 issue: ""
 blocked_reason: ""
 serves: ["G3"]            # direction survives the work — this is what notices when it doesn't
-touches: [".github/workflows/_flow-compass.yml", "project-template/.github/workflows/flow-compass.yml", "project-template/.claude/skills/flow-compass/SKILL.md", ".flow/bin/check-workflows.test.mjs"]
+touches: [".github/workflows/_flow-compass.yml", ".github/workflows/flow-compass.yml", "project-template/.github/workflows/flow-compass.yml", "project-template/.claude/skills/flow-compass/SKILL.md", ".flow/bin/check-workflows.test.mjs"]
 labels: [infra, vision, workflows]
 notes:
   - "2026-08-18: deliverable D4 of the vision-layer handoff, with the handoff's workflow sketch corrected — it named a reusable that doesn't match canonical's convention, put permissions at workflow level, and omitted the OIDC grant. See Scope."
   - "2026-08-18: cadence confirmed weekly; findings are issues on every run, including the first. Independent of flow-0010/0011/0012 — verified disjoint touches on 2026-08-18."
+  - "2026-08-24: worker-initiated, needs ratification — widened touches to add `.github/workflows/flow-compass.yml` (canonical's own root-level thin caller). `adapters.test.mjs` (existing gate test, not in this task's original touches) asserts every reusable in `.github/workflows/` — except `_flow-sync.yml`, whose absence is explained in-repo — has a matching `flow-<name>.yml` caller at canonical's root, mirroring how canonical already runs `flow-review.yml` and `flow-triage.yml` on itself (CLAUDE.md: \"Canonical runs the same gate it imposes on everyone else\"). Without this file the gate fails on existing, out-of-scope test infra. The declared radius was insufficient to deliver the task; this widening is the minimal fix, following the flow-0007/0008/0015 pattern rather than blocking or drifting silently."
 ---
 
 ## Context
