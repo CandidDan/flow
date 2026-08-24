@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0019"
 title: "Answer 'where is every project up to' in one page that cannot be stale, including whether the automation is alive"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "flow-0019-worker"
 created: "2026-08-19"
 started: "2026-08-24T07:05:25Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0019-mission-control"
+pr: "https://github.com/CandidDan/flow/pull/26"
 issue: ""
 blocked_reason: ""
 serves: ["G5"]            # always knowing where the work is, and whether the machinery is alive
