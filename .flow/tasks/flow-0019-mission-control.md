@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0019"
 title: "Answer 'where is every project up to' in one page that cannot be stale, including whether the automation is alive"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "flow-0019-worker"
 created: "2026-08-19"
-started: ""
+started: "2026-08-24T07:05:25Z"
 branch: ""
 pr: ""
 issue: ""
