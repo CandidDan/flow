@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0017"
 title: "Let flow-doctor tell an uncalibrated repo apart from a stale declaration"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "flow/flow-0017-doctor-uncalibrated-vs-stale"
 created: "2026-08-19"
 started: "2026-08-24T06:54:51Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0017-doctor-uncalibrated-vs-stale"
+pr: "https://github.com/CandidDan/flow/pull/25"
 issue: ""
 blocked_reason: ""
 serves: ["G2"]            # a check that states its decision instead of collapsing two facts into one
