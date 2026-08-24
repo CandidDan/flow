@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0013"
 title: "Add the scheduled drift audit, with its read-only boundary proved by a test"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "flow"
 owner: "flow/flow-0013-flow-compass"
 created: "2026-08-18"
 started: "2026-08-24T07:34:37Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0013-flow-compass"
+pr: "https://github.com/CandidDan/flow/pull/28"
 issue: ""
 blocked_reason: ""
 serves: ["G3"]            # direction survives the work — this is what notices when it doesn't
