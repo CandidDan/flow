@@ -18,6 +18,11 @@ npm-debug.log*
 # Flow board-edits scratch (never committed)
 **/.flow/board-edits.json
 
+# flow-review.mjs's scratch output (the bounded diff + changed-files list it hands the reviewers) —
+# CI always starts from a fresh checkout so it never sees this, but `npm test` runs the real CLI
+# against this repo's own root and leaves it behind locally.
+.flow-review/
+
 # --- kept local: private registry, business scaffolding, Cowork mount ---
 flightdeck/projects.yml
 NUDGE-RETROFIT-NOTES.md
