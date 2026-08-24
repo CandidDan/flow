@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0017"
 title: "Let flow-doctor tell an uncalibrated repo apart from a stale declaration"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "flow/flow-0017-doctor-uncalibrated-vs-stale"
 created: "2026-08-19"
-started: ""
+started: "2026-08-24T06:54:51Z"
 branch: ""
 pr: ""
 issue: ""
