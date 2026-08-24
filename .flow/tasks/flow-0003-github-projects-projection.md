@@ -1,7 +1,7 @@
 ---
 id: "flow-0003"
 title: "Project the task store into a GitHub Project v2 board, written only by CI"
-status: "ready"
+status: "blocked"
 priority: 3
 project: "flow"
 owner: ""
@@ -10,11 +10,12 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
+blocked_reason: "Deferred, not cancelled, by ADR-0002 Amendment 1 (2026-08-18), decision item 3: 'flow-0003 (the Project v2 projection) is deferred, not cancelled. Its trigger is the condition its own Context names: the day a non-operator — an employee or a client — needs a board. Until then it is infrastructure for a user who does not exist.' The amendment's own action-item list marks flow-0003 'deferred pending the second-person trigger.' VISION.md's audience decision is unchanged since (solo-first, multi-user option preserved and not exercised; 'no feature is built for an employee or a client until one actually exists'). That trigger has not occurred. The store's status: ready was stale relative to the ADR — flagged by flow-0019's handoff and independently verified against the ADR and VISION.md before blocking. Re-ready this the day the trigger condition in Amendment 1 decision 3 is met."
 serves: ["G5"]            # the projection; deferred per ADR-0002 Amendment 1, goal unchanged
 touches: [".github/workflows/_flow-project-sync.yml", "project-template/.github/workflows/flow-project-sync.yml", "project-template/.flow/bin/project-sync.mjs", "project-template/.flow/bin/project-sync.test.mjs", "docs/adr/0002-flightdeck-projection-github-projects.md"]
 labels: [flightdeck, infra, integration]
-notes: []
+notes:
+  - "2026-08-24: blocked, not cancelled. The task selector (pick-task.mjs) kept returning flow-0003 as highest-priority ready because status: ready was never updated after ADR-0002 Amendment 1 (2026-08-18) deferred it. flow-0019's handoff flagged this as a judgment call rather than silently implementing it; this session independently read the full ADR (original decision + Amendment 1) and VISION.md and reached the same conclusion. Amendment 1 decision 3 names the unblocking condition explicitly: a non-operator (employee or client) needing a board. The Scope, acceptance criteria and auth decision (FLOW_PROJECT_PAT, project scope only) below remain fully specified and valid for whenever that day comes — nothing here needs re-deriving, only re-reading."
 ---
 
 ## Context
