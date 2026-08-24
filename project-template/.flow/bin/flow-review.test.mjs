@@ -31,6 +31,7 @@ import {
   parseVerdict,
   reviewBlock,
   runPlan,
+  runReviewCli,
   securityDecision,
   verdictOutcome,
 } from "./flow-review.mjs";
@@ -305,6 +306,24 @@ test("CLI rejects an unknown subcommand instead of exiting 0 having done nothing
   const r = run(["definitely-not-a-command"]);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /expected "plan" or "verdict"/);
+});
+
+// runReviewCli is the entry point an adapter calls directly (see canonical's own
+// .flow/bin/flow-review.mjs) rather than re-implementing this dispatch — same pattern as
+// flow-state.mjs's runStateCli and touches-guard.mjs's runGuard. It must return a code, never
+// call process.exit itself, so a caller (an adapter, or this test) can run in-process.
+test("runReviewCli returns an exit code without calling process.exit — an adapter can call it in-process", () => {
+  const dir = tmp("cli-fn-verdict");
+  try {
+    const f = join(dir, "verdict.json");
+    writeFileSync(f, JSON.stringify({ verdict: "FAIL", summary: "nope" }));
+    const code = runReviewCli({ argv: ["verdict", f, "--check", "qa"], env: {} });
+    assert.equal(code, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("runReviewCli: unknown subcommand returns 1, same as the CLI", () => {
+  assert.equal(runReviewCli({ argv: ["nope"], env: {} }), 1);
 });
 
 // End-to-end `plan` against a real git repo: proves the outputs the workflow reads are actually

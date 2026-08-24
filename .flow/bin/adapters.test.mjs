@@ -160,6 +160,36 @@ test("touches-guard's CLI actually runs — the guard must never fail open", () 
     `expected the guard to report a real check; got:\n${r.stdout}${r.stderr}`);
 });
 
+// ══ the flow-review adapter — `_flow-review.yml` (flow-0007) invokes `.flow/bin/flow-review.mjs
+//    plan`/`verdict` on every PR. Canonical had no such file (this repo's own PRs failed
+//    `flow-review / plan` with "flow-review.mjs is missing" until this closed the gap — the
+//    same class of miss flow-state.mjs's header describes, except this one was not latent) ══
+
+test("flow-review adapter CLI actually runs `plan` against canonical's own config — not a symlink no-op", () => {
+  const dir = tmp("review-plan");
+  try {
+    const out = join(dir, "gh-output");
+    const summary = join(dir, "gh-summary");
+    writeFileSync(out, "");
+    writeFileSync(summary, "");
+    const r = run("flow-review.mjs", ["plan"], {
+      BASE_REF: "HEAD", GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: summary,
+    });
+    assert.equal(r.status, 0, `expected plan to succeed against canonical's real .flow/config.yml:\n${r.stderr}`);
+    assert.match(r.stdout, /### Flow review gate — plan/,
+      `expected the adapter to actually execute the template's CLI, not exit silently; got:\n${r.stdout}${r.stderr}`);
+    assert.match(readFileSync(out, "utf8"), /^model=/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("flow-review adapter CLI `verdict` fails closed on a missing verdict file, same as the template", () => {
+  const r = run("flow-review.mjs", ["verdict", join(tmpdir(), "flow-adapter-no-such-verdict.json"), "--check", "qa"]);
+  assert.equal(r.status, 1, "a reviewer that produced no verdict must not read as an approval");
+  assert.match(r.stderr, /no verdict at/);
+});
+
 test("findTaskFile ignores the template placeholder and returns null for an unknown id", () => {
   const tasks = join(doctorFlowDir(), "tasks");
   assert.equal(findTaskFile(tasks, "flow-9999"), null);

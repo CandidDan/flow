@@ -310,16 +310,24 @@ function planSummary({ cfg, changedFiles, security, diff }) {
   return out.join("\n");
 }
 
-if (__isMain) {
-  const [cmd, ...rest] = process.argv.slice(2);
+// The whole CLI, factored out so an adapter (canonical's `.flow/bin/flow-review.mjs`) can call
+// it directly instead of duplicating this dispatch — same reason `flow-state.mjs` exports
+// `runStateCli` and `touches-guard.mjs` exports `runGuard`. Nothing here needs a repo root: both
+// subcommands already resolve every path off `env`/the CLI's own CWD, which is correct in every
+// repo that invokes it from its own root (CI always does), so an adapter needs to supply nothing
+// beyond calling this function. Returns an exit code; never calls `process.exit` itself, so a
+// test (or an adapter with its own cleanup to run first) can inspect the code before the process
+// actually ends.
+export function runReviewCli({ argv = process.argv.slice(2), env = process.env } = {}) {
+  const [cmd, ...rest] = argv;
   try {
     if (cmd === "plan") {
       const plan = runPlan({
-        configPath: process.env.FLOW_CONFIG || ".flow/config.yml",
-        outDir: process.env.REVIEW_OUT_DIR || ".flow-review",
+        configPath: env.FLOW_CONFIG || ".flow/config.yml",
+        outDir: env.REVIEW_OUT_DIR || ".flow-review",
       });
       const { cfg, changedFiles, security, diff } = plan;
-      emit(process.env.GITHUB_OUTPUT, [
+      emit(env.GITHUB_OUTPUT, [
         `model=${cfg.model}`,
         `security_model=${cfg.securityModel}`,
         `security_run=${security.run}`,
@@ -328,9 +336,9 @@ if (__isMain) {
         `diff_truncated=${diff.truncated}`,
       ].join("\n"));
       const summary = planSummary(plan);
-      emit(process.env.GITHUB_STEP_SUMMARY, summary);
+      emit(env.GITHUB_STEP_SUMMARY, summary);
       console.log(summary);
-      process.exit(0);
+      return 0;
     }
 
     if (cmd === "verdict") {
@@ -348,15 +356,19 @@ if (__isMain) {
         .concat(parsed.summary ? [parsed.summary, ""] : [])
         .concat(outcome.lines.map((l) => `- ${l}`))
         .join("\n");
-      emit(process.env.GITHUB_STEP_SUMMARY, md);
+      emit(env.GITHUB_STEP_SUMMARY, md);
       for (const l of outcome.lines) console.error(`::error::${l}`);
       console.log(`${check}: ${outcome.ok ? "PASS" : "FAIL"}${parsed.summary ? ` — ${parsed.summary}` : ""}`);
-      process.exit(outcome.code);
+      return outcome.code;
     }
 
     throw new ReviewError(`unknown command ${JSON.stringify(cmd ?? "")} — expected "plan" or "verdict"`);
   } catch (e) {
     console.error(`::error::flow-review: ${e.message}`);
-    process.exit(1);
+    return 1;
   }
+}
+
+if (__isMain) {
+  process.exit(runReviewCli());
 }
