@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0021"
 title: "Make task-id allocation first-push-wins, so two orchestrators cannot land the same id"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude/flow-task-workflow-l8ypch"
 created: "2026-08-19"
 started: "2026-08-24T07:17:36Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0021-atomic-task-id-allocation"
+pr: "https://github.com/CandidDan/flow/pull/27"
 issue: ""
 blocked_reason: ""
 serves: ["G2"]            # a green gate worth believing — a guard that does not exist yet
