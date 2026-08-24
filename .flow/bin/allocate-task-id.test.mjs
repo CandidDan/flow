@@ -32,6 +32,12 @@ test("canonicalProjectName reads 'flow' out of this repo's own .flow/config.yml"
 });
 
 test("readIdsFromOrigin, pointed at canonical, returns real flow-NNNN ids from origin/main", () => {
+  // `flow-gates.yml`'s `flow-tooling` job checks this repo out with `actions/checkout@v4`'s
+  // default (shallow, single-ref) settings — it never fetches `origin/main` on its own, unlike
+  // the `touches` job (`fetch-depth: 0`). Every REAL caller of `readIdsFromOrigin` reaches it
+  // through `allocateTaskId`, which fetches first; a standalone call needs to do the same or it
+  // sees whatever `origin/main` state a shallow checkout happened to leave behind.
+  spawnSync("git", ["-C", REPO, "fetch", "origin", "main", "--quiet"]);
   const ids = readIdsFromOrigin(REPO);
   assert.ok(ids.length > 10, "canonical's real store holds a real backlog");
   assert.ok(ids.every((id) => /^flow-\d{4}$/.test(id)), "every id must be canonical's own shape");
