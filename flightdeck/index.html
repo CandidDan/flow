@@ -60,7 +60,7 @@
   <h1>Mission control</h1>
   <div id="auth">
     <input id="token" type="password" placeholder="Read-only fine-grained PAT (Contents, Actions, Issues, Pull requests, metadata)" autocomplete="off">
-    <label><input id="remember" type="checkbox"> Remember on this device</label>
+    <label title="On file:// every local HTML file in this browser profile shares one storage origin, so another local page could read this token back out of localStorage. The token is still read-only, but know that before checking this."><input id="remember" type="checkbox"> Remember on this device</label>
     <button id="connect">Load</button>
     <span id="owner-note"></span>
   </div>
@@ -71,7 +71,10 @@
     Paste a read-only PAT and press Load. Nothing is sent anywhere except <code>api.github.com</code>,
     and this page makes no write calls — see <a href="README.md">README.md</a>. "Remember on this
     device" stores the token in this browser's <code>localStorage</code>; left unchecked, it lives in
-    memory only and is gone when you close the tab.
+    memory only and is gone when you close the tab. Opened via <code>file://</code>, every local HTML
+    file shares one storage origin in Chromium browsers, so checking "Remember" makes the token
+    readable by any other local page you open in this profile — the token is read-only-scoped either
+    way, but know that before opting in.
   </p>
 </main>
 

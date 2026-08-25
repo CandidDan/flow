@@ -111,10 +111,12 @@ the token lives in a page-local variable and is gone when the tab closes.
 `npm test` runs, not a duplicate copy inlined into the page. Firefox loads local ES modules over
 `file://` without complaint; Chrome and Edge apply CORS-style restrictions to `type="module"`
 scripts loaded from `file://` and may show a blank page with a console error instead. If that
-happens, serve the folder with any static file server — `npx serve flightdeck` or
-`python3 -m http.server` from this directory both work — which is still "no server-side
-component" in the sense that matters here: nothing computes, stores, or authenticates anything;
-it is a dumb static-file host standing in for a browser restriction, not infrastructure.
+happens, serve the folder with any static file server — `npx serve -l 127.0.0.1 flightdeck` or
+`python3 -m http.server --bind 127.0.0.1` from this directory both work — which is still "no
+server-side component" in the sense that matters here: nothing computes, stores, or authenticates
+anything; it is a dumb static-file host standing in for a browser restriction, not infrastructure.
+Bind to `127.0.0.1` explicitly: both tools default to `0.0.0.0`, which would expose the page —
+and the paste-a-PAT flow — to the rest of your local network, not just this machine.
 
 **Read-only, mechanically, not by policy.** Every call `mission-control.mjs` makes is a REST
 `GET`. GraphQL was deliberately not used even though it would collapse some of the request count
