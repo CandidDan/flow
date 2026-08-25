@@ -43,6 +43,14 @@ export function classifyWorkflowTrigger(workflowYamlText) {
   const text = String(workflowYamlText ?? "");
   const crons = extractCronExpressions(text);
   if (crons.length > 0) return { kind: "scheduled", crons };
+
+  // `on: [push, pull_request]` — the flow-shorthand array form. GitHub does not allow `schedule`
+  // (it needs a nested cron object) in this form, so it only ever matters for event detection.
+  const inlineOn = text.match(/^on:\s*\[([^\]]*)\]/m);
+  if (inlineOn && EVENT_TRIGGER_KEYS.some((k) => new RegExp(`(^|,)\\s*${k}\\s*(,|$)`).test(inlineOn[1]))) {
+    return { kind: "event", crons: [] };
+  }
+
   const onBlock = text.match(/^on:\s*$/m);
   const scanFrom = onBlock ? text.slice(onBlock.index) : text;
   if (EVENT_TRIGGER_KEYS.some((k) => new RegExp(`^\\s*${k}:`, "m").test(scanFrom))) {
@@ -116,6 +124,11 @@ function cronMatchesMinute(fields, epochMinutes) {
 // "now"), so the result is deterministic and independent of when it's computed.
 const WINDOW_DAYS_DEFAULT = 28; // four weeks — long enough to average out a weekly cron cleanly
 
+// Brute-forces every minute in the window (40,320 at the default 28 days) per distinct cron set —
+// simple and exactly correct for any cron expression, rather than special-casing the common
+// `*/N` shape. Called once per scheduled workflow classified, so a page load's total cost is
+// bounded by workflow count, not repo count squared; fine at fleet sizes Flow actually reaches.
+// Worth revisiting only if a single repo's scheduled-workflow count grows far past today's ~3-4.
 export function cronIntervalHours(crons, { windowDays = WINDOW_DAYS_DEFAULT } = {}) {
   const list = Array.isArray(crons) ? crons : [crons];
   const parsed = list.map(parseCronExpr).filter(Boolean);

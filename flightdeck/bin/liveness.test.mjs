@@ -47,6 +47,11 @@ test("classifyWorkflowTrigger: workflow_dispatch only is manual, not scheduled o
   assert.equal(classifyWorkflowTrigger("").kind, "manual");
 });
 
+test("classifyWorkflowTrigger: the array shorthand (on: [push, pull_request]) is still event, not manual", () => {
+  assert.equal(classifyWorkflowTrigger("on: [push, pull_request]\n").kind, "event");
+  assert.equal(classifyWorkflowTrigger("on: [workflow_dispatch]\n").kind, "manual");
+});
+
 // ── cron parsing / interval math ────────────────────────────────────────────────────────────
 
 test("parseCronExpr rejects anything that isn't exactly 5 fields", () => {

@@ -247,9 +247,8 @@ export function deriveNeeds({ blockedTasks, proposedIssues, compassIssues, await
 // this reads api.github.com exclusively) ────────────────────────────────────────────────────
 
 async function listDirOrEmpty(io, budget, path) {
-  budget.charge(1);
   try {
-    const data = await io.rest(path);
+    const data = await budgetedRest(io, budget, path);
     return Array.isArray(data) ? data : [];
   } catch (err) {
     if (err && err.status === 404) return [];
@@ -258,16 +257,14 @@ async function listDirOrEmpty(io, budget, path) {
 }
 
 async function fetchTextFile(io, budget, path) {
-  budget.charge(1);
-  const data = await io.rest(path);
+  const data = await budgetedRest(io, budget, path);
   if (!data || typeof data.content !== "string") throw new Error(`${path}: no file content in response`);
   return decodeBase64(data.content);
 }
 
 async function fetchOptionalTextFile(io, budget, path) {
-  budget.charge(1);
   try {
-    const data = await io.rest(path);
+    const data = await budgetedRest(io, budget, path);
     if (!data || typeof data.content !== "string") return null;
     return decodeBase64(data.content);
   } catch (err) {
