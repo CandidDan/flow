@@ -14,7 +14,7 @@
 // in Node itself.
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +31,7 @@ import {
   parseVerdict,
   reviewBlock,
   runPlan,
+  runReviewCli,
   securityDecision,
   verdictOutcome,
 } from "./flow-review.mjs";
@@ -305,6 +306,53 @@ test("CLI rejects an unknown subcommand instead of exiting 0 having done nothing
   const r = run(["definitely-not-a-command"]);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /expected "plan" or "verdict"/);
+});
+
+// ── runReviewCli: the shell itself is exported, so an adapter never carries a copy of it ──
+// Canonical's `.flow/bin/flow-review.mjs` invokes this function against its own store. Two
+// copies of one shell is the flow-0008 hazard (see touches-guard.mjs), so the function has to
+// hold the whole contract: it returns the exit code, it takes its defaults from `opts`, and the
+// environment overrides still beat those defaults — the CI contract unchanged.
+
+test("runReviewCli RETURNS the exit code instead of exiting — pass, fail, and fail-closed", () => {
+  const dir = tmp("cli-fn");
+  try {
+    const f = join(dir, "qa.json");
+    writeFileSync(f, JSON.stringify({ verdict: "PASS", summary: "ok" }));
+    assert.equal(runReviewCli(["verdict", f, "--check", "qa"], { env: {} }), 0);
+    writeFileSync(f, JSON.stringify({ verdict: "FAIL", summary: "nope" }));
+    assert.equal(runReviewCli(["verdict", f, "--check", "qa"], { env: {} }), 1);
+    assert.equal(runReviewCli(["verdict", join(dir, "absent.json")], { env: {} }), 1,
+      "a missing verdict must fail through the function exactly as through the process");
+    assert.equal(runReviewCli(["definitely-not-a-command"], { env: {} }), 1,
+      "an unknown command returning 0 would be a gate that passes having done nothing");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("runReviewCli plan takes its defaults from opts — and the environment still wins", () => {
+  const dir = tmp("cli-opts");
+  try {
+    writeFileSync(join(dir, "config.yml"), CONFIG);
+    writeFileSync(join(dir, "override.yml"), `review:\n  model: "opus"\n`);
+    const git = () => "";                       // an empty diff — the plan still has to complete
+    const pinned = { configPath: join(dir, "config.yml"), outDir: join(dir, "outA"), git };
+
+    assert.equal(runReviewCli(["plan"], { env: { GITHUB_OUTPUT: join(dir, "ghA") }, ...pinned }), 0);
+    assert.match(readFileSync(join(dir, "ghA"), "utf8"), /^model=haiku$/m,
+      "with no FLOW_CONFIG set, the pinned configPath is the config that is read");
+    assert.ok(existsSync(join(dir, "outA", "diff.patch")) && existsSync(join(dir, "outA", "files.txt")),
+      "the bounded context lands in the pinned outDir");
+
+    const env = {
+      FLOW_CONFIG: join(dir, "override.yml"),
+      REVIEW_OUT_DIR: join(dir, "outB"),
+      GITHUB_OUTPUT: join(dir, "ghB"),
+    };
+    assert.equal(runReviewCli(["plan"], { env, ...pinned }), 0);
+    assert.match(readFileSync(join(dir, "ghB"), "utf8"), /^model=opus$/m,
+      "FLOW_CONFIG must beat the pinned default — adapters change the default, never the contract");
+    assert.ok(existsSync(join(dir, "outB", "diff.patch")), "and so must REVIEW_OUT_DIR");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 // End-to-end `plan` against a real git repo: proves the outputs the workflow reads are actually

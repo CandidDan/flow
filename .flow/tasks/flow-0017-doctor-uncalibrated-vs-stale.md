@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0017"
 title: "Let flow-doctor tell an uncalibrated repo apart from a stale declaration"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "flow/flow-0017-doctor-uncalibrated-vs-stale"
 created: "2026-08-19"
 started: "2026-08-24T06:54:51Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0017-doctor-uncalibrated-vs-stale"
+pr: "https://github.com/CandidDan/flow/pull/25"
 issue: ""
 blocked_reason: ""
 serves: ["G2"]            # a check that states its decision instead of collapsing two facts into one
@@ -19,6 +19,7 @@ notes:
   - "2026-08-19: surfaced by flow-0011, which shipped project-template/VISION.md and could not fix this (project-template/.flow/config.yml was outside its touches). It shipped a deliberately narrowed assertion instead; clearing that narrowing is criterion 7 here."
   - "2026-08-19: a second defect found while specifying this, not in the original report — `check: \"REPLACE-ME\"` is truthy, so flow-doctor.mjs:496's `if (!r.check)` never fires for it and a placeholder check reads as a declared one. That is a check passing on silence, which is why this task is G2 rather than housekeeping. It is criterion 4."
   - "2026-08-19: touches intersected against every ready task on 2026-08-19 (flow-0003/0005/0007/0008/0012/0013/0014/0015/0016) and against flow-0018, written in the same batch. Disjoint from all. The near-miss is flow-0007, which declares project-template/.flow/config.yml — disjoint ONLY because this task deliberately does not touch that file. Widening scope to include it breaks parallel-safety with flow-0007."
+  - "2026-08-24: PR #25 open, all seven acceptance criteria met, gate green locally (npm ci/build/lint/test/coverage — 450 tests, 1 expected skip, coverage 95.78% vs 83.5 floor). Implementation: flow-doctor.mjs gained a PLACEHOLDER/isPlaceholder(v) helper (strips trailing slash, compares to \"REPLACE-ME\") and the source_roots loop now checks isPlaceholder(r.path) || isPlaceholder(r.check) before the missing-check/stale-path checks, pushing a WARNING and skipping the rest of that entry's checks; the same isPlaceholder(r.path) guard was added to the topLevelSourceDirs coverage scan so an uncalibrated entry can never appear to cover a real tree (closes the criterion-5 backstop). vision-template.test.mjs's criterion-4 test was rewritten to assert exit 0 outright (status captured via e.status in the catch) with the REPLACE-ME carve-out and its explanatory comment deleted. Six new unit tests added to flow-doctor.test.mjs directly under the existing gate-coverage-floor block, using the same repoFixture/cfg helpers already there. One judgment call a fresh session would otherwise rediscover: the criterion-6 test (no `path` key at all) had to be written as `path: \"\"` rather than an omitted `path:` line — parseSourceRoots only pushes a root object once it matches a `path:` line, so an entry with only a `check:` line and no `path:` line never reaches the roots array at all (cur stays null, the check line is silently dropped); an empty-string path is the only reachable way to exercise the existing `!r.path` PROBLEM branch. No reviewer agents run in-session per current CLAUDE.md/PROTOCOL.md (flow-0007 moved qa/security/code-review onto PR checks); nothing else deferred or worker-initiated-widened on this task. Next action: none from a worker — PR #25 is open and subscribed for CI/review events, awaiting the qa/security/code-review checks and human merge."
 ---
 
 ## Context
