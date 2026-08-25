@@ -20,7 +20,13 @@ import {
   loadRepoRow,
   parseTaskFrontmatter,
   parseVision,
+  renderErrorBannerHTML,
+  renderMissionControlHTML,
+  renderRepoRow,
+  renderUnavailableRow,
+  renderVisionDrawer,
   resolveOwner,
+  statusLineText,
 } from "./mission-control.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
@@ -428,6 +434,105 @@ test("loadMissionControl: a repo whose fetch fails appears explicitly unavailabl
   assert.equal(doc.repos[0].status, "unavailable");
 });
 
+// ── render — the actual page HTML, exercised and asserted, not just scanned for absence ────
+// The QA gate's own finding on this task (flow-0019): moving the templating out of index.html's
+// <script> block into this file is only real if something calls it with data and checks the
+// output — a source-presence scan proves the code exists, not that it renders correctly.
+
+test("renderUnavailableRow names the repo and the reason", () => {
+  const html = renderUnavailableRow({ name: "o/gone", reason: "404: /repos/o/gone" });
+  assert.match(html, /o\/gone/);
+  assert.match(html, /404: \/repos\/o\/gone/);
+});
+
+test("renderRepoRow renders all four question columns with their real content", () => {
+  const row = {
+    name: "o/r", desc: "a repo", severity: "attention",
+    moving: [{ id: "flow-0001", title: "In flight", status: "in_progress" }],
+    next: [{ id: "flow-0002", title: "Next up" }], nextMore: 2,
+    needs: [{ type: "blocked-task", title: "Stuck task" }, { type: "pr-review", title: "Review me", url: "https://x/pr1" }],
+    machinery: [{ name: "flow-gates", state: "good" }, { name: "flow-recover", state: "warn", reason: "running late" }],
+    vision: null,
+  };
+  const html = renderRepoRow(row);
+  assert.match(html, /What's moving/);
+  assert.match(html, /In flight/);
+  assert.match(html, /What's next/);
+  assert.match(html, /Next up/);
+  assert.match(html, /\+2 more ready/);
+  assert.match(html, /What needs you/);
+  assert.match(html, /Stuck task/);
+  assert.match(html, /href="https:\/\/x\/pr1"/);
+  assert.match(html, /Machinery/);
+  assert.match(html, /flow-gates/);
+  assert.match(html, /m-good/);
+  assert.match(html, /m-warn/);
+  assert.match(html, /sev-attention/);
+  assert.doesNotMatch(html, /class="vision"/, "no vision drawer when the row has none");
+});
+
+test("renderRepoRow shows explicit empty states, never a blank column", () => {
+  const html = renderRepoRow({
+    name: "o/r", desc: "", severity: "quiet",
+    moving: [], next: [], nextMore: 0, needs: [], machinery: [], vision: null,
+  });
+  assert.match(html, /Nothing in flight\./);
+  assert.match(html, /Ready queue is empty\./);
+  assert.match(html, /Nothing waiting on you\./);
+});
+
+test("renderRepoRow includes the vision drawer only when the row carries one", () => {
+  const html = renderRepoRow({ ...VISION_FIXTURE, desc: "", severity: "quiet", moving: [], next: [], nextMore: 0, needs: [], machinery: [] });
+  assert.match(html, /class="vision"/);
+  assert.match(html, /Ship things/);
+});
+
+test("renderRepoRow/renderUnavailableRow escape hostile data from the GitHub API — no raw HTML injection", () => {
+  const html = renderRepoRow({
+    name: "<img src=x onerror=alert(1)>", desc: "<script>evil()</script>", severity: "quiet",
+    moving: [], next: [], nextMore: 0,
+    needs: [{ type: "pr-review", title: "<b>hi</b>", url: "javascript:alert(1)" }],
+    machinery: [], vision: null,
+  });
+  assert.doesNotMatch(html, /<img src=x/);
+  assert.doesNotMatch(html, /<script>evil/);
+  assert.doesNotMatch(html, /<b>hi<\/b>/);
+  assert.match(html, /&lt;img/);
+  assert.match(html, /&lt;script&gt;/);
+});
+
+test("renderMissionControlHTML preserves doc.repos' own order (needs-you-first, already sorted upstream)", () => {
+  const doc = {
+    owner: "o", repos: [
+      { status: "ok", name: "o/first", desc: "", severity: "critical", moving: [], next: [], nextMore: 0, needs: [], machinery: [], vision: null },
+      { status: "ok", name: "o/second", desc: "", severity: "quiet", moving: [], next: [], nextMore: 0, needs: [], machinery: [], vision: null },
+      { status: "unavailable", name: "o/third", reason: "boom" },
+    ], truncated: null,
+  };
+  const html = renderMissionControlHTML(doc);
+  const iFirst = html.indexOf("o/first"), iSecond = html.indexOf("o/second"), iThird = html.indexOf("o/third");
+  assert.ok(iFirst > -1 && iSecond > iFirst && iThird > iSecond, "render order must match doc.repos order");
+});
+
+test("renderMissionControlHTML shows the truncation banner naming the count and reason, and an explicit empty state", () => {
+  const truncated = renderMissionControlHTML({ owner: "o", repos: [], truncated: { count: 2, reason: "request ceiling (10) reached", repos: ["o/a", "o/b"] } });
+  assert.match(truncated, /2 repo\(s\) not loaded/);
+  assert.match(truncated, /request ceiling \(10\) reached/);
+  assert.match(truncated, /o\/a, o\/b/);
+
+  const empty = renderMissionControlHTML({ owner: "o", repos: [], truncated: null });
+  assert.match(empty, /No repos carrying the.*flow.*topic were found for o/);
+});
+
+test("statusLineText reports the request count against the documented ceiling", () => {
+  assert.match(statusLineText({ requestCount: 42, requestCeiling: 900 }), /42\/900 requests/);
+});
+
+test("renderErrorBannerHTML escapes the error message", () => {
+  assert.doesNotMatch(renderErrorBannerHTML(new Error("<script>x</script>")), /<script>x<\/script>/);
+  assert.match(renderErrorBannerHTML(new Error("Paste a read-only PAT first.")), /Paste a read-only PAT first\./);
+});
+
 // ── the write-call scan — "makes no write calls" is asserted, not documented ───────────────
 //
 // A blunt word-boundary scan for "POST" also flags this very file's own prose explaining why
@@ -452,11 +557,31 @@ test("no write-capable API call appears anywhere in flightdeck/index.html", () =
   assert.doesNotMatch(html, WRITE_METHOD_USAGE, "a write-capable HTTP method call appears in index.html");
 });
 
-test("the vision drawer's only action is a link to propose a change — no edit affordance", () => {
-  const html = readFileSync(join(BIN, "..", "index.html"), "utf8");
-  const fn = html.match(/function renderVision\([\s\S]*?\n  \}/);
-  assert.ok(fn, "renderVision() not found in index.html");
-  const body = fn[0];
-  assert.match(body, /Propose a \[vision\] change on GitHub/, "no propose-a-change link in the vision drawer");
-  assert.doesNotMatch(body, /<input|<textarea|<button|contenteditable/i, "the vision drawer offers an edit affordance, which ADR-0002 Amendment 1 forbids");
+const VISION_FIXTURE = {
+  name: "o/r",
+  vision: {
+    purpose: "Purpose text.",
+    goals: [{ id: "G1", title: "Ship things", activity: { doneIn30d: 2, readyCount: 1, lastMerged: "2026-08-20T00:00:00Z" } }],
+    nonGoals: [{ id: "NG1", title: "Not a platform", reason: "no daemon" }],
+    changelog: [{ date: "2026-08-18", change: "Initial.", why: "Anchor." }],
+  },
+};
+
+test("renderVisionDrawer's only action is a link to propose a change — no edit affordance", () => {
+  const html = renderVisionDrawer(VISION_FIXTURE);
+  assert.match(html, /Propose a \[vision\] change on GitHub/, "no propose-a-change link in the vision drawer");
+  assert.match(html, /href="https:\/\/github\.com\/o\/r\/edit\/main\/VISION\.md"/);
+  assert.doesNotMatch(html, /<input|<textarea|<button|contenteditable/i, "the vision drawer offers an edit affordance, which ADR-0002 Amendment 1 forbids");
+});
+
+test("renderVisionDrawer shows purpose, each goal's activity line, non-goals with reasons, and the change log", () => {
+  const html = renderVisionDrawer(VISION_FIXTURE);
+  assert.match(html, /Purpose text\./);
+  assert.match(html, /G1/);
+  assert.match(html, /2 done in 30d/);
+  assert.match(html, /1 ready/);
+  assert.match(html, /NG1/);
+  assert.match(html, /no daemon/);
+  assert.match(html, /Initial\./);
+  assert.doesNotMatch(html, /%|percent|progress/i, "activity is counts, never a percent-complete");
 });

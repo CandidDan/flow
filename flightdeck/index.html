@@ -79,7 +79,10 @@
 </main>
 
 <script type="module">
-  import { loadMissionControl, resolveOwner, createGitHubIO, createBudget, DEFAULT_REQUEST_CEILING } from "./bin/mission-control.mjs";
+  import {
+    loadMissionControl, resolveOwner, createGitHubIO, createBudget, DEFAULT_REQUEST_CEILING,
+    renderMissionControlHTML, renderErrorBannerHTML, statusLineText,
+  } from "./bin/mission-control.mjs";
 
   const STORAGE_KEY = "flightdeck-mission-control-pat";
   const tokenInput = document.getElementById("token");
@@ -98,6 +101,10 @@
 
   connectBtn.addEventListener("click", () => { load().catch(showFatalError); });
 
+  // Nothing below decides WHAT to render — it wires DOM events, calls the tested fetch/derive/
+  // render functions in mission-control.mjs, and assigns their return values to the page. Every
+  // decision (what a row shows, how it sorts, how a value gets escaped) lives in, and is tested
+  // in, mission-control.mjs.
   async function load() {
     const token = tokenInput.value.trim();
     if (!token) { showFatalError(new Error("Paste a read-only PAT first.")); return; }
@@ -116,95 +123,13 @@
     ownerNote.textContent = `as ${login}`;
 
     const doc = await loadMissionControl({ io, owner: login, ownerType: type, budget, now: Date.now() });
-    render(doc);
-  }
-
-  function render(doc) {
-    statusLine.textContent = `${doc.requestCount}/${doc.requestCeiling} requests · generated just now, computed live — never stored`;
-
-    const parts = [];
-    if (doc.truncated) {
-      parts.push(
-        `<div class="banner">Request ceiling reached (${escapeHtml(String(doc.truncated.reason))}) — ` +
-        `${doc.truncated.count} repo(s) not loaded: ${doc.truncated.repos.map(escapeHtml).join(", ")}</div>`
-      );
-    }
-    if (doc.repos.length === 0) {
-      parts.push(`<p class="empty">No repos carrying the <code>flow</code> topic were found for ${escapeHtml(doc.owner)}.</p>`);
-    }
-    for (const row of doc.repos) parts.push(row.status === "ok" ? renderRepo(row) : renderUnavailable(row));
-    app.innerHTML = parts.join("\n");
-  }
-
-  function renderUnavailable(row) {
-    return `<div class="repo"><div class="unavailable"><strong>${escapeHtml(row.name)}</strong> — unavailable: ${escapeHtml(row.reason || "unknown reason")}</div></div>`;
-  }
-
-  function renderRepo(row) {
-    const moving = row.moving.length
-      ? `<ul>${row.moving.map((m) => `<li>${escapeHtml(m.title || m.id)} <span class="empty">(${escapeHtml(m.status)})</span></li>`).join("")}</ul>`
-      : `<p class="empty">Nothing in flight.</p>`;
-
-    const next = row.next.length
-      ? `<ul><li>${escapeHtml(row.next[0].title || row.next[0].id)}${row.nextMore > 0 ? ` <span class="empty">+${row.nextMore} more ready</span>` : ""}</li></ul>`
-      : `<p class="empty">Ready queue is empty.</p>`;
-
-    const needs = row.needs.length
-      ? `<ul>${row.needs.map((n) => `<li>${n.url ? `<a href="${escapeAttr(n.url)}">${escapeHtml(n.title)}</a>` : escapeHtml(n.title)}</li>`).join("")}</ul>`
-      : `<p class="empty">Nothing waiting on you.</p>`;
-
-    const machinery = `<div class="machinery">${row.machinery.map((m) =>
-      `<span class="m-chip" title="${escapeAttr(m.reason || m.state)}"><span class="m-dot m-${escapeAttr(m.state)}"></span>${escapeHtml(m.name)}</span>`
-    ).join("")}</div>`;
-
-    return `
-      <div class="repo">
-        <div class="repo-head">
-          <span class="sev-dot sev-${escapeAttr(row.severity)}"></span>
-          <span class="name">${escapeHtml(row.name)}</span>
-          <span class="desc">${escapeHtml(row.desc || "")}</span>
-        </div>
-        <div class="repo-body">
-          <div class="col"><h3>What's moving</h3>${moving}</div>
-          <div class="col"><h3>What's next</h3>${next}</div>
-          <div class="col"><h3>What needs you</h3>${needs}</div>
-          <div class="col"><h3>Machinery</h3>${machinery}</div>
-        </div>
-        ${row.vision ? renderVision(row) : ""}
-      </div>`;
-  }
-
-  function renderVision(row) {
-    const goals = row.vision.goals.map((g) => `
-      <div class="vision-goal">
-        <strong>${escapeHtml(g.id)}</strong> — ${escapeHtml(g.title)}
-        <div class="activity">activity: ${g.activity.doneIn30d} done in 30d · ${g.activity.readyCount} ready ·
-          last merged ${g.activity.lastMerged ? escapeHtml(g.activity.lastMerged) : "never"}</div>
-      </div>`).join("");
-    const nonGoals = row.vision.nonGoals.map((ng) =>
-      `<div class="non-goal"><strong>${escapeHtml(ng.id)}</strong> — ${escapeHtml(ng.title)}: ${escapeHtml(ng.reason)}</div>`).join("");
-    const rows = row.vision.changelog.map((c) =>
-      `<tr><td>${escapeHtml(c.date)}</td><td>${escapeHtml(c.change)}</td><td>${escapeHtml(c.why)}</td></tr>`).join("");
-
-    return `
-      <details class="vision">
-        <summary>Vision</summary>
-        <p>${escapeHtml(row.vision.purpose)}</p>
-        ${goals}
-        ${nonGoals}
-        <table class="changelog"><tr><th>Date</th><th>Change</th><th>Why</th></tr>${rows}</table>
-        <p><a href="https://github.com/${escapeAttr(row.name)}/edit/main/VISION.md">Propose a [vision] change on GitHub &rarr;</a></p>
-      </details>`;
+    statusLine.textContent = statusLineText(doc);
+    app.innerHTML = renderMissionControlHTML(doc);
   }
 
   function showFatalError(err) {
-    app.innerHTML = `<div class="banner error">${escapeHtml(err.message || String(err))}</div>`;
+    app.innerHTML = renderErrorBannerHTML(err);
   }
-
-  function escapeHtml(s) {
-    return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  }
-  function escapeAttr(s) { return escapeHtml(s); }
 </script>
 </body>
 </html>

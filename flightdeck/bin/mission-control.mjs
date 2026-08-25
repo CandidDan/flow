@@ -476,6 +476,110 @@ export async function loadMissionControl({ io, owner, ownerType, budget = create
   };
 }
 
+// ── render — pure HTML-string templating, tested and linted like everything else ──────────────
+// `index.html`'s Notes/open-questions rule: "the page is a render shell over tested modules...
+// logic inlined in HTML is neither linted nor testable." That applies to templating as much as
+// to derivation — an untested `renderRepo()` sitting in a `<script>` block is exactly the failure
+// this task exists to avoid repeating. So the render functions live here, as pure functions of
+// already-derived data (a `doc` from `loadMissionControl`, or one `row` from `doc.repos`) to an
+// HTML string. `index.html`'s own script does nothing but wire DOM events, call `loadMissionControl`,
+// and assign the returned string to `innerHTML` — no decision of what to show is made there.
+
+export function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+export function escapeAttr(s) { return escapeHtml(s); }
+
+export function renderUnavailableRow(row) {
+  return `<div class="repo"><div class="unavailable"><strong>${escapeHtml(row.name)}</strong> — unavailable: ${escapeHtml(row.reason || "unknown reason")}</div></div>`;
+}
+
+export function renderVisionDrawer(row) {
+  const goals = row.vision.goals.map((g) => `
+      <div class="vision-goal">
+        <strong>${escapeHtml(g.id)}</strong> — ${escapeHtml(g.title)}
+        <div class="activity">activity: ${g.activity.doneIn30d} done in 30d · ${g.activity.readyCount} ready ·
+          last merged ${g.activity.lastMerged ? escapeHtml(g.activity.lastMerged) : "never"}</div>
+      </div>`).join("");
+  const nonGoals = row.vision.nonGoals.map((ng) =>
+    `<div class="non-goal"><strong>${escapeHtml(ng.id)}</strong> — ${escapeHtml(ng.title)}: ${escapeHtml(ng.reason)}</div>`).join("");
+  const changelogRows = row.vision.changelog.map((c) =>
+    `<tr><td>${escapeHtml(c.date)}</td><td>${escapeHtml(c.change)}</td><td>${escapeHtml(c.why)}</td></tr>`).join("");
+
+  return `
+      <details class="vision">
+        <summary>Vision</summary>
+        <p>${escapeHtml(row.vision.purpose)}</p>
+        ${goals}
+        ${nonGoals}
+        <table class="changelog"><tr><th>Date</th><th>Change</th><th>Why</th></tr>${changelogRows}</table>
+        <p><a href="https://github.com/${escapeAttr(row.name)}/edit/main/VISION.md">Propose a [vision] change on GitHub &rarr;</a></p>
+      </details>`;
+}
+
+export function renderRepoRow(row) {
+  const moving = row.moving.length
+    ? `<ul>${row.moving.map((m) => `<li>${escapeHtml(m.title || m.id)} <span class="empty">(${escapeHtml(m.status)})</span></li>`).join("")}</ul>`
+    : `<p class="empty">Nothing in flight.</p>`;
+
+  const next = row.next.length
+    ? `<ul><li>${escapeHtml(row.next[0].title || row.next[0].id)}${row.nextMore > 0 ? ` <span class="empty">+${row.nextMore} more ready</span>` : ""}</li></ul>`
+    : `<p class="empty">Ready queue is empty.</p>`;
+
+  const needs = row.needs.length
+    ? `<ul>${row.needs.map((n) => `<li>${n.url ? `<a href="${escapeAttr(n.url)}">${escapeHtml(n.title)}</a>` : escapeHtml(n.title)}</li>`).join("")}</ul>`
+    : `<p class="empty">Nothing waiting on you.</p>`;
+
+  const machinery = `<div class="machinery">${row.machinery.map((m) =>
+    `<span class="m-chip" title="${escapeAttr(m.reason || m.state)}"><span class="m-dot m-${escapeAttr(m.state)}"></span>${escapeHtml(m.name)}</span>`
+  ).join("")}</div>`;
+
+  return `
+      <div class="repo">
+        <div class="repo-head">
+          <span class="sev-dot sev-${escapeAttr(row.severity)}"></span>
+          <span class="name">${escapeHtml(row.name)}</span>
+          <span class="desc">${escapeHtml(row.desc || "")}</span>
+        </div>
+        <div class="repo-body">
+          <div class="col"><h3>What's moving</h3>${moving}</div>
+          <div class="col"><h3>What's next</h3>${next}</div>
+          <div class="col"><h3>What needs you</h3>${needs}</div>
+          <div class="col"><h3>Machinery</h3>${machinery}</div>
+        </div>
+        ${row.vision ? renderVisionDrawer(row) : ""}
+      </div>`;
+}
+
+// The status line's text, separated from the HTML body so a caller can assign it to a plain
+// `textContent` node (never `innerHTML`) without re-deriving anything.
+export function statusLineText(doc) {
+  return `${doc.requestCount}/${doc.requestCeiling} requests · generated just now, computed live — never stored`;
+}
+
+// The full `#app` body for one loaded document: the truncation banner (if any), an explicit
+// empty-state message (never a blank pane), then every repo row in `doc.repos`' own order —
+// `loadMissionControl` has already sorted that needs-you-first, so preserving order here is the
+// whole contract.
+export function renderMissionControlHTML(doc) {
+  const parts = [];
+  if (doc.truncated) {
+    parts.push(
+      `<div class="banner">Request ceiling reached (${escapeHtml(String(doc.truncated.reason))}) — ` +
+      `${doc.truncated.count} repo(s) not loaded: ${doc.truncated.repos.map(escapeHtml).join(", ")}</div>`
+    );
+  }
+  if (doc.repos.length === 0) {
+    parts.push(`<p class="empty">No repos carrying the <code>flow</code> topic were found for ${escapeHtml(doc.owner)}.</p>`);
+  }
+  for (const row of doc.repos) parts.push(row.status === "ok" ? renderRepoRow(row) : renderUnavailableRow(row));
+  return parts.join("\n");
+}
+
+export function renderErrorBannerHTML(err) {
+  return `<div class="banner error">${escapeHtml(err?.message || String(err))}</div>`;
+}
+
 // ── the one real IO implementation — browser fetch, never called from a test ──────────────────
 // Read-only by construction: every method issues a GET. There is no POST/PATCH/PUT/DELETE
 // anywhere in this file (see the module comment) — `mission-control.test.mjs` asserts it by
