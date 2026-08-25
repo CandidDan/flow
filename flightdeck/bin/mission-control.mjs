@@ -361,7 +361,10 @@ export async function loadRepoRow({ io, budget, fullName, desc, now }) {
       }
       const latestRun = (runs.workflow_runs ?? [])[0] ? { conclusion: runs.workflow_runs[0].conclusion } : null;
       machinery.push({ name: meta.name || wf.name, path, kind: "event", ...eventLiveness({ disabled, latestRun }) });
-      if (isGate) gateRunShas = (runs.workflow_runs ?? []).map((r) => r.head_sha).filter(Boolean);
+      // Accumulate rather than overwrite: a repo could carry more than one event-triggered
+      // workflow whose name matches /gate/i, and dropping an earlier one's runs would silently
+      // shrink gateRunShas — the wrong direction for a check whose job is not missing a merge.
+      if (isGate) gateRunShas = gateRunShas.concat((runs.workflow_runs ?? []).map((r) => r.head_sha).filter(Boolean));
     }
   }
 
@@ -378,9 +381,16 @@ export async function loadRepoRow({ io, budget, fullName, desc, now }) {
 
   if (gateRunShas.length > 0 || mergedPRs.length > 0) {
     const windowMs = MERGE_WINDOW_DAYS * 24 * 3600 * 1000;
+    // `gateRunShas` comes from the gate workflow's `pull_request`-triggered runs, whose
+    // `head_sha` is the PR branch's own tip — never a merge commit, because flow-gates.yml
+    // triggers on `pull_request`/`workflow_dispatch`, not `push`. So the merged SHA that must
+    // match is `p.head.sha` (what the gate actually ran against), not `merge_commit_sha` (a
+    // brand-new commit created AFTER merge that no gate run was ever triggered against). Falling
+    // back to `merge_commit_sha` only covers the rare case where GitHub has already pruned the
+    // head ref data for an old merged PR.
     const mergedShas = mergedPRs
       .filter((p) => now - new Date(p.merged_at).getTime() <= windowMs)
-      .map((p) => p.merge_commit_sha || p.head?.sha)
+      .map((p) => p.head?.sha || p.merge_commit_sha)
       .filter(Boolean);
     machinery.push({ name: "merges vs gate runs", path: null, kind: "derived", ...ungatedMergesLiveness({ mergedShas, gateRunShas }) });
   }

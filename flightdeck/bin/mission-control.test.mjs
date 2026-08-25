@@ -291,8 +291,11 @@ function buildHappyPathIO() {
     ] }],
     [/\/repos\/o\/r\/actions\/workflows\/1\/runs/, { workflow_runs: [{ conclusion: "success", head_sha: "sha-gated" }] }],
     [/\/repos\/o\/r\/actions\/workflows\/2\/runs/, { workflow_runs: [{ run_started_at: new Date().toISOString() }] }],
+    // head.sha matches the gate's run (it's what the gate actually ran against); merge_commit_sha
+    // is deliberately DIFFERENT and unmatched, as it always is on real GitHub data — a merge
+    // commit is created after merge, so no gate run is ever triggered against it.
     [/\/repos\/o\/r\/pulls\?state=closed/, [
-      { title: "[flow-0002] Ship it", merged_at: new Date().toISOString(), merge_commit_sha: "sha-gated", head: { sha: "sha-gated" } },
+      { title: "[flow-0002] Ship it", merged_at: new Date().toISOString(), merge_commit_sha: "sha-post-merge-commit", head: { sha: "sha-gated" } },
     ]],
     [/\/repos\/o\/r\/pulls\?state=open/, [{ title: "[flow-0004] Review me", draft: false, html_url: "https://x/pr9" }]],
     [/\/repos\/o\/r\/issues\?labels=proposed/, [{ title: "Proposed idea", html_url: "https://x/i1" }]],
@@ -329,13 +332,28 @@ test("loadRepoRow: an ungated merge is reported crit, naming the count", async (
   // Replace the closed-PR route with one whose merge SHA never appears in the gate's runs.
   const origRest = io.rest.bind(io);
   io.rest = async (path) => (/\/pulls\?state=closed/.test(path)
-    ? [{ title: "[flow-0002] Ship it", merged_at: new Date().toISOString(), merge_commit_sha: "sha-NOT-gated", head: { sha: "sha-NOT-gated" } }]
+    ? [{ title: "[flow-0002] Ship it", merged_at: new Date().toISOString(), merge_commit_sha: "sha-also-not-gated", head: { sha: "sha-NOT-gated" } }]
     : origRest(path));
   const budget = createBudget(50);
   const row = await loadRepoRow({ io, budget, fullName: "o/r", desc: "", now: Date.now() });
   const m = row.machinery.find((x) => x.name === "merges vs gate runs");
   assert.equal(m.state, "crit");
   assert.equal(m.count, 1);
+});
+
+test("loadRepoRow: ungated-merge detection matches on head.sha, not merge_commit_sha — the two differ on real GitHub data", async () => {
+  const io = buildHappyPathIO();
+  const origRest = io.rest.bind(io);
+  // A merge_commit_sha that coincidentally matches a gate run's head_sha ("sha-gated") must NOT
+  // read as gated — the gate never ran against a merge commit. Only head.sha, which genuinely was
+  // NOT gated here, may decide the verdict.
+  io.rest = async (path) => (/\/pulls\?state=closed/.test(path)
+    ? [{ title: "[flow-0002] Ship it", merged_at: new Date().toISOString(), merge_commit_sha: "sha-gated", head: { sha: "sha-NOT-gated" } }]
+    : origRest(path));
+  const budget = createBudget(50);
+  const row = await loadRepoRow({ io, budget, fullName: "o/r", desc: "", now: Date.now() });
+  const m = row.machinery.find((x) => x.name === "merges vs gate runs");
+  assert.equal(m.state, "crit", "preferring merge_commit_sha over head.sha would have wrongly reported this as gated");
 });
 
 test("loadRepoRow: a repo with no VISION.md renders vision: null, not an error", async () => {
@@ -352,6 +370,31 @@ test("loadRepoRow: an unreachable repo is reported unavailable with a reason, ne
   const row = await loadRepoRow({ io, budget: createBudget(50), fullName: "o/gone", desc: "", now: Date.now() });
   assert.equal(row.status, "unavailable");
   assert.ok(row.reason && row.reason.length > 0);
+});
+
+test("loadRepoRow: gate-run SHAs accumulate across multiple gate-named workflows, never overwrite", async () => {
+  const eventYaml = `on:\n  pull_request:\n    branches: [main]\n`;
+  const io = fakeIO([
+    ["/repos/o/r", { full_name: "o/r" }],
+    ["/repos/o/r/contents/.flow/tasks", []],
+    ["/repos/o/r/contents/.github/workflows", [{ name: "flow-gates-a.yml", type: "file" }, { name: "flow-gates-b.yml", type: "file" }]],
+    ["/repos/o/r/contents/.github/workflows/flow-gates-a.yml", { content: b64(eventYaml) }],
+    ["/repos/o/r/contents/.github/workflows/flow-gates-b.yml", { content: b64(eventYaml) }],
+    ["/repos/o/r/contents/VISION.md", notFound()],
+    ["/repos/o/r/actions/workflows?per_page=100", { workflows: [
+      { id: 1, name: "flow-gates-a", path: ".github/workflows/flow-gates-a.yml", state: "active" },
+      { id: 2, name: "flow-gates-b", path: ".github/workflows/flow-gates-b.yml", state: "active" },
+    ] }],
+    [/\/repos\/o\/r\/actions\/workflows\/1\/runs/, { workflow_runs: [{ conclusion: "success", head_sha: "sha-from-gate-a" }] }],
+    [/\/repos\/o\/r\/actions\/workflows\/2\/runs/, { workflow_runs: [{ conclusion: "success", head_sha: "sha-from-gate-b" }] }],
+    // Merged only against gate-a's run — lost entirely if gate-b's processing overwrote gateRunShas.
+    [/\/repos\/o\/r\/pulls\?state=closed/, [{ title: "[flow-0002] Ship it", merged_at: new Date().toISOString(), head: { sha: "sha-from-gate-a" } }]],
+    [/\/repos\/o\/r\/pulls\?state=open/, []],
+    [/\/repos\/o\/r\/issues/, []],
+  ]);
+  const row = await loadRepoRow({ io, budget: createBudget(50), fullName: "o/r", desc: "", now: Date.now() });
+  const m = row.machinery.find((x) => x.name === "merges vs gate runs");
+  assert.equal(m.state, "good", "gate-a's run must still count after gate-b is also processed");
 });
 
 test("loadRepoRow: a disabled workflow reports off, never a blank cell", async () => {
