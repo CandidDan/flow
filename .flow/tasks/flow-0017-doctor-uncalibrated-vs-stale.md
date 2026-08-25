@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0017"
 title: "Let flow-doctor tell an uncalibrated repo apart from a stale declaration"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "flow/flow-0017-doctor-uncalibrated-vs-stale"
