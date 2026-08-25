@@ -9,18 +9,20 @@
 // PROBLEMS (exit 1): malformed frontmatter · missing required fields · illegal status ·
 //   duplicate ids · in_review without pr/branch · blocked without blocked_reason ·
 //   in_progress without owner/started · two in_progress tasks with overlapping touches (the
-//   atomic-claim rule was bypassed) · a declared source_root that's missing/uncovered, or a
-//   top-level source tree no source_root covers (the gate-coverage floor — see below) ·
-//   a task file present on disk but not committed (the uncommitted-task guard — see below) ·
-//   a ready task whose body doesn't meet the readiness bar, or whose `serves` doesn't resolve
-//   against VISION.md (see below).
+//   atomic-claim rule was bypassed) · a declared, CALIBRATED source_root that's missing/uncovered,
+//   or a top-level source tree no calibrated source_root covers (the gate-coverage floor — see
+//   below) · a task file present on disk but not committed (the uncommitted-task guard — see
+//   below) · a ready task whose body doesn't meet the readiness bar, or whose `serves` doesn't
+//   resolve against VISION.md (see below).
 // WARNINGS (exit 0): ready task with owner set · ready task with empty touches (concurrency
 //   relies on it) · live tasks with overlapping touches (they can't run in parallel — sequence
 //   them; don't call them parallel-safe) · board snapshot ids/statuses drifted from the files ·
-//   no source_roots declared yet (adoption nudge) · Flow infra behind canonical (only when
-//   FLOW_CANONICAL_VERSION is set — see "version drift" below) · a task touching a top-level
-//   directory that doesn't exist yet (new-subsystem tell) · no VISION.md (vision layer
-//   inactive) · a retired goal, or an unresolvable `serves` on a non-ready task.
+//   no source_roots declared yet (adoption nudge) · a source_root still holding the shipped
+//   REPLACE-ME placeholder in `path` or `check` (uncalibrated, not stale — see below) · Flow
+//   infra behind canonical (only when FLOW_CANONICAL_VERSION is set — see "version drift"
+//   below) · a task touching a top-level directory that doesn't exist yet (new-subsystem tell) ·
+//   no VISION.md (vision layer inactive) · a retired goal, or an unresolvable `serves` on a
+//   non-ready task.
 // NOTES (exit 0): a check that was skipped because its precondition wasn't met (e.g. not run
 //   inside a git work tree, so the uncommitted-task guard can't read `git status`).
 //
@@ -65,9 +67,18 @@
 // so an undeclared runtime is invisible until production (real incident: Deno edge functions,
 // gate ran only in app/, a parse error took down inbound for ~7 days). This check makes the
 // floor a *declared, ratcheting* contract and catches it drifting as the repo grows: a new
-// top-level source tree that no `source_root` covers FAILS the gate until it's declared (or
-// explicitly ignored). It can't prove a command truly parses a tree — it makes coverage
-// explicit and reviewed, not magically complete.
+// top-level source tree that no calibrated `source_root` covers FAILS the gate until it's
+// declared (or explicitly ignored). It can't prove a command truly parses a tree — it makes
+// coverage explicit and reviewed, not magically complete.
+//
+// UNCALIBRATED VS STALE (flow-0017). A fresh scaffold still holds the shipped `REPLACE-ME`
+// sentinel in `path` and/or `check` — that is "hasn't been calibrated yet", not "drifted", and
+// collapsing the two into one PROBLEM makes the first thing an adopter sees after scaffolding a
+// red doctor blaming them for drift they haven't had the chance to create. So a `source_root`
+// whose `path` or `check` is still `REPLACE-ME` is a WARNING naming the entry, not a PROBLEM, and
+// is excluded from the missing-check / stale-path checks and from covering the backstop scan
+// below (an uncalibrated entry proves nothing, so it must not appear to satisfy coverage). A
+// non-placeholder `path` absent from disk is still stale drift and still a PROBLEM.
 
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
@@ -105,6 +116,15 @@ const SOURCE_EXT = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".rs", ".go", ".rb", ".java", ".kt",
   ".cs", ".php", ".ex", ".exs", ".swift", ".scala", ".dart",
 ]);
+
+// The sentinel `project-template/.flow/config.yml` ships in `source_roots[].path` / `.check` —
+// documented, load-bearing behaviour (`INIT.md` rule 1: never invent a config value) that marks
+// a repo as not-yet-calibrated rather than drifted. Trailing slashes on `path` are stripped
+// before comparing, so `"REPLACE-ME/"` and `"REPLACE-ME"` both match.
+const PLACEHOLDER = "REPLACE-ME";
+function isPlaceholder(v) {
+  return String(v ?? "").replace(/\/+$/, "") === PLACEHOLDER;
+}
 
 // Parse the `source_roots:` block from config.yml without a YAML dep. Tolerant line scan of:
 //   source_roots:
@@ -493,11 +513,17 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
   } else if (declared) {
     for (const r of roots) {
       if (!r.path) { problems.push("source_root with no path in config.yml"); continue; }
+      if (isPlaceholder(r.path) || isPlaceholder(r.check)) {
+        warnings.push(`source_root "${r.path}" is uncalibrated — it still holds the shipped ` +
+          `"${PLACEHOLDER}" placeholder; calibrate it (INIT.md step 2, or \`flow-init\`) before ` +
+          "relying on the gate-coverage floor.");
+        continue;
+      }
       if (!r.check) problems.push(`source_root "${r.path}" has no check — declare the command that parses/lints it`);
       if (!existsSync(join(repoRoot, r.path))) problems.push(`source_root "${r.path}" does not exist on disk — stale declaration`);
     }
     for (const dir of topLevelSourceDirs(repoRoot)) {
-      if (!roots.some((r) => r.path && rootCovers(r.path, dir))) {
+      if (!roots.some((r) => r.path && !isPlaceholder(r.path) && rootCovers(r.path, dir))) {
         problems.push(`source tree "${dir}/" is not covered by any source_root — declare it (with a check) ` +
           `or it's never parsed before production. If it shouldn't be gated, add it to ROOT_IGNORE.`);
       }

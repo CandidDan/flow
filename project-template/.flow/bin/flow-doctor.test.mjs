@@ -258,6 +258,76 @@ test("source_roots: config present but none declared → adoption warning, not f
   rmSync(repo, { recursive: true, force: true });
 });
 
+// ── uncalibrated vs stale (flow-0017) ──
+// A source_root still holding the shipped REPLACE-ME sentinel is "not yet calibrated", not
+// "drifted" — it must warn, never fail, and must not let the gate-coverage floor pass silently.
+
+test("source_roots: the shipped REPLACE-ME/REPLACE-ME entry alone → clean exit, one warning naming it", () => {
+  const { repo, flowDir } = repoFixture({
+    config: cfg([{ path: "REPLACE-ME/", check: "REPLACE-ME" }]),
+  });
+  const r = runDoctor({ flowDir });
+  assert.deepEqual(r.problems, []);
+  assert.ok(r.warnings.some((w) => w.includes('"REPLACE-ME/"') && /uncalibrated/i.test(w)),
+    "no warning names the uncalibrated source_root");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("source_roots: a real, non-placeholder path missing on disk is still a stale-declaration PROBLEM", () => {
+  const { repo, flowDir } = repoFixture({
+    config: cfg([{ path: "ghost/", check: "npm run lint" }]),
+  });
+  const r = runDoctor({ flowDir });
+  assert.ok(r.problems.some((p) => p.includes('"ghost/" does not exist') && /stale declaration/.test(p)));
+  assert.ok(!r.warnings.some((w) => /uncalibrated/i.test(w)), "a real stale path must not read as uncalibrated");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("source_roots: half-calibrated — one real root plus one REPLACE-ME entry — neither goes silent", () => {
+  const { repo, flowDir } = repoFixture({
+    config: cfg([{ path: "app/", check: "npm run lint" }, { path: "REPLACE-ME/", check: "REPLACE-ME" }]),
+    trees: { "app/src": "index.ts" },
+  });
+  const r = runDoctor({ flowDir });
+  assert.deepEqual(r.problems, [], "the real, calibrated root must not fail alongside the placeholder");
+  assert.ok(r.warnings.some((w) => w.includes('"REPLACE-ME/"') && /uncalibrated/i.test(w)),
+    "the placeholder entry produced no warning — it went silent");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("source_roots: real, present path but placeholder check → uncalibrated warning, not a silent pass", () => {
+  const { repo, flowDir } = repoFixture({
+    config: cfg([{ path: "app/", check: "REPLACE-ME" }]),
+    trees: { "app/src": "index.ts" },
+  });
+  const r = runDoctor({ flowDir });
+  assert.deepEqual(r.problems, []);
+  assert.ok(r.warnings.some((w) => w.includes('"app/"') && /uncalibrated/i.test(w)),
+    "a REPLACE-ME check on a real path must still warn — the truthy-placeholder hole must stay closed");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("source_roots: uncalibrated config + an undeclared top-level source tree — the backstop still fires", () => {
+  const { repo, flowDir } = repoFixture({
+    config: cfg([{ path: "REPLACE-ME/", check: "REPLACE-ME" }]),
+    trees: { "app/src": "index.ts" },
+  });
+  const r = runDoctor({ flowDir });
+  assert.ok(r.problems.some((p) => p.includes('"app/"') && p.includes("not covered")),
+    "the uncalibrated placeholder must not appear to cover a real, undeclared source tree");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("source_roots: an entry with an empty path is the existing PROBLEM, not reclassified as uncalibrated", () => {
+  const { repo, flowDir } = repoFixture({
+    config: 'source_roots:\n  - path: ""\n    check: "npm run lint"\n',
+  });
+  const r = runDoctor({ flowDir });
+  assert.ok(r.problems.some((p) => p === "source_root with no path in config.yml"));
+  assert.ok(!r.warnings.some((w) => /uncalibrated/i.test(w)), "an empty path is malformed config, not a placeholder");
+  rmSync(repo, { recursive: true, force: true });
+});
+
 // ── version drift (Flow infra is authored in canonical; repos adopt — the guard) ──
 
 test("compareVersions: orders, tolerates v-prefix and short forms", () => {

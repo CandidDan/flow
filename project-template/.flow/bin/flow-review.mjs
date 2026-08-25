@@ -271,6 +271,75 @@ export function verdictOutcome(parsed, { check = "review" } = {}) {
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────
 const emit = (file, text) => { if (file) appendFileSync(file, text.endsWith("\n") ? text : `${text}\n`); };
 
+// The whole CLI, exported as a function that RETURNS the exit code instead of calling
+// process.exit. Canonical's `.flow/bin/flow-review.mjs` adapter invokes this same shell against
+// its own store rather than carrying a copy of it — two copies of one shell is the flow-0008
+// hazard in miniature: the same fix needed twice, and the gate green when only one lands
+// (see touches-guard.mjs for the incident).
+//
+// `opts` supplies the defaults an adapter pins (its config path, its out dir, a `git` bound to
+// its repo root); the environment overrides (FLOW_CONFIG, REVIEW_OUT_DIR, BASE_REF,
+// REVIEW_DIFF_MAX_BYTES) still win over those defaults, because that is the contract
+// `_flow-review.yml` and the tests already rely on.
+export function runReviewCli(argv, {
+  env = process.env,
+  configPath = ".flow/config.yml",
+  outDir = ".flow-review",
+  git,
+} = {}) {
+  const [cmd, ...rest] = argv;
+  try {
+    if (cmd === "plan") {
+      const plan = runPlan({
+        configPath: env.FLOW_CONFIG || configPath,
+        outDir: env.REVIEW_OUT_DIR || outDir,
+        baseRef: env.BASE_REF || "origin/main",
+        maxBytes: Number(env.REVIEW_DIFF_MAX_BYTES || DEFAULT_MAX_DIFF_BYTES),
+        ...(git ? { git } : {}),
+      });
+      const { cfg, changedFiles, security, diff } = plan;
+      emit(env.GITHUB_OUTPUT, [
+        `model=${cfg.model}`,
+        `security_model=${cfg.securityModel}`,
+        `security_run=${security.run}`,
+        `security_reason=${security.reason.replace(/\r?\n/g, " ")}`,
+        `changed_count=${changedFiles.length}`,
+        `diff_truncated=${diff.truncated}`,
+      ].join("\n"));
+      const summary = planSummary(plan);
+      emit(env.GITHUB_STEP_SUMMARY, summary);
+      console.log(summary);
+      return 0;
+    }
+
+    if (cmd === "verdict") {
+      const file = rest.find((a) => !a.startsWith("--"));
+      const ci = rest.indexOf("--check");
+      const check = ci !== -1 ? rest[ci + 1] : "review";
+      if (!file) throw new ReviewError("usage: flow-review.mjs verdict <file> [--check <name>]");
+      if (!existsSync(file)) {
+        throw new ReviewError(`no verdict at ${file} — the ${check} reviewer produced none. ` +
+          `A missing verdict fails the check: a reviewer that did not report has not approved.`);
+      }
+      const parsed = parseVerdict(readFileSync(file, "utf8"));
+      const outcome = verdictOutcome(parsed, { check });
+      const md = [`### ${check} review — ${outcome.ok ? "PASS" : "FAIL"}`, ""]
+        .concat(parsed.summary ? [parsed.summary, ""] : [])
+        .concat(outcome.lines.map((l) => `- ${l}`))
+        .join("\n");
+      emit(env.GITHUB_STEP_SUMMARY, md);
+      for (const l of outcome.lines) console.error(`::error::${l}`);
+      console.log(`${check}: ${outcome.ok ? "PASS" : "FAIL"}${parsed.summary ? ` — ${parsed.summary}` : ""}`);
+      return outcome.code;
+    }
+
+    throw new ReviewError(`unknown command ${JSON.stringify(cmd ?? "")} — expected "plan" or "verdict"`);
+  } catch (e) {
+    console.error(`::error::flow-review: ${e.message}`);
+    return 1;
+  }
+}
+
 export function runPlan({
   configPath = ".flow/config.yml",
   outDir = ".flow-review",
@@ -310,53 +379,4 @@ function planSummary({ cfg, changedFiles, security, diff }) {
   return out.join("\n");
 }
 
-if (__isMain) {
-  const [cmd, ...rest] = process.argv.slice(2);
-  try {
-    if (cmd === "plan") {
-      const plan = runPlan({
-        configPath: process.env.FLOW_CONFIG || ".flow/config.yml",
-        outDir: process.env.REVIEW_OUT_DIR || ".flow-review",
-      });
-      const { cfg, changedFiles, security, diff } = plan;
-      emit(process.env.GITHUB_OUTPUT, [
-        `model=${cfg.model}`,
-        `security_model=${cfg.securityModel}`,
-        `security_run=${security.run}`,
-        `security_reason=${security.reason.replace(/\r?\n/g, " ")}`,
-        `changed_count=${changedFiles.length}`,
-        `diff_truncated=${diff.truncated}`,
-      ].join("\n"));
-      const summary = planSummary(plan);
-      emit(process.env.GITHUB_STEP_SUMMARY, summary);
-      console.log(summary);
-      process.exit(0);
-    }
-
-    if (cmd === "verdict") {
-      const file = rest.find((a) => !a.startsWith("--"));
-      const ci = rest.indexOf("--check");
-      const check = ci !== -1 ? rest[ci + 1] : "review";
-      if (!file) throw new ReviewError("usage: flow-review.mjs verdict <file> [--check <name>]");
-      if (!existsSync(file)) {
-        throw new ReviewError(`no verdict at ${file} — the ${check} reviewer produced none. ` +
-          `A missing verdict fails the check: a reviewer that did not report has not approved.`);
-      }
-      const parsed = parseVerdict(readFileSync(file, "utf8"));
-      const outcome = verdictOutcome(parsed, { check });
-      const md = [`### ${check} review — ${outcome.ok ? "PASS" : "FAIL"}`, ""]
-        .concat(parsed.summary ? [parsed.summary, ""] : [])
-        .concat(outcome.lines.map((l) => `- ${l}`))
-        .join("\n");
-      emit(process.env.GITHUB_STEP_SUMMARY, md);
-      for (const l of outcome.lines) console.error(`::error::${l}`);
-      console.log(`${check}: ${outcome.ok ? "PASS" : "FAIL"}${parsed.summary ? ` — ${parsed.summary}` : ""}`);
-      process.exit(outcome.code);
-    }
-
-    throw new ReviewError(`unknown command ${JSON.stringify(cmd ?? "")} — expected "plan" or "verdict"`);
-  } catch (e) {
-    console.error(`::error::flow-review: ${e.message}`);
-    process.exit(1);
-  }
-}
+if (__isMain) process.exit(runReviewCli(process.argv.slice(2)));
