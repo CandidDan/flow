@@ -15,7 +15,9 @@ import test from "node:test";
 
 import {
   AllocationError,
+  SLUG_RE,
   allocateTaskId,
+  assertInsideTasksDir,
   buildContentFromFile,
   idWidth,
   nextId,
@@ -326,4 +328,100 @@ test("runCli prints usage and exits 1 when given neither --dry-run nor --write",
   const code = runCli([], { log: (s) => { printed = s; }, logErr: () => {}, cwd: "." });
   assert.equal(code, 1);
   assert.match(printed, /allocate-task-id/);
+});
+
+// ══ the caller-supplied filename cannot escape the store ══════════════════════════════════
+//
+// Found by the security check on PR #27. `filenameFor`'s result was joined onto tasksDir with
+// no validation, and `join()` NORMALISES `..` — so a slug of `../../../../tmp/evil` resolved to
+// `<repo>/tmp/evil.md`. This transaction then `git add`s, commits and PUSHES that path to
+// `main`, so an attacker-chosen slug was an arbitrary file write landed on the default branch
+// with no PR and no review. Not reachable from untrusted input while the allocator stays
+// unwired (flow-0021 ships it deliberately uncalled), which is exactly why it had to be closed
+// BEFORE the wiring task drives `--slug` from a task title.
+//
+// Both layers are proved separately, because each covers a hole the other cannot:
+// the regex cannot help a programmatic caller supplying its own `filenameFor`, and the
+// containment check cannot name the offending CLI flag in its message.
+
+test("assertInsideTasksDir refuses a filename whose `..` segments escape the store", () => {
+  const tasks = "/repo/.flow/tasks";
+  for (const escape of [
+    "flow-0004-../../../../tmp/evil.md",     // the verified PR #27 payload
+    "../outside.md",
+    "../../.github/workflows/ci.yml",
+  ]) {
+    assert.throws(() => assertInsideTasksDir(tasks, join(tasks, escape)), AllocationError,
+      `${escape} resolves outside the store and must never reach the write/commit/push`);
+  }
+  // The store is flat, so a nested path is wrong even though it does not escape.
+  assert.throws(() => assertInsideTasksDir(tasks, join(tasks, "sub/dir.md")), AllocationError);
+  assert.throws(() => assertInsideTasksDir(tasks, tasks), AllocationError, "the dir itself is not a task file");
+});
+
+test("assertInsideTasksDir passes a normal task filename through unchanged", () => {
+  const tasks = "/repo/.flow/tasks";
+  const ok = join(tasks, "flow-0022-a-real-task.md");
+  assert.equal(assertInsideTasksDir(tasks, ok), ok);
+});
+
+test("allocateTaskId refuses a traversing filenameFor BEFORE it writes, commits or pushes", () => {
+  const { root, work } = buildRemoteAndClone(["flow-0001"]);
+  try {
+    const calls = [];
+    assert.throws(() => allocateTaskId({
+      repoRoot: work,
+      prefix: "flow",
+      filenameFor: (id) => `${id}-../../../../tmp/evil.md`,
+      buildContent: (id) => taskFile(id),
+      git: (args) => { calls.push(args[0]); return ""; },
+      write: () => { throw new Error("write must never be reached for an escaping path"); },
+    }), AllocationError);
+
+    // The guard's whole value is its position: nothing may have been staged or pushed.
+    assert.deepEqual(calls.filter((c) => ["add", "commit", "push"].includes(c)), [],
+      "an escaping path must be refused before anything is staged, committed or pushed");
+    assert.ok(!existsSync("/tmp/evil.md"), "nothing may be written outside the store");
+  } finally { cleanup(root); }
+});
+
+test("runCli rejects a --slug carrying traversal, and never starts the transaction", () => {
+  const { root, work } = buildRemoteAndClone(["flow-0001"]);
+  try {
+    const contentFile = join(work, "draft.md");
+    writeFileSync(contentFile, "# draft\n");
+    for (const slug of ["../../../../tmp/evil", "../escape", "a/b", "dot.md", "UPPER", "has space"]) {
+      let err = "";
+      const code = runCli(
+        ["--write", "--repo-root", work, "--prefix", "flow", "--content-file", contentFile, "--slug", slug],
+        { log: () => {}, logErr: (s) => { err = s; }, cwd: work });
+      assert.equal(code, 1, `${JSON.stringify(slug)} must be refused`);
+      assert.match(err, /--slug must be lowercase alphanumeric/);
+    }
+  } finally { cleanup(root); }
+});
+
+test("runCli rejects a valueless --slug rather than filing it under the string \"true\"", () => {
+  const { root, work } = buildRemoteAndClone(["flow-0001"]);
+  try {
+    const contentFile = join(work, "draft.md");
+    writeFileSync(contentFile, "# draft\n");
+    let err = "";
+    // `--slug --content-file x` parses slug as the boolean true; String(true) would match the
+    // regex as "true", so the type check has to come first.
+    const code = runCli(
+      ["--write", "--repo-root", work, "--prefix", "flow", "--slug", "--content-file", contentFile],
+      { log: () => {}, logErr: (s) => { err = s; }, cwd: work });
+    assert.equal(code, 1);
+    assert.match(err, /--slug/);
+  } finally { cleanup(root); }
+});
+
+test("SLUG_RE accepts the slugs this store actually uses and nothing that could traverse", () => {
+  for (const good of ["atomic-task-id-allocation", "flightdeck-state-aggregator", "my-new-task", "flow2"]) {
+    assert.ok(SLUG_RE.test(good), `${good} is a real slug shape and must keep working`);
+  }
+  for (const bad of ["../x", "a/b", "a\\b", ".", "..", "x.md", "-lead", "trail-", "double--hyphen", "Upper", ""]) {
+    assert.ok(!SLUG_RE.test(bad), `${JSON.stringify(bad)} must not be usable as a filename fragment`);
+  }
 });

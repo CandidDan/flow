@@ -32,7 +32,8 @@ const __isMain = (() => {
 // ---------------------------------------------------------------------------------------
 
 export {
-  AllocationError, allocateTaskId, buildContentFromFile, idWidth, nextId, readIdsFromOrigin, runCli,
+  AllocationError, SLUG_RE, allocateTaskId, assertInsideTasksDir, buildContentFromFile, idWidth,
+  nextId, readIdsFromOrigin, runCli,
 } from "../../project-template/.flow/bin/allocate-task-id.mjs";
 
 // Canonical's repo root — two levels up from this `bin/` directory (`.flow/bin` -> `.flow` -> repo).

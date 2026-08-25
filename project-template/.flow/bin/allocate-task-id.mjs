@@ -26,7 +26,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readTasksFromOrigin } from "./flow-state.mjs";
 
@@ -52,6 +52,35 @@ const __isMain = (() => {
 export class AllocationError extends Error {}
 
 export const DEFAULT_MAX_ATTEMPTS = 5;
+
+// ── the two guards on the caller-supplied filename ────────────────────────────────────────
+// This function writes a file and then `git add`s, commits and PUSHES IT TO `main` (see "WRITES
+// TO `main` BY DESIGN" above). The name it writes comes from the caller — `filenameFor` here,
+// `--slug` at the CLI — and `join()` NORMALISES `..`, so an unchecked name does not merely land
+// in the wrong place: it escapes `.flow/tasks` entirely and lands anywhere under the repo root,
+// committed straight to `main` with no PR and no review. Both guards below exist because either
+// one alone leaves a hole: the regex cannot help a programmatic caller that supplies its own
+// `filenameFor`, and the containment check cannot give a CLI user a message naming the flag.
+
+// A slug is a filename fragment, not free text. Lowercase alphanumerics in hyphen-separated
+// runs — no leading, trailing or doubled hyphens, no dots, no separators, so nothing that could
+// traverse or hide an extension survives it.
+export const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+// Defence in depth, at the point the path is actually computed. `allocateTaskId` is exported,
+// so `filenameFor` is an untrusted seam for every caller, not just `runCli`. A task file must be
+// a DIRECT child of the store: the store is flat, so a name carrying any separator is wrong even
+// when it does not escape.
+export function assertInsideTasksDir(tasksDir, candidate) {
+  const rel = relative(resolve(tasksDir), resolve(candidate));
+  if (!rel || rel.startsWith("..") || isAbsolute(rel) || rel.includes(sep)) {
+    throw new AllocationError(
+      `allocate-task-id: refusing to write ${JSON.stringify(candidate)} — a task file must be a ` +
+      `direct child of ${tasksDir}. \`join()\` normalises \`..\`, so an unchecked name escapes ` +
+      `the store, and this transaction commits and pushes what it writes straight to \`main\`.`);
+  }
+  return candidate;
+}
 const DEFAULT_WIDTH = 4;
 
 // ── pure: the allocation itself ─────────────────────────────────────────────────────────
@@ -141,7 +170,9 @@ export function allocateTaskId({
 
     if (dryRun) return { id, path: null, attempts: attempt };
 
-    const nextPath = join(tasksDir, filenameFor(id));
+    // Checked BEFORE the write, not after: everything downstream (write, add, commit, push to
+    // `main`) acts on this path, so the only safe place to refuse is before anything exists.
+    const nextPath = assertInsideTasksDir(tasksDir, join(tasksDir, filenameFor(id)));
     write(nextPath, buildContent(id));
     path = nextPath;
 
@@ -226,6 +257,14 @@ export function runCli(argv, { log = console.log, logErr = console.error, cwd = 
     const slug = flags.slug;
     const contentFile = flags["content-file"];
     if (!slug) { logErr("allocate-task-id: --slug is required with --write"); return 1; }
+    // `--slug foo --write` parses `slug` as the boolean `true`; String(true) would sail through
+    // the regex as "true", so the type is checked before the shape.
+    if (typeof slug !== "string" || !SLUG_RE.test(slug)) {
+      logErr("allocate-task-id: --slug must be lowercase alphanumeric in hyphen-separated runs " +
+             `(e.g. my-new-task), got ${JSON.stringify(slug)}. It becomes part of a filename ` +
+             "that is committed and pushed to main.");
+      return 1;
+    }
     if (!contentFile) { logErr("allocate-task-id: --content-file is required with --write"); return 1; }
 
     const raw = readFileSync(resolve(cwd, contentFile), "utf8");
