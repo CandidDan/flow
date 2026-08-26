@@ -16,6 +16,7 @@ serves: ["G3"]            # direction survives the work — an unrecorded reason
 touches: ["docs/adr/0004-vision-layer.md"]
 labels: [docs, vision]
 notes:
+  - "2026-08-26: scope note, raised rather than taken silently. `touches` declares only the ADR, but the inherited Definition of Done requires a proving test per acceptance criterion, and six of the seven criteria are `when it is read, then it contains` assertions about the file. Canonical's precedent for exactly this shape is to declare the test in `touches` — flow-0009 declared `.flow/bin/protocol-docs.test.mjs`, flow-0016 declared `.flow/bin/protocol-portability.test.mjs`. This task's `touches` did not. Resolved by writing `.flow/bin/adr-vision-layer.test.mjs` and isolating it in its own commit on the PR, so it can be dropped if the orchestrator would rather widen `touches` first. Note `touches-guard` ignores all of `.flow/**` by design, so the guard neither catches nor forbids this — which is why it is recorded here instead of being left to CI."
   - "2026-08-18: deliverable D6 of the vision-layer handoff. Number 0004 confirmed free. Single new file, disjoint from every ready task including flow-0003 (which touches ADR-0002)."
 ---
 
