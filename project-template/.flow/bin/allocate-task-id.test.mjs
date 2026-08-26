@@ -6,7 +6,9 @@
 // by a fake standing in for them.
 
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -424,4 +426,69 @@ test("SLUG_RE accepts the slugs this store actually uses and nothing that could 
   for (const bad of ["../x", "a/b", "a\\b", ".", "..", "x.md", "-lead", "trail-", "double--hyphen", "Upper", ""]) {
     assert.ok(!SLUG_RE.test(bad), `${JSON.stringify(bad)} must not be usable as a filename fragment`);
   }
+});
+
+// ══ the CLI surfaces an exhausted retry budget to a real caller ═══════════════════════════
+//
+// Found by the code-review check on PR #27. AC8 ("exits non-zero, names the attempt count,
+// leaves no commit or file behind") was proved at the `allocateTaskId` boundary, but the path a
+// real caller actually takes — `runCli`'s catch, which turns a thrown AllocationError into
+// `logErr(...)` + `return 1` — had ZERO coverage: `npx c8` reported lines 279-281 uncovered.
+// Every other runCli failure test returns 1 from an explicit guard BEFORE allocateTaskId is
+// called, so none of them throws and none of them reaches the catch.
+//
+// The refusal here is a real one: a `pre-receive` hook on the bare remote rejects every push,
+// so `git push` exits non-zero exactly as it does against a remote someone else just advanced.
+// Nothing is stubbed — the same posture as the five-allocator race test above.
+function rejectAllPushes(bare) {
+  const hook = join(bare, "hooks", "pre-receive");
+  writeFileSync(hook, "#!/bin/sh\necho 'rejected by fixture' >&2\nexit 1\n");
+  chmodSync(hook, 0o755);
+}
+
+test("runCli exits non-zero and names the attempt count when the retry budget is exhausted", () => {
+  const { root, bare, work } = buildRemoteAndClone(["flow-0001"]);
+  try {
+    rejectAllPushes(bare);
+    const contentFile = join(work, "draft.md");
+    writeFileSync(contentFile, "# draft\n");
+
+    let err = "";
+    let out = "";
+    const code = runCli(
+      ["--write", "--repo-root", work, "--prefix", "flow", "--content-file", contentFile,
+       "--slug", "never-lands", "--max-attempts", "2"],
+      { log: (s) => { out += s; }, logErr: (s) => { err += s; }, cwd: work });
+
+    // The catch block's whole job: a thrown AllocationError becomes a non-zero CLI exit.
+    assert.equal(code, 1, "an exhausted retry budget must fail the CLI, not fall through as success");
+    assert.match(err, /exhausted 2 attempt\(s\)/,
+      `the caller must be told how many attempts were made; got: ${err}`);
+    assert.equal(out, "", "nothing may be reported as allocated when nothing landed");
+
+    // "...and does not allocate anyway": no task file left behind, nothing on the remote.
+    assert.deepEqual(
+      readdirSync(join(work, ".flow", "tasks")).filter((n) => n.includes("never-lands")), [],
+      "the attempt's file must be removed, not left in the working tree");
+    assert.doesNotMatch(sh(bare, "log", "--oneline", "main"), /allocate flow-0002/,
+      "a refused push must leave the remote untouched");
+  } finally { cleanup(root); }
+});
+
+test("runCli reports a non-AllocationError through the same catch, still exiting non-zero", () => {
+  // The catch has two arms; the second (a generic Error, prefixed rather than passed through)
+  // is what a genuinely unexpected failure hits. An unreadable --content-file reaches it via
+  // readFileSync, so the arm is proved without stubbing the module.
+  const { root, work } = buildRemoteAndClone(["flow-0001"]);
+  try {
+    let err = "";
+    const code = runCli(
+      ["--write", "--repo-root", work, "--prefix", "flow",
+       "--content-file", join(work, "definitely-absent.md"), "--slug", "ok-slug"],
+      { log: () => {}, logErr: (s) => { err += s; }, cwd: work });
+
+    assert.equal(code, 1);
+    assert.match(err, /allocate-task-id: /,
+      "an unexpected error must still be surfaced with the tool's name, not swallowed");
+  } finally { cleanup(root); }
 });
