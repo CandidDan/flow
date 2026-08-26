@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0014"
 title: "Record why the vision layer is shaped this way, including what was rejected"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "flow"
 owner: "claude/next-task-protocol-s1cqaw"
 created: "2026-08-18"
 started: "2026-08-26T12:13:57Z"
-branch: ""
-pr: ""
+branch: "claude/next-task-protocol-s1cqaw"
+pr: "https://github.com/CandidDan/flow/pull/35"
 issue: ""
 blocked_reason: ""
 serves: ["G3"]            # direction survives the work — an unrecorded reason gets relitigated
