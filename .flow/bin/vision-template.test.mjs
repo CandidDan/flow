@@ -115,33 +115,26 @@ test("the sample task serves a goal id that VISION.md actually declares", () => 
 // ── criterion 4: the shipped fixture is self-consistent under the template's own doctor ──
 //
 // The CLI is run for real rather than through runDoctor(), because the fixture's self-consistency
-// is a property of how it ships, not of how a test wires it up. It cannot yet exit 0: the
-// template's config.yml ships `source_roots: [{ path: "REPLACE-ME/" }]` on purpose — a
-// placeholder an adopting repo fills in — and a declared root that isn't on disk is a
-// flow-doctor PROBLEM. That failure predates this task and fixing it (by naming a real tree in
-// the shipped template) would defeat the placeholder. So the assertion is the strongest one that
-// is true and still catches what this task could break: the placeholder is the ONLY problem, and
-// nothing about the vision layer is among them.
-test("the template store's only flow-doctor problem is the REPLACE-ME source_root placeholder", () => {
-  let stdout = "", stderr = "";
+// is a property of how it ships, not of how a test wires it up. flow-0017 taught flow-doctor to
+// tell "uncalibrated" (still holding the shipped `REPLACE-ME` sentinel) apart from "stale" (a
+// real declaration gone missing) — the former is a WARNING, not a PROBLEM — so the shipped
+// template, which is uncalibrated by design, now exits clean.
+test("the template store's flow-doctor CLI exits 0 over the shipped fixture", () => {
+  let stdout = "", stderr = "", status = 0;
   try {
     stdout = execFileSync(process.execPath, [join(TEMPLATE, ".flow/bin/flow-doctor.mjs")],
       { encoding: "utf8", cwd: REPO, stdio: ["ignore", "pipe", "pipe"] });
   } catch (e) {
     stdout = e.stdout?.toString() ?? "";
     stderr = e.stderr?.toString() ?? "";
+    status = e.status ?? 1;
   }
   assert.match(stdout, /flow-doctor: \d+ task\(s\) checked/, "flow-doctor produced no report");
+  assert.equal(status, 0,
+    `the shipped fixture is not self-consistent — flow-doctor exited ${status}:\n${stderr}`);
 
-  const problems = stderr.split("\n").filter((l) => l.includes("FAIL")).map((l) => l.trim());
-  const unexpected = problems.filter((p) => !/source_root "REPLACE-ME\//.test(p));
-  assert.deepEqual(unexpected, [],
-    `the shipped fixture is not self-consistent — problems beyond the known config placeholder:\n${unexpected.join("\n")}`);
-  assert.deepEqual(problems.filter((p) => /VISION|serves/i.test(p)), [],
-    "the vision layer reports a problem against the shipped fixture");
-
-  // The vision layer is ACTIVE over the fixture — the inactive-layer warning must be gone, which
-  // is what proves the checks above ran against something rather than passing vacuously.
+  // The vision layer is ACTIVE over the fixture — the inactive-layer warning must be absent,
+  // which is what proves the checks above ran against something rather than passing vacuously.
   assert.doesNotMatch(stderr, /no VISION\.md at the repo root/,
     "the template ships a VISION.md, so flow-doctor must no longer report the vision layer inactive");
 });
