@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0014"
 title: "Record why the vision layer is shaped this way, including what was rejected"
-status: "in_review"
+status: "done"
 priority: 3
 project: "flow"
 owner: "claude/next-task-protocol-s1cqaw"
