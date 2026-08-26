@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0021"
 title: "Make task-id allocation first-push-wins, so two orchestrators cannot land the same id"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude/flow-task-workflow-l8ypch"
