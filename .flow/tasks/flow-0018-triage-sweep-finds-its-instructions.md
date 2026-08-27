@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0018"
 title: "Make the triage sweep able to find its own instructions in canonical, and check that every workflow prompt's cited path resolves"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "claude/next-task-protocol-7arims"
 created: "2026-08-19"
-started: ""
+started: "2026-08-27T03:39:39Z"
 branch: ""
 pr: ""
 issue: ""
