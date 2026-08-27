@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0018"
 title: "Make the triage sweep able to find its own instructions in canonical, and check that every workflow prompt's cited path resolves"
-status: "in_review"
+status: "done"
 priority: 3
 project: "flow"
 owner: "claude/next-task-protocol-7arims"
