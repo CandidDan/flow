@@ -53,13 +53,20 @@ jobs:
           # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
             Run the issue triage sweep for this repository, following the "Triaging the inbox"
-            section of .claude/skills/task-writer/SKILL.md exactly. Concretely:
+            section of the task-writer skill exactly. That skill sits at
+            .claude/skills/task-writer/SKILL.md in a repo scaffolded from the Flow template, and
+            at project-template/.claude/skills/task-writer/SKILL.md in canonical, which ships the
+            template rather than being scaffolded from it. Read whichever of the two exists.
+            Concretely:
 
             1. List open issues. Skip any labelled `proposed` or `triaged`.
             2. For each remaining issue WITHOUT the `auto-ok` label: draft a complete ready-task
-               spec (the .flow/tasks/_TEMPLATE.md shape: context, scope with explicit boundaries,
-               observable acceptance criteria, touches globs) and post it as a comment on the
-               issue, then add the `proposed` label. Do NOT create a task file.
+               spec in the task template's shape (context, scope with explicit boundaries,
+               observable acceptance criteria, touches globs). That template is at
+               .flow/tasks/_TEMPLATE.md in a scaffolded repo and at
+               project-template/.flow/tasks/_TEMPLATE.md in canonical — read whichever exists.
+               Post the spec as a comment on the issue, then add the `proposed` label. Do NOT
+               create a task file.
             3. For each open issue labelled `approved` (the human accepted a proposal) or
                `auto-ok` (pre-authorised lane): create the ready task file in .flow/tasks/ with
                the next id, `issue:` set to the issue URL, commit it to main with message
