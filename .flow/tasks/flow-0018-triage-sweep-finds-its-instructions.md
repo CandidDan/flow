@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0018"
 title: "Make the triage sweep able to find its own instructions in canonical, and check that every workflow prompt's cited path resolves"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "flow"
 owner: "claude/next-task-protocol-7arims"
 created: "2026-08-19"
 started: "2026-08-27T03:39:39Z"
-branch: ""
-pr: ""
+branch: "claude/next-task-protocol-7arims"
+pr: "https://github.com/CandidDan/flow/pull/36"
 issue: ""
 blocked_reason: ""
 serves: ["G4"]            # canonical can run the infra it publishes, and the drift is caught by a check
