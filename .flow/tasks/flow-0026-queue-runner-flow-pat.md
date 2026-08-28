@@ -1,12 +1,12 @@
 ---
 id: "flow-0026"
 title: "Push queue-runner worker commits with FLOW_PAT so branch pushes trigger flow-open-pr"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_013Rjw5HRn2wR6wFYy2bi1iQ"
 created: "2026-08-27"
-started: ""
+started: "2026-08-28T04:43:05Z"
 branch: ""
 pr: ""
 issue: "https://github.com/CandidDan/flow/issues/32"
