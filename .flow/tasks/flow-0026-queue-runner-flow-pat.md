@@ -16,6 +16,7 @@ touches: [".github/workflows/_flow-queue-runner.yml", ".flow/bin/flow-pat-forwar
 labels: [infra, queue-runner]
 notes:
   - "2026-08-28: built and PR open — https://github.com/CandidDan/flow/pull/40 (draft), branch flow/flow-0026-queue-runner-flow-pat. Both scope items done: FLOW_PAT declared optional in on.workflow_call.secrets, Work-the-task github_token now `${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}`, step comment rewritten for the fast path. Proving test .flow/bin/flow-pat-forwarding.test.mjs (parses the YAML, asserts both facts). Full gate green locally: build 21 workflows parsed, lint 59 files, test 605 pass, coverage 96.01%/84% vs floor 83.5. Deliberate exclusions honoured (no belt-and-braces PR step, no _flow-open-pr/_flow-recover edits, no secret creation). Next action: human reviews/merges PR #40; flow-0025 unblocks on _flow-queue-runner.yml once it lands."
+  - "2026-08-28: PR checks all PASS (code-review, qa, security ×2 heads). Security's Low finding (setup doc says Contents=Read, insufficient for this consumer's pushes) fixed in the step comment on the branch (04db823). Follow-up for the orchestrator, out of this task's touches by design: security recommends the FLOW_PAT scope/short-expiry/rotation guidance also live in the shared setup docs (_flow-open-pr.yml header or docs/), not just _flow-queue-runner.yml's comment — this task explicitly may not touch those files. Small docs task if deemed worth it."
 ---
 
 ## Context
