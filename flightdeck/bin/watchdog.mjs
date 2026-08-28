@@ -112,7 +112,12 @@ export function renderIssueBody({ fullName, workflow, now }) {
   const lines = [
     workflowMarker(w.path),
     "",
-    `**Workflow:** \`${w.path ?? "?"}\`${w.name && w.name !== w.path ? ` (${w.name})` : ""}`,
+    // Both the path and the NAME go in code spans. `name:` is free text from the watched repo's
+    // own workflow file, and this body is Markdown — an unspanned name could carry control
+    // characters that reshape the issue. Not cross-tenant (the issue lands in the same repo whose
+    // workflow carries the name), but a watchdog whose alert can be made to misrender is a
+    // watchdog whose alert can be made to mislead.
+    `**Workflow:** \`${w.path ?? "?"}\`${w.name && w.name !== w.path ? ` (\`${w.name}\`)` : ""}`,
     `**Repository:** \`${fullName ?? "?"}\``,
     `**Trigger type:** ${w.kind ?? "?"}`,
     `**Last successful run:** ${formatWhen(w.lastSuccessAt)}`,

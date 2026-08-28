@@ -51,7 +51,11 @@ jobs:
     runs-on: ubuntu-latest
 
     # `issues: write` and nothing else writable. This block governs GITHUB_TOKEN, which reaches
-    # canonical ONLY — the cross-repo filing uses FLOW_WATCHDOG_PAT below. It is kept exact anyway
+    # canonical ONLY — the cross-repo filing uses FLOW_WATCHDOG_PAT below, so in practice this
+    # grant is not exercised today. It is stated rather than dropped because a permissions block is
+    # the DECLARED BLAST RADIUS of the job, not a log of which token happened to be used: filing an
+    # issue is the single thing this workflow is for, and the honest declaration is the one a
+    # reader can check against the code. flow-0020's criterion 6 pins it. It is kept exact anyway
     # because it is the mechanical proof of the boundary: `flightdeck/bin/watchdog.test.mjs` parses
     # this block and FAILS if `contents` is ever raised to `write`, or if any other write scope
     # appears. A watchdog that could write code, a task or a workflow would be a far larger blast

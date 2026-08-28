@@ -149,6 +149,15 @@ test("criterion 1 (rule text): a scheduled workflow silently past 2x its cron in
   assert.match(body, /State:.*`crit`/);
 });
 
+test("a workflow's free-text `name:` is code-spanned in the issue body, so it cannot reshape the Markdown", () => {
+  const body = renderIssueBody({
+    fullName: REPO,
+    workflow: { path: ".github/workflows/q.yml", name: "**bold** [link](http://x) `tick", state: "crit", reason: "r" },
+    now: NOW,
+  });
+  assert.match(body, /\(`\*\*bold\*\* \[link\]\(http:\/\/x\) `tick`\)/, "the name sits inside a code span");
+});
+
 // ── criterion 2 ──────────────────────────────────────────────────────────────────────────────
 
 test("criterion 2: on a second and third run with the workflow still down, exactly ONE open issue exists and re-detection is a comment", async () => {
