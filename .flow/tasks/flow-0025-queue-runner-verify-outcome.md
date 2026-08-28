@@ -1,14 +1,14 @@
 ---
 id: "flow-0025"
 title: "Fail the queue-runner job when a worker produces no verifiable outcome"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "session_01LeGZLrACwUQ6u2b6GDkvJT"
 created: "2026-08-27"
 started: "2026-08-28T06:45:01Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0025-queue-runner-verify-outcome"
+pr: "https://github.com/CandidDan/flow/pull/42"
 issue: "https://github.com/CandidDan/flow/issues/33"
 blocked_reason: ""
 serves: ["G2"]
