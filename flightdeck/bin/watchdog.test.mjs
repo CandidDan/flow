@@ -18,6 +18,7 @@ import { parse as parseYaml } from "yaml";
 import {
   AUTOMATION_DOWN_LABEL,
   applyActions,
+  codeSpan,
   ensureLabel,
   evaluateWorkflows,
   findIssueForWorkflow,
@@ -149,13 +150,43 @@ test("criterion 1 (rule text): a scheduled workflow silently past 2x its cron in
   assert.match(body, /State:.*`crit`/);
 });
 
-test("a workflow's free-text `name:` is code-spanned in the issue body, so it cannot reshape the Markdown", () => {
+test("codeSpan: the fence always outruns the longest backtick run inside the value", () => {
+  // The property, not a literal expectation. The first version of this test fed a name containing
+  // a backtick and asserted the raw output verbatim — so it passed while the span was broken.
+  for (const [input, longestRun] of [["plain", 0], ["one `tick", 1], ["a ``pair`` here", 2], ["```", 3]]) {
+    const out = codeSpan(input);
+    const fence = out.match(/^`+/)[0];
+    assert.equal(fence.length, longestRun + 1, `fence for ${JSON.stringify(input)}`);
+    assert.ok(out.endsWith(fence), "opens and closes with the same fence");
+    // The decisive check: no run inside the body is long enough to close the fence early.
+    const body = out.slice(fence.length, -fence.length);
+    for (const m of body.matchAll(/`+/g)) {
+      assert.ok(m[0].length < fence.length, `inner run ${m[0].length} would close a fence of ${fence.length}`);
+    }
+  }
+});
+
+test("codeSpan pads when the value itself starts or ends with a backtick", () => {
+  assert.equal(codeSpan("`x"), "`` `x ``");
+  assert.equal(codeSpan("x`"), "`` x` ``");
+  assert.equal(codeSpan("x"), "`x`");
+});
+
+test("a workflow's free-text `name:` cannot escape its code span in the issue body", () => {
+  const hostile = "**bold** [link](http://x) `tick`` and ```three";
   const body = renderIssueBody({
     fullName: REPO,
-    workflow: { path: ".github/workflows/q.yml", name: "**bold** [link](http://x) `tick", state: "crit", reason: "r" },
+    workflow: { path: ".github/workflows/q.yml", name: hostile, state: "crit", reason: "r" },
     now: NOW,
   });
-  assert.match(body, /\(`\*\*bold\*\* \[link\]\(http:\/\/x\) `tick`\)/, "the name sits inside a code span");
+
+  const span = codeSpan(hostile);
+  assert.ok(body.includes(`(${span})`), "the name appears inside a computed-width span");
+  // And prove the span actually contains the whole name — the failure mode of the first attempt
+  // was the name being cut in half by its own backtick with the remainder rendering as Markdown.
+  const fence = span.match(/^`+/)[0];
+  assert.ok(fence.length > 3, "fence outruns the three-backtick run in the name");
+  assert.ok(span.slice(fence.length, -fence.length).includes(hostile), "the whole name is inside");
 });
 
 // ── criterion 2 ──────────────────────────────────────────────────────────────────────────────

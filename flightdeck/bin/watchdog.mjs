@@ -101,6 +101,24 @@ export function findIssueForWorkflow(openIssues, path) {
 
 // ── issue bodies ─────────────────────────────────────────────────────────────────────────────
 
+// Wrap free text in a Markdown code span that the text cannot escape. CommonMark closes a span
+// on the first backtick RUN of matching length, so a fixed pair of backticks is not enough: a name
+// containing one backtick closes the span early and spills the rest into live Markdown. The fence
+// is therefore one longer than the longest backtick run inside the value, and padded with a space
+// when the value itself starts or ends with a backtick (the renderer strips one leading and one
+// trailing space, so the padding does not show).
+//
+// This exists because the first attempt shipped a fixed single-backtick pair with a test that
+// asserted the broken output verbatim — it pinned the bug rather than proving the property. The
+// test below now asserts the property.
+export function codeSpan(text) {
+  const s = String(text ?? "");
+  const runs = [...s.matchAll(/`+/g)].map((m) => m[0].length);
+  const fence = "`".repeat(Math.max(0, ...runs) + 1);
+  const pad = s.startsWith("`") || s.endsWith("`") ? " " : "";
+  return `${fence}${pad}${s}${pad}${fence}`;
+}
+
 function formatWhen(iso) {
   if (!iso) return "never";
   const ms = new Date(iso).getTime();
@@ -112,16 +130,16 @@ export function renderIssueBody({ fullName, workflow, now }) {
   const lines = [
     workflowMarker(w.path),
     "",
-    // Both the path and the NAME go in code spans. `name:` is free text from the watched repo's
-    // own workflow file, and this body is Markdown — an unspanned name could carry control
-    // characters that reshape the issue. Not cross-tenant (the issue lands in the same repo whose
-    // workflow carries the name), but a watchdog whose alert can be made to misrender is a
-    // watchdog whose alert can be made to mislead.
-    `**Workflow:** \`${w.path ?? "?"}\`${w.name && w.name !== w.path ? ` (\`${w.name}\`)` : ""}`,
-    `**Repository:** \`${fullName ?? "?"}\``,
+    // Both the path and the NAME go through codeSpan. `name:` is free text from the watched repo's
+    // own workflow file, and this body is Markdown — text that escapes its span reshapes the
+    // issue. Not cross-tenant (the issue lands in the same repo whose workflow carries the name),
+    // but a watchdog whose alert can be made to misrender is one whose alert can be made to
+    // mislead, and that is the whole asset this component has.
+    `**Workflow:** ${codeSpan(w.path ?? "?")}${w.name && w.name !== w.path ? ` (${codeSpan(w.name)})` : ""}`,
+    `**Repository:** ${codeSpan(fullName ?? "?")}`,
     `**Trigger type:** ${w.kind ?? "?"}`,
     `**Last successful run:** ${formatWhen(w.lastSuccessAt)}`,
-    `**State:** \`${w.state ?? "?"}\``,
+    `**State:** ${codeSpan(w.state ?? "?")}`,
     `**Rule that fired:** ${w.reason ?? "(no reason recorded)"}`,
     "",
     "GitHub notifies on failure, never on absence — a scheduled workflow that stops running emits",
@@ -138,7 +156,7 @@ export function renderRedetectionComment({ workflow, now }) {
   return [
     `Still down as of ${formatWhen(now ? new Date(now).toISOString() : null)}.`,
     "",
-    `**State:** \`${w.state ?? "?"}\` — ${w.reason ?? "(no reason recorded)"}`,
+    `**State:** ${codeSpan(w.state ?? "?")} — ${w.reason ?? "(no reason recorded)"}`,
     `**Last successful run:** ${formatWhen(w.lastSuccessAt)}`,
     "",
     "_Re-detected by `flow-watchdog`. Commenting rather than filing again keeps this to one issue",
@@ -150,7 +168,7 @@ export function renderRecoveryComment({ workflow }) {
   const w = workflow ?? {};
   const link = w.runUrl ? `\n\n**Recovery run:** ${w.runUrl}` : "";
   return [
-    `Recovered — \`${w.path ?? "?"}\` succeeded again at ${formatWhen(w.lastSuccessAt)}.${link}`,
+    `Recovered — ${codeSpan(w.path ?? "?")} succeeded again at ${formatWhen(w.lastSuccessAt)}.${link}`,
     "",
     "_Closed automatically by `flow-watchdog`. A stale \"down\" alert is its own staleness bug._",
   ].join("\n");
