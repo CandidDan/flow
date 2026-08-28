@@ -77,7 +77,16 @@ jobs:
           # guard), which left worker branches sitting PR-less until the _flow-recover sweep or a
           # human noticed. Falls back to GITHUB_TOKEN when the secret isn't set: exactly today's
           # behaviour (branch pushes silently, _flow-open-pr/_flow-recover catch up after the
-          # fact). See _flow-open-pr.yml's header for FLOW_PAT setup.
+          # fact). See _flow-open-pr.yml's header for FLOW_PAT setup, with two differences for
+          # THIS consumer:
+          #   - Permissions: Contents = Read/Write (not the Read that header documents) — the
+          #     worker pushes the claim commit to main and the task branch. A Read-only token
+          #     cannot push, and the run fails at the first git push.
+          #   - Exposure model: open-pr/recover/sync only hand FLOW_PAT to fixed gh/git commands
+          #     in deterministic run: blocks. Here it enters the worker agent's environment
+          #     (bypassPermissions bash over task-file-derived prompts), and unlike the
+          #     job-scoped GITHUB_TOKEN a PAT outlives the run — so use a short-expiry
+          #     fine-grained PAT and rotate it; don't assume open-pr's risk profile applies.
           github_token: ${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}
           # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}   # pay-per-use alternative
           # The build role gets the strongest model — fewer blocks/kickbacks = fewer human
