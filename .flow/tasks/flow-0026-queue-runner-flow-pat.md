@@ -14,7 +14,8 @@ blocked_reason: ""
 serves: ["G1"]
 touches: [".github/workflows/_flow-queue-runner.yml", ".flow/bin/flow-pat-forwarding.test.mjs"]
 labels: [infra, queue-runner]
-notes: []
+notes:
+  - "2026-08-28: built and PR open — https://github.com/CandidDan/flow/pull/40 (draft), branch flow/flow-0026-queue-runner-flow-pat. Both scope items done: FLOW_PAT declared optional in on.workflow_call.secrets, Work-the-task github_token now `${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}`, step comment rewritten for the fast path. Proving test .flow/bin/flow-pat-forwarding.test.mjs (parses the YAML, asserts both facts). Full gate green locally: build 21 workflows parsed, lint 59 files, test 605 pass, coverage 96.01%/84% vs floor 83.5. Deliberate exclusions honoured (no belt-and-braces PR step, no _flow-open-pr/_flow-recover edits, no secret creation). Next action: human reviews/merges PR #40; flow-0025 unblocks on _flow-queue-runner.yml once it lands."
 ---
 
 ## Context
