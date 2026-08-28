@@ -320,6 +320,42 @@ test("discovery is owner-scoped — a bare `topic:flow` is never issued", async 
   assert.equal(summary.repos, 1);
 });
 
+test("discovering ZERO repos is flagged as a failure, not reported as a healthy fleet", async () => {
+  // The watchdog's own version of the bug it hunts: an empty result set is indistinguishable from
+  // "everything is fine" unless something says so. Enrolment is the `flow` topic, so a fleet where
+  // nobody added the topic — or an org account queried with the `user:` qualifier — watches nothing.
+  const io = { rest: async () => ({ items: [] }), write: async () => {} };
+  const summary = await runWatchdog({ io, owner: "CandidDan", now: NOW });
+
+  assert.equal(summary.repos, 0);
+  assert.equal(summary.discoveredNothing, true, "the empty discovery is flagged, not silently green");
+  assert.deepEqual(summary.results, []);
+});
+
+test("a non-empty discovery is not flagged", async () => {
+  const { io } = fakeGitHub({ workflows: [{ file: "gates.yml", text: EVENT_WF, latestRun: { conclusion: "success" } }] });
+  const summary = await runWatchdog({ io, owner: "CandidDan", now: NOW });
+  assert.equal(summary.discoveredNothing, false);
+});
+
+test("ownerType: 'org' switches the discovery qualifier, so an org account does not silently match zero repos", async () => {
+  const { io, state } = fakeGitHub({ workflows: [{ file: "gates.yml", text: EVENT_WF, latestRun: { conclusion: "success" } }] });
+  const summary = await runWatchdog({ io, owner: "SomeOrg", ownerType: "org", now: NOW });
+
+  assert.equal(summary.query, "org:SomeOrg topic:flow");
+  assert.match(state.reads.find((p) => p.startsWith("/search/repositories")), /org%3ASomeOrg/);
+});
+
+test("the workflow wires FLOW_WATCHDOG_OWNER_TYPE through to the CLI, not just the owner", () => {
+  const repoRoot = join(import.meta.dirname, "..", "..");
+  const doc = parseYaml(readFileSync(join(repoRoot, ".github/workflows/flow-watchdog.yml"), "utf8"));
+
+  assert.ok(doc.env?.FLOW_WATCHDOG_OWNER_TYPE, "the owner type is defined at workflow level");
+  const runStep = doc.jobs.watchdog.steps.find((s) => s.name === "Run the watchdog");
+  assert.ok(runStep.env.FLOW_WATCHDOG_OWNER, "owner reaches the step");
+  assert.ok(runStep.env.FLOW_WATCHDOG_OWNER_TYPE, "owner TYPE reaches the step too");
+});
+
 // ── the smaller pure pieces ──────────────────────────────────────────────────────────────────
 
 test("evaluateWorkflows drops manual workflows — a workflow_dispatch-only file has no cadence to be late for", () => {

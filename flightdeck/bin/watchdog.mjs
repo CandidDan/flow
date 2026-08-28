@@ -190,7 +190,10 @@ export function planRepoActions({ fullName, machinery, openIssues, now }) {
   const tracked = markedIssues(openIssues);
 
   for (const w of machinery ?? []) {
-    const existing = findIssueForWorkflow(openIssues, w.path);
+    // `tracked` is the marker index built above — the same answer `findIssueForWorkflow`
+    // computes by rescan. Two ways to reach one answer is two things to keep in step, so the
+    // planner reads the index and `findIssueForWorkflow` stays the single-lookup helper.
+    const existing = tracked.get(w.path) ?? null;
 
     if (REPORTABLE_STATES.has(w.state)) {
       if (existing) {
@@ -361,7 +364,13 @@ export async function runWatchdog({ io, owner, ownerType = "user", now = Date.no
   const results = [];
   for (const fullName of repos) results.push(await watchRepo({ io, fullName, now, dryRun }));
 
-  return { query: q, repos: repos.length, results };
+  // DISCOVERING NOTHING IS A FAILURE, NOT A QUIET SUCCESS. Enrolment is the `flow` GitHub topic,
+  // and a repo that never had the topic added — or an owner whose account became an organization,
+  // making the `user:` qualifier match zero repos — produces an empty result set that is
+  // indistinguishable from "the whole fleet is healthy". A watchdog reporting green while
+  // watching nothing is the exact failure it exists to detect, one level up. So it is flagged
+  // here and the CLI exits non-zero on it.
+  return { query: q, repos: repos.length, results, discoveredNothing: repos.length === 0 };
 }
 
 // ── the one real IO implementation — never called from a test ────────────────────────────────
@@ -416,6 +425,13 @@ if (__isMain) {
   // watchdog watching the rest. But it is not silent either: the run fails so the operator sees a
   // red tick, because "the watchdog is only watching some of the fleet" is exactly the kind of
   // partial death this file exists to make loud.
+  if (summary.discoveredNothing) {
+    console.error(`flow-watchdog: discovery matched ZERO repositories for \`${summary.query}\` — nothing is being watched.`);
+    console.error("Enrolment is the GitHub topic `flow`: add it to each repo (repo home -> About -> Topics).");
+    console.error("If the account is an organization rather than a user, set FLOW_WATCHDOG_OWNER_TYPE=org.");
+    process.exit(1);
+  }
+
   const unavailable = summary.results.filter((r) => r.status === "unavailable");
   if (unavailable.length > 0) {
     console.error(`flow-watchdog: ${unavailable.length} repo(s) unreadable — not watched:`);

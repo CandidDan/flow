@@ -39,6 +39,11 @@ on:
 # "wired but not yet enabled", so a fresh clone of canonical does not start with a red schedule.
 env:
   FLOW_WATCHDOG_OWNER: ${{ github.repository_owner }}
+  # `user:` vs `org:` in the discovery query. Defaults to a personal account, which is what
+  # canonical is today. If this account ever becomes an organization the `user:` qualifier would
+  # match ZERO repos — so set the repo variable FLOW_WATCHDOG_OWNER_TYPE to `org` at the same
+  # time. The run fails loudly on a zero-repo discovery either way; this is the knob that fixes it.
+  FLOW_WATCHDOG_OWNER_TYPE: ${{ vars.FLOW_WATCHDOG_OWNER_TYPE || 'user' }}
 
 jobs:
   watchdog:
@@ -65,6 +70,9 @@ jobs:
       # No `npm ci`: watchdog.mjs imports only liveness.mjs and mission-control.mjs, both
       # dependency-free by design, so there is nothing to install and nothing to go stale.
 
+      # Enrolment note: this watches every repo carrying the GitHub topic `flow`. A repo without
+      # that topic is not watched, silently, from this workflow's point of view — so the run fails
+      # if discovery matches nothing at all. Adding the topic is a human-only step, like the PAT.
       - name: Check the watchdog is actually credentialled
         env:
           FLOW_WATCHDOG_PAT: ${{ secrets.FLOW_WATCHDOG_PAT }}
@@ -89,5 +97,6 @@ jobs:
           # Flow that is deliberately valid across every repo in the fleet at once.
           FLOW_WATCHDOG_TOKEN: ${{ secrets.FLOW_WATCHDOG_PAT }}
           FLOW_WATCHDOG_OWNER: ${{ env.FLOW_WATCHDOG_OWNER }}
+          FLOW_WATCHDOG_OWNER_TYPE: ${{ env.FLOW_WATCHDOG_OWNER_TYPE }}
         run: |
           node flightdeck/bin/watchdog.mjs ${{ inputs.dry_run && '--dry-run' || '' }}
