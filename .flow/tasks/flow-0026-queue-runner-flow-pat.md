@@ -1,14 +1,14 @@
 ---
 id: "flow-0026"
 title: "Push queue-runner worker commits with FLOW_PAT so branch pushes trigger flow-open-pr"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "session_013Rjw5HRn2wR6wFYy2bi1iQ"
 created: "2026-08-27"
 started: "2026-08-28T04:43:05Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0026-queue-runner-flow-pat"
+pr: "https://github.com/CandidDan/flow/pull/40"
 issue: "https://github.com/CandidDan/flow/issues/32"
 blocked_reason: ""
 serves: ["G1"]
