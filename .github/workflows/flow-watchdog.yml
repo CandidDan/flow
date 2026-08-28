@@ -1,0 +1,93 @@
+name: flow-watchdog
+
+# THE ONE WORKFLOW WITH NO REUSABLE AND NO TEMPLATE CALLER, AND THAT ASYMMETRY IS DELIBERATE.
+#
+# Every other `flow-*.yml` in this directory is a thin caller of a `_flow-*.yml` reusable that
+# consuming repos also call. This one is not, and must not become one. There is exactly ONE
+# watchdog, with ONE schedule, watching the WHOLE fleet from canonical. Shipping a per-repo
+# caller would give every repo its own watchdog watching itself — wasteful, and circular: a repo
+# whose automation has died is the last thing that can be trusted to report that it died.
+#
+# So there is no `_flow-watchdog.yml` and no `project-template/.github/workflows/flow-watchdog.yml`.
+# If you came here to "fix" the missing pair, this comment is the answer.
+#
+# WHAT IT DOES. GitHub notifies on failure, never on absence. A scheduled workflow that quietly
+# stops running produces no event, fails no check, and turns nothing red. This runs the liveness
+# rules from `flightdeck/bin/liveness.mjs` — the same rules mission control renders — across every
+# `flow`-topic repo, and files an `automation-down` issue in the affected repo when one is dead.
+# One issue per workflow, a comment on re-detection, closed automatically on recovery.
+#
+# CADENCE VS DETECTION LATENCY — a real trade-off, not a bug. The liveness rule is "no successful
+# run in ~2x the workflow's own cron interval". Against a WEEKLY workflow (flow-compass) a death
+# is therefore only red after a fortnight, no matter how often this runs. Running daily means the
+# watchdog adds at most ~24h on top of that, which is the right side of the trade: polling hourly
+# would not detect anything sooner, it would only spend rate limit.
+
+on:
+  schedule:
+    - cron: "0 8 * * *"   # daily, 08:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Evaluate and print the plan without filing, commenting or closing anything"
+        type: boolean
+        default: false
+
+# DORMANT until the repo variable FLOW_WATCHDOG is set to 'true'. Merging this turns nothing on.
+# The secret below is a human-only setup step and cannot be created by a worker; gating on a
+# variable (rather than letting the job run and fail) follows flow-compass.yml's precedent for
+# "wired but not yet enabled", so a fresh clone of canonical does not start with a red schedule.
+env:
+  FLOW_WATCHDOG_OWNER: ${{ github.repository_owner }}
+
+jobs:
+  watchdog:
+    if: vars.FLOW_WATCHDOG == 'true'
+    runs-on: ubuntu-latest
+
+    # `issues: write` and nothing else writable. This block governs GITHUB_TOKEN, which reaches
+    # canonical ONLY — the cross-repo filing uses FLOW_WATCHDOG_PAT below. It is kept exact anyway
+    # because it is the mechanical proof of the boundary: `flightdeck/bin/watchdog.test.mjs` parses
+    # this block and FAILS if `contents` is ever raised to `write`, or if any other write scope
+    # appears. A watchdog that could write code, a task or a workflow would be a far larger blast
+    # radius than the thing it is watching for.
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No `npm ci`: watchdog.mjs imports only liveness.mjs and mission-control.mjs, both
+      # dependency-free by design, so there is nothing to install and nothing to go stale.
+
+      - name: Check the watchdog is actually credentialled
+        env:
+          FLOW_WATCHDOG_PAT: ${{ secrets.FLOW_WATCHDOG_PAT }}
+        run: |
+          if [ -z "${FLOW_WATCHDOG_PAT}" ]; then
+            echo "::error::FLOW_WATCHDOG is 'true' but the FLOW_WATCHDOG_PAT secret is not set."
+            echo "The default GITHUB_TOKEN is scoped to this repository, so it cannot file issues"
+            echo "in the other flow-topic repos — a watchdog running on it would silently watch"
+            echo "one repo and report success. Failing loudly instead."
+            echo ""
+            echo "Setup (human-only): create a fine-grained PAT with access to every flow-topic"
+            echo "repo, permissions Metadata: Read, Contents: Read, Actions: Read, Issues: Read"
+            echo "and write. Save it as the repo secret FLOW_WATCHDOG_PAT."
+            exit 1
+          fi
+
+      - name: Run the watchdog
+        env:
+          # A SEPARATE secret from FLOW_PAT, on purpose. FLOW_PAT carries Contents and Pull
+          # requests WRITE so it can push branches and open PRs; this one needs neither. Least
+          # privilege is worth one more secret here, because this token is the only credential in
+          # Flow that is deliberately valid across every repo in the fleet at once.
+          FLOW_WATCHDOG_TOKEN: ${{ secrets.FLOW_WATCHDOG_PAT }}
+          FLOW_WATCHDOG_OWNER: ${{ env.FLOW_WATCHDOG_OWNER }}
+        run: |
+          node flightdeck/bin/watchdog.mjs ${{ inputs.dry_run && '--dry-run' || '' }}
