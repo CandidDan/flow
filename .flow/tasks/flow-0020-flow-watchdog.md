@@ -18,6 +18,7 @@ labels: [flightdeck, infra, integrity]
 notes:
   - "2026-08-19: deliverable D13 of handoff addendum 2. Imports the liveness rules from flightdeck/bin/liveness.mjs, which flow-0019 creates — sequence 0019 -> 0020. Importing is not touching, so the touches stay disjoint, but this cannot start until flow-0019 lands."
   - "2026-08-19: canonical-only. NOT a reusable with a template caller — one watchdog, one schedule, one place. Recorded in Scope so nobody 'fixes' the missing pair."
+  - "2026-08-28: built, PR #41 open, all three review checks PASS on the rebased head; gate green (build 22 workflows, lint 61 files, 629 tests, coverage 95.16% vs floor 83.5). SCOPE GAP FOR THE ORCHESTRATOR, surfaced rather than silently expanded: this task's Notes ask for 'who watches the watchdog is minimised, not solved' to be recorded in docs/adr/0002's Consequences, but docs/adr/ is not in this task's touches, so making that edit here would fail the touches-guard. The task contradicts itself. Either correct the touches list or raise a follow-on docs task — the reasoning to record is in this file's Notes/open-questions section verbatim. Two smaller judgment calls also noted by review, neither acted on: collectRepoEntries makes ~3N+2 REST calls per repo with no createBudget equivalent (fine at today's fleet size, not asked for by any criterion), and findIssueForWorkflow is now exercised only by tests since planRepoActions reads the markedIssues index instead — deliberate, one answer by one code path."
 ---
 
 ## Context
