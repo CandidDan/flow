@@ -28,6 +28,8 @@ on:
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: false
+      FLOW_PAT:
+        required: false
 
 permissions:
   contents: write
@@ -69,10 +71,14 @@ jobs:
         with:
           # Subscription auth (Pro/Max) — uses your plan quota, not API credits.
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # GitHub API token for the action's git/PR operations. NB: a PR the worker opens with
-          # GITHUB_TOKEN does NOT trigger flow-gates (CAN-58) — _flow-open-pr/_flow-recover catch
-          # and re-open it under FLOW_PAT so the gate still fires.
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # GitHub API token for the action's git/PR operations. FLOW_PAT (a real actor, CAN-58)
+          # so the worker's own branch push fires _flow-open-pr.yml on the fast path — pushes made
+          # with the Actions GITHUB_TOKEN don't trigger downstream workflows (GitHub's recursion
+          # guard), which left worker branches sitting PR-less until the _flow-recover sweep or a
+          # human noticed. Falls back to GITHUB_TOKEN when the secret isn't set: exactly today's
+          # behaviour (branch pushes silently, _flow-open-pr/_flow-recover catch up after the
+          # fact). See _flow-open-pr.yml's header for FLOW_PAT setup.
+          github_token: ${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}
           # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}   # pay-per-use alternative
           # The build role gets the strongest model — fewer blocks/kickbacks = fewer human
           # touchpoints, which is the whole point of the loop. Alias (not a pinned version) so it
