@@ -303,29 +303,51 @@ export async function ensureLabel({ io, fullName }) {
   }
 }
 
+// A FAILING WRITE MUST NOT BLIND THE REST OF THE FLEET. Reads already degrade per-repo (see
+// `watchRepo`); writes used to throw straight out, so a transient 5xx filing one issue would abort
+// the whole scan and leave every remaining repo unchecked until the next run — a day later, for a
+// component whose entire job is noticing that something stopped. Each action is attempted
+// independently and failures are collected, not raised. Nothing is swallowed: `watchRepo` reports
+// them and the CLI exits non-zero, so the run is still loud — just no longer all-or-nothing.
 export async function applyActions({ io, fullName, actions, dryRun = false }) {
   const applied = [];
+  const failures = [];
   const needsLabel = (actions ?? []).some((a) => a.type === "file");
 
-  if (needsLabel && !dryRun) await ensureLabel({ io, fullName });
+  if (needsLabel && !dryRun) {
+    // A failed label ensure does not skip the filings: GitHub may still accept the issue, and if
+    // it does not, the per-action catch below records that separately rather than guessing here.
+    try {
+      await ensureLabel({ io, fullName });
+    } catch (err) {
+      failures.push({ type: "label", path: null, reason: `${err?.message || err}` });
+    }
+  }
 
   for (const a of actions ?? []) {
     if (dryRun) { applied.push({ ...a, dryRun: true }); continue; }
-    if (a.type === "file") {
-      const issue = await io.write("POST", `/repos/${fullName}/issues`, {
-        title: a.title, body: a.body, labels: [AUTOMATION_DOWN_LABEL],
-      });
-      applied.push({ ...a, issueNumber: issue?.number ?? null });
-    } else if (a.type === "comment") {
-      await io.write("POST", `/repos/${fullName}/issues/${a.issueNumber}/comments`, { body: a.body });
-      applied.push({ ...a });
-    } else if (a.type === "close") {
-      await io.write("POST", `/repos/${fullName}/issues/${a.issueNumber}/comments`, { body: a.body });
-      await io.write("PATCH", `/repos/${fullName}/issues/${a.issueNumber}`, { state: "closed", state_reason: "completed" });
-      applied.push({ ...a });
+    try {
+      if (a.type === "file") {
+        const issue = await io.write("POST", `/repos/${fullName}/issues`, {
+          title: a.title, body: a.body, labels: [AUTOMATION_DOWN_LABEL],
+        });
+        applied.push({ ...a, issueNumber: issue?.number ?? null });
+      } else if (a.type === "comment") {
+        await io.write("POST", `/repos/${fullName}/issues/${a.issueNumber}/comments`, { body: a.body });
+        applied.push({ ...a });
+      } else if (a.type === "close") {
+        // The comment is posted before the close so a reader never meets a closed issue with no
+        // explanation. If the PATCH fails the issue stays open with a recovery comment on it —
+        // visible and wrong in the safe direction, which is the same bias as the rest of this file.
+        await io.write("POST", `/repos/${fullName}/issues/${a.issueNumber}/comments`, { body: a.body });
+        await io.write("PATCH", `/repos/${fullName}/issues/${a.issueNumber}`, { state: "closed", state_reason: "completed" });
+        applied.push({ ...a });
+      }
+    } catch (err) {
+      failures.push({ type: a.type, path: a.path ?? null, reason: `${err?.message || err}` });
     }
   }
-  return applied;
+  return { applied, failures };
 }
 
 // ── the run ──────────────────────────────────────────────────────────────────────────────────
@@ -351,11 +373,15 @@ export async function watchRepo({ io, fullName, now, dryRun }) {
   }
 
   const { actions, orphaned } = planRepoActions({ fullName, machinery, openIssues, now });
-  const applied = await applyActions({ io, fullName, actions, dryRun });
+  const { applied, failures } = await applyActions({ io, fullName, actions, dryRun });
 
   return {
     repo: fullName,
-    status: "ok",
+    // `incomplete` is distinct from `unavailable` on purpose: the repo was read fine and the plan
+    // was computed, but not every action landed. Both are failures the CLI exits non-zero on;
+    // collapsing them would lose which half broke.
+    status: failures.length > 0 ? "incomplete" : "ok",
+    failures,
     watched: machinery.length,
     down: machinery.filter((w) => REPORTABLE_STATES.has(w.state)).map((w) => ({ path: w.path, state: w.state, reason: w.reason })),
     actions: applied.map((a) => ({ type: a.type, path: a.path, issueNumber: a.issueNumber ?? null })),
@@ -440,9 +466,14 @@ if (__isMain) {
   }
 
   const unavailable = summary.results.filter((r) => r.status === "unavailable");
-  if (unavailable.length > 0) {
-    console.error(`flow-watchdog: ${unavailable.length} repo(s) unreadable — not watched:`);
-    for (const r of unavailable) console.error(`  ${r.repo}: ${r.reason}`);
+  const incomplete = summary.results.filter((r) => r.status === "incomplete");
+
+  for (const r of unavailable) console.error(`flow-watchdog: ${r.repo} unreadable — NOT watched: ${r.reason}`);
+  for (const r of incomplete) {
+    for (const f of r.failures) console.error(`flow-watchdog: ${r.repo} ${f.type} failed${f.path ? ` for ${f.path}` : ""}: ${f.reason}`);
+  }
+  if (unavailable.length + incomplete.length > 0) {
+    console.error(`flow-watchdog: ${unavailable.length} repo(s) unreadable, ${incomplete.length} with failed writes.`);
     process.exit(1);
   }
   process.exit(0);

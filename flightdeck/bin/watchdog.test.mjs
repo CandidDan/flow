@@ -438,6 +438,61 @@ test("--dry-run plans everything and writes nothing", async () => {
   assert.deepEqual(state.writes, [], "no write call of any kind");
 });
 
+test("a failed write on one repo does not abort the rest of the fleet scan", async () => {
+  // The regression this pins: writes used to throw straight out of watchRepo, so a transient 5xx
+  // filing one issue aborted the whole run and left every remaining repo unchecked for a day.
+  const io = {
+    rest: async (path) => {
+      if (/^\/search\/repositories/.test(path)) return { items: [{ full_name: "o/a" }, { full_name: "o/b" }] };
+      if (/\/contents\/\.github\/workflows$/.test(path)) return [{ type: "file", name: "flow-queue-runner.yml" }];
+      if (/\/contents\/\.github\/workflows\//.test(path)) return { content: Buffer.from(SCHEDULED_6H, "utf8").toString("base64") };
+      if (/\/actions\/workflows\?/.test(path)) return { workflows: [{ id: 1, name: "queue-runner", path: ".github/workflows/flow-queue-runner.yml", state: "active" }] };
+      if (/\/runs\?/.test(path)) return { workflow_runs: [] };
+      if (/\/issues\?labels=/.test(path)) return [];
+      if (/\/labels\//.test(path)) return { name: AUTOMATION_DOWN_LABEL };
+      throw new Error(`unrouted GET ${path}`);
+    },
+    // Every filing fails, for both repos.
+    write: async () => { const e = new Error("500 Internal Server Error"); e.status = 500; throw e; },
+  };
+
+  const summary = await runWatchdog({ io, owner: "o", now: NOW });
+
+  assert.equal(summary.results.length, 2, "the second repo was still scanned after the first failed to write");
+  for (const r of summary.results) {
+    assert.equal(r.status, "incomplete", "reported as incomplete, not ok and not unavailable");
+    assert.equal(r.failures.length, 1);
+    assert.match(r.failures[0].reason, /500/, "the real cause is carried, not swallowed");
+    assert.equal(r.failures[0].type, "file");
+  }
+});
+
+test("applyActions isolates per-action failures and still applies the rest", async () => {
+  let calls = 0;
+  const io = {
+    rest: async () => ({ name: AUTOMATION_DOWN_LABEL }),
+    write: async (method, path) => {
+      calls += 1;
+      if (/\/issues$/.test(path)) { const e = new Error("422 unprocessable"); e.status = 422; throw e; }
+      return { number: 7 };
+    },
+  };
+
+  const { applied, failures } = await applyActions({
+    io, fullName: REPO,
+    actions: [
+      { type: "file", path: "a.yml", title: "t", body: "b" },
+      { type: "comment", path: "b.yml", issueNumber: 2, body: "x" },
+    ],
+  });
+
+  assert.equal(failures.length, 1, "the filing failed");
+  assert.equal(failures[0].path, "a.yml");
+  assert.equal(applied.length, 1, "the comment still went out");
+  assert.equal(applied[0].type, "comment");
+  assert.ok(calls >= 2, "the second action was attempted despite the first throwing");
+});
+
 test("applyActions files, comments and closes through the injected writer only", async () => {
   const seen = [];
   const io = { rest: async () => ({ name: AUTOMATION_DOWN_LABEL }), write: async (m, p, b) => { seen.push([m, p]); return { number: 1 }; } };
