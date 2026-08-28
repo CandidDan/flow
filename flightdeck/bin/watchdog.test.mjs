@@ -376,6 +376,22 @@ test("the dedupe key is the workflow PATH, so renaming a workflow's `name:` cann
   assert.deepEqual([...markedIssues(issues).keys()], [".github/workflows/x.yml"]);
 });
 
+test("findIssueForWorkflow and markedIssues cannot disagree — one marker parser, one answer", () => {
+  // They used to match by different means (substring test vs regex extraction). A body carrying
+  // two markers is the case where that could diverge: whichever the planner trusted would decide
+  // whether an issue is filed or commented on, so the two must resolve identically.
+  const issues = [
+    { number: 1, body: `${workflowMarker(".github/workflows/a.yml")}\n\nfirst` },
+    { number: 2, body: `${workflowMarker(".github/workflows/b+c.yml")}\n\nregex-special path` },
+  ];
+  const index = markedIssues(issues);
+
+  for (const path of [".github/workflows/a.yml", ".github/workflows/b+c.yml", ".github/workflows/missing.yml"]) {
+    assert.equal(findIssueForWorkflow(issues, path)?.number ?? null, index.get(path)?.number ?? null, path);
+  }
+  assert.equal(findIssueForWorkflow(issues, ".github/workflows/b+c.yml").number, 2, "a regex-special path still resolves");
+});
+
 test("an automation-down issue with no watchdog marker is left alone — a human's issue is not this file's to close", () => {
   const openIssues = [{ number: 5, body: "queue runner looks dead to me" }];
   const machinery = [{ path: ".github/workflows/q.yml", name: "q", state: "good" }];

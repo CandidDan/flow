@@ -73,15 +73,16 @@ export function issueTitle(workflowName) {
   return `Automation down: ${String(workflowName ?? "unknown workflow")}`;
 }
 
-// Locate the ONE open issue already tracking a workflow, by marker. Returns null when none.
-export function findIssueForWorkflow(openIssues, path) {
-  const marker = workflowMarker(path);
-  return (openIssues ?? []).find((i) => String(i.body ?? "").includes(marker)) ?? null;
-}
-
-// Every open `automation-down` issue this watchdog filed, as {path -> issue}. Issues carrying no
-// marker are ignored entirely: a human may have hand-labelled something, and closing their issue
-// because this file did not recognise it would be the watchdog corrupting the inbox it feeds.
+// Every open `automation-down` issue this watchdog filed, as {path -> issue}. THE ONLY PLACE THE
+// MARKER IS MATCHED — `findIssueForWorkflow` below delegates here rather than scanning again.
+// That matters more than tidiness: the two used to match by different means (a substring test for
+// the exact marker vs. this extraction), which is two answers to one question and a real chance of
+// disagreeing on an odd body — an issue carrying two markers, or a path with regex-special
+// characters. One parser, one answer.
+//
+// Issues carrying no marker are ignored entirely: a human may have hand-labelled something, and
+// closing their issue because this file did not recognise it would be the watchdog corrupting the
+// inbox it feeds.
 export function markedIssues(openIssues) {
   const out = new Map();
   for (const issue of openIssues ?? []) {
@@ -89,6 +90,13 @@ export function markedIssues(openIssues) {
     if (m) out.set(m[1], issue);
   }
   return out;
+}
+
+// Locate the ONE open issue already tracking a workflow. Returns null when none. A convenience
+// over `markedIssues` for a single lookup; `planRepoActions` builds the index once and reads it
+// directly, because it looks up every workflow in turn.
+export function findIssueForWorkflow(openIssues, path) {
+  return markedIssues(openIssues).get(String(path ?? "")) ?? null;
 }
 
 // ── issue bodies ─────────────────────────────────────────────────────────────────────────────
@@ -190,9 +198,8 @@ export function planRepoActions({ fullName, machinery, openIssues, now }) {
   const tracked = markedIssues(openIssues);
 
   for (const w of machinery ?? []) {
-    // `tracked` is the marker index built above — the same answer `findIssueForWorkflow`
-    // computes by rescan. Two ways to reach one answer is two things to keep in step, so the
-    // planner reads the index and `findIssueForWorkflow` stays the single-lookup helper.
+    // Read the index built once above rather than re-deriving per workflow. `markedIssues` is the
+    // single marker parser both this and `findIssueForWorkflow` resolve through.
     const existing = tracked.get(w.path) ?? null;
 
     if (REPORTABLE_STATES.has(w.state)) {
