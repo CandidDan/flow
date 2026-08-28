@@ -1,12 +1,12 @@
 ---
 id: "flow-0025"
 title: "Fail the queue-runner job when a worker produces no verifiable outcome"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_01LeGZLrACwUQ6u2b6GDkvJT"
 created: "2026-08-27"
-started: ""
+started: "2026-08-28T06:45:01Z"
 branch: ""
 pr: ""
 issue: "https://github.com/CandidDan/flow/issues/33"
