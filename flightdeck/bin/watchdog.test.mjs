@@ -288,6 +288,21 @@ test("criterion 6 (canonical-only): there is no _flow-watchdog reusable and no t
   }
 });
 
+test("no `run:` block in flow-watchdog.yml interpolates a GitHub Actions expression", () => {
+  // `security.focus` in .flow/config.yml names "untrusted input reaching `run:` blocks" as one of
+  // canonical's real risks. Values reach the shell through `env:` instead, so an input can never
+  // become script text — asserted rather than documented, because the safe form and the unsafe one
+  // look almost identical in a diff.
+  const repoRoot = join(import.meta.dirname, "..", "..");
+  const doc = parseYaml(readFileSync(join(repoRoot, ".github/workflows/flow-watchdog.yml"), "utf8"));
+
+  const steps = doc.jobs.watchdog.steps.filter((s) => typeof s.run === "string");
+  assert.ok(steps.length > 0, "an empty scan is a failure, not a pass — there are run: blocks to check");
+  for (const step of steps) {
+    assert.doesNotMatch(step.run, /\$\{\{/, `step "${step.name}" interpolates an expression into run:; pass it via env: instead`);
+  }
+});
+
 // ── criterion 7 ──────────────────────────────────────────────────────────────────────────────
 
 test("criterion 7: the liveness rules come from liveness.mjs and are not reimplemented in watchdog.mjs", () => {

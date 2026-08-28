@@ -98,5 +98,16 @@ jobs:
           FLOW_WATCHDOG_TOKEN: ${{ secrets.FLOW_WATCHDOG_PAT }}
           FLOW_WATCHDOG_OWNER: ${{ env.FLOW_WATCHDOG_OWNER }}
           FLOW_WATCHDOG_OWNER_TYPE: ${{ env.FLOW_WATCHDOG_OWNER_TYPE }}
+          # Through `env:`, never interpolated into the `run:` script below. `dry_run` is a typed
+          # boolean and the old `${{ ... && '--dry-run' || '' }}` form collapsed to one of two
+          # fixed literals, so it was not exploitable — but "untrusted input reaching `run:`
+          # blocks" is a named item in this repo's own security.focus, and canonical does not get
+          # to ship the pattern it warns everyone else about on the grounds that today's input
+          # happens to be safe. The branch below reads the value; it never becomes script text.
+          FLOW_WATCHDOG_DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          node flightdeck/bin/watchdog.mjs ${{ inputs.dry_run && '--dry-run' || '' }}
+          if [ "${FLOW_WATCHDOG_DRY_RUN}" = "true" ]; then
+            node flightdeck/bin/watchdog.mjs --dry-run
+          else
+            node flightdeck/bin/watchdog.mjs
+          fi
