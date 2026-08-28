@@ -1,7 +1,7 @@
 ---
 id: "flow-0026"
 title: "Push queue-runner worker commits with FLOW_PAT so branch pushes trigger flow-open-pr"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "session_013Rjw5HRn2wR6wFYy2bi1iQ"
