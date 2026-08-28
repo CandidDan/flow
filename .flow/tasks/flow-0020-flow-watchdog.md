@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0020"
 title: "Turn silent automation death into an issue that finds the human, because a dead scheduler emits no event"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "flow"
 owner: "claude/task-planning-mission-control-gpn1l9"
 created: "2026-08-19"
 started: "2026-08-28T04:57:32Z"
-branch: ""
-pr: ""
+branch: "claude/task-planning-mission-control-gpn1l9"
+pr: "https://github.com/CandidDan/flow/pull/41"
 issue: ""
 blocked_reason: ""
 serves: ["G5"]            # whether the machinery is alive — the half a pane can't cover
