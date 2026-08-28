@@ -14,7 +14,8 @@ blocked_reason: ""
 serves: ["G2"]
 touches: [".github/workflows/_flow-queue-runner.yml", "project-template/.flow/bin/queue-runner-verify.mjs", "project-template/.flow/bin/queue-runner-verify.test.mjs", ".flow/bin/queue-runner-verify.mjs", ".flow/bin/queue-runner-verify.test.mjs"]
 labels: [infra, queue-runner, integrity]
-notes: []
+notes:
+  - "2026-08-28: built end to end, PR #42 open on branch flow/flow-0025-queue-runner-verify-outcome; gate green (build 21 workflows, lint 63 files, 627 tests pass / 1 pre-existing env-gated skip, coverage 96.2% vs floor 83.5). All Scope decisions honoured: notes-alone fails, bootstrap guard no-ops when the helper is absent (proved by executing the step's real script in a bare dir), flow-recover/flow-open-pr untouched, pure verifyOutcome + thin IO per the release-guard adapter pattern. Two implementation choices a fresh session should not re-litigate: (1) the step is gated `!cancelled() && steps.pick.outputs.task_id != ''` — it also runs when the worker step FAILED, purely as diagnostics (the job is already red); the spec's 'unconditionally after Work the task' is read as 'regardless of worker verdict', and the AC only forbids failure()-gating, which the parse test asserts. (2) the [<id>]-title PR fallback check filters titles in node with TASK_ID passed via env, not interpolated into a jq program — workflow_dispatch ids are untrusted input per config.yml's security focus. Next action: none for a worker — await review checks / human validation on PR #42; kickbacks on the same branch."
 ---
 
 ## Context
