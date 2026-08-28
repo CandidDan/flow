@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0020"
 title: "Turn silent automation death into an issue that finds the human, because a dead scheduler emits no event"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "claude/task-planning-mission-control-gpn1l9"
 created: "2026-08-19"
-started: ""
+started: "2026-08-28T04:57:32Z"
 branch: ""
 pr: ""
 issue: ""
