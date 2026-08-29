@@ -16,6 +16,12 @@ name: _flow-triage (reusable)
 # Authority stays with the human: triage PROPOSES; only an `approved` or `auto-ok` label —
 # both human-applied — lets work enter the queue.
 #
+# The lanes decide what may BECOME a task. They do not decide whose text the sweep reads, and
+# that is a separate boundary: this sweep runs an agent with `contents: write` and a permissive
+# permission mode, and on a public repository anyone can author its input. So the input set is
+# selected mechanically, in the `inbox` step below, before the prompt is built — see the note
+# there. Prompt text is guidance to a model; a step that never hands over the issue is a bound.
+#
 # DISABLED BY DEFAULT. Enable by setting repo variable FLOW_AI=true and adding the
 # CLAUDE_CODE_OAUTH_TOKEN secret (from `claude setup-token` — uses your Max plan quota). (Check
 # anthropics/claude-code-action's current README for input names when you first enable this —
@@ -41,7 +47,88 @@ jobs:
         with:
           fetch-depth: 0
 
+      # ── The trust boundary ───────────────────────────────────────────────────────────────
+      # Everything after this step READS issue text. This step decides WHOSE text, and it is
+      # the only place that decision is enforceable: the agent below runs with
+      # `--permission-mode bypassPermissions` and this job holds `contents: write`, so by the
+      # time the model is reading, the only thing standing between an arbitrary internet author
+      # and the task store is an instruction in a prompt. An instruction is guidance, not a
+      # boundary. Selecting the issue numbers here — and handing the agent that list instead of
+      # the inbox — moves the boundary to somewhere a test can hold it.
+      #
+      # `author_association` is GitHub's own answer to "could this person already direct this
+      # repo": OWNER, MEMBER and COLLABORATOR can. It comes back on the issue object, so the
+      # filter costs no extra request. NONE and CONTRIBUTOR are excluded — loudly, never
+      # silently: an issue nobody is told was skipped is queue debt that never surfaces, which
+      # is the failure mode this whole sweep exists to prevent.
+      #
+      # Only NUMBERS cross into the prompt. Titles and bodies are attacker-authored strings and
+      # are never interpolated into a workflow expression.
+      - id: inbox
+        name: Select the issues this sweep may read (author-trust filter)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Widen the trusted set deliberately, per repo, e.g. "OWNER,MEMBER,COLLABORATOR,
+          # CONTRIBUTOR". Unset is the restrictive default — the safe posture is the one you
+          # get by doing nothing, and opening the inbox has to be somebody's decision.
+          FLOW_TRIAGE_TRUSTED_ASSOCIATIONS: ${{ vars.FLOW_TRIAGE_TRUSTED_ASSOCIATIONS }}
+        run: |
+          set -euo pipefail
+          gh issue list --state open --limit 200 \
+            --json number,labels,authorAssociation > "$RUNNER_TEMP/flow-triage-issues.json"
+          cat > "$RUNNER_TEMP/flow-triage-filter.mjs" <<'FLOW_TRIAGE_FILTER'
+          // Author-trust filter for the triage sweep. Reads the `gh issue list` JSON named on
+          // argv[2]; writes the admitted issue numbers to GITHUB_OUTPUT and reports the
+          // exclusions to the run log and the job summary. Kept dependency-free and pure enough
+          // to be extracted and executed by .flow/bin/triage-author-trust.test.mjs, which is
+          // what stops this boundary from being quietly deleted.
+          import { appendFileSync, readFileSync } from "node:fs";
+
+          // The people who can already direct this repo, per GitHub's own answer.
+          const DEFAULT_TRUSTED = ["OWNER", "MEMBER", "COLLABORATOR"];
+
+          const configured = (process.env.FLOW_TRIAGE_TRUSTED_ASSOCIATIONS || "")
+            .split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+          // Unset, empty, or all-whitespace all land on the restrictive default. A repo that
+          // wants the open inbox sets the variable; nothing else can widen this.
+          const trusted = configured.length ? configured : DEFAULT_TRUSTED;
+
+          const issues = JSON.parse(readFileSync(process.argv[2], "utf8"));
+          // LABELS ARE DELIBERATELY NOT CONSULTED. The lanes (`approved`, `auto-ok`) decide what
+          // may become a task; they are evaluated later, by the agent. If a label could re-admit
+          // an issue here, the filter would be exactly as strong as the label model it is meant
+          // to sit in front of. Trust is decided on authorship alone, first.
+          const ok = (i) => trusted.includes(String(i?.authorAssociation ?? "").trim().toUpperCase());
+          const admitted = issues.filter(ok);
+          const excluded = issues.filter((i) => !ok(i));
+
+          const numbers = admitted
+            .map((i) => Number(i?.number))
+            .filter((n) => Number.isInteger(n) && n > 0)
+            .join(",");
+
+          const safe = (v) => String(v ?? "").replace(/[^A-Za-z_]/g, "") || "UNKNOWN";
+          const report = [
+            `triage inbox: ${admitted.length} issue(s) admitted, ${excluded.length} excluded by author trust.`,
+            `trusted author_association values: ${trusted.join(", ")}`,
+            ...excluded.map((i) => `  excluded: issue ${Number(i?.number) || "?"} (author_association: ${safe(i?.authorAssociation)})`),
+          ].join("\n");
+          console.log(report);
+
+          if (process.env.GITHUB_OUTPUT) {
+            appendFileSync(process.env.GITHUB_OUTPUT,
+              `numbers=${numbers}\nadmitted=${admitted.length}\nexcluded=${excluded.length}\n`);
+          }
+          if (process.env.GITHUB_STEP_SUMMARY) {
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${report}\n`);
+          }
+          FLOW_TRIAGE_FILTER
+          node "$RUNNER_TEMP/flow-triage-filter.mjs" "$RUNNER_TEMP/flow-triage-issues.json"
+
       - uses: anthropics/claude-code-action@v1
+        # Nothing admitted means nothing to sweep. Skipping keeps the agent — and its turn
+        # budget — away from an inbox it has already been told it may not read.
+        if: ${{ steps.inbox.outputs.numbers != '' }}
         with:
           # Subscription auth (Pro/Max): run `claude setup-token` locally, save the result as
           # the CLAUDE_CODE_OAUTH_TOKEN repo secret. Uses your plan quota, not API credits.
@@ -59,7 +146,11 @@ jobs:
             template rather than being scaffolded from it. Read whichever of the two exists.
             Concretely:
 
-            1. List open issues. Skip any labelled `proposed` or `triaged`.
+            1. The issues in scope for this sweep have ALREADY been selected for you, by issue
+               number: ${{ steps.inbox.outputs.numbers }}. Work only those. Do not list the
+               inbox yourself, and do not read or act on any issue outside that list — issues
+               were withheld deliberately and re-listing would undo the decision. Of the issues
+               in scope, skip any labelled `proposed` or `triaged`.
             2. For each remaining issue WITHOUT the `auto-ok` label: draft a complete ready-task
                spec in the task template's shape (context, scope with explicit boundaries,
                observable acceptance criteria, touches globs). That template is at
@@ -67,7 +158,7 @@ jobs:
                project-template/.flow/tasks/_TEMPLATE.md in canonical — read whichever exists.
                Post the spec as a comment on the issue, then add the `proposed` label. Do NOT
                create a task file.
-            3. For each open issue labelled `approved` (the human accepted a proposal) or
+            3. For each in-scope issue labelled `approved` (the human accepted a proposal) or
                `auto-ok` (pre-authorised lane): create the ready task file in .flow/tasks/ with
                the next id, `issue:` set to the issue URL, commit it to main with message
                "flow: triage <id> from issue #<n>", then swap the issue's labels to `triaged`.
