@@ -307,6 +307,30 @@ test("only issue numbers cross from the filter into the prompt", { skip }, () =>
     "a non-numeric issue number is dropped rather than passed through");
 });
 
+test("a listing that hit its cap says so — an unread issue is not even an excluded one", { skip }, () => {
+  const inbox = [issue(1, "OWNER"), issue(2, "OWNER")];
+  const hit = runFilter(inbox, { FLOW_TRIAGE_ISSUE_LIMIT: "2" });
+  assert.match(hit.stdout, /WARNING: the listing hit its 2-issue cap/,
+    "issues beyond the cap are never read, so they are not even counted as excluded — the only " +
+    "place that can surface them is the step that did the listing");
+  assert.match(hit.summary, /WARNING: the listing hit its 2-issue cap/);
+  assert.deepEqual(hit.numbers, [1, 2], "the warning must not change what is admitted");
+
+  const clear = runFilter(inbox, { FLOW_TRIAGE_ISSUE_LIMIT: "50" });
+  assert.doesNotMatch(clear.stdout, /WARNING/,
+    "a warning on every ordinary run is a warning nobody reads");
+});
+
+test("the listing cap is set in the step env and used by both the listing and the filter", { skip }, () => {
+  const step = inboxStep();
+  assert.match(String(step.env?.FLOW_TRIAGE_ISSUE_LIMIT ?? ""), /^[0-9]+$/,
+    "the cap must be an explicit number in the step env — `gh issue list` defaults to 30, which " +
+    "would drop most of a real inbox without anyone choosing that");
+  assert.match(String(step.run ?? ""), /--limit "\$FLOW_TRIAGE_ISSUE_LIMIT"/,
+    "the listing and the truncation warning must read the SAME value; two literals would drift " +
+    "and the warning would then fire at the wrong size, or never");
+});
+
 test("an empty inbox produces empty output and no exclusions, without failing the step", { skip }, () => {
   const { outputs, numbers, stdout } = runFilter([]);
   assert.deepEqual(numbers, []);
