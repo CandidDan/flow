@@ -159,6 +159,60 @@ jobs:
             A capped run that pushed a branch and left a note costs one cycle. A capped run that
             pushed nothing costs the whole run, and the next worker starts from zero.
 
+      # The protocol's definition of a finished run is one of exactly three outcomes: a pushed
+      # `flow/<id>-*` branch ahead of main, an open PR, or a `blocked` transition with a reason.
+      # A worker can burn its turns, exit 0, and produce none of them (observed on
+      # CandidDan/write, runs 32869817466 / 32821080230: SDK said `is_error: false`, job
+      # concluded success, nothing existed to show for it) — so the job must not take the
+      # worker's exit code as the verdict. This step re-derives the outcome from the remote and
+      # fails the job when none of the three happened, which is what makes a wasted run visible
+      # in Actions history instead of indistinguishable from a real one. It runs whether the
+      # worker step passed or failed (only a cancelled run skips it): a worker that exits 0
+      # having done nothing is exactly the case `if: failure()` would miss. A `notes` entry
+      # alone deliberately does NOT count — a note warms up the next worker, but it is not a
+      # finished or blocked outcome (see flow-0025 / issue #33). flow-recover still owns
+      # healing the claim; this step only stops the run from lying about its own result.
+      - name: Verify the worker produced an outcome
+        if: ${{ !cancelled() && steps.pick.outputs.task_id != '' }}
+        env:
+          TASK_ID: ${{ steps.pick.outputs.task_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Bootstrap guard: the helper lives in the consuming repo once it adopts the template.
+          # A repo that hasn't synced it yet must not have its queue-runner start failing here.
+          if [ ! -f .flow/bin/queue-runner-verify.mjs ]; then
+            echo "No .flow/bin/queue-runner-verify.mjs in this repo yet — skipping outcome verification."
+            exit 0
+          fi
+          # Everything the worker produced landed on the remote after this job's checkout, so
+          # every fact is read from origin, never from the local worktree the worker mutated.
+          git fetch -q origin main
+          branch="$(git ls-remote --heads origin "flow/$TASK_ID-*" | head -1 | sed 's#.*refs/heads/##')"
+          if [ -n "$branch" ]; then
+            branch_exists=1
+            git fetch -q origin "$branch"
+            ahead="$(git rev-list --count origin/main..FETCH_HEAD)"
+            has_open_pr="$(gh pr list --head "$branch" --state open --json number --jq 'length')"
+          else
+            branch_exists=0; ahead=0; has_open_pr=0
+          fi
+          # A cloud/harness worker can be forced onto a non-flow/ branch; the protocol makes
+          # the [<id>] PR-title prefix load-bearing for exactly that case, so check it too.
+          # Filtered in node with the id passed via the environment — not interpolated into a
+          # jq program — because workflow_dispatch task ids are untrusted input.
+          if [ "$has_open_pr" = "0" ]; then
+            has_open_pr="$(gh pr list --state open --json title | node -e '
+              const prs = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+              const prefix = "[" + process.env.TASK_ID + "]";
+              process.stdout.write(String(prs.filter((p) => p.title.startsWith(prefix)).length));
+            ')"
+          fi
+          # The task's state lives on main, which moved after checkout if the worker claimed or
+          # blocked it — refresh the store from origin/main so the helper reads current state.
+          git checkout -q origin/main -- .flow/tasks/
+          node .flow/bin/queue-runner-verify.mjs --task-id "$TASK_ID" \
+            --branch-exists "$branch_exists" --ahead "$ahead" --has-open-pr "$has_open_pr"
+
       # A capped/failed worker exits non-zero having opened no PR, and the raw log says only
       # "Claude execution failed". State the consequence explicitly so the run is diagnosable
       # from the summary alone: the claim is NOT released here, and must not be — releasing it
