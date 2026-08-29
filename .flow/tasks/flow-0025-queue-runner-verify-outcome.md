@@ -1,7 +1,7 @@
 ---
 id: "flow-0025"
 title: "Fail the queue-runner job when a worker produces no verifiable outcome"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "session_01LeGZLrACwUQ6u2b6GDkvJT"
