@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0027"
 title: "Restrict the triage sweep to issues from people who can already direct this repo"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude/next-task-kssnbf"
 created: "2026-08-28"
-started: ""
+started: "2026-08-29T12:15:44Z"
 branch: ""
 pr: ""
 issue: ""
