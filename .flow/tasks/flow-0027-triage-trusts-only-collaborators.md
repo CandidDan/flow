@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0027"
 title: "Restrict the triage sweep to issues from people who can already direct this repo"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude/next-task-kssnbf"
 created: "2026-08-28"
 started: "2026-08-29T12:15:44Z"
-branch: ""
-pr: ""
+branch: "claude/next-task-kssnbf"
+pr: "https://github.com/CandidDan/flow/pull/43"
 issue: ""
 blocked_reason: ""
 serves: ["G1"]            # the approve-the-spec touchpoint is only real if nothing else can reach the queue
