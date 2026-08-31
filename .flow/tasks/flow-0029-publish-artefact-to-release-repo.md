@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0029"
 title: "Publish the Flow artefact to the public release repo as a history-free snapshot on release"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_015zGFFmqNftp38wLkqgjBse"
 created: "2026-08-28"
-started: ""
+started: "2026-08-31T13:22:24Z"
 branch: ""
 pr: ""
 issue: ""
