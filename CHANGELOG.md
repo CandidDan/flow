@@ -6,7 +6,25 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
-_(next changes accumulate here until the alias is advanced)_
+- **`flow-triage` now reads only issues from trusted authors** (`_flow-triage.yml`, flow-0027).
+  The sweep used to hand its agent the whole open inbox, with its scope limits written in the
+  prompt — guidance to a model, not an enforced boundary, and on a public repo anyone can author
+  that input. A new `inbox` step now selects the issue set *before* the prompt is built: it lists
+  open issues with `gh issue list --json number,labels,authorAssociation` and admits only authors
+  GitHub already reports as able to direct the repo (`OWNER`, `MEMBER`, `COLLABORATOR`). The agent
+  is handed those issue numbers rather than the inbox, and its step is skipped when nothing is
+  admitted. Exclusions are reported by count and by issue number to the run log and the job
+  summary, so a skipped issue surfaces rather than becoming silent queue debt; the same step warns
+  when the listing hits its `FLOW_TRIAGE_ISSUE_LIMIT` (200) cap, because an issue past the cap is
+  never read at all and would not otherwise appear anywhere.
+  **The label lanes are unchanged** — `approved` and `auto-ok` remain the only routes to a task
+  file. This is an input filter in front of them, and it consults authorship only, so a label
+  cannot re-admit an untrusted author.
+  [caller action: none — `_flow-triage.yml` is a reusable and adopters inherit this at their next
+  pin. **But this narrows behaviour by default:** a repo that genuinely wants the open inbox must
+  now opt in, by setting the repo variable `FLOW_TRIAGE_TRUSTED_ASSOCIATIONS` to the comma-separated
+  set it wants (e.g. `OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR`). Unset, empty or separators-only all
+  resolve to the restrictive default.]
 
 ## 1.1.0 — 2026-07-03 (pending tag + canary)
 
