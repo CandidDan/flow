@@ -575,6 +575,16 @@ test("malformed target metadata is a named problem, not an unhandled parse error
     "no --target-meta at all is a different case: runPublish reports it, and a dry run allows it");
   assert.deepEqual(readTargetMeta("/t.json", () => '{"private":false,"topics":[]}').meta,
     { private: false, topics: [] });
+
+  // One cause, one message — the specific reason replaces the generic one rather than stacking
+  // on top of it. Raised as non-blocking on PR #48.
+  const root = fixtureTree();
+  try {
+    const v = runPublish({ sourceRoot: root, remote: "/nowhere.git", targetMeta: null, targetMetaProblem: bad.problem });
+    const meta = v.problems.filter((p) => p.includes("metadata"));
+    assert.equal(meta.length, 1, `one problem for one cause; got: ${meta.join(" | ")}`);
+    assert.equal(meta[0], bad.problem);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("a missing VERSION is a problem, not a crash", () => {
@@ -595,8 +605,10 @@ test("the report names the version, the tag, the count and a machine-readable de
   assert.equal(refused.at(-1), "release-publish: decision=refused problems=1");
 });
 
-test("releaseReadme points contributions at issues and states the licence obligations", () => {
+test("releaseReadme points contributions at issues and never links the private authoring repo", () => {
   const md = releaseReadme({ version: "1.2.0", tag: "v1.2.0" });
+  // After the split the authoring repo is private, so a link to it would 404 for every reader.
+  assert.ok(!md.includes("CandidDan/flow"), "the public README must not point at a private repo");
   assert.match(md, /issues/i);
   assert.match(md, /Apache-2\.0/);
   assert.match(md, /NOTICE/);

@@ -340,7 +340,11 @@ export function materialise(sourceRoot, entries, workDir, generate) {
 
 // The release repo's README. Short on purpose: it exists to stop someone opening a pull request
 // against a tree that is regenerated wholesale on the next release.
-export function releaseReadme({ version, tag, sourceRepo = "CandidDan/flow" } = {}) {
+// Deliberately does NOT name or link the authoring repository. An earlier draft carried a
+// `sourceRepo` parameter for that; after the split the authoring repo is PRIVATE, so a link to
+// it would 404 for every reader of this page. Contributions go to this repo's issues instead,
+// which is what the body says.
+export function releaseReadme({ version, tag } = {}) {
   return `# Flow — published artefact
 
 This repository is a **published mirror**, not a working repository. Everything here is a
@@ -389,6 +393,7 @@ export function runPublish({
   deny = NEVER_PUBLISH,
   dryRun = false,
   targetMeta = null,
+  targetMetaProblem = null,
   branch = RELEASE_BRANCH,
   readme = releaseReadme,
 } = {}) {
@@ -413,7 +418,11 @@ export function runPublish({
     problems.push(`refusing to publish "${o.path}" — ${o.reason}`);
   }
 
+  // One cause, one message: a caller that already knows WHY the metadata is absent (the CLI,
+  // when the file would not parse) supplies that reason, and the generic line is not added on
+  // top of it. Two overlapping problems for one cause makes a report harder to act on.
   if (targetMeta) problems.push(...checkTargetRepo(targetMeta));
+  else if (targetMetaProblem) problems.push(targetMetaProblem);
   else if (!dryRun) problems.push("target repository metadata was not supplied — refusing to publish unchecked");
 
   // The tag check is a network READ, so a dry run does it too: a dry run that hides the one
@@ -509,16 +518,14 @@ export function canonicalRepoRoot(here = __fileURLToPath(import.meta.url)) {
 if (__isMain) {
   const f = parseFlags(process.argv.slice(2));
   const { meta, problem } = readTargetMeta(f["target-meta"]);
-  const verdict = runPublish({
+  reportAndExit(runPublish({
     sourceRoot: typeof f.source === "string" ? f.source : canonicalRepoRoot(),
     workDir: typeof f["work-dir"] === "string" ? f["work-dir"] : null,
     remote: typeof f.remote === "string" ? f.remote : null,
     git: makeGitRunner(),
     dryRun: f["dry-run"] === true,
     targetMeta: meta,
+    targetMetaProblem: problem,
     branch: typeof f.branch === "string" ? f.branch : RELEASE_BRANCH,
-  });
-  // Ahead of runPublish's generic "metadata was not supplied", which is the symptom of this.
-  if (problem) verdict.problems.unshift(problem);
-  reportAndExit(verdict, { json: f.json === true });
+  }), { json: f.json === true });
 }
