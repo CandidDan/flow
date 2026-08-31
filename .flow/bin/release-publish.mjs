@@ -39,11 +39,11 @@ import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   realpathSync as __realpathSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, posix, resolve, sep } from "node:path";
@@ -164,7 +164,7 @@ export const RELEASE_BRANCH = "main";
 // A single `*` inside one path segment. See MANIFEST's comment for why this is not a real glob
 // engine: the blast radius of an over-eager match here is a permanent public disclosure.
 export function globToRegExp(glob) {
-  const escaped = String(glob).replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  const escaped = String(glob).replace(/[.?+^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`^${escaped.replace(/\*/g, "[^/]*")}$`);
 }
 
@@ -183,12 +183,22 @@ export function neverPublishes(path, deny = NEVER_PUBLISH) {
 
 // Walk a directory into repo-relative POSIX paths. `.git` is skipped: a nested repository
 // inside a published tree is not a file list problem, it is a history leak.
-export function walkTree(root, rel = "", out = []) {
+//
+// SYMLINKS ARE COLLECTED, NOT FOLLOWED, and that is load-bearing rather than tidy. `statSync`
+// resolves a link before reporting, so a link at `project-template/notes -> ../../.flow/tasks`
+// would be walked as an ordinary directory and its contents copied out — and `auditEntries`
+// would wave every one of them through, because the paths it sees all begin `project-template/`,
+// which the manifest admits. That is a way past the deny list to the exact disclosure this
+// module exists to prevent, so the caller turns each one into a refusal rather than a skip: a
+// silent skip would instead drop a file someone expected to publish.
+export function walkTree(root, rel = "", out = [], symlinks = []) {
   const abs = rel ? join(root, rel) : root;
   for (const name of readdirSync(abs).sort()) {
     if (name === ".git") continue;
     const child = rel ? posix.join(rel, name) : name;
-    if (statSync(join(root, child.split(posix.sep).join(sep))).isDirectory()) walkTree(root, child, out);
+    const st = lstatSync(join(root, child.split(posix.sep).join(sep)));
+    if (st.isSymbolicLink()) symlinks.push(child);
+    else if (st.isDirectory()) walkTree(root, child, out, symlinks);
     else out.push(child);
   }
   return out;
@@ -202,6 +212,7 @@ export function walkTree(root, rel = "", out = []) {
 export function resolveManifest(sourceRoot, manifest = MANIFEST) {
   const entries = [];
   const missing = [];
+  const symlinks = [];
   const seen = new Set();
   const add = (path, from) => {
     if (seen.has(path)) return;
@@ -213,16 +224,23 @@ export function resolveManifest(sourceRoot, manifest = MANIFEST) {
     const relDir = tree.endsWith("/") ? tree.slice(0, -1) : tree;
     const absDir = join(sourceRoot, relDir);
     if (!existsSync(absDir)) { missing.push(tree); continue; }
-    for (const child of walkTree(absDir)) add(posix.join(relDir, child), posix.join(relDir, child));
+    const links = [];
+    for (const child of walkTree(absDir, "", [], links)) add(posix.join(relDir, child), posix.join(relDir, child));
+    for (const link of links) symlinks.push(posix.join(relDir, link));
   }
 
   for (const glob of manifest.globs ?? []) {
     const relDir = posix.dirname(glob);
     const absDir = join(sourceRoot, relDir);
     const re = globToRegExp(glob);
+    const links = [];
     const hits = existsSync(absDir)
-      ? walkTree(absDir).map((c) => posix.join(relDir, c)).filter((p) => re.test(p))
+      ? walkTree(absDir, "", [], links).map((c) => posix.join(relDir, c)).filter((p) => re.test(p))
       : [];
+    for (const link of links) {
+      const p = posix.join(relDir, link);
+      if (re.test(p)) symlinks.push(p);
+    }
     if (hits.length === 0) { missing.push(glob); continue; }
     for (const hit of hits) add(hit, hit);
   }
@@ -235,7 +253,7 @@ export function resolveManifest(sourceRoot, manifest = MANIFEST) {
   for (const file of manifest.generated ?? []) add(file, null);
 
   entries.sort((a, b) => a.path.localeCompare(b.path));
-  return { entries, missing: missing.sort() };
+  return { entries, missing: missing.sort(), symlinks: symlinks.sort() };
 }
 
 // The redundant check the Scope calls for: "a publisher that trusts its own manifest is one bug
@@ -373,8 +391,14 @@ export function runPublish({
   if (version === null) problems.push(`no readable ${ROOT_VERSION_PATH} at ${sourceRoot}`);
   else if (tag === null) problems.push(`${ROOT_VERSION_PATH} is "${version}", expected MAJOR.MINOR.PATCH`);
 
-  const { entries, missing } = resolveManifest(sourceRoot, manifest);
+  const { entries, missing, symlinks } = resolveManifest(sourceRoot, manifest);
   for (const m of missing) problems.push(`manifest names "${m}" but the source tree has no such path`);
+  for (const l of symlinks) {
+    problems.push(
+      `refusing to publish "${l}" — it is a symlink, and following one would copy a tree the ` +
+      "audit cannot see (its published paths would all sit under an admitted prefix)",
+    );
+  }
 
   for (const o of auditEntries(entries, manifest, deny)) {
     problems.push(`refusing to publish "${o.path}" — ${o.reason}`);

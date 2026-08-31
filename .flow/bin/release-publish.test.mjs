@@ -18,7 +18,7 @@
 // in the per-stack job. Everything else has no dependencies and runs in both.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -223,6 +223,40 @@ test("criterion 2 — canonical's root host file is kept out by the allow-list, 
   assert.ok(!manifestAdmits(hostFile), "canonical's own host file is not artefact");
   assert.ok(manifestAdmits(`project-template/${hostFile}`), "the TEMPLATE's host file is what an adopter is handed");
   assert.equal(auditEntries([{ path: hostFile, from: hostFile }])[0].reason, "outside the manifest");
+});
+
+test("criterion 2 — a symlink cannot smuggle a tree past the audit under an admitted prefix", () => {
+  const root = fixtureTree();
+  const bare = fixtureRemote();
+  const work = join(tmp("work"), "stage");
+  try {
+    // The bypass the deny list cannot see on its own: every path this would publish begins
+    // `project-template/`, which the manifest admits, so following the link would export the
+    // store with a clean audit. Raised as a non-blocking note on PR #48; fixed because it
+    // reaches the one outcome this module exists to prevent.
+    symlinkSync(join(root, ".flow/tasks"), join(root, "project-template/notes"));
+
+    const { symlinks, entries } = resolveManifest(root);
+    assert.deepEqual(symlinks, ["project-template/notes"], "the link is reported, not followed");
+    assert.equal(entries.filter((e) => e.path.startsWith("project-template/notes")).length, 0);
+
+    const v = runPublish({ sourceRoot: root, workDir: work, remote: bare, git, targetMeta: PUBLIC_TARGET });
+    assert.equal(v.published, false);
+    assert.ok(v.problems.some((p) => p.includes("project-template/notes") && p.includes("symlink")),
+      `the link must be named; got: ${v.problems.join(" | ")}`);
+    assert.deepEqual(refsIn(bare), [], "refused before any push");
+    // And the smuggled content never reached the file list at all.
+    assert.equal(v.files.filter((f) => f.includes("flow-0029")).length, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(bare, { recursive: true, force: true }); }
+});
+
+test("globToRegExp escapes every regex metacharacter it could meet in a path", () => {
+  // `?` is a metacharacter and was missing from the escape set — harmless for today's single
+  // glob, but a future one carrying a literal `?` would have silently changed match semantics.
+  assert.ok(globToRegExp("docs/what?.md").test("docs/what?.md"));
+  assert.ok(!globToRegExp("docs/what?.md").test("docs/whatx.md"));
+  assert.ok(globToRegExp("docs/a+b.md").test("docs/a+b.md"));
+  assert.ok(!globToRegExp("docs/a.md").test("docs/aXmd"), "the dot is a literal, not a wildcard");
 });
 
 // ── criterion 3: the published commit has no parent from canonical's history ──
