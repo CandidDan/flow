@@ -452,6 +452,12 @@ export function runPublish({
 
 // ── report ─────────────────────────────────────────────────────────────────────────────
 
+// NOT reused from release-guard.mjs, though the pair looks identical in shape. Its
+// `formatReport` renders a release-guard verdict — stamps, tag distances, warnings — and its
+// `reportAndExit` calls that formatter by name, so reusing the exit half would print the wrong
+// report for a verdict that carries a file list and a tag instead. Two small formatters beat one
+// with a mode flag. If a THIRD publisher-shaped script ever appears, that is the point at which
+// the shared shell is worth extracting into the template — not before.
 export function formatReport(v) {
   const lines = [];
   lines.push(`release-publish: version=${v.version ?? "?"} tag=${v.tag ?? "?"} files=${v.files.length}`);
