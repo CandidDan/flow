@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0029"
 title: "Publish the Flow artefact to the public release repo as a history-free snapshot on release"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -11,13 +11,14 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Depends on flow-0028, the ADR that decides which artefacts are published and which stay private. Flow has no dependency field (a gap ADR-0002 recorded), so `blocked` is how sequencing is expressed. Building the publisher before the boundary is decided means guessing the boundary and rebuilding it. UNBLOCK: flip to ready once flow-0028 has merged. Note this task does NOT re-pin any reference — that is flow-0030 and it is sequenced separately because it collides with flow-0016 and flow-0023 on project-template/README.md and PROTOCOL.md."
+blocked_reason: ""
 serves: ["G4"]            # consuming by reference only works if the reference is published mechanically
 touches: [".github/workflows/flow-release-publish.yml", ".flow/bin/release-publish.mjs", ".flow/bin/release-publish.test.mjs"]
 labels: [infra, release, integrity]
 notes:
   - "2026-08-28: the mechanism half of the split decided in flow-0028. Deliberately separated from the re-pin (flow-0030) because the publisher can be built and proved against a scratch target before a single adopter reference changes — and because flow-0030 collides with two live tasks while this one collides with nothing."
   - "2026-08-28: the failure this task must not have is the one it exists to prevent — publishing more than intended. A snapshot that carries history exports the very commits the split withholds. Treat 'what does NOT get published' as the tested property, not the happy path."
+  - "2026-08-31: UNBLOCKED. flow-0028 merged (PR #43 chain: PR #44), so the boundary this task builds against is decided and on `main` as `docs/adr/0005-split-authoring-from-release.md`. Its Decision section carries both the two artefact lists AND a boundary RULE (a file is published only if an adopter needs it at run time or adoption time; anything that exists to author, plan or operate canonical stays private) — use the rule for files the lists do not name. Also corrected a stale pointer in Scope: the manifest source said ADR-0003, which is the MCP-server ADR; the split ADR is 0005. That was leftover from the pre-renumber spec and would have sent a worker to the wrong document. No other change: the release repo's NAME is still undecided and this task does not need it — repo creation and the publishing PAT remain human-only setup steps, to be named in the PR description, per this task's own scope."
 ---
 
 ## Context
@@ -42,7 +43,7 @@ absent.
 
 - Add a publish helper under `.flow/bin/` that, given a source checkout and an artefact manifest,
   produces the exact tree to publish. Pure and testable: it decides *what* goes, and the workflow
-  does the pushing. The manifest — which paths are artefact — comes from ADR-0003.
+  does the pushing. The manifest — which paths are artefact — comes from ADR-0005.
 - Add `.github/workflows/flow-release-publish.yml`, triggered on release (and manually
   dispatchable for a dry run), which builds that tree, commits it as a **history-free snapshot**,
   pushes it to the release repo, and tags it with the version from `VERSION`.

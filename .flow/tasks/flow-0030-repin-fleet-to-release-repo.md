@@ -18,7 +18,7 @@ labels: [infra, docs, fleet, cleanup]
 notes:
   - "2026-08-28: the reference half of the split. Held apart from flow-0029 deliberately: the publisher collides with nothing and can land early, while this one claims eighteen files that two live tasks also claim. Sequencing them together would have blocked the publisher behind a docs task for no reason."
   - "2026-08-28: touches were derived by grepping for the literal owner/repo reference across the tree, not from memory. Re-run that grep at claim time — this list is a snapshot of 2026-08-28 and the tree will have moved."
-  - "2026-08-28: canonical's own nine callers currently pin a ref to canonical itself. Switching them to local `uses: ./.github/workflows/_flow-*.yml` is what makes the dogfooding claim literally true — it then runs the files it publishes rather than a ref that could drift from them. ADR-0003 records this as a consequence; this task is where it happens."
+  - "2026-08-28: canonical's own nine callers currently pin a ref to canonical itself. Switching them to local `uses: ./.github/workflows/_flow-*.yml` is what makes the dogfooding claim literally true — it then runs the files it publishes rather than a ref that could drift from them. ADR-0005 records this as a consequence; this task is where it happens."
 ---
 
 ## Context
