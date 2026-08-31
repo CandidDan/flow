@@ -18,7 +18,7 @@
 // in the per-stack job. Everything else has no dependencies and runs in both.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -248,6 +248,52 @@ test("criterion 2 — a symlink cannot smuggle a tree past the audit under an ad
     // And the smuggled content never reached the file list at all.
     assert.equal(v.files.filter((f) => f.includes("flow-0029")).length, 0);
   } finally { rmSync(root, { recursive: true, force: true }); rmSync(bare, { recursive: true, force: true }); }
+});
+
+test("criterion 2 — a symlinked `files` entry is refused too, not just one inside a tree", () => {
+  // The gap the first symlink fix left, caught by the security check on PR #48: `manifest.files`
+  // does not go through walkTree, so it had only an existsSync. `copyFileSync` dereferences,
+  // which would have published the store's content under a trusted artefact filename — and the
+  // audit sees only `docs/repinning-a-consuming-repo.md`, which it admits.
+  const root = fixtureTree();
+  const bare = fixtureRemote();
+  const work = join(tmp("work"), "stage");
+  try {
+    const victim = "docs/repinning-a-consuming-repo.md";
+    rmSync(join(root, victim));
+    symlinkSync(join(root, ".flow/tasks/flow-0029-publish-artefact-to-release-repo.md"), join(root, victim));
+
+    const { symlinks, entries } = resolveManifest(root);
+    assert.deepEqual(symlinks, [victim], "the link is reported, not dereferenced");
+    assert.equal(entries.filter((e) => e.path === victim).length, 0);
+
+    const v = runPublish({ sourceRoot: root, workDir: work, remote: bare, git, targetMeta: PUBLIC_TARGET });
+    assert.equal(v.published, false);
+    assert.ok(v.problems.some((p) => p.includes(victim) && p.includes("symlink")));
+    assert.deepEqual(refsIn(bare), [], "refused before any push");
+    assert.equal(existsSync(work), false, "and before writing a staging tree");
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(bare, { recursive: true, force: true }); }
+});
+
+test("criterion 2 — every manifest category is symlink-guarded, so a new one cannot forget", () => {
+  // A guard applied per-category is a guard someone adds a category around. Assert the property
+  // over the whole resolved set rather than over the two categories that happen to exist.
+  const root = fixtureTree();
+  try {
+    symlinkSync(join(root, ".flow/config.yml"), join(root, "LICENSE.link"));
+    symlinkSync(join(root, ".flow/tasks"), join(root, "project-template/.claude/leak"));
+    rmSync(join(root, "NOTICE"));
+    symlinkSync(join(root, ".flow/config.yml"), join(root, "NOTICE"));
+
+    const { entries, symlinks } = resolveManifest(root);
+    assert.ok(symlinks.includes("NOTICE"), "a files entry");
+    assert.ok(symlinks.includes("project-template/.claude/leak"), "a trees entry");
+    for (const e of entries) {
+      if (e.generated) continue;
+      assert.equal(lstatSync(join(root, e.from)).isSymbolicLink(), false,
+        `"${e.path}" reached the publish set as a symlink — copyFileSync would dereference it`);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("globToRegExp escapes every regex metacharacter it could meet in a path", () => {
