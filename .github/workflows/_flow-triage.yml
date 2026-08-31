@@ -84,19 +84,23 @@ jobs:
           set -euo pipefail
           # LISTED WITH `gh api`, NOT `gh issue list`. The `--json` projection on `gh issue
           # list` has no `authorAssociation` field — its issue object stops at `author`, and
-          # asking for it fails the step outright ("Unknown JSON field"), which is exactly what
-          # happened on run 33362641134. `author_association` IS on the issue object the REST
-          # API returns, so the trust signal comes from the API rather than from gh's own view
-          # of it. `--slurp` collects every page into one array before `--jq` shapes it, and the
-          # cap is applied to that array, so the listing and the truncation warning below read
-          # the same `$FLOW_TRIAGE_ISSUE_LIMIT`. `/issues` also returns pull requests, which are
-          # not inbox items and are dropped here; the filter only ever sees issues.
+          # asking for it fails the step outright ("Unknown JSON field"), which is what happened
+          # on run 33362641134. `author_association` IS on the issue object the REST API
+          # returns, so the trust signal comes from the API rather than from gh's view of it.
+          #
+          # NOTHING IS SHAPED HERE. No `--jq`: gh rejects `--slurp` combined with `--jq` or
+          # `--template` before it makes a request, so shaping on the command line would trade
+          # one always-failing invocation for another. It also would not be tested — this step
+          # has now been wrong twice, both times in the one part no test could execute. So the
+          # command is a plain fetch, and every transformation (flattening the pages, dropping
+          # the pull requests `/issues` also returns, projecting `author_association`, applying
+          # the cap) happens in the filter below, which the proving tests run.
+          #
+          # `--paginate` requests every page, and `--slurp` gathers them into one array of
+          # pages. Note what the cap therefore does NOT do: it bounds what reaches the agent,
+          # not the number of API calls, which is one request per 100 open issues either way.
           gh api --method GET "repos/$GITHUB_REPOSITORY/issues" \
             -f state=open -F per_page=100 --paginate --slurp \
-            --jq '[ .[][]
-                    | select(has("pull_request") | not)
-                    | { number, labels: [.labels[] | { name }], authorAssociation: .author_association } ]
-                  | .[:($ENV.FLOW_TRIAGE_ISSUE_LIMIT | tonumber)]' \
             > "$RUNNER_TEMP/flow-triage-issues.json"
           cat > "$RUNNER_TEMP/flow-triage-filter.mjs" <<'FLOW_TRIAGE_FILTER'
           // Author-trust filter for the triage sweep. Reads the listing JSON named on
@@ -115,7 +119,25 @@ jobs:
           // wants the open inbox sets the variable; nothing else can widen this.
           const trusted = configured.length ? configured : DEFAULT_TRUSTED;
 
-          const issues = JSON.parse(readFileSync(process.argv[2], "utf8"));
+          // `gh api --paginate --slurp` hands back one array per page. Flatten them, drop the
+          // pull requests that `/issues` also returns, and project the REST issue object onto
+          // the shape the rest of this filter decides on. `.flat()` is deliberate rather than
+          // `[0]`: a single-page inbox is still wrapped, and an already-flat array survives it
+          // unchanged, so the filter cannot be broken by the listing returning one page.
+          const fetched = JSON.parse(readFileSync(process.argv[2], "utf8"))
+            .flat()
+            .filter((i) => i && i.pull_request == null)
+            .map((i) => ({
+              number: i.number,
+              labels: Array.isArray(i.labels) ? i.labels.map((l) => ({ name: l?.name })) : [],
+              authorAssociation: i.author_association,
+            }));
+
+          // The cap bounds what is handed to a turn-budgeted agent. Newest first, as the API
+          // returns them, so it is the oldest that fall off.
+          const limit = Number(process.env.FLOW_TRIAGE_ISSUE_LIMIT);
+          const capped = Number.isInteger(limit) && limit > 0;
+          const issues = capped ? fetched.slice(0, limit) : fetched;
           // LABELS ARE DELIBERATELY NOT CONSULTED. The lanes (`approved`, `auto-ok`) decide what
           // may become a task; they are evaluated later, by the agent. If a label could re-admit
           // an issue here, the filter would be exactly as strong as the label model it is meant
@@ -130,18 +152,19 @@ jobs:
             .join(",");
 
           const safe = (v) => String(v ?? "").replace(/[^A-Za-z_]/g, "") || "UNKNOWN";
-          // A listing that hit its cap did not see the whole inbox, and the issues it missed
-          // are invisible to every later step — they are not even excluded, they were never
-          // read. Say it out loud for the same reason the exclusions are said out loud.
-          const limit = Number(process.env.FLOW_TRIAGE_ISSUE_LIMIT);
-          const truncated = Number.isInteger(limit) && limit > 0 && issues.length >= limit;
+          // Issues past the cap reach no later step — they are not even excluded, they are
+          // simply gone, so this is the only place that can surface them. Now that the cap is
+          // applied here, over the whole fetched inbox, the count is exact rather than the
+          // "we came back full, so there may be more" guess it used to be.
+          const dropped = fetched.length - issues.length;
+          const truncated = dropped > 0;
           const report = [
             `triage inbox: ${admitted.length} issue(s) admitted, ${excluded.length} excluded by author trust.`,
             `trusted author_association values: ${trusted.join(", ")}`,
             ...excluded.map((i) => `  excluded: issue ${Number(i?.number) || "?"} (author_association: ${safe(i?.authorAssociation)})`),
-            ...(truncated ? [`WARNING: the listing hit its ${limit}-issue cap, so this sweep did ` +
-              `not see the whole open inbox. Older issues were never read — raise ` +
-              `FLOW_TRIAGE_ISSUE_LIMIT in the inbox step.`] : []),
+            ...(truncated ? [`WARNING: the listing hit its ${limit}-issue cap, so this sweep ` +
+              `dropped the ${dropped} oldest of ${fetched.length} open issue(s); the ` +
+              `sweep never saw them — raise FLOW_TRIAGE_ISSUE_LIMIT in the inbox step.`] : []),
           ].join("\n");
           console.log(report);
 
