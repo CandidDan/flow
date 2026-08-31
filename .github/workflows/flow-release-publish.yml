@@ -118,9 +118,23 @@ jobs:
       # unpublishable, whether the tag may be created — lives in .flow/bin/release-publish.mjs
       # and is proved by its own tests against a fixture tree and a local bare repo.
       #
-      # The credential is NEVER put in the remote URL. `git` echoes a failing remote back in its
-      # stderr, and that stderr is surfaced in the publisher's own error text — a token in the
-      # URL would land in the run log. An auth header is masked and stays out of argv.
+      # THE CREDENTIAL REACHES GIT THREE WAYS IT MUST NOT, AND THIS STEP AVOIDS ALL THREE.
+      #
+      #   · Not in the remote URL. `git` echoes a failing remote back in its stderr, and the
+      #     publisher surfaces that stderr in its own error text — a token in the URL would
+      #     land in the run log.
+      #   · Not in argv. `--remote` is credential-free, so nothing sensitive appears in a
+      #     process listing or in an execFileSync error message.
+      #   · Not in `~/.gitconfig`. `git config --global` would leave the header configured for
+      #     the REST OF THE RUNNER'S LIFE — harmless today, since nothing follows this step,
+      #     but a latent footgun the moment someone appends one (raised as a Low finding by
+      #     the security check on PR #48).
+      #
+      # GIT_CONFIG_COUNT scopes the header to this one command's process tree instead. The
+      # publisher shells out to git itself — for `ls-remote` and for the two pushes — so the
+      # config has to be inherited by a CHILD process, which rules out the per-invocation
+      # `git -c` the finding suggested: the workflow does not run those git commands, and
+      # passing the header down as an argument would put it straight back into argv.
       - name: Publish the snapshot
         env:
           FLOW_RELEASE_PAT: ${{ secrets.FLOW_RELEASE_PAT }}
@@ -128,14 +142,16 @@ jobs:
           set -euo pipefail
           AUTH="$(printf 'x-access-token:%s' "$FLOW_RELEASE_PAT" | base64 -w0)"
           echo "::add-mask::$AUTH"
-          git config --global "http.https://github.com/.extraheader" "AUTHORIZATION: basic $AUTH"
 
           ARGS=(--remote "https://github.com/$FLOW_RELEASE_REPO.git"
                 --work-dir "$RUNNER_TEMP/flow-release-snapshot"
                 --target-meta "$RUNNER_TEMP/target.json")
           if [ "$DRY_RUN" = "true" ]; then ARGS+=(--dry-run); fi
 
-          node .flow/bin/release-publish.mjs "${ARGS[@]}" | tee "$RUNNER_TEMP/publish.log"
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH" \
+            node .flow/bin/release-publish.mjs "${ARGS[@]}" | tee "$RUNNER_TEMP/publish.log"
 
       # The file list and the tag, in the run summary — so "what did that release actually
       # publish?" is answerable from the run itself rather than by diffing the release repo.

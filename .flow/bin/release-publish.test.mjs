@@ -408,6 +408,15 @@ test("criterion 7 — the publish never writes to canonical and never echoes the
   assert.ok(!/https:\/\/[^\s"']*\$\{?FLOW_RELEASE_PAT/.test(all),
     "the PAT must not be interpolated into a remote URL — git echoes a failing remote into stderr");
   assert.ok(all.includes("::add-mask::"), "the derived auth header must be masked in the run log");
+
+  // Raised as a Low by the security check on PR #48: `git config --global` would leave the
+  // header configured for the rest of the runner's life. Scope it to the publish command's
+  // process tree instead — which also has to survive being inherited by the git processes the
+  // PUBLISHER spawns, so a per-invocation `git -c` in this file cannot do the job.
+  assert.ok(!/git config --global/.test(all),
+    "the credential must not be written to the runner's global git config");
+  assert.ok(all.includes("GIT_CONFIG_COUNT=1") && all.includes("GIT_CONFIG_KEY_0"),
+    "the auth header is scoped to the publish command via GIT_CONFIG_*, inherited by its git children");
 });
 
 test("criterion 7 — every third-party action is pinned to a 40-character commit SHA", { skip }, () => {
