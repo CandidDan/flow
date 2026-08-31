@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0028"
 title: "Record the decision to split canonical into a private authoring repo and a public release repo"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "session_01WyRqgh77A3uKEFjFmNJhgd"
