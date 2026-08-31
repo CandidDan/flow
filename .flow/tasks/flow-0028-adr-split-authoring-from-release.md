@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0028"
 title: "Record the decision to split canonical into a private authoring repo and a public release repo"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "session_01WyRqgh77A3uKEFjFmNJhgd"
 created: "2026-08-28"
 started: "2026-08-31T04:45:19Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0028-adr-split-authoring-from-release"
+pr: "https://github.com/CandidDan/flow/pull/44"
 issue: ""
 blocked_reason: ""
 serves: ["G4"]            # how the fleet consumes canonical is exactly what this changes
