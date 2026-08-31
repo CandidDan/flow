@@ -1,0 +1,153 @@
+name: flow-release-publish
+
+# Publishes the Flow artefact to the PUBLIC RELEASE REPO as a history-free snapshot (ADR-0005).
+#
+# WHY A SNAPSHOT AND NOT A PUSH. Canonical does three jobs out of one repository: it authors
+# Flow, it IS the artefact the fleet resolves by reference, and it runs Flow on itself. The
+# third means `.flow/tasks/` — the planning record, every `blocked_reason` and handoff note —
+# lives here, and the second means the repository has to be public. ADR-0005 splits those apart.
+#
+# The split only holds if publication carries no history. A `git subtree push`, a filtered
+# branch, or a mirror exports the very commits the split withholds, permanently, while the
+# working tree still looks correct. So each release is ONE parentless commit containing only the
+# manifest's paths. `release-publish.mjs` is where that is decided and it has its own tests;
+# this file is invocation only. That division is deliberate — see the header of release-tag.yml
+# for the four earlier tasks whose criteria became unprovable because the logic lived in YAML.
+#
+# DORMANT until the repo variable FLOW_RELEASE_PUBLISH is set to 'true'. Merging this turns
+# nothing on. Creating the release repository and minting the publishing PAT are human-only
+# setup steps (see the PR for flow-0029); gating on a variable rather than letting the job run
+# and fail follows flow-watchdog.yml's precedent for "wired but not yet enabled", so canonical
+# does not start carrying a red release path the moment this merges.
+#
+# THIRD-PARTY ACTIONS ARE PINNED TO COMMIT SHAs, NOT TAGS. A tag is a mutable pointer: whoever
+# owns the action can repoint it and the next run executes different code, with no PR, no diff
+# and nothing in the log saying anything changed. That matters more here than anywhere else in
+# this repo — this is the job holding a credential that can write to the repository the whole
+# fleet resolves. flow-0031 makes this a checked rule across the directory; it is done here at
+# authoring time so that task finds nothing to fix. Comments name the version the SHA is.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report the file list and the tag, write nothing, push nothing"
+        type: boolean
+        default: true
+
+# LEAST PRIVILEGE, and this block is the declared blast radius rather than a log of which token
+# happened to be used. It governs GITHUB_TOKEN, which reaches CANONICAL only — and canonical is
+# read here and never written: the snapshot is built in a scratch directory and pushed to the
+# release repo with FLOW_RELEASE_PAT, a separate, narrowly-scoped secret (same reasoning as
+# FLOW_WATCHDOG_PAT in flow-0020). `.flow/bin/release-publish.test.mjs` parses this block and
+# fails if any scope is widened, so a future "just add packages: write" cannot pass unremarked.
+permissions:
+  contents: read
+
+# Two releases must never race to write the same branch and tag. Not cancel-in-progress: a
+# cancelled run could leave the release repo holding a half-pushed snapshot.
+concurrency:
+  group: flow-release-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: vars.FLOW_RELEASE_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+
+    env:
+      # The publish target. A repo variable with a default, so the human who created the
+      # repository can point this at it without a code change. ADR-0005 records that this name
+      # becomes a permanent public `uses:` reference in every adopting repo, so it changes at
+      # most once — flow-0030 is the task that writes it into the fleet's references.
+      FLOW_RELEASE_REPO: ${{ vars.FLOW_RELEASE_REPO || 'CandidDan/flow-protocol' }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Depth 1 on purpose, and it is not an optimisation. The snapshot must not be able to
+          # inherit a parent from canonical's history; not fetching that history is the cheapest
+          # possible statement of that, and it makes a future edit that tries to preserve
+          # lineage fail rather than succeed quietly.
+          fetch-depth: 1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # A release named v1.3.0 that publishes a tree stamped 1.2.0 would put a pinned adopter
+      # and the artefact's own VERSION into disagreement — the exact thing release-guard exists
+      # to stop on the tagging path. The publisher always DERIVES its tag from VERSION, so this
+      # cannot mis-tag; it can only publish under a name the release did not expect. Catch that
+      # here, where the event data lives, rather than shipping a confusing snapshot.
+      - name: The release tag must be the tag VERSION would produce
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          EXPECTED="v$(tr -d '[:space:]' < VERSION)"
+          if [ "$RELEASE_TAG" != "$EXPECTED" ]; then
+            echo "::error::release is '$RELEASE_TAG' but VERSION would publish '$EXPECTED'."
+            exit 1
+          fi
+          echo "release tag and VERSION agree on $EXPECTED"
+
+      # The two properties of the target that would each silently defeat the split, fetched
+      # here and JUDGED in the module. PUBLIC, because a private repo's reusables cannot be
+      # resolved by an outside adopter's `uses:` — the only reason the release repo exists. And
+      # WITHOUT the `flow` topic, because that is how the flightdeck and the watchdog enrol a
+      # repo, and a store-less repo enrolled that way becomes a phantom project every liveness
+      # sweep reports on. The publisher REFUSES to run if this file is absent, so a failed
+      # fetch cannot degrade into an unchecked publish.
+      - name: Fetch the target repository's metadata
+        env:
+          FLOW_RELEASE_PAT: ${{ secrets.FLOW_RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $FLOW_RELEASE_PAT" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$FLOW_RELEASE_REPO" > "$RUNNER_TEMP/target.json"
+
+      # Invocation only. Every decision — which paths are artefact, what makes a tree
+      # unpublishable, whether the tag may be created — lives in .flow/bin/release-publish.mjs
+      # and is proved by its own tests against a fixture tree and a local bare repo.
+      #
+      # The credential is NEVER put in the remote URL. `git` echoes a failing remote back in its
+      # stderr, and that stderr is surfaced in the publisher's own error text — a token in the
+      # URL would land in the run log. An auth header is masked and stays out of argv.
+      - name: Publish the snapshot
+        env:
+          FLOW_RELEASE_PAT: ${{ secrets.FLOW_RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          AUTH="$(printf 'x-access-token:%s' "$FLOW_RELEASE_PAT" | base64 -w0)"
+          echo "::add-mask::$AUTH"
+          git config --global "http.https://github.com/.extraheader" "AUTHORIZATION: basic $AUTH"
+
+          ARGS=(--remote "https://github.com/$FLOW_RELEASE_REPO.git"
+                --work-dir "$RUNNER_TEMP/flow-release-snapshot"
+                --target-meta "$RUNNER_TEMP/target.json")
+          if [ "$DRY_RUN" = "true" ]; then ARGS+=(--dry-run); fi
+
+          node .flow/bin/release-publish.mjs "${ARGS[@]}" | tee "$RUNNER_TEMP/publish.log"
+
+      # The file list and the tag, in the run summary — so "what did that release actually
+      # publish?" is answerable from the run itself rather than by diffing the release repo.
+      - name: Summarise what was published
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### flow-release-publish -> \`$FLOW_RELEASE_REPO\`"
+            echo ""
+            if [ "$DRY_RUN" = "true" ]; then echo "**Dry run** — nothing was written or pushed."; echo ""; fi
+            echo '```'
+            cat "$RUNNER_TEMP/publish.log" 2>/dev/null || echo "(no publisher output — an earlier step failed)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
