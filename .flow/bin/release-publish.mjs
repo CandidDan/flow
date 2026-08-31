@@ -485,6 +485,16 @@ export function reportAndExit(verdict, { json = false, log = console.log, exit =
   exit(verdict.problems.length ? 1 : 0);
 }
 
+// The CLI's `--target-meta` file, read into a verdict-shaped result rather than thrown from.
+// A malformed file already fails CLOSED — `runPublish` refuses without metadata — so this
+// changes the failure's legibility, not its safety: an unhandled parse trace does not say which
+// file it was reading, and the publisher's whole posture is that every refusal names its reason.
+export function readTargetMeta(path, read = (p) => readFileSync(p, "utf8")) {
+  if (typeof path !== "string") return { meta: null, problem: null };
+  try { return { meta: JSON.parse(read(path)), problem: null }; }
+  catch (err) { return { meta: null, problem: `could not read target metadata from "${path}": ${err?.message ?? err}` }; }
+}
+
 export function makeGitRunner() {
   return (args, { cwd } = {}) =>
     execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -498,10 +508,8 @@ export function canonicalRepoRoot(here = __fileURLToPath(import.meta.url)) {
 // ── CLI ──
 if (__isMain) {
   const f = parseFlags(process.argv.slice(2));
-  const meta = typeof f["target-meta"] === "string"
-    ? JSON.parse(readFileSync(f["target-meta"], "utf8"))
-    : null;
-  reportAndExit(runPublish({
+  const { meta, problem } = readTargetMeta(f["target-meta"]);
+  const verdict = runPublish({
     sourceRoot: typeof f.source === "string" ? f.source : canonicalRepoRoot(),
     workDir: typeof f["work-dir"] === "string" ? f["work-dir"] : null,
     remote: typeof f.remote === "string" ? f.remote : null,
@@ -509,5 +517,8 @@ if (__isMain) {
     dryRun: f["dry-run"] === true,
     targetMeta: meta,
     branch: typeof f.branch === "string" ? f.branch : RELEASE_BRANCH,
-  }), { json: f.json === true });
+  });
+  // Ahead of runPublish's generic "metadata was not supplied", which is the symptom of this.
+  if (problem) verdict.problems.unshift(problem);
+  reportAndExit(verdict, { json: f.json === true });
 }

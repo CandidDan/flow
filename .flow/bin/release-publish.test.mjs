@@ -35,6 +35,7 @@ import {
   MANIFEST,
   neverPublishes,
   NEVER_PUBLISH,
+  readTargetMeta,
   readVersion,
   releaseReadme,
   releaseTag,
@@ -280,14 +281,22 @@ test("criterion 2 — every manifest category is symlink-guarded, so a new one c
   // over the whole resolved set rather than over the two categories that happen to exist.
   const root = fixtureTree();
   try {
-    symlinkSync(join(root, ".flow/config.yml"), join(root, "LICENSE.link"));
     symlinkSync(join(root, ".flow/tasks"), join(root, "project-template/.claude/leak"));
     rmSync(join(root, "NOTICE"));
     symlinkSync(join(root, ".flow/config.yml"), join(root, "NOTICE"));
+    // The third category. Flagged on PR #48: the comment above claimed the whole resolved set
+    // while the assertions covered two of three, which is the same overclaiming this file
+    // exists to catch elsewhere.
+    rmSync(join(root, ".github/workflows/_flow-review.yml"));
+    symlinkSync(join(root, ".flow/tasks/flow-0001-flightdeck-state-aggregator.md"),
+                join(root, ".github/workflows/_flow-review.yml"));
 
     const { entries, symlinks } = resolveManifest(root);
     assert.ok(symlinks.includes("NOTICE"), "a files entry");
     assert.ok(symlinks.includes("project-template/.claude/leak"), "a trees entry");
+    assert.ok(symlinks.includes(".github/workflows/_flow-review.yml"), "a globs entry");
+    assert.equal(entries.filter((e) => e.path === ".github/workflows/_flow-review.yml").length, 0,
+      "a symlink matching the glob must not reach the publish set");
     for (const e of entries) {
       if (e.generated) continue;
       assert.equal(lstatSync(join(root, e.from)).isSymbolicLink(), false,
@@ -553,6 +562,19 @@ test("a real publish with no remote is refused", () => {
     const v = runPublish({ sourceRoot: root, targetMeta: PUBLIC_TARGET });
     assert.ok(v.problems.some((p) => p.includes("no --remote given")));
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("malformed target metadata is a named problem, not an unhandled parse error", () => {
+  // Fails closed either way — runPublish refuses without metadata — but a parse trace does not
+  // say which file it was reading. Raised as non-blocking on PR #48.
+  const bad = readTargetMeta("/some/target.json", () => "{ not json");
+  assert.equal(bad.meta, null);
+  assert.match(bad.problem, /could not read target metadata from "\/some\/target\.json"/);
+
+  assert.deepEqual(readTargetMeta(undefined), { meta: null, problem: null },
+    "no --target-meta at all is a different case: runPublish reports it, and a dry run allows it");
+  assert.deepEqual(readTargetMeta("/t.json", () => '{"private":false,"topics":[]}').meta,
+    { private: false, topics: [] });
 });
 
 test("a missing VERSION is a problem, not a crash", () => {
