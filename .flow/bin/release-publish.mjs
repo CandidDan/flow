@@ -253,16 +253,23 @@ export function resolveManifest(sourceRoot, manifest = MANIFEST) {
   }
 
   for (const file of manifest.files ?? []) {
-    const abs = join(sourceRoot, file);
-    if (!existsSync(abs)) { missing.push(file); continue; }
-    // lstat, for the same reason walkTree does — and it has to be repeated here because this
-    // loop does not go through walkTree. `materialise` copies with `copyFileSync`, which
-    // DEREFERENCES a link, so a symlink at one of these paths would publish its target's
-    // content under a trusted artefact filename (`docs/repinning-a-consuming-repo.md`,
-    // `LICENSE`) and sail past `auditEntries`, which only ever sees the admitted name. The
-    // first pass at the symlink guard covered the tree and glob categories and missed this
-    // one; the security check on PR #48 caught it. Same refusal path, same array.
-    if (lstatSync(abs).isSymbolicLink()) { symlinks.push(file); continue; }
+    // lstat and nothing else, for the same reason walkTree does — and it has to be repeated
+    // here because this loop does not go through walkTree. `materialise` copies with
+    // `copyFileSync`, which DEREFERENCES a link, so a symlink at one of these paths would
+    // publish its target's content under a trusted artefact filename
+    // (`docs/repinning-a-consuming-repo.md`, `LICENSE`) and sail past `auditEntries`, which
+    // only ever sees the admitted name. The first pass at the symlink guard covered the tree
+    // and glob categories and missed this one; the security check on PR #48 caught it.
+    //
+    // This used to test `existsSync` first. That FOLLOWS a link, so a broken symlink here was
+    // reported as "missing" while the identical thing under a tree was reported as a symlink —
+    // same refusal either way, but two different accounts of the same condition, in the one
+    // module whose guards are supposed to be uniform across categories. One lstat answers both
+    // questions and drops a syscall.
+    let st;
+    try { st = lstatSync(join(sourceRoot, file)); }
+    catch { missing.push(file); continue; }
+    if (st.isSymbolicLink()) { symlinks.push(file); continue; }
     add(file, file);
   }
 

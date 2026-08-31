@@ -305,6 +305,24 @@ test("criterion 2 — every manifest category is symlink-guarded, so a new one c
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("criterion 2 — a BROKEN symlink is reported as a symlink, not as a missing file", () => {
+  // Both outcomes refuse, so this is about the account the module gives of itself: existsSync
+  // follows a link, so checking it first described a broken link at a `files` path as "missing"
+  // while the identical thing under a tree was described as a symlink. Raised as non-blocking
+  // on PR #48; fixed because uniformity across categories is the property this module claims.
+  const root = fixtureTree();
+  try {
+    rmSync(join(root, "NOTICE"));
+    symlinkSync(join(root, "no-such-target"), join(root, "NOTICE"));
+    const { missing, symlinks } = resolveManifest(root);
+    assert.deepEqual(symlinks, ["NOTICE"]);
+    assert.deepEqual(missing, [], "a link that exists is not a missing file, however broken its target");
+
+    const v = runPublish({ sourceRoot: root, dryRun: true });
+    assert.ok(v.problems.some((p) => p.includes("NOTICE") && p.includes("symlink")));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("globToRegExp escapes every regex metacharacter it could meet in a path", () => {
   // `?` is a metacharacter and was missing from the escape set — harmless for today's single
   // glob, but a future one carrying a literal `?` would have silently changed match semantics.
