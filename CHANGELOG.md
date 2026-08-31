@@ -10,13 +10,17 @@ after a canary passes). Note any **caller action** required (a caller change is 
   The sweep used to hand its agent the whole open inbox, with its scope limits written in the
   prompt — guidance to a model, not an enforced boundary, and on a public repo anyone can author
   that input. A new `inbox` step now selects the issue set *before* the prompt is built: it lists
-  open issues with `gh issue list --json number,labels,authorAssociation` and admits only authors
-  GitHub already reports as able to direct the repo (`OWNER`, `MEMBER`, `COLLABORATOR`). The agent
-  is handed those issue numbers rather than the inbox, and its step is skipped when nothing is
-  admitted. Exclusions are reported by count and by issue number to the run log and the job
-  summary, so a skipped issue surfaces rather than becoming silent queue debt; the same step warns
-  when the listing hits its `FLOW_TRIAGE_ISSUE_LIMIT` (200) cap, because an issue past the cap is
-  never read at all and would not otherwise appear anywhere.
+  open issues via `gh api .../issues` (the REST issue object, which carries `author_association`
+  — gh's own `--json` projection does not) and admits only authors GitHub already reports as able
+  to direct the repo (`OWNER`, `MEMBER`, `COLLABORATOR`). The agent is handed those issue numbers
+  rather than the inbox, and its step is skipped when nothing is admitted. That endpoint also
+  returns pull requests, which are not inbox items and are dropped before the trust filter sees
+  them — the net behaviour is unchanged (a PR could never have become a task) but the exclusion
+  log stays about authorship rather than filling with PRs. Exclusions are reported by count and
+  by issue number to the run log and the job summary, so a skipped issue surfaces rather than
+  becoming silent queue debt; the same step warns, with an exact count, when the inbox exceeds
+  its `FLOW_TRIAGE_ISSUE_LIMIT` (200) cap, because an issue past the cap reaches no later step
+  and would not otherwise appear anywhere.
   **The label lanes are unchanged** — `approved` and `auto-ok` remain the only routes to a task
   file. This is an input filter in front of them, and it consults authorship only, so a label
   cannot re-admit an untrusted author.
