@@ -10,7 +10,8 @@ after a canary passes). Note any **caller action** required (a caller change is 
   The sweep used to hand its agent the whole open inbox, with its scope limits written in the
   prompt — guidance to a model, not an enforced boundary, and on a public repo anyone can author
   that input. A new `inbox` step now selects the issue set *before* the prompt is built: it lists
-  open issues with `gh issue list --json number,labels,authorAssociation` and admits only authors
+  open issues via `gh api .../issues` (the REST issue object, which carries `author_association`
+  — gh's own `--json` projection does not) and admits only authors
   GitHub already reports as able to direct the repo (`OWNER`, `MEMBER`, `COLLABORATOR`). The agent
   is handed those issue numbers rather than the inbox, and its step is skipped when nothing is
   admitted. Exclusions are reported by count and by issue number to the run log and the job

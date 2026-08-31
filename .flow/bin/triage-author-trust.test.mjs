@@ -255,11 +255,24 @@ test("the variable widens the trusted set when a repo sets it deliberately", { s
 test("the issue listing happens in a step, before the agent, and asks GitHub for authorship", { skip }, () => {
   const step = inboxStep();
   const run = String(step.run ?? "");
-  assert.match(run, /gh issue list/,
+  // The listing is the part of the step before the filter heredoc. Comments are dropped, so a
+  // guard below tests the command that runs rather than the prose explaining it.
+  const listing = run.split("<<'FLOW_TRIAGE_FILTER'")[0]
+    .split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
+  assert.match(listing, /gh\s+(api|issue list)/,
     "the inbox must be listed by the workflow, not by the agent — that is the whole point");
-  assert.match(run, /--json[^\n]*authorAssociation/,
+  assert.match(listing, /author_association/,
     "the listing must request author_association. Without it the filter has nothing to decide " +
     "on and would have to trust the agent to ask");
+  // Regression guard for run 33362641134, where this step failed outright with "Unknown JSON
+  // field: authorAssociation". `gh issue list --json` projects gh's OWN issue object, which
+  // stops at `author`; only the REST/GraphQL issue object carries the association. The
+  // assertion above passes against either spelling, so it is this one that stops the fix being
+  // undone by somebody re-reaching for the more obvious command.
+  assert.doesNotMatch(listing, /gh issue list[\s\S]*?authorAssociation/,
+    "`gh issue list --json` has no `authorAssociation` field and fails the step outright — the " +
+    "association must come from the API (`gh api .../issues` -> `author_association`), not " +
+    "from gh's projection of it");
   assert.match(run, /node .*flow-triage-filter\.mjs/,
     "the listing must be piped through the filter; a listing that is not filtered is the " +
     "unrestricted inbox with extra steps");
@@ -324,9 +337,11 @@ test("a listing that hit its cap says so — an unread issue is not even an excl
 test("the listing cap is set in the step env and used by both the listing and the filter", { skip }, () => {
   const step = inboxStep();
   assert.match(String(step.env?.FLOW_TRIAGE_ISSUE_LIMIT ?? ""), /^[0-9]+$/,
-    "the cap must be an explicit number in the step env — `gh issue list` defaults to 30, which " +
-    "would drop most of a real inbox without anyone choosing that");
-  assert.match(String(step.run ?? ""), /--limit "\$FLOW_TRIAGE_ISSUE_LIMIT"/,
+    "the cap must be an explicit number in the step env — an uncapped sweep hands an unbounded " +
+    "inbox to a turn-budgeted agent, and gh's listing default (30) would drop most of a real " +
+    "inbox without anyone choosing that");
+  const listing = String(step.run ?? "").split("<<'FLOW_TRIAGE_FILTER'")[0];
+  assert.match(listing, /\$(\{|ENV\.)?FLOW_TRIAGE_ISSUE_LIMIT/,
     "the listing and the truncation warning must read the SAME value; two literals would drift " +
     "and the warning would then fire at the wrong size, or never");
 });

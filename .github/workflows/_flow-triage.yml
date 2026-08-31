@@ -72,18 +72,34 @@ jobs:
           # CONTRIBUTOR". Unset is the restrictive default — the safe posture is the one you
           # get by doing nothing, and opening the inbox has to be somebody's decision.
           FLOW_TRIAGE_TRUSTED_ASSOCIATIONS: ${{ vars.FLOW_TRIAGE_TRUSTED_ASSOCIATIONS }}
-          # How many open issues to pull. `gh issue list` defaults to 30, which would drop most
-          # of a real inbox on the floor; 200 is generous for the inboxes Flow repos actually
-          # carry. The filter below SAYS SO when the cap is reached, because a sweep that
-          # silently sees two thirds of the queue is the same queue debt this step exists to
-          # surface — just moved one step earlier.
+          # How many open issues to pull. There has to be a number: an uncapped sweep hands an
+          # unbounded inbox to a turn-budgeted agent, and gh's own listing default (30) would
+          # drop most of a real inbox on the floor without anyone choosing that. 200 is generous
+          # for the inboxes Flow repos actually carry. Newest first, so the cap drops the oldest
+          # — and the filter below SAYS SO when it is reached, because a sweep that silently
+          # sees two thirds of the queue is the same queue debt this step exists to surface,
+          # just moved one step earlier.
           FLOW_TRIAGE_ISSUE_LIMIT: "200"
         run: |
           set -euo pipefail
-          gh issue list --state open --limit "$FLOW_TRIAGE_ISSUE_LIMIT" \
-            --json number,labels,authorAssociation > "$RUNNER_TEMP/flow-triage-issues.json"
+          # LISTED WITH `gh api`, NOT `gh issue list`. The `--json` projection on `gh issue
+          # list` has no `authorAssociation` field — its issue object stops at `author`, and
+          # asking for it fails the step outright ("Unknown JSON field"), which is exactly what
+          # happened on run 33362641134. `author_association` IS on the issue object the REST
+          # API returns, so the trust signal comes from the API rather than from gh's own view
+          # of it. `--slurp` collects every page into one array before `--jq` shapes it, and the
+          # cap is applied to that array, so the listing and the truncation warning below read
+          # the same `$FLOW_TRIAGE_ISSUE_LIMIT`. `/issues` also returns pull requests, which are
+          # not inbox items and are dropped here; the filter only ever sees issues.
+          gh api --method GET "repos/$GITHUB_REPOSITORY/issues" \
+            -f state=open -F per_page=100 --paginate --slurp \
+            --jq '[ .[][]
+                    | select(has("pull_request") | not)
+                    | { number, labels: [.labels[] | { name }], authorAssociation: .author_association } ]
+                  | .[:($ENV.FLOW_TRIAGE_ISSUE_LIMIT | tonumber)]' \
+            > "$RUNNER_TEMP/flow-triage-issues.json"
           cat > "$RUNNER_TEMP/flow-triage-filter.mjs" <<'FLOW_TRIAGE_FILTER'
-          // Author-trust filter for the triage sweep. Reads the `gh issue list` JSON named on
+          // Author-trust filter for the triage sweep. Reads the listing JSON named on
           // argv[2]; writes the admitted issue numbers to GITHUB_OUTPUT and reports the
           // exclusions to the run log and the job summary. Kept dependency-free and pure enough
           // to be extracted and executed by .flow/bin/triage-author-trust.test.mjs, which is
