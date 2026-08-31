@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0028"
 title: "Record the decision to split canonical into a private authoring repo and a public release repo"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_01WyRqgh77A3uKEFjFmNJhgd"
 created: "2026-08-28"
-started: ""
+started: "2026-08-31T04:45:19Z"
 branch: ""
 pr: ""
 issue: ""
