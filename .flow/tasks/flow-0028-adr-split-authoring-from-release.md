@@ -2,20 +2,21 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0028"
 title: "Record the decision to split canonical into a private authoring repo and a public release repo"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
-owner: "session_01WyRqgh77A3uKEFjFmNJhgd"
+owner: ""
 created: "2026-08-28"
-started: "2026-08-31T02:15:02Z"
+started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "The declared deliverable path collides with an existing ADR number, and both places that name it are orchestrator-owned. `docs/adr/0003-flow-mcp-server.md` (2026-08-11) and `docs/adr/0004-vision-layer.md` (2026-08-18) both predate this task, so the next free number is 0005 — but `touches` and acceptance criterion 1 both name `docs/adr/0003-split-authoring-from-release.md`. Proven on both horns, not assumed: (a) writing it as 0003 makes the EXISTING, currently-green test `no two ADRs share a number` in `.flow/bin/adr-vision-layer.test.mjs` fail (verified: 'duplicate ADR numbers in docs/adr/: 0003'), which fails criterion 7 and the gate; (b) writing it as 0005 puts the task's only deliverable outside `touches`, so `touches-guard` exits 1 (verified via `checkTouches`) and the gate fails. There is no filename that satisfies both, so this is not a judgement call the worker can make by drifting. The ADR CONTENT is fully specified and needs no rework. UNBLOCK: on `main`, renumber to 0005 in exactly two places in this file — `touches` and acceptance criterion 1 — then flip to ready. Nothing else about the task changes. Note the proving test belongs in `.flow/bin/` (extending the ADR-shape convention, per this task's own notes); touches-guard ignores `.flow/**`, so the test file needs no `touches` entry. flow-0029 and flow-0030 remain blocked behind this."
+blocked_reason: ""
 serves: ["G4"]            # how the fleet consumes canonical is exactly what this changes
-touches: ["docs/adr/0003-split-authoring-from-release.md"]
+touches: ["docs/adr/0005-split-authoring-from-release.md"]
 labels: [docs, adr, infra]
 notes:
+  - "2026-08-31: UNBLOCKED by orchestrator. Renumbered the deliverable 0003 -> 0005 in all three places that named it — `touches`, the Scope bullet and acceptance criterion 1 (the blocked_reason named two; the Scope bullet was the third, and leaving it would have been exactly the doc drift flow-0016 exists to clear). 0005 is the next free number: docs/adr/ holds 0001-0004. Nothing else about the task changed — the ADR content, scope and remaining criteria stand as written. Returned to `ready`, unclaimed. flow-0029 and flow-0030 unblock once this merges."
   - "2026-08-28: the human's decision, taken in session after two rounds of pushback. Recorded here as an ADR before any implementation, because it changes what canonical IS — the repo that authors Flow stops being the repo the fleet points at. The implementation is flow-0029 (publish mechanism) and flow-0030 (re-pin), both sequenced behind this."
   - "2026-08-28: the alternatives were argued and rejected in session; the ADR must carry them and WHY, not just the outcome. Rejected: keep one public repo (the store, with every task's context, is public — the human's objection, and it is legitimate); make Flow an npm package (reusable workflows resolve by repo ref, so npm cannot carry the primary artefact); take canonical private outright (kills adoption by anyone else — the reusables become uncallable). Also record what the split does NOT buy, which is the point most easily lost."
   - "2026-08-31: claimed by session_01WyRqgh77A3uKEFjFmNJhgd, then blocked WITHOUT writing the ADR — the spec is unsatisfiable as written, not merely awkward. ADR 0003 and 0004 are both already taken, so the declared filename cannot be used, and the correct filename (0005) is outside the declared `touches`. Both failure modes were reproduced rather than reasoned about; see blocked_reason. Deliberately did NOT: pick 0005 and let touches-guard go red, pick 0003 and knowingly break a green test, or edit `touches`/criteria myself — the worker hand-writes only the claim and `blocked`, and silently widening scope is the exact drift `touches-guard` exists to catch. The baseline gate was confirmed green first (`npm ci`, `npm test`: 674 pass / 0 fail), so nothing here is a pre-existing failure. Next session: after the renumber, this is a straight docs task — write the ADR per Scope, and extend the ADR-shape test convention in `.flow/bin/`."
@@ -44,7 +45,7 @@ because the split *feels* like it makes the automation safe and it does not.
 
 **Does:**
 
-- Add `docs/adr/0003-split-authoring-from-release.md` in the existing ADR shape, recording:
+- Add `docs/adr/0005-split-authoring-from-release.md` in the existing ADR shape, recording:
   - **Context** — one public repo doing three jobs; the store being public as the objection.
   - **Decision** — private authoring repo as source of truth; public release repo holding the
     artefact only (`.github/workflows/_flow-*.yml`, `project-template/`, the top-level licence and
@@ -81,7 +82,7 @@ because the split *feels* like it makes the automation safe and it does not.
 
 ## Acceptance criteria
 
-- [ ] Given `docs/adr/`, when this task is done, then `0003-split-authoring-from-release.md` exists
+- [ ] Given `docs/adr/`, when this task is done, then `0005-split-authoring-from-release.md` exists
       and follows the same section shape as the existing ADRs in that directory.
 - [ ] Given the ADR, when its Decision section is read, then it states which artefacts live in the
       public release repo and which stay private, specifically enough that flow-0029 can be
