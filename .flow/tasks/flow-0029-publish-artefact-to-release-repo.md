@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0029"
 title: "Publish the Flow artefact to the public release repo as a history-free snapshot on release"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "session_015zGFFmqNftp38wLkqgjBse"
 created: "2026-08-28"
 started: "2026-08-31T13:22:24Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0029-publish-artefact-to-release-repo"
+pr: "https://github.com/CandidDan/flow/pull/48"
 issue: ""
 blocked_reason: ""
 serves: ["G4"]            # consuming by reference only works if the reference is published mechanically
