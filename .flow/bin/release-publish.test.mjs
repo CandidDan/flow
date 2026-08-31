@@ -506,6 +506,17 @@ test("criterion 7 — the publish never writes to canonical and never echoes the
     "the credential must not be written to the runner's global git config");
   assert.ok(all.includes("GIT_CONFIG_COUNT=1") && all.includes("GIT_CONFIG_KEY_0"),
     "the auth header is scoped to the publish command via GIT_CONFIG_*, inherited by its git children");
+
+  // The header of the workflow claims the credential never reaches argv. It did, once, in the
+  // metadata fetch — a curl header flag puts it in a process's argv for the life of the
+  // request. Raised as a Low on PR #48; pinned here so the claim and the file cannot diverge.
+  assert.ok(!/(^|\s)(-H|--header)\s+\S*FLOW_RELEASE_PAT/.test(all),
+    "the PAT must not be passed through a command-line flag — it lands in argv, readable by ps");
+  assert.ok(all.includes("--config -"), "curl reads the auth header from stdin instead");
+
+  // Nothing after checkout reaches canonical through git, and this job runs `git push`.
+  assert.equal(wf.jobs.publish.steps[0].with?.["persist-credentials"], false,
+    "GITHUB_TOKEN must not be left configured in the checkout for the rest of the job");
 });
 
 test("criterion 7 — every third-party action is pinned to a 40-character commit SHA", { skip }, () => {
@@ -575,6 +586,15 @@ test("malformed target metadata is a named problem, not an unhandled parse error
     "no --target-meta at all is a different case: runPublish reports it, and a dry run allows it");
   assert.deepEqual(readTargetMeta("/t.json", () => '{"private":false,"topics":[]}').meta,
     { private: false, topics: [] });
+
+  // Valid JSON that is not an object used to FAIL OPEN: checkTargetRepo reads `.private` and
+  // `.topics` off it, both come back empty on a number or a string, and the publish proceeds
+  // with the target unchecked. That is the one thing a guard must never do.
+  for (const shape of ["123", '"ok"', "null", "[]"]) {
+    const r = readTargetMeta("/t.json", () => shape);
+    assert.equal(r.meta, null, `metadata \`${shape}\` must not be accepted as a target`);
+    assert.match(r.problem, /is not a JSON object/);
+  }
 
   // One cause, one message — the specific reason replaces the generic one rather than stacking
   // on top of it. Raised as non-blocking on PR #48.

@@ -73,6 +73,11 @@ jobs:
           # possible statement of that, and it makes a future edit that tries to preserve
           # lineage fail rather than succeed quietly.
           fetch-depth: 1
+          # Nothing after this step touches canonical through git — the snapshot is built in a
+          # scratch directory and pushed to a different remote with a different credential. So
+          # do not leave GITHUB_TOKEN configured in the checkout's git config for the rest of
+          # the job, in a job that then runs `git push` at all.
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -108,11 +113,17 @@ jobs:
           FLOW_RELEASE_PAT: ${{ secrets.FLOW_RELEASE_PAT }}
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer $FLOW_RELEASE_PAT" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/$FLOW_RELEASE_REPO" > "$RUNNER_TEMP/target.json"
+          # The auth header goes in on STDIN, not in argv. An earlier revision passed the
+          # secret through a curl header FLAG, which put the token in curl's argv — readable
+          # from `ps` for the life of the request, and flatly inconsistent with the
+          # argv-avoidance the publish step below documents as a property of this file.
+          # `printf` is a shell builtin, so the expansion never becomes a process's argv
+          # either. Raised as a Low by the security check on PR #48.
+          printf 'header = "Authorization: Bearer %s"\n' "$FLOW_RELEASE_PAT" |
+            curl --fail --silent --show-error --config - \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$FLOW_RELEASE_REPO" > "$RUNNER_TEMP/target.json"
 
       # Invocation only. Every decision — which paths are artefact, what makes a tree
       # unpublishable, whether the tag may be created — lives in .flow/bin/release-publish.mjs

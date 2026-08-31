@@ -102,6 +102,13 @@ export const MANIFEST = Object.freeze({
     // The documentation an adopter reads. Enumerated file by file rather than shipping `docs/`
     // whole: `docs/` also holds the ADRs, the propagation plan and the handoff notes, which
     // ADR-0005 names as never crossing. A directory include here would export them.
+    //
+    // The four below are the whole of it. Three files in `docs/` are EXCLUDED BY DECISION
+    // rather than by oversight, under ADR-0005's boundary rule — needed at run time or
+    // adoption time, or it does not cross: `docs/landing.html` and `docs/flow-map.html` (the
+    // public face; an adopter needs neither to adopt or run Flow) and `docs/blog-two-touchpoints.md`
+    // (an essay about the model, not instructions for using it). Each is a one-line addition
+    // here if the human decides the release repo should carry the public face too.
     "docs/adopting-flow-cutover.md",
     "docs/flow-reusable-workflows.md",
     "docs/flow-versioning-policy.md",
@@ -500,8 +507,18 @@ export function reportAndExit(verdict, { json = false, log = console.log, exit =
 // file it was reading, and the publisher's whole posture is that every refusal names its reason.
 export function readTargetMeta(path, read = (p) => readFileSync(p, "utf8")) {
   if (typeof path !== "string") return { meta: null, problem: null };
-  try { return { meta: JSON.parse(read(path)), problem: null }; }
+  let parsed;
+  try { parsed = JSON.parse(read(path)); }
   catch (err) { return { meta: null, problem: `could not read target metadata from "${path}": ${err?.message ?? err}` }; }
+  // Valid JSON that is not an object FAILS OPEN through checkTargetRepo, which is the one
+  // outcome a guard must never have: `(123).private` is undefined and `(123).topics ?? []` is
+  // empty, so a metadata file containing `123` or `"ok"` or `null` would report no problems
+  // and the publish would proceed unchecked. Reject the shape here instead. Raised as a Low by
+  // the security check on PR #48; the fail-open is the part that made it worth fixing.
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { meta: null, problem: `target metadata in "${path}" is not a JSON object — refusing to publish unchecked` };
+  }
+  return { meta: parsed, problem: null };
 }
 
 export function makeGitRunner() {
