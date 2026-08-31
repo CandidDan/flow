@@ -99,8 +99,14 @@ jobs:
           # `--paginate` requests every page, and `--slurp` gathers them into one array of
           # pages. Note what the cap therefore does NOT do: it bounds what reaches the agent,
           # not the number of API calls, which is one request per 100 open issues either way.
+          #
+          # `sort`/`direction` are pinned rather than left to the endpoint's defaults, which
+          # today are the same values. The cap keeps the head of this list, and the warning it
+          # prints claims the dropped issues are the OLDEST — an invariant that would otherwise
+          # rest on an unstated API default, and would fail silently if that default ever moved.
           gh api --method GET "repos/$GITHUB_REPOSITORY/issues" \
-            -f state=open -F per_page=100 --paginate --slurp \
+            -f state=open -f sort=created -f direction=desc \
+            -F per_page=100 --paginate --slurp \
             > "$RUNNER_TEMP/flow-triage-issues.json"
           cat > "$RUNNER_TEMP/flow-triage-filter.mjs" <<'FLOW_TRIAGE_FILTER'
           // Author-trust filter for the triage sweep. Reads the listing JSON named on

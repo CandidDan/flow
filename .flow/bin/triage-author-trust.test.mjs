@@ -297,6 +297,17 @@ test("the issue listing happens in a step, before the agent, and asks GitHub for
   assert.ok(!(/--slurp/.test(listing) && /--jq|--template/.test(listing)),
     "gh refuses `--slurp` together with `--jq`/`--template`, so the pair is an always-failing " +
     "step — shape the response in the filter, which the tests can actually execute");
+  // The cap keeps the head of the listing and the truncation warning says the dropped issues
+  // are the oldest. That is only true while the listing is newest-first, so the order is
+  // pinned on the request rather than inherited from an endpoint default that no test here
+  // can observe changing.
+  assert.match(listing, /-f sort=created/,
+    "the sort must be pinned: the cap drops from the tail, so an ordering change would " +
+    "silently drop the newest issues while every message still said 'oldest'");
+  assert.match(listing, /-f direction=desc/,
+    "the direction must be pinned for the same reason — ascending would invert exactly the " +
+    "issues the cap keeps");
+
   // `--slurp` without `--paginate` is the third rejected form ("`--paginate` required when
   // passing `--slurp`"), and it is what a well-meaning edit trying to bound the fetch would
   // reach for first.
