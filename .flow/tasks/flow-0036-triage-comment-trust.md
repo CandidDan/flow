@@ -46,6 +46,20 @@ notes:
     declaration would have dropped a deliverable the spec names. Both paths are declared here so
     the declaration matches the spec; no path outside the two the task body already names has
     been added, and the change itself did not widen."
+  - "2026-09-01: PR #51 open (draft), branch flow/flow-0036-triage-comment-trust. Genuinely
+    done: the content step, the shared-resolution wiring, 13 new proving tests in
+    .flow/bin/triage-author-trust.test.mjs, the CHANGELOG entry. Full local gate green (build 23
+    workflows, lint 70 .mjs, test 773/772 pass 1 skip, coverage 95.47% vs floor 83.5);
+    touches-guard decision=enforced reason=in-scope outside=0; branch does not touch .flow/tasks/.
+    Decisions a fresh session should not re-litigate: (1) the comment filter deliberately has NO
+    default trusted set and fails closed — it consumes the inbox step trusted output, which is the
+    only reason the two boundaries cannot drift; do not add a DEFAULT_TRUSTED constant to it, a
+    test asserts its absence. (2) The one edit to the existing inbox filter is the additive line
+    publishing its already-resolved set as a step output; its filtering logic is untouched, per
+    Scope. (3) Issue/comment text reaches the agent as FILES under runner.temp, never through a
+    workflow expression — a test allow-lists the prompt interpolations. (4) touches was widened on
+    main first (see the note above). Next action: none from the worker — the three review checks
+    run on the PR; address any kickback on the same branch."
 ---
 
 ## Context
