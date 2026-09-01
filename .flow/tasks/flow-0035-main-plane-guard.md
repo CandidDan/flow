@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0035"
 title: "Catch anything that reaches main without a PR, because the store-guard only watches the branch side"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -11,7 +11,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "FILE CLAIM, checked not assumed: flow-0033 (in_review) claims the glob `.flow/bin/*.test.mjs`, which covers every test file in canonical including the one this task must add. UNBLOCK: flip to ready once flow-0033 has merged — it is already in review, so this should clear quickly. The workflow and helper paths here were deliberately chosen to dodge its other glob (`.github/workflows/flow-*.yml`) by not using the `flow-` prefix, matching `ci.yml` and `release-tag.yml` which already do the same."
+blocked_reason: ""
 serves: ["G2"]            # PROVISIONAL — see notes; the vision is being re-authored
 touches: [".github/workflows/plane-guard.yml", ".flow/bin/plane-guard.mjs", ".flow/bin/plane-guard.test.mjs"]
 labels: [infra, integrity, guard]
