@@ -29,4 +29,8 @@ jobs:
       issues: write
       id-token: write
     uses: CandidDan/flow/.github/workflows/_flow-compass.yml@main
-    secrets: inherit
+    # Named, not `inherit`: the reusable declares only CLAUDE_CODE_OAUTH_TOKEN in
+    # on.workflow_call.secrets, so that is the only one this caller hands over. `inherit` would
+    # also expose FLOW_PAT to a job that never uses it.
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

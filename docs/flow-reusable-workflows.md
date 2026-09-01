@@ -35,7 +35,7 @@ them. They are:
 | `_flow-recover.yml` | Scheduled self-heal sweep (CAN-51): a task stranded `in_progress` past a staleness threshold gets its PR re-opened (work was pushed) or its claim reset to `ready` (nothing to recover). Off unless `FLOW_AI=true`; always on-demand via dispatch | input `threshold_minutes`; secret `FLOW_PAT` (optional) |
 | `_flow-triage.yml` | Scheduled issue triage (off unless `FLOW_AI=true`) | secret `CLAUDE_CODE_OAUTH_TOKEN` |
 | `_flow-review.yml` | The three Definition-of-Done review checks on a PR — qa, code-review and a conditional security review (flow-0007). Runs for **any** PR author, not just `flow/` branches; model and security-trigger paths come from the caller's `.flow/config.yml` `review:` block, and `.flow/bin/flow-review.mjs` turns each written verdict into an exit code (fail-closed). Off unless `FLOW_AI=true` | input `node_version`; secret `CLAUDE_CODE_OAUTH_TOKEN` |
-| `_flow-queue-runner.yml` | Picks a ready task → dispatches a fresh worker (off unless `FLOW_AI=true`) | input `task_id`; secret `CLAUDE_CODE_OAUTH_TOKEN` |
+| `_flow-queue-runner.yml` | Picks a ready task → dispatches a fresh worker (off unless `FLOW_AI=true`) | input `task_id`; secrets `CLAUDE_CODE_OAUTH_TOKEN` + `FLOW_PAT` (CAN-58 — so the worker's own push fires `flow-open-pr`; `FLOW_PAT` only on `main`, not yet released as `@v1`) |
 | `_flow-sync.yml` | The adopt mechanism (Phase 4): when the repo's `.flow/VERSION` is behind canonical, copies the updated `.flow/bin/*` + thin callers in, bumps the stamp, and opens a **reviewed PR**. Safe to run anytime (only opens a PR; no `FLOW_AI` gate) | input `canonical_ref` (default `v1`); secret `FLOW_PAT` (optional) |
 
 **`FLOW_PAT` (CAN-58).** A PR opened with the Actions `GITHUB_TOKEN` does *not* trigger downstream
@@ -43,7 +43,8 @@ workflows, so `flow-gates` would never fire on an auto-opened PR — the gate si
 `_flow-open-pr` / `_flow-recover` open PRs with a `FLOW_PAT` (fine-grained PAT: this repo, Contents
 Read + Pull requests Read/Write) so the `pull_request` event is attributed to a real actor and the
 gate runs. Falls back to `GITHUB_TOKEN` when the secret is unset (PR opens, but ungated), so adding
-the secret is a no-break enablement. Thin callers pass it with `secrets: inherit`.
+the secret is a no-break enablement. Thin callers pass it by name — `FLOW_PAT: ${{ secrets.FLOW_PAT }}` —
+not `secrets: inherit`, so a caller only ever forwards the secret(s) its own reusable declares.
 
 Because `actions/checkout` in a reusable workflow checks out the **caller's** repo, every
 `node .flow/bin/…` and `.flow/config.yml` reference resolves to the *consuming project's* store and
@@ -64,8 +65,8 @@ jobs:
     uses: CandidDan/flow/.github/workflows/_flow-gates.yml@v1
 ```
 
-- **Secrets:** the AI callers pass `secrets: inherit` so `CLAUDE_CODE_OAUTH_TOKEN` reaches the
-  reusable workflow without re-declaring it.
+- **Secrets:** the AI callers pass `CLAUDE_CODE_OAUTH_TOKEN` by name — not `secrets: inherit`,
+  which would also hand the job any other configured secret (e.g. `FLOW_PAT`) it never uses.
 - **Inputs:** `flow-queue-runner` forwards its `workflow_dispatch` `task_id` via `with:`.
 - **Pinning:** callers pin `@v1` for stability (the plan's choice over `@main`). Bump the tag to
   adopt a new Flow version.

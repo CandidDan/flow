@@ -16,7 +16,7 @@ name: _flow-queue-runner (reusable)
 #
 # DISABLED BY DEFAULT. Enable: repo variable FLOW_AI=true + CLAUDE_CODE_OAUTH_TOKEN secret
 # (`claude setup-token` — uses your Max plan quota, not API credits). The thin caller passes
-# the secret with `secrets: inherit`.
+# both secrets this reusable declares by name, not `secrets: inherit`.
 
 on:
   workflow_call:

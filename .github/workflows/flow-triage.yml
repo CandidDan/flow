@@ -34,4 +34,6 @@ jobs:
       issues: write
       id-token: write
     uses: CandidDan/flow/.github/workflows/_flow-triage.yml@main
-    secrets: inherit
+    # Named, not `inherit` — the reusable declares only CLAUDE_CODE_OAUTH_TOKEN.
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

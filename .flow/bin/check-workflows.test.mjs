@@ -188,7 +188,9 @@ test("the thin caller wires the reusable correctly and owns the schedule", { ski
   const job = caller.jobs["flow-compass"];
   assert.match(job.uses, /^CandidDan\/flow\/\.github\/workflows\/_flow-compass\.yml@/,
     "repos adopt the logic by reference; a copy is the drift surface this replaced");
-  assert.equal(job.secrets, "inherit");
+  assert.deepEqual(job.secrets, { CLAUDE_CODE_OAUTH_TOKEN: "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}" },
+    "named, not `secrets: inherit` — the reusable declares only CLAUDE_CODE_OAUTH_TOKEN, so " +
+    "inherit would over-grant this job FLOW_PAT it never uses (see secrets-scope.test.mjs)");
   for (const p of ["contents", "issues", "id-token"]) {
     assert.ok(job.permissions?.[p], `the caller must grant ${p} — the reusable cannot raise it`);
   }

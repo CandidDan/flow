@@ -49,4 +49,9 @@ jobs:
     uses: CandidDan/flow/.github/workflows/_flow-queue-runner.yml@main
     with:
       task_id: ${{ inputs.task_id }}
-    secrets: inherit
+    # Named, not `inherit`. The reusable declares BOTH — CLAUDE_CODE_OAUTH_TOKEN for the agent,
+    # FLOW_PAT so the worker's own git pushes fire as a real actor (CAN-58) — and nothing else,
+    # so both and only both are forwarded here.
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      FLOW_PAT: ${{ secrets.FLOW_PAT }}

@@ -19,7 +19,7 @@ name: _flow-recover (reusable)
 #
 # Reopened PRs use FLOW_PAT (CAN-58) so flow-gates fires on them too; falls back to GITHUB_TOKEN
 # when the secret is unset (recovery still works, just ungated). The thin caller passes the
-# secret with `secrets: inherit`. See _flow-open-pr.yml for FLOW_PAT setup.
+# secret by name, not `secrets: inherit`. See _flow-open-pr.yml for FLOW_PAT setup.
 
 on:
   workflow_call:

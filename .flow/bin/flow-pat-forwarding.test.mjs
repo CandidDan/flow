@@ -34,7 +34,8 @@ test("_flow-queue-runner.yml declares FLOW_PAT as an optional workflow_call secr
   const wf = parseQueueRunner();
   const secret = wf.on?.workflow_call?.secrets?.FLOW_PAT;
   assert.ok(secret, "on.workflow_call.secrets.FLOW_PAT must be declared — without the " +
-    "declaration a thin caller's `secrets: inherit` has nothing to forward");
+    "declaration a thin caller's named `FLOW_PAT: ...` forward would be rejected as an " +
+    "undeclared secret");
   assert.equal(secret.required, false,
     "required:true would fail the whole workflow at call time in a repo that hasn't created " +
     "the secret, instead of falling back to GITHUB_TOKEN (today's behaviour)");

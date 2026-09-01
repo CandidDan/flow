@@ -13,10 +13,12 @@ name: flow-open-pr
 # the point. The reusable exists BECAUSE a worker once pushed and never opened the PR, and until
 # now canonical — the repo that authors the protection — was the one repo without it.
 #
-# `secrets: inherit` passes FLOW_PAT through, which is what makes the PR this opens trigger
-# flow-gates: a PR opened with the default GITHUB_TOKEN does not fire downstream workflows
-# (GitHub's loop prevention). Without FLOW_PAT the PR still opens; it just arrives ungated,
-# which the reusable's own header explains.
+# Named FLOW_PAT (not `secrets: inherit`) is what makes the PR this opens trigger flow-gates:
+# a PR opened with the default GITHUB_TOKEN does not fire downstream workflows (GitHub's loop
+# prevention). Without FLOW_PAT the PR still opens; it just arrives ungated, which the
+# reusable's own header explains. Named rather than inherited because this job — triggered by
+# every push, with no human review — has no use for CLAUDE_CODE_OAUTH_TOKEN and should not carry
+# it: the reusable's on.workflow_call.secrets declares only FLOW_PAT.
 #
 # WHY THERE IS NO flow-sync.yml IN THIS DIRECTORY. Eight of canonical's nine reusables have a
 # caller here; `_flow-sync.yml` deliberately has none. Sync is how an adopting repo catches up
@@ -36,4 +38,5 @@ jobs:
       contents: read
       pull-requests: write
     uses: CandidDan/flow/.github/workflows/_flow-open-pr.yml@main
-    secrets: inherit
+    secrets:
+      FLOW_PAT: ${{ secrets.FLOW_PAT }}

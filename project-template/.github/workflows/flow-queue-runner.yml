@@ -2,8 +2,9 @@ name: flow-queue-runner
 
 # Thin caller — the queue-runner logic lives in canonical (CandidDan/flow) as a reusable
 # workflow, adopted here by reference. This caller owns the schedule and the workflow_dispatch
-# input (forwarded with `with: task_id`); `secrets: inherit` passes CLAUDE_CODE_OAUTH_TOKEN
-# through. See docs/flow-reusable-workflows.md in the flow repo.
+# input (forwarded with `with: task_id`), and passes CLAUDE_CODE_OAUTH_TOKEN by name — the only
+# secret the reusable declares — rather than `secrets: inherit`, which would also hand this job
+# FLOW_PAT it never uses. See docs/flow-reusable-workflows.md in the flow repo.
 #
 # DISABLED BY DEFAULT — the reusable job is gated on repo variable FLOW_AI=true and needs the
 # CLAUDE_CODE_OAUTH_TOKEN secret. Start with a sparse cron and drive it manually until trusted.
@@ -37,4 +38,5 @@ jobs:
     uses: CandidDan/flow/.github/workflows/_flow-queue-runner.yml@v1
     with:
       task_id: ${{ inputs.task_id }}
-    secrets: inherit
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
