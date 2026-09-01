@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0036"
 title: "Extend flow-triage's authorship trust boundary to comments, not just issue selection"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude/flow-0036-triage-comment-trust"
 created: "2026-08-31"
-started: ""
+started: "2026-09-01T02:40:02Z"
 branch: ""
 pr: ""
 issue: ""
