@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0036"
 title: "Extend flow-triage's authorship trust boundary to comments, not just issue selection"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude/flow-0036-triage-comment-trust"
 created: "2026-08-31"
 started: "2026-09-01T02:40:02Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0036-triage-comment-trust"
+pr: "https://github.com/CandidDan/flow/pull/51"
 issue: ""
 blocked_reason: ""
 serves: ["G1"]             # same rationale as flow-0027: the approve-the-spec touchpoint is only
