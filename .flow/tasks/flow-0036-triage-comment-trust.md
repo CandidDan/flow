@@ -73,6 +73,21 @@ notes:
     so the read paths the prompt forbids are refused by the harness rather than by instruction,
     turning both backstops into bounds. Worth checking whether the same applies to
     _flow-review.yml and _flow-compass.yml before scoping."
+  - "2026-09-01: FOR THE ORCHESTRATOR — second follow-on, from the code-review check on PR #51
+    (verdict PASS, no blocking; this was a non-blocking note). The content step re-fetches each
+    admitted issue individually (`gh api repos/.../issues/$n`) even though the inbox step
+    downloaded the whole listing, titles and bodies included, into
+    $RUNNER_TEMP/flow-triage-issues.json moments earlier. Not a correctness bug and not a trust
+    hole: the inbox filter projects only number/labels/authorAssociation and discards the rest, so
+    the content step genuinely cannot read title/body from that file today. But it is an N-issue
+    round trip in a workflow that works hard elsewhere to minimise API calls. Closing it means
+    having the inbox step also persist the raw listing (or the needed fields) — i.e. editing the
+    issue-level filter, which flow-0036's Scope forbids by name ('does not modify the existing
+    one'), so it was correctly left alone here. Worth folding into whichever task next touches
+    _flow-triage.yml. Also noted by the same review, and deliberately kept: the content step's
+    `dir` output is currently unconsumed, because the prompt names the directory literally so no
+    computed step output can carry issue-derived text into a workflow expression. It stays as
+    step-level observability; do not 'fix' it by wiring it into the prompt."
 ---
 
 ## Context
