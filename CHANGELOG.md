@@ -59,7 +59,6 @@ after a canary passes). Note any **caller action** required (a caller change is 
   There is deliberately **no second variable**: both boundaries read that one set, so widening the
   inbox widens comments by exactly the same step, and neither can be widened without the other.]
 
-
 ## 1.1.0 — 2026-07-03 (pending tag + canary)
 
 - **`flow-state` resolver added** (`.flow/bin/flow-state.mjs` + tests) — the trusted, on-demand
