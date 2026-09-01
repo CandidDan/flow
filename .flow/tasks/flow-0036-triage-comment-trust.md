@@ -14,7 +14,7 @@ issue: ""
 blocked_reason: ""
 serves: ["G1"]             # same rationale as flow-0027: the approve-the-spec touchpoint is only
                             # real if nothing else can reach the queue — a comment is "something else"
-touches: [".github/workflows/_flow-triage.yml"]
+touches: [".github/workflows/_flow-triage.yml", ".flow/bin/triage-author-trust.test.mjs", "CHANGELOG.md"]
 labels: [infra, triage, integrity, security]
 notes:
   - "2026-08-31: this is the residual half of the finding flow-0027 fixed, raised by the security
@@ -38,6 +38,14 @@ notes:
     built and tested (`triage-author-trust.test.mjs` / the inbox step's `extractFilter()`) to
     comment authors, using the same `FLOW_TRIAGE_TRUSTED_ASSOCIATIONS` resolution so the two
     boundaries can never drift out of sync with each other."
+  - "2026-09-01: touches widened, on main, to the radius this task body already mandates.
+    As written, touches declared only _flow-triage.yml, while Scope and acceptance criterion 6
+    require extending .flow/bin/triage-author-trust.test.mjs and adding a CHANGELOG.md entry.
+    touches-guard ignores all of .flow/, so the test file was never going to fail the gate — but
+    CHANGELOG.md did (decision=enforced, outside=1), and dropping the changelog entry to fit the
+    declaration would have dropped a deliverable the spec names. Both paths are declared here so
+    the declaration matches the spec; no path outside the two the task body already names has
+    been added, and the change itself did not widen."
 ---
 
 ## Context
