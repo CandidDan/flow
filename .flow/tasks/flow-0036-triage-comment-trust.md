@@ -60,6 +60,19 @@ notes:
     workflow expression — a test allow-lists the prompt interpolations. (4) touches was widened on
     main first (see the note above). Next action: none from the worker — the three review checks
     run on the PR; address any kickback on the same branch."
+  - "2026-09-01: FOR THE ORCHESTRATOR — follow-on finding from the security check on PR #51
+    (verdict PASS, no high/critical; this was its one Info row, marked no-action-for-this-PR).
+    The content step withholds untrusted comment text mechanically, but the agent still runs with
+    bypassPermissions and a github_token that can call `gh issue view` / `gh api`, so the only
+    thing stopping it re-fetching the withheld thread is the prompt hard limit — guidance to a
+    model, which is the exact distinction flow-0027 and flow-0036 both rest on. NOT a regression:
+    the same is already true of issue SELECTION today (nothing mechanically stops the agent
+    calling `gh issue list`). flow-0036 scoped this out by name (Deliberately does NOT: 'Remove
+    the agent's gh/bash access, or its bypassPermissions posture'), so it is a separate task, not
+    silent extra work here. Suggested shape: set `disallowed_tools` on the claude-code-action step
+    so the read paths the prompt forbids are refused by the harness rather than by instruction,
+    turning both backstops into bounds. Worth checking whether the same applies to
+    _flow-review.yml and _flow-compass.yml before scoping."
 ---
 
 ## Context
