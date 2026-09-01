@@ -1,14 +1,14 @@
 ---
 id: "flow-0033"
 title: "Stop callers handing every secret to every reusable workflow"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "session_01DGq92vqQgDYS9RXn7rRr1B"
 created: "2026-09-01"
 started: "2026-09-01T02:11:51Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0033-secrets-scope"
+pr: "https://github.com/CandidDan/flow/pull/50"
 issue: ""
 blocked_reason: ""
 serves: ["maintenance"]
