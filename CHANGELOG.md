@@ -29,6 +29,35 @@ after a canary passes). Note any **caller action** required (a caller change is 
   now opt in, by setting the repo variable `FLOW_TRIAGE_TRUSTED_ASSOCIATIONS` to the comma-separated
   set it wants (e.g. `OWNER,MEMBER,COLLABORATOR,CONTRIBUTOR`). Unset, empty or separators-only all
   resolve to the restrictive default.]
+- **`flow-triage`'s author-trust boundary now covers comments, not just issue selection**
+  (`_flow-triage.yml`, flow-0036). flow-0027 (above) decided *which issues* the sweep reads,
+  by the issue author's `author_association`. It did not decide whose text the agent reads once
+  an issue is admitted — and those are different questions, because GitHub lets anyone comment
+  on anyone's issue. An issue opened by a `MEMBER` passed the filter and could still carry a
+  comment from an account with no relationship to the repo, and that comment reached the same
+  `bypassPermissions` agent unfiltered: the same bug shape as flow-0027, one layer in. A new
+  `content` step now fetches each admitted issue's comments
+  (`gh api .../issues/<n>/comments --paginate --slurp`, the same pagination pattern the inbox
+  listing uses), classifies each by its commenter's `author_association`, and assembles a
+  trust-filtered Markdown view per issue — the issue body (already trust-gated by the issue-level
+  filter) plus only the comments whose author passes the same check. The agent is handed those
+  files instead of being left to read the thread itself, and the prompt gains a matching hard
+  limit: treat them as the complete view, never `gh issue view` / `gh api .../comments` a fuller
+  one. That instruction is a backstop to the step, not a substitute for it — the point of
+  flow-0027 was that a prompt is guidance to a model, not a bound. Withheld comments are counted
+  and named (issue + comment id) in the run log and the job summary, never quoted, so a filtered
+  injection attempt is visible without the report becoming its delivery vehicle. Issue and
+  comment text reaches the agent as files on disk and is never interpolated into a workflow
+  expression, the same rule flow-0027 set for issue numbers.
+  **One resolution, not two.** The `content` step has no trusted set of its own: the `inbox` step
+  publishes the set it already resolved as a step output, `content` consumes it, and it fails the
+  step closed if handed nothing. The two boundaries therefore cannot be configured apart.
+  [caller action: none — `_flow-triage.yml` is a reusable and adopters inherit this at their next
+  pin. **But this narrows behaviour by default,** in the same way flow-0027's issue-level filter
+  did: comments from `NONE`/`CONTRIBUTOR` authors on an otherwise-admitted issue no longer reach
+  the sweep. The opt-out is the variable that already exists — `FLOW_TRIAGE_TRUSTED_ASSOCIATIONS`.
+  There is deliberately **no second variable**: both boundaries read that one set, so widening the
+  inbox widens comments by exactly the same step, and neither can be widened without the other.]
 
 ## 1.1.0 — 2026-07-03 (pending tag + canary)
 
