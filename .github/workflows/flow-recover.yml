@@ -40,4 +40,6 @@ jobs:
     uses: CandidDan/flow/.github/workflows/_flow-recover.yml@main
     with:
       threshold_minutes: ${{ inputs.threshold_minutes }}
-    secrets: inherit
+    # Named, not `inherit` — the reusable declares only FLOW_PAT.
+    secrets:
+      FLOW_PAT: ${{ secrets.FLOW_PAT }}

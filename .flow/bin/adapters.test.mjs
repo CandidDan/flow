@@ -362,7 +362,22 @@ test("every reusable has a thin caller except _flow-sync.yml, whose absence is r
     "some workflow file must record WHY flow-sync has no caller — otherwise it reads as an oversight");
 });
 
-// ── criterion: each new caller references the reusable @main, grants matching permissions, inherits secrets ──
+// ── criterion: each new caller references the reusable @main, grants matching permissions, passes
+//              exactly the secret(s) its reusable declares ──
+
+// Which secret(s) each ADDED caller's reusable declares in on.workflow_call.secrets — FLOW_PAT
+// for the two that only need a real git actor, CLAUDE_CODE_OAUTH_TOKEN for the two that only run
+// claude-code-action, and BOTH for flow-queue-runner (it does both: the agent, and its own git
+// push as FLOW_PAT — CAN-58). Named, not `secrets: inherit`: inheriting would additionally hand
+// each job whichever of the two it doesn't need (see secrets-scope.test.mjs for the fleet-wide
+// version of this, including the @v1-vs-@main split on queue-runner specifically).
+const ADDED_SECRET = {
+  "flow-open-pr.yml": "FLOW_PAT",
+  "flow-recover.yml": "FLOW_PAT",
+  "flow-triage.yml": "CLAUDE_CODE_OAUTH_TOKEN",
+  "flow-review.yml": "CLAUDE_CODE_OAUTH_TOKEN",
+  "flow-queue-runner.yml": ["CLAUDE_CODE_OAUTH_TOKEN", "FLOW_PAT"],
+};
 
 test("every new caller references CandidDan/flow's reusable at @main, not @v1", () => {
   for (const name of ADDED) {
@@ -376,10 +391,19 @@ test("every new caller references CandidDan/flow's reusable at @main, not @v1", 
   }
 });
 
-test("every new caller passes secrets: inherit, or the reusable gets no token at all", () => {
+test("every new caller passes exactly the secret(s) its reusable declares, by name", { skip }, () => {
   for (const name of ADDED) {
-    assert.match(wfSrc(name), /^\s*secrets:\s*inherit\s*$/m,
-      `${name} must inherit secrets — FLOW_PAT and CLAUDE_CODE_OAUTH_TOKEN reach the reusable no other way`);
+    const wanted = ADDED_SECRET[name];
+    assert.ok(wanted, `no expected secret recorded for ${name} — update ADDED_SECRET`);
+    const wantedKeys = (Array.isArray(wanted) ? wanted : [wanted]).slice().sort();
+    const job = Object.values(wfParse(name).jobs ?? {})[0];
+    assert.deepEqual(Object.keys(job.secrets ?? {}).sort(), wantedKeys,
+      `${name} must pass exactly {${wantedKeys.join(", ")}} — not \`secrets: inherit\`, which ` +
+      `would also hand this job whichever credential it doesn't need`);
+    for (const key of wantedKeys) {
+      assert.equal(job.secrets[key], `\${{ secrets.${key} }}`,
+        `${name}'s ${key} must be forwarded verbatim from the caller's own secret of that name`);
+    }
   }
 });
 

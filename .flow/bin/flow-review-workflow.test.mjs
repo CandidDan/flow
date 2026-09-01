@@ -61,12 +61,14 @@ test("every reviewer is told to post its verdict as a PR comment, not only to a 
   }
 });
 
-test("the caller is a thin, pinned reference that inherits the token", { skip }, () => {
+test("the caller is a thin, pinned reference that passes the token by name", { skip }, () => {
   const caller = yamlMod.parse(readFileSync(CALLER, "utf8"));
   const job = caller.jobs["flow-review"];
   assert.match(job.uses, /^CandidDan\/flow\/\.github\/workflows\/_flow-review\.yml@/,
     "repos adopt the logic by reference; a copy is the drift surface this replaced");
-  assert.equal(job.secrets, "inherit");
+  assert.deepEqual(job.secrets, { CLAUDE_CODE_OAUTH_TOKEN: "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}" },
+    "named, not `secrets: inherit` — the reusable declares only CLAUDE_CODE_OAUTH_TOKEN, so " +
+    "inherit would over-grant this job FLOW_PAT it never uses (see secrets-scope.test.mjs)");
   // A caller `permissions:` block is exhaustive, and a reusable cannot raise above its caller.
   for (const p of ["contents", "pull-requests", "issues", "id-token"]) {
     assert.ok(job.permissions?.[p], `the caller must grant ${p} — the reusable cannot raise it`);

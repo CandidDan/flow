@@ -2,8 +2,9 @@ name: flow-recover
 
 # Thin caller — the stranded-task self-heal sweep (CAN-51) lives in canonical (CandidDan/flow)
 # as a reusable workflow, adopted here by reference. This caller owns the schedule + the
-# workflow_dispatch input (forwarded with `with: threshold_minutes`); `secrets: inherit` passes
-# FLOW_PAT through (CAN-58). See docs/flow-reusable-workflows.md in the flow repo.
+# workflow_dispatch input (forwarded with `with: threshold_minutes`), and passes FLOW_PAT by
+# name (CAN-58), not `secrets: inherit`: this job has no use for CLAUDE_CODE_OAUTH_TOKEN and
+# should not carry it. See docs/flow-reusable-workflows.md in the flow repo.
 #
 # DORMANT until repo variable FLOW_AI=true (same switch as the queue-runner — no autonomous
 # workers, nothing to strand); always runnable on demand via workflow_dispatch.
@@ -30,4 +31,5 @@ jobs:
     uses: CandidDan/flow/.github/workflows/_flow-recover.yml@v1
     with:
       threshold_minutes: ${{ inputs.threshold_minutes }}
-    secrets: inherit
+    secrets:
+      FLOW_PAT: ${{ secrets.FLOW_PAT }}
