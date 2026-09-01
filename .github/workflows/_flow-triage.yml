@@ -19,8 +19,16 @@ name: _flow-triage (reusable)
 # The lanes decide what may BECOME a task. They do not decide whose text the sweep reads, and
 # that is a separate boundary: this sweep runs an agent with `contents: write` and a permissive
 # permission mode, and on a public repository anyone can author its input. So the input set is
-# selected mechanically, in the `inbox` step below, before the prompt is built — see the note
-# there. Prompt text is guidance to a model; a step that never hands over the issue is a bound.
+# selected mechanically, before the prompt is built, in two steps that answer two different
+# questions — see the notes on each:
+#
+#   `inbox`    which ISSUES may be read, by the issue author's `author_association`
+#   `content`  whose TEXT inside an admitted issue may be read — the same check, applied to
+#              each comment's author, because anyone may comment on anyone's issue
+#
+# Both resolve the trusted set ONCE (in `inbox`; `content` consumes its output), so widening
+# one boundary widens both and neither can drift. Prompt text is guidance to a model; a step
+# that never hands over the issue is a bound.
 #
 # DISABLED BY DEFAULT. Enable by setting repo variable FLOW_AI=true and adding the
 # CLAUDE_CODE_OAUTH_TOKEN secret (from `claude setup-token` — uses your Max plan quota). (Check
@@ -174,15 +182,195 @@ jobs:
           ].join("\n");
           console.log(report);
 
+          // `trusted` is published as a step output, not just printed. The comment-trust filter
+          // in the `content` step below has NO default set of its own — it is handed this one.
+          // That is the only reason the two boundaries cannot drift: there is one resolution of
+          // FLOW_TRIAGE_TRUSTED_ASSOCIATIONS in this workflow, performed here, and the second
+          // filter consumes its result rather than repeating it. Sanitised to the shape an
+          // `author_association` can actually have, because this line is written to a file the
+          // runner parses; a value outside that shape matches no association on either side, so
+          // dropping it here narrows nothing.
+          const publishedTrusted = trusted.filter((t) => /^[A-Z_]+$/.test(t)).join(",");
           if (process.env.GITHUB_OUTPUT) {
             appendFileSync(process.env.GITHUB_OUTPUT,
-              `numbers=${numbers}\nadmitted=${admitted.length}\nexcluded=${excluded.length}\n`);
+              `numbers=${numbers}\nadmitted=${admitted.length}\nexcluded=${excluded.length}\n` +
+              `trusted=${publishedTrusted}\n`);
           }
           if (process.env.GITHUB_STEP_SUMMARY) {
             appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${report}\n`);
           }
           FLOW_TRIAGE_FILTER
           node "$RUNNER_TEMP/flow-triage-filter.mjs" "$RUNNER_TEMP/flow-triage-issues.json"
+
+      # ── The same boundary, one layer in ─────────────────────────────────────────────────
+      # The `inbox` step decides WHOSE ISSUES this sweep reads. It does not decide whose text
+      # the agent reads once an issue is admitted, and those are not the same question: GitHub
+      # lets anyone comment on anyone's issue, so an issue opened by a MEMBER can carry a
+      # comment from an account with no relationship to this repo at all. Left alone, the agent
+      # — `bypassPermissions`, full `gh` — would read that comment itself, and the trust filter
+      # above would have moved the boundary one step earlier without closing it.
+      #
+      # So the agent is handed CONTENT the same way it is handed numbers: assembled here, from
+      # the issue body (already trust-gated, by the author filter above) plus only the comments
+      # whose author passes the SAME check. The prompt's "do not go and read the rest" limit is
+      # a backstop for this step, not a substitute for it — the whole point of flow-0027 was
+      # that an instruction in a prompt is guidance to a model, not a bound.
+      #
+      # ONE RESOLUTION, NOT TWO. This step does not read `vars.FLOW_TRIAGE_TRUSTED_ASSOCIATIONS`
+      # and has no default trusted set. It reads the set the `inbox` step already resolved, via
+      # that step's `trusted` output, and fails closed if it is handed nothing. Two filters that
+      # each resolve the same variable are two filters that can drift; one that consumes the
+      # other's answer cannot.
+      #
+      # Content is written to files under the runner temp dir and NEVER interpolated into a
+      # workflow expression — same rule as above, for the same reason. Only the directory path,
+      # which this workflow chose, crosses into the prompt.
+      - id: content
+        name: Assemble the trust-filtered issue content the agent may read
+        if: ${{ steps.inbox.outputs.numbers != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FLOW_TRIAGE_NUMBERS: ${{ steps.inbox.outputs.numbers }}
+          # The inbox step's ALREADY-RESOLVED set — deliberately not `vars.*` again.
+          FLOW_TRIAGE_TRUSTED_RESOLVED: ${{ steps.inbox.outputs.trusted }}
+          FLOW_TRIAGE_CONTENT_DIR: ${{ runner.temp }}/flow-triage-content
+        run: |
+          set -euo pipefail
+          raw="$RUNNER_TEMP/flow-triage-raw"
+          mkdir -p "$raw" "$FLOW_TRIAGE_CONTENT_DIR"
+          # The numbers arrive through the environment rather than being pasted into this
+          # script, and the inbox filter already proves its output is digits and commas (its
+          # own test asserts the shape). Re-checking each element keeps that guarantee local to
+          # the place that builds a URL out of it, instead of resting on a property proved two
+          # steps away.
+          IFS=',' read -r -a nums <<< "$FLOW_TRIAGE_NUMBERS"
+          for n in "${nums[@]}"; do
+            case "$n" in
+              ''|*[!0-9]*)
+                echo "flow-triage: refusing a non-numeric issue reference: '$n'" >&2
+                exit 1
+                ;;
+            esac
+            # Same `--paginate --slurp` pattern as the inbox listing, for the same reason: a
+            # thread past its first page of comments would otherwise be silently truncated, and
+            # `--slurp` cannot be combined with `--jq`/`--template`, so nothing is shaped here.
+            # The single-issue GET returns one object and needs neither flag.
+            gh api "repos/$GITHUB_REPOSITORY/issues/$n" > "$raw/issue-$n.json"
+            gh api --method GET "repos/$GITHUB_REPOSITORY/issues/$n/comments" \
+              -F per_page=100 --paginate --slurp > "$raw/comments-$n.json"
+          done
+          cat > "$RUNNER_TEMP/flow-triage-content.mjs" <<'FLOW_TRIAGE_CONTENT'
+          // Comment-trust filter for the triage sweep. Reads the raw issue/comment JSON in the
+          // directory named on argv[2], writes one trust-filtered Markdown view per issue into
+          // argv[3], and reports the exclusions to the run log and the job summary. Kept
+          // dependency-free and pure enough to be extracted and executed by
+          // .flow/bin/triage-author-trust.test.mjs, alongside the issue-level filter it extends.
+          import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+          import { join } from "node:path";
+
+          // NO DEFAULT SET HERE, DELIBERATELY. The trusted set is resolved exactly once in this
+          // workflow — by the `inbox` step — and handed over. A default constant here would be
+          // a second resolution of the same policy, and two resolutions drift. Handed nothing,
+          // this filter fails closed rather than guessing a set of its own.
+          const trusted = (process.env.FLOW_TRIAGE_TRUSTED_RESOLVED || "")
+            .split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+          if (trusted.length === 0) {
+            console.error(
+              "flow-triage: the comment filter was handed no resolved trusted set " +
+              "(FLOW_TRIAGE_TRUSTED_RESOLVED is empty). It has no default of its own by design " +
+              "— the inbox step owns that resolution. Failing closed.");
+            process.exit(1);
+          }
+
+          const rawDir = process.argv[2];
+          const outDir = process.argv[3];
+          mkdirSync(outDir, { recursive: true });
+
+          const numbers = String(process.env.FLOW_TRIAGE_NUMBERS || "")
+            .split(",").map((n) => Number(String(n).trim()))
+            .filter((n) => Number.isInteger(n) && n > 0);
+
+          // The issue-level filter's predicate, applied to a commenter instead of an author.
+          const ok = (a) => trusted.includes(String(a ?? "").trim().toUpperCase());
+          // An association is `[A-Z_]+`; anything else is not one, and the reports below are
+          // read by humans looking for an injection attempt, so nothing arbitrary is echoed.
+          const safe = (v) => String(v ?? "").replace(/[^A-Za-z_]/g, "") || "UNKNOWN";
+
+          const excluded = [];
+          let admittedComments = 0;
+
+          for (const n of numbers) {
+            const issue = JSON.parse(readFileSync(join(rawDir, `issue-${n}.json`), "utf8"));
+            // `--slurp` hands back an array OF pages; `.flat()` for the same reason the inbox
+            // filter flattens — a single-page thread is still wrapped, and a flat array
+            // survives unchanged.
+            const comments = JSON.parse(readFileSync(join(rawDir, `comments-${n}.json`), "utf8"))
+              .flat()
+              .filter((c) => c && typeof c === "object");
+
+            const keep = [];
+            for (const c of comments) {
+              if (ok(c.author_association)) keep.push(c);
+              else excluded.push({
+                issue: n,
+                id: Number(c.id) || 0,
+                association: safe(c.author_association),
+              });
+            }
+            admittedComments += keep.length;
+
+            const body = String(issue.body ?? "");
+            const labels = (Array.isArray(issue.labels) ? issue.labels : [])
+              .map((l) => String(l?.name ?? "")).filter(Boolean).join(", ");
+            const view = [
+              `# Issue #${n}: ${String(issue.title ?? "")}`,
+              "",
+              `- author_association: ${safe(issue.author_association)}`,
+              `- labels: ${labels || "(none)"}`,
+              "",
+              "## Body",
+              "",
+              body.trim() ? body : "(empty)",
+              "",
+              `## Comments — ${keep.length} from trusted authors, ` +
+                `${comments.length - keep.length} withheld`,
+              "",
+              // The withheld ones are counted, never quoted: a "here is what we filtered"
+              // section would hand the agent the exact text the filter exists to keep away
+              // from it. The run log names them by id for a human to go and look at.
+              ...(keep.length
+                ? keep.flatMap((c) => [
+                    `### comment ${Number(c.id) || 0} (${safe(c.author_association)})`,
+                    "",
+                    String(c.body ?? ""),
+                    "",
+                  ])
+                : ["(no comments from trusted authors)", ""]),
+            ].join("\n");
+            writeFileSync(join(outDir, `issue-${n}.md`), `${view}\n`);
+          }
+
+          const report = [
+            `triage content: ${numbers.length} issue(s) assembled, ` +
+              `${admittedComments} comment(s) admitted, ` +
+              `${excluded.length} excluded by author trust.`,
+            `trusted author_association values: ${trusted.join(", ")}`,
+            ...excluded.map((e) =>
+              `  excluded: comment ${e.id} on issue ${e.issue} ` +
+              `(author_association: ${e.association})`),
+          ].join("\n");
+          console.log(report);
+
+          if (process.env.GITHUB_OUTPUT) {
+            appendFileSync(process.env.GITHUB_OUTPUT,
+              `dir=${outDir}\ncomments_admitted=${admittedComments}\n` +
+              `comments_excluded=${excluded.length}\n`);
+          }
+          if (process.env.GITHUB_STEP_SUMMARY) {
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${report}\n`);
+          }
+          FLOW_TRIAGE_CONTENT
+          node "$RUNNER_TEMP/flow-triage-content.mjs" "$raw" "$FLOW_TRIAGE_CONTENT_DIR"
 
       - uses: anthropics/claude-code-action@v1
         # Nothing admitted means nothing to sweep. Skipping keeps the agent — and its turn
@@ -210,6 +398,13 @@ jobs:
                inbox yourself, and do not read or act on any issue outside that list — issues
                were withheld deliberately and re-listing would undo the decision. Of the issues
                in scope, skip any labelled `proposed` or `triaged`.
+            1a. Each in-scope issue's CONTENT has also already been assembled for you, one
+               Markdown file per issue, in the directory ${{ runner.temp }}/flow-triage-content
+               — named issue-<number>.md, where <number> is the issue number. Each file holds
+               that issue's title, labels, body, and only those comments whose author passed the
+               same trust check the issue itself passed. Read those files for issue content.
+               Comments from untrusted authors were withheld deliberately; the file states how
+               many, and the run log names them.
             2. For each remaining issue WITHOUT the `auto-ok` label: draft a complete ready-task
                spec in the task template's shape (context, scope with explicit boundaries,
                observable acceptance criteria, touches globs). That template is at
@@ -224,9 +419,15 @@ jobs:
             4. If an issue is not worth doing, comment one line saying why and close it.
 
             Hard limits: never modify code or any file outside .flow/tasks/; never edit an
-            existing task file; never work on an issue yourself; if a proposal would require
-            guessing the human's intent, ask the question in the issue comment instead of
-            proposing. Apply the readiness bar honestly — a vague proposal is worse than none.
+            existing task file; never work on an issue yourself; treat the assembled files from
+            step 1a as the COMPLETE view of each issue and never independently fetch a fuller
+            thread — no `gh issue view`, no `gh api` call against an issue or its comments, no
+            other command or tool that reads issue or comment content. Withheld comments were
+            withheld deliberately and reading them back would undo the decision, exactly as
+            re-listing the inbox would. (Posting comments, applying labels and committing task
+            files are unaffected — this limit is about what you READ.) If a proposal would
+            require guessing the human's intent, ask the question in the issue comment instead
+            of proposing. Apply the readiness bar honestly — a vague proposal is worse than none.
           # --max-turns 150 (was 30) + bypassPermissions: same headless-runner failure that hit
           # flow-review and the queue-runner, and triage was the one caller left unfixed. With no
           # permission posture every gh issue-list / comment / label call was denied, so the sweep
