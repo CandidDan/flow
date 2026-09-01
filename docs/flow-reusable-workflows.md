@@ -43,7 +43,8 @@ workflows, so `flow-gates` would never fire on an auto-opened PR — the gate si
 `_flow-open-pr` / `_flow-recover` open PRs with a `FLOW_PAT` (fine-grained PAT: this repo, Contents
 Read + Pull requests Read/Write) so the `pull_request` event is attributed to a real actor and the
 gate runs. Falls back to `GITHUB_TOKEN` when the secret is unset (PR opens, but ungated), so adding
-the secret is a no-break enablement. Thin callers pass it with `secrets: inherit`.
+the secret is a no-break enablement. Thin callers pass it by name — `FLOW_PAT: ${{ secrets.FLOW_PAT }}` —
+not `secrets: inherit`, so a caller only ever forwards the secret(s) its own reusable declares.
 
 Because `actions/checkout` in a reusable workflow checks out the **caller's** repo, every
 `node .flow/bin/…` and `.flow/config.yml` reference resolves to the *consuming project's* store and
@@ -64,8 +65,8 @@ jobs:
     uses: CandidDan/flow/.github/workflows/_flow-gates.yml@v1
 ```
 
-- **Secrets:** the AI callers pass `secrets: inherit` so `CLAUDE_CODE_OAUTH_TOKEN` reaches the
-  reusable workflow without re-declaring it.
+- **Secrets:** the AI callers pass `CLAUDE_CODE_OAUTH_TOKEN` by name — not `secrets: inherit`,
+  which would also hand the job any other configured secret (e.g. `FLOW_PAT`) it never uses.
 - **Inputs:** `flow-queue-runner` forwards its `workflow_dispatch` `task_id` via `with:`.
 - **Pinning:** callers pin `@v1` for stability (the plan's choice over `@main`). Bump the tag to
   adopt a new Flow version.

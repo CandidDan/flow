@@ -22,7 +22,7 @@ name: _flow-open-pr (reusable)
 # close/reopened it). Fix: open the PR with a Personal Access Token (`FLOW_PAT`) instead, so the
 # `pull_request` event is attributed to a real actor and `flow-gates` fires automatically.
 #
-#   Required secret:  FLOW_PAT (passed by the thin caller with `secrets: inherit`)
+#   Required secret:  FLOW_PAT (passed by the thin caller by name, not `secrets: inherit`)
 #   How to create it: GitHub → Settings → Developer settings → Fine-grained PATs → Generate.
 #     Repository access: this repo only. Permissions: Contents = Read, Pull requests = Read/Write.
 #     Save it as a repo secret named FLOW_PAT (Settings → Secrets and variables → Actions).

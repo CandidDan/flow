@@ -32,7 +32,7 @@ name: _flow-review (reusable)
 #
 # DISABLED BY DEFAULT. Enable with repo variable FLOW_AI=true + the CLAUDE_CODE_OAUTH_TOKEN
 # secret (from `claude setup-token` — uses your Max plan quota, not API credits). The thin
-# caller passes it with `secrets: inherit`. Note GitHub's own boundary: a PR from a FORK gets
+# caller passes it by name, not `secrets: inherit`. Note GitHub's own boundary: a PR from a FORK gets
 # no secrets, so the reviewers cannot run there. That is GitHub's rule, not Flow's — review
 # fork contributions on a branch in the repo.
 

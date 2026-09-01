@@ -22,7 +22,7 @@ name: _flow-sync (reusable)
 # runs the *synced* tests + flow-doctor, so the gate validates the update for free.
 #
 # Opens with FLOW_PAT (CAN-58) so flow-gates fires on the sync PR too; falls back to GITHUB_TOKEN
-# when unset (the PR opens, just ungated). The thin caller passes it with `secrets: inherit`.
+# when unset (the PR opens, just ungated). The thin caller passes it by name, not `secrets: inherit`.
 
 on:
   workflow_call:

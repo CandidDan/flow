@@ -13,7 +13,7 @@ name: _flow-compass (reusable)
 # DISABLED BY DEFAULT. Enable by setting repo variable FLOW_AI=true and adding the
 # CLAUDE_CODE_OAUTH_TOKEN secret (from `claude setup-token` — uses your Max plan quota). (Check
 # anthropics/claude-code-action's current README for input names when you first enable this —
-# the action evolves.) The thin caller passes the secret with `secrets: inherit`.
+# the action evolves.) The thin caller passes the secret by name, not `secrets: inherit`.
 
 on:
   workflow_call:
