@@ -1,7 +1,7 @@
 ---
 id: "flow-0033"
 title: "Stop callers handing every secret to every reusable workflow"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "session_01DGq92vqQgDYS9RXn7rRr1B"
