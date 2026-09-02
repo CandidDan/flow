@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0038"
 title: "Point AGENTS.md at the orchestrator skills, so a non-Claude-Code session can write tasks too"
-status: "in_progress"
+status: "done"
 priority: 3
 project: "flow"
 owner: "session_013rbLWXPoTBArTjMBbtfrzu"
