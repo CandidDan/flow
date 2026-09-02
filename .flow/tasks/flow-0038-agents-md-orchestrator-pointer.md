@@ -13,9 +13,10 @@ pr: "https://github.com/CandidDan/flow/pull/53"
 issue: ""
 blocked_reason: ""
 serves: ["G4"]
-touches: ["project-template/AGENTS.md"]
+touches: ["project-template/AGENTS.md", ".flow/bin/protocol-portability.test.mjs"]
 labels: [docs, infra, protocol]
 notes:
+  - "2026-09-02: touches widened to include .flow/bin/protocol-portability.test.mjs — code-review on PR #53 correctly noted qa's own demand (a proving test for the new AGENTS.md content) landed in a file this task hadn't declared. touches-guard passed anyway on the actual PR, but the field should say what the diff really touches regardless of whether the guard happened to catch the gap."
   - "2026-09-02: filed RETROACTIVELY — the PR (#53) was opened and the diff written before this task existed, in an interactive session testing Flow with a Codex-worker repo. The qa check correctly FAILed the PR for exactly this: no `flow/<id>-…` branch and no `[<id>]` PR title, so nothing tied the diff back to acceptance criteria. This task exists to fix that traceability gap after the fact, not to re-litigate whether the change is a good idea — it already passed the security check with zero findings. `started` is the time this file was written, not the time the diff was written; the PR predates the claim by a few minutes."
   - "2026-09-02: origin story — AGENTS.md already pointed the WORKER role at .flow/PROTOCOL.md (a plain-English instruction, since the AGENTS.md convention has no @-import). It said nothing about the ORCHESTRATOR role: task-writer/vision-writer/board-builder are discovered automatically by Claude Code/Cowork via the Skill mechanism, and a non-Claude agent (Codex, specifically, in the session that surfaced this) has no equivalent discovery path. serves G4 rather than a narrower goal: this is exactly 'what canonical says' to an adopting repo's agents, for a class of agent canonical was silent to."
 ---
