@@ -112,10 +112,13 @@ the token lives in a page-local variable and is gone when the tab closes.
 `file://` without complaint; Chrome and Edge apply CORS-style restrictions to `type="module"`
 scripts loaded from `file://` and may show a blank page with a console error instead. If that
 happens, serve the folder with any static file server. Either of these, run from the repo root,
-works:
+works — pick one, they both want port 3000:
 
 ```sh
+# either
 npx serve -l tcp://127.0.0.1:3000 flightdeck
+
+# or
 python3 -m http.server --bind 127.0.0.1 -d flightdeck 3000
 ```
 
