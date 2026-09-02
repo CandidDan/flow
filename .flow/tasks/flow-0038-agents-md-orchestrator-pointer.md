@@ -55,14 +55,14 @@ orchestrator under Flow.
 
 ## Acceptance criteria
 
-- [ ] Given `project-template/AGENTS.md`, when read after this change, then it contains a section
+- [x] Given `project-template/AGENTS.md`, when read after this change, then it contains a section
       pointing a non-Claude-Code orchestrator session at `.claude/skills/task-writer/SKILL.md`,
       `.claude/skills/vision-writer/SKILL.md`, and `.claude/skills/board-builder/SKILL.md`, without
       repeating any of their procedural content.
-- [ ] Given the same file, when `node --test .flow/bin/protocol-portability.test.mjs` runs, then
+- [x] Given the same file, when `node --test .flow/bin/protocol-portability.test.mjs` runs, then
       every non-skipped test still passes — in particular the ones that fail if `AGENTS.md` grows
       a second copy of the protocol body or an `@`-import the AGENTS.md convention can't use.
-- [ ] Given the repo after this change, when `npm run build`, `npm run lint`, `npm test`, and
+- [x] Given the repo after this change, when `npm run build`, `npm run lint`, `npm test`, and
       `npm run coverage` run, then all pass and coverage stays at or above the 83.5 floor.
 
 ## Definition of done (inherited — do not edit)
@@ -74,6 +74,10 @@ linked, criteria checklist ticked with the proving test named.
 
 ## Notes / open questions
 
-None — the diff is already written and reviewed (security: PASS, zero findings). What remains is
-retitling PR #53 to `[flow-0038] …` so `flow-status`/`flow-done` and the qa check can resolve it,
-and re-running the qa check once retitled.
+None. All three review checks now PASS on PR #53's head (`50d04fe`): security (zero findings,
+both rounds), code-review (one real finding fixed — the task-writer pointer duplicated a
+paragraph `PROTOCOL.md` already had; cross-referenced instead of restating), and qa (initially
+FAIL for an unproven criterion — no test asserted the new AGENTS.md content — fixed by adding
+three tests to `protocol-portability.test.mjs`, now PASS on all three criteria). Acceptance
+criteria checked off above accordingly. Gate green: build/lint/test/coverage all pass, 776 tests,
+95.51% coverage. Nothing left but the human's merge.
