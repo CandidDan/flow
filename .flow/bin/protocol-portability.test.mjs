@@ -186,6 +186,50 @@ test("AGENTS.md holds no second copy of the protocol body", () => {
   }
 });
 
+// --- flow-0038: AGENTS.md's orchestrator pointer names the skills, without copying them --
+
+// The orchestrator-role pointer added by flow-0038: an agent that only follows the AGENTS.md
+// convention has no equivalent to Claude Code/Cowork's automatic .claude/skills/ discovery, so
+// AGENTS.md has to name these paths explicitly. Proven the same way criterion 3 proves the
+// protocol pointer: the path is named, and the target is not duplicated, just pointed at.
+const ORCHESTRATOR_SKILL_PATHS = [
+  ".claude/skills/task-writer/SKILL.md",
+  ".claude/skills/vision-writer/SKILL.md",
+  ".claude/skills/board-builder/SKILL.md",
+];
+
+test("AGENTS.md names all three orchestrator skill paths", () => {
+  for (const path of ORCHESTRATOR_SKILL_PATHS) {
+    assert.ok(agents.includes(path),
+      `AGENTS.md must name ${path} — an agent following only the AGENTS.md convention has no ` +
+      `other way to discover it, since just Claude Code/Cowork auto-discover .claude/skills/`);
+  }
+});
+
+test("AGENTS.md does not duplicate the orchestrator skills' own procedural content", () => {
+  // Same principle as "AGENTS.md holds no second copy of the protocol body" above: a pointer
+  // names a skill, it does not restate its headings. Collect every `## ` heading each named
+  // skill uses, and fail if any of them shows up as a heading in AGENTS.md too.
+  const agentsHeadings = new Set(sectionsOf(agents).map(([h]) => h));
+  for (const path of ORCHESTRATOR_SKILL_PATHS) {
+    const skillHeadings = sectionsOf(readFileSync(join(TEMPLATE, path), "utf8")).map(([h]) => h);
+    for (const heading of skillHeadings) {
+      assert.ok(!agentsHeadings.has(heading),
+        `AGENTS.md restates "${heading}" from ${path} — that is a second copy of the skill's ` +
+        `own procedure, not a pointer to it`);
+    }
+  }
+});
+
+test("AGENTS.md's orchestrator section stays pointer-sized, not a growing copy", () => {
+  const body = new Map(sectionsOf(agents)).get("Writing tasks, not just executing them");
+  assert.ok(body, `AGENTS.md must carry a "Writing tasks, not just executing them" section`);
+  const lines = body.split("\n").filter((l) => l.trim() !== "").length;
+  assert.ok(lines < 30,
+    `the orchestrator section is ${lines} non-blank lines. The ceiling is what keeps it a ` +
+    `pointer instead of growing back into a copy of the skills it names.`);
+});
+
 test("exactly one file in the template tree contains the protocol body", () => {
   // Walk the whole shipped template and count files carrying the protocol's own sections.
   // Two hosts, two doorways, ONE copy — that is the invariant this task exists to create.

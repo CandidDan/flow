@@ -17,6 +17,27 @@ There is exactly **one** copy of the protocol in this repo. `CLAUDE.md` imports 
 for Claude Code. Do not copy the protocol into this file, and do not follow a stale copy of it
 from anywhere else.
 
+## Writing tasks, not just executing them
+
+Everything above is the **worker's** contract: claim a `ready` task, execute it, open a PR. If
+this session is instead acting as the **orchestrator** — turning a human's direction into new
+`ready` tasks rather than picking one up — `PROTOCOL.md` already told you where to look, in its
+"Creating a task (orchestrator)" paragraph: read `.claude/skills/task-writer/SKILL.md` in full and
+follow it. That is not repeated here.
+
+Two companion skills the procedure itself calls out, which `PROTOCOL.md` does not point at with
+the same precision: `.claude/skills/vision-writer/SKILL.md` if the repo has no `VISION.md` yet
+(every task's `serves` needs one to resolve against — `PROTOCOL.md` never names this skill), and
+`.claude/skills/board-builder/SKILL.md` to regenerate `.flow/board.html` after writing or changing
+tasks (`PROTOCOL.md` names it but gives no path, relying on Claude Code's skill-name resolution —
+an agent that only follows the AGENTS.md convention has no such resolution). Read each in full
+before using it — they are short, load-bearing procedures, not references to skim.
+
+The authority rule does not change with which agent is running it: the human decides what
+matters — priority, direction, and every goal or non-goal in `VISION.md`. Decomposition into
+tasks is the orchestrator's job; inventing priority is not, regardless of which model is doing
+the writing.
+
 ## Project notes
 
 Everything below is *this project's* context — the things a fresh session cannot derive from the
