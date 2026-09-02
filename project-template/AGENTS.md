@@ -21,17 +21,17 @@ from anywhere else.
 
 Everything above is the **worker's** contract: claim a `ready` task, execute it, open a PR. If
 this session is instead acting as the **orchestrator** — turning a human's direction into new
-`ready` tasks rather than picking one up — read `.claude/skills/task-writer/SKILL.md` in full and
-follow its procedure exactly. Claude Code and Cowork sessions discover that file automatically
-through the Skill mechanism; nothing else does, so an agent that only follows the AGENTS.md
-convention has to be pointed at it explicitly — the same reason this file points at
-`PROTOCOL.md` instead of restating it.
+`ready` tasks rather than picking one up — `PROTOCOL.md` already told you where to look, in its
+"Creating a task (orchestrator)" paragraph: read `.claude/skills/task-writer/SKILL.md` in full and
+follow it. That is not repeated here.
 
-Two companion skills the procedure itself calls out, for the same reason: `.claude/skills/vision-writer/SKILL.md`
-if the repo has no `VISION.md` yet (every task's `serves` needs one to resolve against), and
-`.claude/skills/board-builder/SKILL.md` to regenerate `.flow/board.html` after writing or
-changing tasks. Read each in full before using it — they are short, load-bearing procedures, not
-references to skim.
+Two companion skills the procedure itself calls out, which `PROTOCOL.md` does not point at with
+the same precision: `.claude/skills/vision-writer/SKILL.md` if the repo has no `VISION.md` yet
+(every task's `serves` needs one to resolve against — `PROTOCOL.md` never names this skill), and
+`.claude/skills/board-builder/SKILL.md` to regenerate `.flow/board.html` after writing or changing
+tasks (`PROTOCOL.md` names it but gives no path, relying on Claude Code's skill-name resolution —
+an agent that only follows the AGENTS.md convention has no such resolution). Read each in full
+before using it — they are short, load-bearing procedures, not references to skim.
 
 The authority rule does not change with which agent is running it: the human decides what
 matters — priority, direction, and every goal or non-goal in `VISION.md`. Decomposition into
