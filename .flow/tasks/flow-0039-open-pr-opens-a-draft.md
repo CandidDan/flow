@@ -25,8 +25,11 @@ touches:
   - "project-template/.flow/PROTOCOL.md"
   - "docs/flow-reusable-workflows.md"
   - ".flow/bin/draft-pr-lifecycle.test.mjs"
+  - ".flow/bin/flow-review-workflow.test.mjs"
+  - ".flow/bin/protocol-portability.test.mjs"
 labels: [infra, protocol]
-notes: []
+notes:
+  - "2026-09-03: touches widened on main, per the guard's own instruction rather than by narrowing the change. Two PRE-EXISTING tests correctly caught this task's edits and have to move with them: flow-review-workflow.test.mjs pins `plan.if` to the exact string `${{ vars.FLOW_AI == 'true' }}` (criterion 6, \"identical checks whoever opened the PR\"), and protocol-portability.test.mjs pins a sha256 per PROTOCOL.md section and tells you in its own failure message to recompute the digest in the same commit as a deliberate edit. Neither was foreseeable from the scope as written — the first because the draft clause lands in a field an authorship test happened to pin whole, the second because it pins sections rather than the lines changed. Both keep their intent: the review test still forbids a branch-name or author fence, and the digests are recomputed, not relaxed."
 ---
 
 ## Context
