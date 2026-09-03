@@ -5,9 +5,12 @@ name: _flow-status (reusable)
 #
 # Event-driven state: the worker writes code and opens/closes PRs; PR events own the
 # lifecycle transitions so frontmatter never needs hand-editing for them.
-#   opened / reopened          -> in_review (+ branch & pr recorded)
+#   opened / reopened, DRAFT   -> stays in_progress (+ branch & pr recorded) — flow-0039
+#   opened / reopened, ready   -> in_review (+ branch & pr recorded)
+#   ready_for_review           -> in_review (the hand-off; a worker's `gh pr ready`)
 #   closed without merge       -> back to ready (owner/branch/pr cleared for re-claim)
 #   closed by merge            -> handled by flow-done.yml (this job no-ops)
+#   anything else              -> logged no-op (a caller pinned ahead of this reusable)
 # Workers write only two transitions by hand: the claim (ready -> in_progress, which must
 # stay an atomic first-push-wins commit) and blocked (a judgment call).
 

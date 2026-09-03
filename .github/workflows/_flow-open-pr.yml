@@ -9,8 +9,12 @@ name: _flow-open-pr (reusable)
 # `gh pr create`, stranding the task `in_progress` with a pushed branch and no PR (observed
 # twice on CAN-43). PR creation is a deterministic, mechanical step, so it should not depend on
 # the model's diligence: this workflow opens the PR on branch push. A worker stopping short then
-# becomes harmless — the PR opens regardless, flow-status flips the task to in_review, and the
-# loop continues. Because the workflow opens it, the `[<id>] <title>` title is correct every time.
+# becomes harmless — the PR opens regardless, flow-status records `branch` + `pr` on the task, and
+# the work is visible on a PR instead of stranded on an orphan branch. (It opens as a DRAFT, so the
+# task stays `in_progress` until the worker marks it ready — see OPENS A DRAFT below. This
+# paragraph said "flow-status flips the task to in_review" until flow-0039 moved that transition
+# onto `ready_for_review`.) Because the workflow opens it, the `[<id>] <title>` title is correct
+# every time.
 #
 # Idempotent: a re-push never opens a second PR (the helper AND the create step both gate on
 # "no open PR for this branch" — `gh pr list --state open` counts drafts, so the draft this now
