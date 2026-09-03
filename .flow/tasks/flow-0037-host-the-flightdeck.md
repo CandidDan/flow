@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0037"
 title: "Publish the flightdeck to a URL, so opening mission control is a bookmark rather than an errand"
-status: "ready"
+status: "blocked"
 priority: 2
 project: "flow"
 owner: ""
@@ -11,11 +11,12 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
+blocked_reason: "Superseded by ADR-0006 (2026-09-03): mission control moves to its own public repo, CandidDan/inflight, served directly by GitHub Pages. This task's publisher, workflow, publish-set computation and boundary assertions all exist to move three static files out of a private repo into a public one so they can be served -- which is the split, done by workflow on every push instead of once. Its own notes predicted this ('do not build a second publisher permanently'). Held rather than deleted on the flow-0002 precedent: whether to retire it or rescope its one surviving criterion -- that the page works from a subpath -- is the human's call."
 serves: ["G5"]            # PROVISIONAL — see notes; the vision is being re-authored
 touches: [".github/workflows/publish-flightdeck.yml", ".flow/bin/publish-flightdeck.mjs", ".flow/bin/publish-flightdeck.test.mjs"]
 labels: [flightdeck, infra, ux]
 notes:
+  - "2026-09-03: blocked by ADR-0006, not by a dependency. The friction this task identified is real and unchanged -- a mission control you need five minutes to launch is not mission control -- but the fix is placement, not publishing. The repo name is settled as CandidDan/inflight; creating it and enabling Pages are human-only steps named in the ADR. If the subpath criterion is worth keeping it belongs on the move task, not here."
   - "2026-09-01: the human's words, twice: 'a mission control you need 5 minutes to launch is not mission control.' Today opening it means pull the repo, run a static server (Chrome and Edge block ES modules over file://), and paste a PAT. The page is correct and tested; it is simply not reachable."
   - "2026-09-01: this task was dropped once. It was proposed on 2026-08-28, then squeezed out when flow-0027..0030 were numbered, and never written. Recorded so the gap in the record is visible rather than tidy."
   - "2026-09-01: NOT hosted from canonical, for two reasons. (1) Canonical is going private per ADR-0005 and flow-0029/0030; GitHub Pages from a private repo needs Enterprise, so it would work now and break at the split. (2) Pages on canonical would serve the whole repo as a website, which makes .flow/tasks/ search-indexable — no new access, but a real change in discoverability the human has said he is uncomfortable with."
