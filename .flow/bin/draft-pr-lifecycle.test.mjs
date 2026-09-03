@@ -76,12 +76,42 @@ function runStatusCase(dir, env) {
   const script = stepNamed(STATUS_YML, "sync-status", "Sync task state from the PR event").run;
   const block = sliceBlock(script, /^\s*case\s+"\$ACTION"\s+in\s*$/, /^\s*esac\s*$/);
 
-  const res = execFileSync("bash", ["-c", block], {
+  // `-e` because GitHub runs a `run:` block as `bash -e {0}`; without it these would execute
+  // under laxer semantics than production and could pass on a script that CI would abort.
+  const res = execFileSync("bash", ["-e", "-c", block], {
     cwd: dir,
     encoding: "utf8",
     env: { PATH: process.env.PATH, id: "flow-0039", ...env },
   });
   return { stdout: res, edits: existsSync(edits) ? JSON.parse(readFileSync(edits, "utf8")) : null };
+}
+
+// The same step, but sliced from its FIRST line through the `apply-board-edits.mjs` call rather
+// than just the `case` — so the "…and does not invoke apply-board-edits.mjs" half of the
+// unmodelled-action criterion is executed rather than inferred from bash `exit` semantics. Both
+// helpers the script shells out to are stubbed as real files on disk, so no PATH games are needed
+// and the script's own `[ -f .flow/bin/parse-task-id.mjs ]` guard sees what it expects.
+function runStatusStepToApply(dir, env) {
+  mkdirSync(join(dir, ".flow", "bin"), { recursive: true });
+  const marker = join(dir, ".flow", "apply-was-called");
+  writeFileSync(join(dir, ".flow", "bin", "parse-task-id.mjs"),
+    'process.stdout.write("flow-0039");\n');
+  writeFileSync(join(dir, ".flow", "bin", "apply-board-edits.mjs"),
+    `import { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, "1");\n`);
+
+  const script = stepNamed(STATUS_YML, "sync-status", "Sync task state from the PR event").run;
+  const block = sliceBlock(script, /^\s*id=""\s*$/,
+    /^\s*node\s+\.flow\/bin\/apply-board-edits\.mjs\s*$/);
+
+  const stdout = execFileSync("bash", ["-e", "-c", block], {
+    cwd: dir, encoding: "utf8", env: { PATH: process.env.PATH, ...env },
+  });
+  const edits = join(dir, ".flow", "board-edits.json");
+  return {
+    stdout,
+    applyCalled: existsSync(marker),
+    edits: existsSync(edits) ? JSON.parse(readFileSync(edits, "utf8")) : null,
+  };
 }
 
 const EVENT = {
@@ -152,6 +182,35 @@ test("an action the workflow does not model is a clean no-op, not a crash", { sk
     });
     assert.equal(edits, null, "no board-edits.json should be written for an unmodelled action");
     assert.match(stdout, /not one this workflow transitions on/);
+  });
+});
+
+// The other half of that criterion, executed rather than inferred: the qa check on PR #57 noted
+// that slicing out only the `case` block proves the `*)` branch exits cleanly but never runs the
+// trailing `node .flow/bin/apply-board-edits.mjs` line, so "does not invoke apply-board-edits"
+// rested on bash `exit` semantics being taken on trust. It is directly testable — run the step from
+// its first line through that call, with both helpers stubbed — so it is tested directly here.
+test("the unmodelled-action exit really does skip apply-board-edits.mjs", { skip }, () => {
+  withTmp((dir) => {
+    const { applyCalled, edits } = runStatusStepToApply(dir, {
+      ...EVENT, ACTION: "converted_to_draft", DRAFT: "true",
+    });
+    assert.equal(applyCalled, false,
+      "the `*)` branch must terminate the whole step, not just the case — reaching " +
+      "apply-board-edits.mjs with no edits file is the crash this branch exists to prevent");
+    assert.equal(edits, null);
+  });
+});
+
+// …and the positive control, without which the test above would pass on a script that never
+// reaches apply-board-edits.mjs for ANY action.
+test("a modelled action does reach apply-board-edits.mjs, with the edits file written", { skip }, () => {
+  withTmp((dir) => {
+    const { applyCalled, edits } = runStatusStepToApply(dir, {
+      ...EVENT, ACTION: "opened", DRAFT: "true",
+    });
+    assert.equal(applyCalled, true);
+    assert.equal(edits.updates[0].status, "in_progress");
   });
 });
 
