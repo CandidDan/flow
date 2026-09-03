@@ -2,13 +2,13 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0039"
 title: "Open the auto-PR as a draft, so a pushed branch stops claiming to be ready for review"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_011jwLeP4dH526ggjoAyG1oT"
 created: "2026-09-03"
-started: ""
-branch: ""
+started: "2026-09-03T01:23:27Z"
+branch: "claude/flow-open-pr-401-error-lqavuy"
 pr: ""
 issue: ""
 blocked_reason: ""
