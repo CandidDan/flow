@@ -181,8 +181,12 @@ test("no reviewer is fenced on the branch name or the PR author", { skip }, () =
         `${job} must accept a bot-initiated run — Flow's own worker PRs are opened by one`);
     }
   }
-  // The one remaining gate is the repo's own opt-in, which is about cost, not authorship.
-  assert.equal(wf.jobs.plan.if.trim(), "${{ vars.FLOW_AI == 'true' }}");
+  // The remaining gates are the repo's own opt-in and the PR's draft state. Both are about cost
+  // and readiness; neither is about authorship, which is what this criterion protects. Pinned as
+  // an exact string rather than a substring match so a future `head.ref`/`actor` clause smuggled
+  // into the same expression fails here instead of silently re-fencing the reviewers.
+  assert.equal(wf.jobs.plan.if.trim(),
+    "${{ vars.FLOW_AI == 'true' && github.event.pull_request.draft != true }}");
 });
 
 // ── criterion 7: the reviewers read the diff and its blast radius, not the whole repo ──────

@@ -21,7 +21,9 @@ name: flow-review
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize]
+    # ready_for_review is flow-0039: the reusable skips its jobs while the PR is a draft, so this
+    # is the event that actually starts the three Definition-of-Done reviewers.
+    types: [opened, reopened, ready_for_review, synchronize]
     branches: [main]
 
 jobs:

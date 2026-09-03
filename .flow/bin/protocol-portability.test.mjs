@@ -60,12 +60,12 @@ const PROTOCOL_REF = ".flow/PROTOCOL.md";
 const PRE_MOVE_SECTION_DIGESTS = [
   ["Response style — always TL;DR", "3542b8b979ddb4efa71684a0dace416e60ccc84ba754183e18f6b4605abeee6f"],
   ["The store", "c6dcbc3bb200de6b31be37d0e0d9ca619b6fb8c1a073e527703d8aa6e5af914a"],
-  ["Status lifecycle", "bcce4f4fda874d9e0fce488e8ba948d90b7ccb7fb92bf88fdd03c43212744263"],
-  ["Concurrency — how parallel sessions don't collide", "363cc65c5b717b605681212e13ec4079cb9d944c06c1c347619627e3c691ab37"],
-  ["The loop you run", "58a59349ce4829eccccb91bd1540eb58350150257e483ac758d40f71bd932f9b"],   // rewritten by flow-0007
+  ["Status lifecycle", "c2f7d6a2d54fe4ac3ed8585cffb4fa0a805e9f372e4d7f9288805fece9712273"],   // rewritten by flow-0039
+  ["Concurrency — how parallel sessions don't collide", "42bbc5aa8e43eb1371eaae9b43fcb0d68cf7973df33844914d1137209bb49f6c"],   // rewritten by flow-0039
+  ["The loop you run", "501469c1994131fd1ee695e91c1a800352cfe89f0f38cd74b39f8f4f531475d4"],   // rewritten by flow-0007, then flow-0039
   ["Session hygiene — context is a budget", "71c9e144cad9aa9449dd199cf449c713ce90abb81ad3f7e59cc7761b093aebc0"],
   ["The gate — Definition of Done (every task, every stack)", "b4a7356cba7beb92a670375a59959cab46b91a4cb7648873b115300ecc4ea750"],   // rewritten by flow-0007
-  ["Hard rules", "15388fcda35f81aad61e1d8ecf8e94382e28833854277a23edccb31e4e1cd447"],
+  ["Hard rules", "1c7c64687eb78d96e8d6e9f2c7648d95c99ae0455c03fd4a7c701e6bc2285e50"],   // rewritten by flow-0039
   ["What stays out of here", "24bd8ebcce937389248fb3c7e00ff8a4ec48db0912ec39d982abbab1397f00b3"],
 ];
 
