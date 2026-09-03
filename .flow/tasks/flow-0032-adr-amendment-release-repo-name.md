@@ -13,9 +13,10 @@ pr: ""
 issue: ""
 blocked_reason: ""
 serves: ["G4"]            # the fleet's reference target, and the traps in changing it
-touches: ["docs/adr/0005-split-authoring-from-release.md"]
+touches: ["docs/adr/0005-split-authoring-from-release.md", ".flow/bin/adr-split-authoring.test.mjs"]
 labels: [docs, adr, infra]
 notes:
+  - "2026-09-03: scope grows by one item. ADR-0006 supersedes the `flightdeck/` line in ADR-0005's private-authoring-repo inventory -- mission control moves to CandidDan/inflight, public, Pages-served -- and answers the hosting question ADR-0005 recorded as an open interaction. ADR-0006 deliberately did not edit ADR-0005, because this task claims that file and a fifth link in the flow-0022/0023/0030/0034 file-claim ring helps nobody. TRAP: .flow/bin/adr-split-authoring.test.mjs asserts at line 118 that the flightdeck stays with the authoring repo, and at line 265 that the hosting question is not decided there. Both go red the moment ADR-0005 is amended, so both must be updated in the SAME diff -- which is why that file is now in touches."
   - "2026-08-31: ADR-0005 deliberately left the release repo's name to be chosen at implementation time. It has now been chosen — `CandidDan/flow-protocol` — and three operational constraints surfaced in the same session that the ADR does not carry. All four currently live only in task notes on flow-0029 and flow-0030, which is the wrong home: a task note is read by the worker of that task and nobody else, while the ADR is what a future maintainer reads. This task moves them into the record."
   - "2026-08-31: the human chose the name over `flow-agent-protocol`, dropping `agent` because the protocol is deliberately vendor- and agent-neutral (flow-0006) and ADR-0005 records that the reviewer 'no longer has to be your vendor' — baking today's vocabulary into a permanent public `uses:` reference is the one thing the ADR calls expensive to undo. Record the rejected form and that reason, per this ADR family's habit of keeping the alternatives."
 ---
