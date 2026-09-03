@@ -29,12 +29,12 @@ them. They are:
 | Reusable workflow | What it does | Inputs / secrets |
 |---|---|---|
 | `_flow-gates.yml` | The Definition-of-Done gate: store-is-main-only guard, build/lint/test/coverage from the caller's `.flow/config.yml`, flow-tooling tests, touches-guard | input `setup_node_version` (default `22`; `""` for non-Node) |
-| `_flow-status.yml` | PR open → `in_review`; closed-unmerged → `ready`. Id resolved from the branch **or** the PR title (CAN-52), so non-`flow/` branches (e.g. cloud `claude/…`) still transition | — |
+| `_flow-status.yml` | PR marked ready for review → `in_review`; draft PR opened → stays `in_progress` with `branch` + `pr` recorded (flow-0039); a PR opened directly as non-draft still goes straight to `in_review`; closed-unmerged → `ready`. An action it does not model is a logged no-op, so a caller pinned ahead of the reusable degrades to silence. Id resolved from the branch **or** the PR title (CAN-52), so non-`flow/` branches (e.g. cloud `claude/…`) still transition | — |
 | `_flow-done.yml` | PR merged → task `done`. Same branch-**or**-title id resolution (CAN-52) | — |
-| `_flow-open-pr.yml` | On a `flow/<id>-…` branch push, auto-opens the PR if the branch is ahead of base with no PR yet (CAN-50) — a worker that stops short of `gh pr create` no longer strands the task. Idempotent. Opens with `FLOW_PAT` so the PR triggers `flow-gates` (CAN-58) | secret `FLOW_PAT` (optional) |
-| `_flow-recover.yml` | Scheduled self-heal sweep (CAN-51): a task stranded `in_progress` past a staleness threshold gets its PR re-opened (work was pushed) or its claim reset to `ready` (nothing to recover). Off unless `FLOW_AI=true`; always on-demand via dispatch | input `threshold_minutes`; secret `FLOW_PAT` (optional) |
+| `_flow-open-pr.yml` | On a `flow/<id>-…` branch push, auto-opens the PR if the branch is ahead of base with no PR yet (CAN-50) — a worker that stops short of `gh pr create` no longer strands the task. Opens it as a **draft** (flow-0039), falling back to non-draft where drafts are unavailable; the worker's `gh pr ready` is what asks for review. Idempotent. Opens with `FLOW_PAT` so the PR triggers `flow-gates` (CAN-58) | secret `FLOW_PAT` (optional) |
+| `_flow-recover.yml` | Scheduled self-heal sweep (CAN-51): a task stranded `in_progress` past a staleness threshold gets its PR re-opened as a **draft** (work was pushed but is unfinished by definition — flow-0039) or its claim reset to `ready` (nothing to recover). Off unless `FLOW_AI=true`; always on-demand via dispatch | input `threshold_minutes`; secret `FLOW_PAT` (optional) |
 | `_flow-triage.yml` | Scheduled issue triage (off unless `FLOW_AI=true`) | secret `CLAUDE_CODE_OAUTH_TOKEN` |
-| `_flow-review.yml` | The three Definition-of-Done review checks on a PR — qa, code-review and a conditional security review (flow-0007). Runs for **any** PR author, not just `flow/` branches; model and security-trigger paths come from the caller's `.flow/config.yml` `review:` block, and `.flow/bin/flow-review.mjs` turns each written verdict into an exit code (fail-closed). Off unless `FLOW_AI=true` | input `node_version`; secret `CLAUDE_CODE_OAUTH_TOKEN` |
+| `_flow-review.yml` | The three Definition-of-Done review checks on a PR — qa, code-review and a conditional security review (flow-0007). **Skipped entirely while the PR is a draft** (flow-0039) — the `plan` job carries the condition and the other three `needs: plan` — so the reviewers run once, when the worker marks the PR ready, not on every work-in-progress push. Runs for **any** PR author, not just `flow/` branches; model and security-trigger paths come from the caller's `.flow/config.yml` `review:` block, and `.flow/bin/flow-review.mjs` turns each written verdict into an exit code (fail-closed). Off unless `FLOW_AI=true` | input `node_version`; secret `CLAUDE_CODE_OAUTH_TOKEN` |
 | `_flow-queue-runner.yml` | Picks a ready task → dispatches a fresh worker (off unless `FLOW_AI=true`) | input `task_id`; secrets `CLAUDE_CODE_OAUTH_TOKEN` + `FLOW_PAT` (CAN-58 — so the worker's own push fires `flow-open-pr`; `FLOW_PAT` only on `main`, not yet released as `@v1`) |
 | `_flow-sync.yml` | The adopt mechanism (Phase 4): when the repo's `.flow/VERSION` is behind canonical, copies the updated `.flow/bin/*` + thin callers in, bumps the stamp, and opens a **reviewed PR**. Safe to run anytime (only opens a PR; no `FLOW_AI` gate) | input `canonical_ref` (default `v1`); secret `FLOW_PAT` (optional) |
 
@@ -130,8 +130,11 @@ superset:
 
 - **`parse-task-id.mjs` + branch-or-title id resolution (CAN-52)** in `_flow-status` / `_flow-done`,
   so cloud sessions forced onto non-`flow/` branches still transition.
-- **`flow-open-pr.mjs` + `_flow-open-pr.yml` (CAN-50)** — auto-open the PR on branch push. Per the
-  plan, canonical opens it **non-draft** (the canary repo's version still used `--draft`).
+- **`flow-open-pr.mjs` + `_flow-open-pr.yml` (CAN-50)** — auto-open the PR on branch push.
+  Canonical originally opened it **non-draft**, against the canary repo's `--draft`; flow-0039
+  reversed that, because opening ready-for-review on the first push made `flow-status` report the
+  task `in_review` while the worker was still building and made `flow-review` spend three agent
+  runs per work-in-progress push. The canary was right.
 - **`flow-recover.mjs` + `_flow-recover.yml` (CAN-51)** — self-heal stranded tasks.
 - **The CAN-41 uncommitted-task guard** merged into `flow-doctor`, alongside canonical's existing
   ahead-bits (the touches-overlap check, multi-line `touches` parsing, and the version-drift check —

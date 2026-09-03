@@ -128,11 +128,19 @@ jobs:
                 if [ -n "$d" ]; then
                   title="$(node -e 'console.log(JSON.parse(process.argv[1]).title)' "$d")"
                   task_path="$(grep -rl "^id: \"$id\"" .flow/tasks/ | head -1)"
-                  body="$(printf '%s\n\nTask: `%s`\n' \
+                  body="$(printf '%s\n\nTask: `%s`\n\n%s\n' \
                     "Recovered by **flow-recover** (CAN-51): \`$branch\` was pushed but no PR existed." \
-                    "${task_path:-.flow/tasks/ (id $id)}")"
-                  gh pr create --base main --head "$branch" --title "$title" --body "$body" || \
-                    echo "gh pr create failed for $id — will retry next sweep."
+                    "${task_path:-.flow/tasks/ (id $id)}" \
+                    "Opened as a **draft** — this branch was stranded, so the work is unfinished by definition. Run \`gh pr ready\` once it is complete.")"
+                  # --draft for the same reason as flow-open-pr (flow-0039), and more so: a recovered
+                  # branch is stranded work by definition, and marking it ready would flip the task to
+                  # in_review and spend the three review agents on an abandoned build. Same fallback —
+                  # a repo without draft support gets a non-draft PR rather than no PR.
+                  if ! gh pr create --draft --base main --head "$branch" --title "$title" --body "$body"; then
+                    echo "::warning::Could not open a draft PR for $id (drafts need a paid plan on a private repo) — retrying without --draft."
+                    gh pr create --base main --head "$branch" --title "$title" --body "$body" || \
+                      echo "gh pr create failed for $id — will retry next sweep."
+                  fi
                 fi
                 ;;
               reset-to-ready)

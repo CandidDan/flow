@@ -41,6 +41,8 @@ jobs:
           MERGED:   ${{ github.event.pull_request.merged }}
           PR_URL:   ${{ github.event.pull_request.html_url }}
           PR_NUM:   ${{ github.event.pull_request.number }}
+          # flow-0039. Present on every `pull_request` event, so draft state needs no API call.
+          DRAFT:    ${{ github.event.pull_request.draft }}
         run: |
           # Branch name first (canonical), PR title second (CAN-52 fallback for non-flow/ branches).
           # The job checks out `main`; the helper lives there once the repo adopts the template.
@@ -52,9 +54,25 @@ jobs:
           fi
           if [ -z "$id" ]; then echo "No task id in branch '$HEAD_REF' or title '$PR_TITLE' — nothing to sync."; exit 0; fi
 
+          # flow-0039: a DRAFT PR is not a hand-off. flow-open-pr fires on the first push, so a PR
+          # existing says only "a branch was pushed" — it is `ready_for_review` that says the worker
+          # is done. A draft therefore records `branch` + `pr` (genuinely new information, and
+          # earlier than the store used to get it) while leaving the task `in_progress`; the
+          # in_review transition moves to the moment the draft is marked ready.
           case "$ACTION" in
             opened|reopened)
-              echo "PR #$PR_NUM opened -> $id in_review"
+              if [ "$DRAFT" = "true" ]; then
+                echo "PR #$PR_NUM opened as a draft -> $id stays in_progress (branch + pr recorded)"
+                printf '{"updates":[{"id":"%s","status":"in_progress","branch":"%s","pr":"%s"}]}\n' \
+                  "$id" "$HEAD_REF" "$PR_URL" > .flow/board-edits.json
+              else
+                echo "PR #$PR_NUM opened ready for review -> $id in_review"
+                printf '{"updates":[{"id":"%s","status":"in_review","branch":"%s","pr":"%s"}]}\n' \
+                  "$id" "$HEAD_REF" "$PR_URL" > .flow/board-edits.json
+              fi
+              ;;
+            ready_for_review)
+              echo "PR #$PR_NUM marked ready for review -> $id in_review"
               printf '{"updates":[{"id":"%s","status":"in_review","branch":"%s","pr":"%s"}]}\n' \
                 "$id" "$HEAD_REF" "$PR_URL" > .flow/board-edits.json
               ;;
@@ -63,6 +81,14 @@ jobs:
               echo "PR #$PR_NUM closed unmerged -> $id back to ready"
               printf '{"updates":[{"id":"%s","status":"ready","owner":"","branch":"","pr":""}]}\n' \
                 "$id" > .flow/board-edits.json
+              ;;
+            *)
+              # An action this reusable does not model. Reachable whenever a caller is pinned to a
+              # ref that lists a `types:` entry the reusable predates — exactly the `@v1` vs `@main`
+              # skew flow-0033 hit — and without this branch the run would fall through to
+              # apply-board-edits.mjs with no edits file written. Degrade to silence, not a crash.
+              echo "PR #$PR_NUM: action '$ACTION' is not one this workflow transitions on — nothing to do."
+              exit 0
               ;;
           esac
 

@@ -13,7 +13,24 @@ name: _flow-open-pr (reusable)
 # loop continues. Because the workflow opens it, the `[<id>] <title>` title is correct every time.
 #
 # Idempotent: a re-push never opens a second PR (the helper AND the create step both gate on
-# "no open PR for this branch"). Only worker branches (flow/<id>-…) ahead of base get a PR.
+# "no open PR for this branch" — `gh pr list --state open` counts drafts, so the draft this now
+# opens still satisfies that guard). Only worker branches (flow/<id>-…) ahead of base get a PR.
+#
+# OPENS A DRAFT (flow-0039). CAN-50 fires on the FIRST push, not on completion, so the PR this
+# opens is routinely a branch one commit in. Opening it ready for review made three things treat
+# unfinished work as finished: `_flow-status.yml` flipped the task to `in_review` (so the store and
+# the flightdeck reported a task awaiting a human while the worker was still building),
+# `_flow-review.yml` ran the three Definition-of-Done reviewers on `opened` AND on every subsequent
+# `synchronize` — three agent invocations per work-in-progress push — and a red gate on half-written
+# code read as a failing PR rather than a build in progress.
+#
+# The fix is deliberately NOT to gate PR creation on a readiness signal: that reintroduces exactly
+# the failure CAN-50 exists to prevent, because a worker that forgets `gh pr create` is the same
+# worker that forgets to signal ready. The PR still opens unconditionally on the first push; it
+# just opens as a draft, and `flow-status`/`flow-review` key off `ready_for_review` instead of off
+# the PR existing. The worker's hand-off step is now `gh pr ready`.
+#
+# `flow-gates` deliberately still runs on drafts — a worker wants the gate red early.
 #
 # GATING AUTO-WORKER PRs (CAN-58). A PR opened with the Actions GITHUB_TOKEN does NOT trigger
 # downstream workflows (GitHub's loop-prevention), so `flow-gates` (on: pull_request) never ran
@@ -99,8 +116,20 @@ jobs:
           # Link the task file; do NOT invent acceptance text — the criteria checklist and DoD
           # live in the task file and are completed by the worker / enforced by the gate.
           task_path="$(grep -rl "^id: \"${TASK_ID}\"" .flow/tasks/ | head -1)"
-          body="$(printf '%s\n\n%s\n\n%s\n' \
-            "Auto-opened by **flow-open-pr** (CAN-50) on branch push — the worker pushed \`${BRANCH}\` but a PR did not yet exist." \
+          body="$(printf '%s\n\n%s\n\n%s\n\n%s\n' \
+            "Auto-opened as a **draft** by **flow-open-pr** (CAN-50) on branch push — the worker pushed \`${BRANCH}\` but a PR did not yet exist." \
             "Task: \`${task_path:-.flow/tasks/ (id ${TASK_ID})}\`" \
-            "Acceptance criteria, the proving tests, and the Definition-of-Done checklist live in the task file and are completed by the worker before this PR is ready for review.")"
-          gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$body"
+            "Acceptance criteria, the proving tests, and the Definition-of-Done checklist live in the task file and are completed by the worker before this PR is ready for review." \
+            "**It stays a draft until the worker runs \`gh pr ready\`.** While it is a draft the task stays \`in_progress\` and the three Definition-of-Done review checks do not run; marking it ready is what flips the task to \`in_review\` and asks for review.")"
+          # --draft is flow-0039: the PR opens on the FIRST push, so announcing it ready for review
+          # made flow-status flip the task to in_review and flow-review spend three agent runs on
+          # unfinished work — again on every subsequent push. Opening it draft keeps CAN-50's
+          # guarantee (the PR always exists) without the claim that the work is done.
+          #
+          # Draft PRs need a paid plan on a private repo. Where they are unavailable, fall back to a
+          # non-draft PR: a branch with no PR at all is the failure CAN-50 exists to prevent, and it
+          # is strictly worse than one that opens ready. The fallback warns rather than passing quietly.
+          if ! gh pr create --draft --base main --head "$BRANCH" --title "$TITLE" --body "$body"; then
+            echo "::warning::Could not open a draft PR (draft pull requests need a paid plan on a private repo). Retrying without --draft — the PR will open ready for review."
+            gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$body"
+          fi

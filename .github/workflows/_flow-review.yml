@@ -59,7 +59,15 @@ jobs:
   # Reads the repo's own review config and decides the conditional security review, once, so
   # every reviewer below runs on the same decision and the human sees it in the run summary.
   plan:
-    if: ${{ vars.FLOW_AI == 'true' }}
+    # The draft clause is flow-0039, and it is the single gate for all four jobs: `qa`,
+    # `code-review` and `security` each declare `needs: plan`, so suppressing `plan` suppresses
+    # them. Without it the three Definition-of-Done reviewers ran on `opened` — which flow-open-pr
+    # triggers on the FIRST push — and again on every `synchronize`, i.e. three agent invocations
+    # per work-in-progress push against code the worker had not finished writing. The caller lists
+    # `ready_for_review` in its `types:`, so the reviewers fire once, when the worker hands off.
+    # `github.event.pull_request.draft` is present on every `pull_request` event; on any other event
+    # it is empty, which is why this compares against 'true' rather than testing for false.
+    if: ${{ vars.FLOW_AI == 'true' && github.event.pull_request.draft != true }}
     runs-on: ubuntu-latest
     outputs:
       model: ${{ steps.plan.outputs.model }}
