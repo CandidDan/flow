@@ -237,9 +237,12 @@ function ghStub(dir, { failOnDraft }) {
     ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []) };
 }
 
+// Returns the block's stdout. That return value is load-bearing, not incidental: criterion 2 is
+// "warns AND retries", and while it was discarded the tests proved only the retry — deleting the
+// `::warning::` echo from either workflow would have kept them green.
 function runCreateBlock(dir, script, stub) {
   const block = sliceBlock(script, /^\s*if\s+!\s+gh pr create --draft/, /^\s*fi\s*$/);
-  execFileSync("bash", ["-c", block], {
+  return execFileSync("bash", ["-e", "-c", block], {
     cwd: dir,
     encoding: "utf8",
     env: {
@@ -257,10 +260,13 @@ function runCreateBlock(dir, script, stub) {
 test("flow-open-pr opens the PR as a draft", { skip }, () => {
   withTmp((dir) => {
     const stub = ghStub(dir, { failOnDraft: false });
-    runCreateBlock(dir, stepNamed(OPEN_PR_YML, "open-pr", "Open the PR").run, stub);
+    const stdout = runCreateBlock(dir, stepNamed(OPEN_PR_YML, "open-pr", "Open the PR").run, stub);
     const calls = stub.calls();
     assert.equal(calls.length, 1, "a working draft create must not be retried");
     assert.match(calls[0], /(^|\s)--draft(\s|$)/);
+    assert.doesNotMatch(stdout, /::warning::/,
+      "the happy path must stay quiet — a warning on every successful open trains people to " +
+      "ignore the one that means the PR opened ready when it should not have");
   });
 });
 
@@ -270,11 +276,15 @@ test("flow-open-pr opens the PR as a draft", { skip }, () => {
 test("flow-open-pr falls back to a non-draft PR where drafts are unavailable", { skip }, () => {
   withTmp((dir) => {
     const stub = ghStub(dir, { failOnDraft: true });
-    runCreateBlock(dir, stepNamed(OPEN_PR_YML, "open-pr", "Open the PR").run, stub);
+    const stdout = runCreateBlock(dir, stepNamed(OPEN_PR_YML, "open-pr", "Open the PR").run, stub);
     const calls = stub.calls();
     assert.equal(calls.length, 2, "the failed draft create must be retried exactly once");
     assert.match(calls[0], /(^|\s)--draft(\s|$)/);
     assert.doesNotMatch(calls[1], /(^|\s)--draft(\s|$)/, "the retry must drop --draft");
+    // The criterion is "warns AND retries". Silently downgrading to a non-draft PR would leave a
+    // repo permanently opening ready-for-review with nothing in the log saying why.
+    assert.match(stdout, /::warning::.*without --draft/,
+      "the downgrade must be announced, not silent");
   });
 });
 
@@ -284,15 +294,18 @@ test("flow-recover opens its recovery PR as a draft, with the same fallback", { 
 
   withTmp((dir) => {
     const stub = ghStub(dir, { failOnDraft: false });
-    runCreateBlock(dir, script, stub);
+    const stdout = runCreateBlock(dir, script, stub);
     assert.match(stub.calls()[0], /(^|\s)--draft(\s|$)/);
     assert.equal(stub.calls().length, 1);
+    assert.doesNotMatch(stdout, /::warning::/);
   });
   withTmp((dir) => {
     const stub = ghStub(dir, { failOnDraft: true });
-    runCreateBlock(dir, script, stub);
+    const stdout = runCreateBlock(dir, script, stub);
     assert.equal(stub.calls().length, 2);
     assert.doesNotMatch(stub.calls()[1], /(^|\s)--draft(\s|$)/);
+    assert.match(stdout, /::warning::.*without --draft/,
+      "same criterion, same gap — flow-recover's downgrade must be announced too");
   });
 });
 
