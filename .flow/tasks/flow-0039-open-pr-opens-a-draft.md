@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0039"
 title: "Open the auto-PR as a draft, so a pushed branch stops claiming to be ready for review"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "session_011jwLeP4dH526ggjoAyG1oT"
