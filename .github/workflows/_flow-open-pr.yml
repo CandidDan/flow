@@ -135,5 +135,10 @@ jobs:
           # is strictly worse than one that opens ready. The fallback warns rather than passing quietly.
           if ! gh pr create --draft --base main --head "$BRANCH" --title "$TITLE" --body "$body"; then
             echo "::warning::Could not open a draft PR (draft pull requests need a paid plan on a private repo). Retrying without --draft — the PR will open ready for review."
+            # DELIBERATELY no `|| echo …` here, unlike _flow-recover.yml's otherwise-identical
+            # fallback. Do not "harmonise" the two: recover sweeps many stranded tasks in one run,
+            # so one bad create must not abort the rest; this step handles exactly one push, and a
+            # swallowed failure here is a branch with no PR reported as green — the silent CAN-50
+            # failure this whole workflow exists to prevent. It must fail loudly.
             gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$body"
           fi
