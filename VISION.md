@@ -11,7 +11,7 @@ task, make a handoff, paste it into a Claude Code session. It worked, but it was
 too much of him in it. Flow is the protocol built to fix that — **agent delegation with the trust
 moved out of prompts and into CI.** Tasks are Markdown files on `main`; a worker claims one and
 opens a PR; CI, not a prompt, enforces scope, tests and coverage; there are two touchpoints —
-approve the task, approve the merge.
+approve the intent, approve the merge.
 
 **Flow is a protocol, not a tool.** Dan runs several projects at once, so what Flow has to earn is
 a smooth workflow across all of them — and *easy* is the bar, not merely possible.
@@ -64,6 +64,15 @@ hand — noticing something off in the acceptance criteria, or reading the code.
 often not plain English, so the approve-the-merge touchpoint is weaker than a green check makes it
 look. No mechanism currently exists that would catch a gate that lied.
 
+### G11 — Work traces to a stated intent
+Every piece of built work points back to something a human said they wanted, written down before
+it was scoped. Issues stay issues — things that are wrong. Intents are things we want, and they
+live in the repo, because that is what makes the accountability visible.
+**Progress looks like:** you can pick any merged PR and read, in the repo, the intent it came
+from and who approved it; and an approved intent survives contact with the tasks derived from it,
+rather than being rewritten once the work starts. *Failing today* — planned work enters as
+`status: ready` with no record of who asked for it or why.
+
 ## Non-goals
 
 ### NG6 — Flow becomes a tool
@@ -105,12 +114,10 @@ pointing at them surface as warnings, which is the intended signal.
 
 - **The shape of the cross-project view.** Wanted, genuinely unexplored. Deliberately not written
   as a prohibition: "we might one day" is not a non-goal, and a fake one rejects nothing.
-- **Touchpoint 1 does not fire on the direct-authoring path.** The issue-inbox path proposes a
-  spec and waits for approval; `task-writer` writes `status: ready` straight into `.flow/tasks/`.
-  Drift against the Purpose paragraph above, and a task rather than a goal.
 
 ## Change log
 
 | Date | Change | Why |
 |---|---|---|
+| 2026-09-07 | G11 declared; the Purpose paragraph's touchpoint 1 changes from approve-the-task to approve-the-intent. The recorded Open item about touchpoint 1 not firing on the direct-authoring path is closed by this change. | The human approves the artefact that needs judgement — what we want and why — rather than a scoped task spec they skim. Intents live in the repo so the record of who asked for what is visible where the work is, and issues stay what their name says: things that are wrong. |
 | 2026-09-01 | Vision rewritten from a `vision-writer` interview. G1–G5 and NG1–NG5 retired; G6–G10 and NG6–NG7 declared. | The previous vision was model-written from the repo's own documents, never extracted from the human, and merged inside a docs PR. It stated that "the audience is a decision, not an assumption" while being exactly the assumption it warned against. Goals here are the human's words; NG4, NG2 and NG3 are reversed on his instruction. |
