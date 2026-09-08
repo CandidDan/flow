@@ -120,10 +120,6 @@ The design review needs an age on every needs-you item, and Flow's frontmatter h
 
 This is the real cost of the decision and is not mitigated away. Previously the only credential was a read-only PAT in the viewer's own browser. Now an App installation credential lives in infrastructure, permanently, and is a considerably more attractive target. The App's short-lived tokens and per-repo scoping reduce the blast radius; they do not remove the fact. Anything that widens the App's scopes is a decision, not a config change.
 
-### Two housekeeping scripts reference paths that will not exist
-
-`flow-publish.sh` (the `projects.yml` → `projects.example.yml` scrub) and `flow-release.sh` (the `portfolio-manager.md` commit) both name `flightdeck/` paths. They fail quietly today; they need updating with the move.
-
 ## Alternatives
 
 ### Fix the ordering and stay client-only — rejected because it answers the wrong question
