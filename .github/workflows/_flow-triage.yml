@@ -51,7 +51,7 @@ jobs:
     if: ${{ vars.FLOW_AI == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
@@ -372,7 +372,7 @@ jobs:
           FLOW_TRIAGE_CONTENT
           node "$RUNNER_TEMP/flow-triage-content.mjs" "$raw" "$FLOW_TRIAGE_CONTENT_DIR"
 
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
         # Nothing admitted means nothing to sweep. Skipping keeps the agent — and its turn
         # budget — away from an inbox it has already been told it may not read.
         if: ${{ steps.inbox.outputs.numbers != '' }}
