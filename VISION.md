@@ -16,10 +16,15 @@ approve the intent, approve the merge.
 **Flow is a protocol, not a tool.** Dan runs several projects at once, so what Flow has to earn is
 a smooth workflow across all of them — and *easy* is the bar, not merely possible.
 
-**Audience: a solo tool today.** A product is a **live possibility, deliberately not built for
-yet** — not ruled out, and not a thing to design against. A second user is **preserved, not built
-for**: the design should not foreclose one, and nothing is built to serve one. Teams are a shape of
-multi-user and are covered by that same word.
+**Audience: one operator, with readers.** Flow is operated by one person — he authors the intents,
+approves them, and approves the merges. That is unchanged, and it is what "solo tool" means here.
+What is new is that in *adopting* repos the artefacts now have readers who are not the operator: a
+client, or the team on a project he contracts to. They read and they feed back; they do not author,
+approve, or work tasks. Building for that reading is in scope — a rendered projection of the intents
+is the first thing it buys. A second **operator** stays **preserved, not built for**: the design must
+not foreclose one, and nothing is built to serve one. A product remains a **live possibility,
+deliberately not built for yet** — not ruled out, and not a thing to design against. Teams are a
+shape of multi-operator and are covered by that same word.
 
 **Git-native is how Flow works today, not a commitment.** If state ever needs to live outside the
 repo, that is open rather than settled.
@@ -114,10 +119,19 @@ pointing at them surface as warnings, which is the intended signal.
 
 - **The shape of the cross-project view.** Wanted, genuinely unexplored. Deliberately not written
   as a prohibition: "we might one day" is not a non-goal, and a fake one rejects nothing.
+- **Whether readers stay readers.** Today they read and feed back, which is what the audience
+  paragraph above is built on. The expectation is that it will not always be that way — but "will
+  not always" is not a decision, so it is recorded here rather than designed for. When it does
+  change, the audience paragraph is the thing that changes first.
+- **Where a reader's feedback lands.** Readers feed back, but nothing yet says through what. A PR
+  comment needs repo access they may not have; an issue is now reserved for things that are wrong;
+  out of band means the operator transcribes it. Undecided — and it decides whose words an intent's
+  Problem section holds, which the intent template currently assumes is one person's.
 
 ## Change log
 
 | Date | Change | Why |
 |---|---|---|
+| 2026-09-07 | Audience amended: one operator, plus readers who are not the operator, in adopting repos only. Two Open items recorded — whether readers stay readers, and where their feedback lands. | Intents in project repos will be read and commented on by clients and contracted teams. That makes "nothing is built to serve a second user" false as written, since a projection is built to serve exactly that. The narrow fix separates operator from reader: the solo-operator position is untouched, and the trajectory beyond reading is recorded as undecided rather than designed for. |
 | 2026-09-07 | G11 declared; the Purpose paragraph's touchpoint 1 changes from approve-the-task to approve-the-intent. The recorded Open item about touchpoint 1 not firing on the direct-authoring path is closed by this change. | The human approves the artefact that needs judgement — what we want and why — rather than a scoped task spec they skim. Intents live in the repo so the record of who asked for what is visible where the work is, and issues stay what their name says: things that are wrong. |
 | 2026-09-01 | Vision rewritten from a `vision-writer` interview. G1–G5 and NG1–NG5 retired; G6–G10 and NG6–NG7 declared. | The previous vision was model-written from the repo's own documents, never extracted from the human, and merged inside a docs PR. It stated that "the audience is a decision, not an assumption" while being exactly the assumption it warned against. Goals here are the human's words; NG4, NG2 and NG3 are reversed on his instruction. |
