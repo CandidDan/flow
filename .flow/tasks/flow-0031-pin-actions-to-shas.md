@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0031"
 title: "Pin canonical's own third-party actions to commit SHAs, so a moved tag cannot change what the fleet runs"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude/next-task-ulxjfc"
 created: "2026-08-31"
-started: ""
+started: "2026-09-09T07:27:35Z"
 branch: ""
 pr: ""
 issue: ""
