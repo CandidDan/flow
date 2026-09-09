@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0031"
 title: "Pin canonical's own third-party actions to commit SHAs, so a moved tag cannot change what the fleet runs"
-status: "in_progress"
+status: "blocked"
 priority: 2
 project: "flow"
 owner: "claude/next-task-ulxjfc"
@@ -11,7 +11,7 @@ started: "2026-09-09T07:27:35Z"
 branch: "claude/next-task-ulxjfc"
 pr: "https://github.com/CandidDan/flow/pull/63"
 issue: ""
-blocked_reason: ""
+blocked_reason: "Touches conflict found at gate time, not a defect in the work. flow-0018's proving test .flow/bin/workflow-prompt-paths.test.mjs (AC2, TRIAGE_STRUCTURE_BEFORE at ~lines 299-300) asserts _flow-triage.yml's checkout and claude-code-action refs byte-identical to actions/checkout@v4 and anthropics/claude-code-action@v1. This task names _flow-triage.yml as one of the thirteen files to pin, so pinning it fails that test, and the test file is outside this task's touches. UNBLOCK: add .flow/bin/workflow-prompt-paths.test.mjs to touches, flip to ready; the fix is updating those two constant values to the pinned form (11d5960a326750d5838078e36cf38b85af677262 and 5ccc3a35a6367cdb8e6fbd0728287467540ecfe2) — same versions, so flow-0018's intent still holds. All other work is done on branch claude/next-task-ulxjfc, draft PR #63."
 serves: ["G4"]            # what canonical says is what the fleet runs — a mutable tag breaks exactly that
 touches: [".github/workflows/_flow-compass.yml", ".github/workflows/_flow-done.yml", ".github/workflows/_flow-gates.yml", ".github/workflows/_flow-open-pr.yml", ".github/workflows/_flow-queue-runner.yml", ".github/workflows/_flow-recover.yml", ".github/workflows/_flow-review.yml", ".github/workflows/_flow-status.yml", ".github/workflows/_flow-sync.yml", ".github/workflows/_flow-triage.yml", ".github/workflows/ci.yml", ".github/workflows/flow-watchdog.yml", ".github/workflows/release-tag.yml", ".flow/bin/action-pins.test.mjs"]
 labels: [infra, security, supply-chain]
@@ -20,6 +20,7 @@ notes:
   - "2026-08-31: raised by the security check on flow-0027's PR (#43) as a Low, pre-existing finding, and deliberately NOT fixed there — it was outside that task's touches. Written up as its own task rather than logged as a note, because the fleet-wide blast radius is the whole point and a note would not have carried it."
   - "2026-08-31: SEQUENCING, decided rather than assumed. The nine project-template/.github/workflows/flow-*.yml callers have the same mutable-tag problem, and they are ALREADY claimed by flow-0030 (blocked), which rewrites every `uses:` line in them for the release-repo move. Pinning them here would either collide on those paths or force flow-0030 to be rewritten, and doing both edits to the same lines in two passes is wasted work. So this task takes canonical's own workflows only — which collide with nothing currently live — and flow-0030 pins the template callers in the same pass that re-points them. If flow-0030 is retired or rescoped, the template callers need a task of their own; they are not covered here."
   - "2026-08-31: the `uses:` lines that reference canonical's OWN reusables (CandidDan/flow/.github/workflows/_flow-*.yml@main) are deliberately out of scope. Those are governed by docs/flow-versioning-policy.md, which already reasons about mutable vs immutable refs for canonical's artefacts and chose a moving alias on purpose (v1-edge / v1, with a canary). Pinning a repo to a SHA of itself would defeat that policy, not harden it. This task is about THIRD-PARTY code only."
+  - "2026-09-09: HANDOFF. Done on branch claude/next-task-ulxjfc (draft PR #63): all 41 third-party uses: refs in the thirteen named files pinned to upstream-resolved SHAs — checkout@v4 -> 11d5960a326750d5838078e36cf38b85af677262 (v4.4.0), setup-node@v4 -> 49933ea5288caeca8642d1e84afbd3f7d6820020 (v4.4.0), claude-code-action@v1 -> 5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 (v1.0.219, peeled from the annotated tag). Resolved via git ls-remote against each upstream, matching the pins flow-0029 already put in flow-release-publish.yml. The check is .flow/bin/action-pins.test.mjs (logic exported from the test file, same shape as workflow-prompt-paths.test.mjs, no yaml dependency so it runs in flow-tooling too). Local gate: build 23 files, lint 73 files, coverage 95.47%, test 820/821 — the ONE failure is flow-0018's AC2 in workflow-prompt-paths.test.mjs, see blocked_reason. NEXT ACTION once touches is widened: on the branch, change TRIAGE_STRUCTURE_BEFORE.checkout and .action to the pinned strings, re-run npm test, push, mark PR #63 ready. Nothing else is outstanding."
 ---
 
 ## Context
