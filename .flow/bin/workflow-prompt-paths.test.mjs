@@ -296,8 +296,8 @@ const TRIAGE_STRUCTURE_BEFORE = {
   permissions: { contents: "write", issues: "write", "id-token": "write" },
   jobIf: "${{ vars.FLOW_AI == 'true' }}",
   runsOn: "ubuntu-latest",
-  checkout: "actions/checkout@v4",
-  action: "anthropics/claude-code-action@v1",
+  checkout: "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+  action: "anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2",
   nonPromptInputs: {
     claude_code_oauth_token: "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}",
     github_token: "${{ secrets.GITHUB_TOKEN }}",
