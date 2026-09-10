@@ -17,6 +17,7 @@
 // gate-passes criterion, which the gate itself proves.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
@@ -42,6 +43,29 @@ function section(text, prefix) {
   }
   return lines.slice(start + 1, end).join("\n");
 }
+
+// Everything BEFORE Amendment 1 — the ADR as originally accepted. Several assertions below are
+// about what the original body says, and must not be satisfiable by text the amendment adds:
+// "the hosting question is not decided here" is true of the 2026-08-31 document and would be
+// trivially matched by the amendment's own discussion of it. Splitting them keeps each honest.
+const AMENDMENT_RULE = /^---\s*$\n+(?=^# Amendment 1\b)/m;
+function originalBody(text) { return text.split(AMENDMENT_RULE)[0]; }
+
+// Body of the `# Amendment 1` block: from its H1 to the next `# ` H1 (a future Amendment 2) or
+// to the end of the document.
+function amendment(text) {
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => /^# Amendment 1\b/.test(l));
+  if (start === -1) return "";
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^# (?!Amendment 1\b)/.test(lines[i])) { end = i; break; }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
+const BODY = originalBody(doc);
+const AMD = amendment(doc);
 
 // ── criterion 1: it exists, and matches the header shape of its siblings ─────────────────────
 
@@ -115,7 +139,15 @@ test("the Decision names what stays PRIVATE — the half an implementer would ot
     "the exclusions must be stated as exclusions, in a passage that says so");
   assert.match(decision, /`\.flow\/tasks\/`/, "the store is the whole motivation — name it as withheld");
   assert.match(decision, /secret/i, "the repository secrets must not cross");
-  assert.match(decision, /flightdeck/i, "the flightdeck stays with the authoring repo");
+  // SUPERSEDED IN PART by ADR-0006, via Amendment 1 (flow-0032). `flightdeck/` no longer stays
+  // with the authoring repo — mission control moved out to `CandidDan/inflight` entirely. The
+  // inventory line is deliberately NOT edited out of the Decision: an ADR records what was
+  // decided on the day, and is amended rather than rewritten. So this still asserts the original
+  // text; what it must no longer claim is that the line describes today. The supersession is
+  // pinned by "the amendment records ADR-0006's supersession of the flightdeck line" below —
+  // do not delete that test and leave this one carrying a stale message again.
+  assert.match(decision, /flightdeck/i,
+    "the Decision's original inventory named the flightdeck as private — superseded by ADR-0006; see Amendment 1");
 });
 
 test("the Decision gives flow-0029 a RULE, not only two lists", () => {
@@ -262,8 +294,10 @@ test("the ADR cross-references ADR-0002 / Amendment 1 on the flightdeck's hostin
     "…precisely because it holds no store, which is the whole reason it is a candidate");
 });
 
-test("the flightdeck hosting question is recorded as NOT decided here", () => {
-  assert.match(doc, /not decided|not in this ADR's scope|interaction, not a decision/i,
+test("the flightdeck hosting question is recorded as NOT decided in the original body", () => {
+  // Asserted against BODY, not `doc`: Amendment 1 discusses the hosting question at length, so
+  // matching the whole document would pass even if the original passage were deleted.
+  assert.match(BODY, /not decided|not in this ADR's scope|interaction, not a decision/i,
     "hosting the flightdeck is out of scope — an ADR that blurs this licenses unplanned work");
 });
 
@@ -295,4 +329,177 @@ test("every repo-relative path ADR-0005 names actually exists", () => {
     if (!existsSync(join(REPO, raw))) missing.push(raw);
   }
   assert.deepEqual(missing, [], `ADR-0005 names paths that do not exist: ${missing.join(", ")}`);
+});
+
+// ── flow-0032: Amendment 1 — the name, the topic trap, the cutover order, the tree ownership ──
+//
+// The amendment carries four operational facts that lived only in task notes on flow-0029 and
+// flow-0030, where the worker of those tasks was the only reader. Each is a trap that costs
+// something real if it is lost — a fleet-wide CI outage, a phantom project in the operator's own
+// rollup, a silently discarded file — so each gets its own assertion rather than riding on a
+// single "the amendment exists" check.
+//
+// Criteria proved: all of flow-0032's except the final gate-passes criterion, which the gate
+// itself proves.
+
+// The header field names an amendment carries, in order. Shared with ADR-0002's Amendment 1
+// rather than asserted twice — the criterion's bar is "the same format as ADR-0002's".
+function amendmentHeaderShape(block) {
+  const lines = block.split("\n").slice(0, 8);
+  return lines.filter((l) => /^\*\*(Status|Date|Deciders|Amends):\*\*\s*\S/.test(l))
+              .map((l) => l.match(/^\*\*(\w+):\*\*/)[1]);
+}
+
+test("ADR-0005 carries an Amendment 1 in ADR-0002's amendment format", () => {
+  assert.ok(AMD, "no `# Amendment 1` block in ADR-0005");
+  assert.match(AMD, /^# Amendment 1 — \S/,
+    'expected an "# Amendment 1 — <title>" H1, em-dashed as ADR-0002\'s is');
+  assert.deepEqual(amendmentHeaderShape(AMD), ["Status", "Date", "Deciders", "Amends"],
+    "the amendment must carry Status, Date, Deciders and Amends, in that order");
+  assert.match(AMD, /^\*\*Date:\*\*\s*\d{4}-\d{2}-\d{2}\s*$/m, "Date must be a bare ISO date");
+  assert.match(AMD, /^\*\*Amends:\*\*\s*\S/m, "Amends must say WHAT is amended, not merely exist");
+});
+
+test("the amendment is preceded by a `---` rule, as ADR-0002's is", () => {
+  assert.match(doc, AMENDMENT_RULE,
+    "ADR-0002 separates its amendment from the body with a horizontal rule — match it");
+});
+
+test("ADR-0002's Amendment 1 really does have the format ADR-0005 is being held to", () => {
+  // Pins the convention to the sibling rather than to this file's memory of it. If ADR-0002's
+  // amendment is ever restructured, this fails and the shared shape gets re-decided once.
+  const sibling = amendment(readFileSync(join(ADR_DIR, SIBLINGS[1]), "utf8"));
+  assert.ok(sibling, `${SIBLINGS[1]}: expected an Amendment 1 block to compare against`);
+  assert.deepEqual(amendmentHeaderShape(sibling), ["Status", "Date", "Deciders", "Amends"],
+    `${SIBLINGS[1]}: the format ADR-0005's amendment is held to must be the one this sibling uses`);
+});
+
+test("the ADR's top Status line records that it has been amended", () => {
+  // Without this, a reader who stops at the header — which is the point of a header — takes the
+  // superseded inventory and the deferred name at face value.
+  assert.match(doc, /^\*\*Status:\*\*\s*Accepted\b.*\bamend/im,
+    "the top Status line must note the amendment, as ADR-0002's does");
+});
+
+test("the amendment names the release repo, and states that it is public", () => {
+  assert.match(AMD, /`CandidDan\/flow-protocol`/,
+    "the whole point of the amendment is that the deferred name is now recorded");
+  assert.match(AMD, /public/i, "…and that the release repo is public — it must be, to be callable");
+});
+
+test("the amendment names `flow-agent-protocol` as the rejected form, with the reason", () => {
+  assert.match(AMD, /`?flow-agent-protocol`?/,
+    "this ADR family keeps its alternatives — the rejected name must be findable");
+  assert.match(AMD, /vendor.{0,20}neutral|agent.{0,20}neutral|neutral/i,
+    "the reason `agent` was dropped is that the protocol is deliberately vendor- and agent-neutral");
+  assert.match(AMD, /permanent|cannot be changed|expensive|re-pin/i,
+    "…and that the name is a permanent public reference, which is what makes the choice costly");
+});
+
+test("the amendment records that the release repo must NOT carry the `flow` topic", () => {
+  assert.match(AMD, /topic/i, "the constraint is about a GitHub topic — say so");
+  assert.match(AMD, /must not|never be tagged|not be tagged/i,
+    "stated as a prohibition, not as a preference a future maintainer can weigh");
+  assert.match(AMD, /`?topic:flow`?/i, "name the topic exactly — `flow`, the enrolment selector");
+});
+
+test("the topic constraint records WHY, not merely the rule", () => {
+  // A bare "don't tag it" is the kind of rule that gets undone by someone tidying repository
+  // settings. The reason is what makes it stick.
+  assert.match(AMD, /enrol|discover/i,
+    "`topic:flow` is the ENROLMENT mechanism for the fleet views — that is the whole reason");
+  assert.match(AMD, /flightdeck\/bin\/mission-control\.mjs|mission-control/i,
+    "name the consumer that reads the topic, so the claim is checkable");
+  assert.match(AMD, /watchdog/i, "…and the watchdog, which reads the same selector");
+  assert.match(AMD, /phantom|store-less|no store/i,
+    "the failure mode is a phantom store-less project in the operator's own rollup");
+});
+
+test("the amendment records the cutover ORDER, all four steps in sequence", () => {
+  const order = ["publish", "re-?pin", "verif|green", "private"];
+  let cursor = -1;
+  for (const step of order) {
+    const at = AMD.slice(cursor + 1).search(new RegExp(step, "i"));
+    assert.notEqual(at, -1, `cutover step not found in order: ${step}`);
+    cursor = cursor + 1 + at;
+  }
+  assert.match(AMD, /only then|last|finally/i,
+    "the visibility flip is explicitly LAST — an ordering with no emphasis is a suggestion");
+});
+
+test("the cutover records the consequence of flipping canonical private too early", () => {
+  assert.match(AMD, /at once|simultaneous|all at once|every adopting repo/i,
+    "the failure is fleet-wide and simultaneous — that is why the order is a safety property");
+  assert.match(AMD, /their CI|in \*their\* CI|adopting repo'?s CI/i,
+    "…and it surfaces in the ADOPTER's CI, furthest from the cause, with nothing local to explain it");
+});
+
+test("the cutover reason is stated in COUNTS, not vaguely", () => {
+  // flow-0032's criterion says "in counts, not vaguely". A number also decays visibly, where a
+  // hand-wave does not: a reader can re-run the count and see it has moved.
+  const numbers = [...AMD.matchAll(/\*\*(\d+)[^*]*\*\*|\b(\d+) (?:files|of those|of them)\b/gi)];
+  assert.ok(numbers.length >= 2,
+    "the amendment must quantify the exposure — at least the file count and the caller count");
+  assert.match(AMD, /\b\d+ files\b/i, "state how many files still name the old reference");
+  assert.match(AMD, /`uses:`|uses: /,
+    "…and how many are real `uses:` references, which are the ones that break at run time");
+});
+
+test("the amendment's file counts still match the working tree", () => {
+  // Pins the ADR to the repo rather than to a remembered number, exactly as the dogfooding test
+  // above pins its "today" passage. When this fails, the count has drifted and the amendment's
+  // paragraph must be updated with it — that drift is the point, not noise.
+  const run = (args) =>
+    execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).split("\n").filter(Boolean).length;
+  const named = run(["grep", "-lI", "CandidDan/flow", "--", ".", ":(exclude).flow/tasks/"]);
+  const claimed = parseInt(AMD.match(/\*\*(\d+) files outside the task store/)[1], 10);
+  assert.equal(claimed, named,
+    `the amendment claims ${claimed} files outside the store name CandidDan/flow; git finds ${named}`);
+});
+
+test("the amendment records that publication REPLACES the release repo's tree", () => {
+  assert.match(AMD, /replace/i,
+    "an orphan snapshot replaces the tree — that is what makes hand-added files disposable");
+  assert.match(AMD, /hand-add|by hand|hand-adding/i, "the instinct being pre-empted is fixing it by hand");
+  assert.match(AMD, /do(es)? not survive|discard/i, "…and the outcome: the file is gone on next publish");
+  assert.match(AMD, /LICENSE|README\.md/,
+    "name the files someone would actually add, or the rule stays abstract");
+  assert.match(AMD, /out-of-manifest|manifest/i,
+    "the worse case is confusing flow-0029's out-of-manifest check — record it, it is not obvious");
+});
+
+test("the amendment records ADR-0006's supersession of the flightdeck line", () => {
+  // This is the assertion that replaces the stale claim in "the Decision names what stays
+  // PRIVATE" above. Deleting it puts that message back into the position of certifying a fact
+  // that stopped being true on 2026-09-03.
+  assert.match(AMD, /ADR-0006|0006-mission-control-own-repo\.md/,
+    "the superseding ADR must be named, so a reader can follow it");
+  assert.match(AMD, /supersede/i, "stated as a supersession, not as a passing mention");
+  assert.match(AMD, /`CandidDan\/inflight`/, "name where mission control actually went");
+  assert.match(AMD, /private/i,
+    "inflight is PRIVATE (Vercel serves private repos) — an earlier draft had it public, and the "
+    + "difference is the whole reason the Pages route was abandoned");
+  assert.match(AMD, /not.{0,40}release repo|does \*\*not\*\* move to the release repo/i,
+    "…and that it did NOT go to the release repo — ADR-0006 rejected that on this ADR's own rule");
+});
+
+test("the amendment records that ADR-0006 answered the deferred hosting question", () => {
+  assert.match(AMD, /hosting question|hosting/i,
+    "the 'Interaction with ADR-0002' section left hosting open — the amendment must close it");
+  assert.match(AMD, /answer|decided|no longer a candidate/i,
+    "…by pointing at where it WAS decided, rather than leaving two open-looking passages");
+});
+
+test("the amendment reopens nothing, and says so", () => {
+  // flow-0032's scope is explicit that the Decision, Consequences and Alternatives stand. Without
+  // this recorded in the document, a later reader cannot tell an amendment from a revision.
+  assert.match(AMD, /stand unchanged|reopens nothing|revises nothing|unchanged/i,
+    "an amendment that does not say what it leaves alone reads as a partial rewrite");
+});
+
+test("the amendment does not implement, and says which tasks do", () => {
+  assert.match(AMD, /flow-0029/, "flow-0029 publishes");
+  assert.match(AMD, /flow-0030/, "flow-0030 re-pins");
+  assert.match(AMD, /does not implement|records; it does not|not.*flipped/i,
+    "the amendment decides and records — it changes no repository setting");
 });

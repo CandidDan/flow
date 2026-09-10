@@ -1,6 +1,6 @@
 # ADR-0005: Split canonical into a private authoring repo and a public release repo
 
-**Status:** Accepted
+**Status:** Accepted — amended 2026-09-10 (Amendment 1: the release repo is named `CandidDan/flow-protocol`, the cutover is ordered, and the `flightdeck/` line is superseded by ADR-0006)
 **Date:** 2026-08-31
 **Deciders:** Dan (inspirator / sole maintainer)
 
@@ -222,3 +222,128 @@ lands.
 
 Both were blocked on this ADR precisely so that the boundary would be decided once, in the open,
 rather than assumed three times.
+
+---
+
+# Amendment 1 — the release repo is named, and the cutover is ordered
+
+**Status:** Accepted
+**Date:** 2026-09-10
+**Deciders:** Dan (inspirator / sole maintainer)
+**Amends:** the deferred name above ("The release repo's name is chosen at implementation time"),
+and the `flightdeck/` line in the private-authoring-repo inventory. The Decision's boundary rule,
+the Consequences and the Alternatives stand unchanged — this amendment records what was deferred
+and what was learned setting the repository up. It reopens nothing.
+
+## What changed since 2026-08-31
+
+The original ADR deliberately left the release repo unnamed, and was written before anything had
+been built. The name has since been chosen and the repository created, and three operational
+constraints surfaced in the same session — each a live trap rather than a nicety, and none of them
+derivable from the ADR as written. They are recorded here because this is the document a future
+maintainer opens; until now they lived only in task notes on flow-0029 and flow-0030, which are
+read by the worker of those tasks and by nobody else.
+
+## The name: `CandidDan/flow-protocol`
+
+The release repo is **`CandidDan/flow-protocol`**, **public**, created 2026-08-31.
+
+It was chosen over **`flow-agent-protocol`**. `agent` was dropped because the protocol is
+deliberately vendor- and agent-neutral — flow-0006 made it so, and this ADR's own Consequences
+record that the reviewer "no longer has to be your vendor". Naming the artefact after the class of
+consumer that happens to dominate today bakes 2026's vocabulary into the one thing the Decision
+above calls expensive to undo: a permanent public `uses:` reference in every adopting repo. If the
+protocol outlives the word "agent", the reference should not have to be re-pinned a second time to
+say so.
+
+The rejected form is recorded rather than discarded, per this ADR family's habit of keeping the
+alternatives: a future maintainer who wonders why the obvious, more descriptive name was passed
+over should find the reason here rather than re-litigate it.
+
+## The release repo must not carry the `flow` GitHub topic
+
+**Constraint: `CandidDan/flow-protocol` must never be tagged with the `flow` topic.**
+
+`topic:flow` is not a label. It is the **enrolment mechanism** for the fleet views:
+`flightdeck/bin/mission-control.mjs` and `flightdeck/bin/watchdog.mjs` both discover every
+repository carrying that topic under the account and then read its task store. The release repo has
+no store, by design — `.flow/tasks/` is the first thing the Decision above lists as never crossing.
+
+So tagging it enrols a **phantom, store-less project** into the operator's own rollup: mission
+control gains a project it can say nothing about, and the watchdog gains a repository whose
+automation liveness is undefined because it has no automation. The failure is quiet — nothing
+errors, the views simply start lying — which is why it is written down rather than left to be
+noticed.
+
+This is a general rule, not a fact about one repository: **a repository that carries the `flow`
+topic is asserting that it has a task store.** Publication targets do not.
+
+## The cutover is ordered, and the order is the whole safety property
+
+**Canonical must stay public until the re-pin has landed and been verified green.**
+
+The order is:
+
+1. **Publish** the artefact to `CandidDan/flow-protocol` (flow-0029).
+2. **Re-pin** the fleet's `uses:` references to the new repository (flow-0030).
+3. **Verify** a green run against the new reference — an actual CI run, not a reading of the diff.
+4. **Only then** flip canonical private.
+
+The reason, in counts rather than vaguely. As of 2026-09-10, **49 files outside the task store name
+`CandidDan/flow`**; the original Consequences recorded 40 on 2026-08-31, and the number has grown,
+not shrunk. **28 of those carry a real `uses:` reference** resolved by GitHub at run time, and
+**11 of them are the workflow callers in `project-template/`** — the files every adopting repo
+ships a copy of.
+
+That last number is the one that matters. Flipping canonical private before step 3 does not degrade
+gradually: a private repository's reusable workflows cannot be resolved by an outside adopter at
+all, so **all 11 callers fail to resolve in every adopting repo at once**, in *their* CI, with no
+local change on their side to explain it. The blast radius is the entire fleet, simultaneously, and
+the symptom appears furthest from the cause.
+
+Steps 1 and 2 are individually reversible; step 4 is what makes the failure fleet-wide, so it is
+last and it is gated on evidence rather than on confidence.
+
+## The publisher owns the release repo's tree
+
+Publication is a **history-free orphan snapshot** (see "Publication must not carry history" above),
+which means it **replaces** whatever is in the release repo rather than merging with it.
+
+The consequence, stated because the instinct on seeing a bare public repository is to fix it by
+hand: **anything hand-added to `CandidDan/flow-protocol` does not survive.** Adding a `LICENSE`, a
+`README.md`, a topic list or a contributing guide there is at best silently discarded on the next
+publish, and at worst confuses flow-0029's own out-of-manifest check, which exists to detect
+exactly the case of content in the release repo that the manifest did not put there.
+
+Everything the release repo should contain is published *from canonical*, by the manifest. If
+something is missing there, the fix belongs in the publish set — never in the release repo.
+
+## What ADR-0006 supersedes here
+
+The private-authoring-repo inventory above lists `flightdeck/` among the things that stay in the
+authoring repo. **That line is superseded by
+`docs/adr/0006-mission-control-own-repo.md`.**
+
+Mission control moves out of canonical entirely, into its own repository, `CandidDan/inflight` —
+**private**, served by Vercel, with its data in Supabase. It does **not** move to the release repo:
+ADR-0006 rejected that on this ADR's own boundary rule, since a cross-project rollup is neither
+needed by an adopter at run time nor at adoption time.
+
+ADR-0006 also **answers the hosting question** that the "Interaction with ADR-0002 and its
+Amendment 1" section above deliberately left open as an interaction rather than a decision. That
+section is now historical: it correctly records that hosting was not decided *here*, and ADR-0006
+is where it was decided. The release repo is no longer a candidate host.
+
+Nothing else in the inventory changes. The store, the secrets, canonical's own `.flow/bin/`
+adapters and `flow-*` callers, `VISION.md`, `CLAUDE.md`, the ADRs and the runbooks all stay
+private, for the reasons given above.
+
+## What this amendment does not do
+
+It records; it does not implement. No repository is published, no reference is re-pinned, no
+visibility is flipped, no topic is set or unset, and `flightdeck/` is not moved. flow-0029,
+flow-0030 and the ADR-0006 move task own that work.
+
+`CandidDan/flow-protocol`'s settings were confirmed public and untagged by the maintainer on
+2026-08-31 and are recorded here as given: the repository is outside canonical's session scope, so
+a worker cannot re-verify them and should not pretend to.
