@@ -264,14 +264,47 @@ export function issueTitle(sha) {
   return `Plane violation: ${String(sha ?? "unknown").slice(0, 8)} reached main without a PR`;
 }
 
-// Every open plane-guard issue, as {sha -> issue}. THE ONLY PLACE THE MARKER IS PARSED — issues
-// carrying no marker are ignored entirely, because a human may have hand-labelled something and
-// this file acting on their issue would corrupt the inbox it feeds.
-export function markedIssues(openIssues) {
+// The identity this guard's issues are filed under. Issues created with the default `GITHUB_TOKEN`
+// in Actions are authored by `github-actions[bot]`; override it if a run ever files under another.
+export const PLANE_GUARD_ISSUE_AUTHOR = "github-actions[bot]";
+
+function markerOf(issue) {
+  const m = String(issue?.body ?? "").match(/<!-- plane-guard:commit=(.*?) -->/);
+  return m ? m[1] : null;
+}
+
+// Every open plane-guard issue THIS GUARD FILED, as {sha -> issue}. THE ONLY PLACE THE MARKER IS
+// PARSED. Issues carrying no marker are ignored entirely — a human may have hand-labelled something,
+// and this file acting on their issue would corrupt the inbox it feeds.
+//
+// AUTHORSHIP IS PART OF THE MATCH, not decoration. The marker is an HTML comment in a body anyone who
+// can open a labelled issue could write, so without this check a decoy issue carrying the marker for a
+// commit someone is about to push would make the guard treat the real violation as already tracked and
+// merely comment on the decoy — downgrading the alert exactly when it matters. flow-review's security
+// check raised it as Low.
+//
+// It is CLOSED rather than accepted, unlike the merge-shape limitation this file used to carry: that
+// one was reachable by an ordinary local workflow and got fixed for that reason, while this one takes
+// deliberate marker-forging — but the fix is two lines, so the threat-model argument never has to be
+// made. A forged marker is not silently skipped either: `foreignMarkedIssues` surfaces it, so the
+// attempt becomes a signal instead of a no-op.
+export function markedIssues(openIssues, { filedBy = PLANE_GUARD_ISSUE_AUTHOR } = {}) {
   const out = new Map();
   for (const issue of openIssues ?? []) {
-    const m = String(issue?.body ?? "").match(/<!-- plane-guard:commit=(.*?) -->/);
-    if (m) out.set(m[1], issue);
+    const sha = markerOf(issue);
+    if (sha && issue?.user?.login === filedBy) out.set(sha, issue);
+  }
+  return out;
+}
+
+// Issues carrying this guard's marker that this guard did not file. Reported, never acted on.
+export function foreignMarkedIssues(openIssues, { filedBy = PLANE_GUARD_ISSUE_AUTHOR } = {}) {
+  const out = [];
+  for (const issue of openIssues ?? []) {
+    const sha = markerOf(issue);
+    if (sha && issue?.user?.login !== filedBy) {
+      out.push({ number: issue?.number ?? null, author: issue?.user?.login ?? "unknown", sha });
+    }
   }
   return out;
 }
@@ -325,8 +358,8 @@ export function renderRedetectionComment({ violation, now }) {
 // its commits is dealt with, and the label stops meaning anything. Nothing is ever CLOSED from
 // here — unlike a dead workflow, a commit that reached `main` without a PR does not recover on its
 // own, so there is no observation that would justify closing the issue. A human resolves it.
-export function planIssueActions({ repo, violations, openIssues, now }) {
-  const tracked = markedIssues(openIssues);
+export function planIssueActions({ repo, violations, openIssues, now, filedBy = PLANE_GUARD_ISSUE_AUTHOR }) {
+  const tracked = markedIssues(openIssues, { filedBy });
   const actions = [];
   for (const v of violations ?? []) {
     // An `unresolved` commit FAILS THE JOB but files NOTHING. The guard fails closed, so a commit
@@ -343,7 +376,7 @@ export function planIssueActions({ repo, violations, openIssues, now }) {
       actions.push({ type: "file", sha: v.sha, title: issueTitle(v.sha), body: renderIssueBody({ repo, violation: v, now }) });
     }
   }
-  return { actions };
+  return { actions, foreign: foreignMarkedIssues(openIssues, { filedBy }) };
 }
 
 // ── pure: `git log` output -> commits ────────────────────────────────────────────────────────
@@ -522,6 +555,7 @@ export async function runPlaneGuard({ io, repo, range, now = Date.now(), fileIss
   let actions = [];
   let failures = [];
   let dedupeIndexTruncated = false;
+  let foreignMarkers = [];
   if (fileIssues && violations.length > 0) {
     let openIssues = [];
     try {
@@ -534,12 +568,13 @@ export async function runPlaneGuard({ io, repo, range, now = Date.now(), fileIss
       failures.push({ type: "read-issues", sha: null, reason: `${err?.message || err}` });
     }
     const planned = planIssueActions({ repo, violations, openIssues, now });
+    foreignMarkers = planned.foreign;
     const outcome = await applyActions({ io, repo, actions: planned.actions, dryRun });
     actions = outcome.applied;
     failures = failures.concat(outcome.failures);
   }
 
-  return { repo, range, baseBranch, examined, results, violations, emptyScan, actions, failures, dedupeIndexTruncated };
+  return { repo, range, baseBranch, examined, results, violations, emptyScan, actions, failures, dedupeIndexTruncated, foreignMarkers };
 }
 
 // The exit code, as a pure function of the summary, so the rule is a table test rather than
@@ -758,6 +793,10 @@ if (__isMain) {
     if (r.pullLookupError) console.error(`plane-guard: could not resolve PRs for ${r.sha.slice(0, 8)} — treated as a violation: ${r.pullLookupError}`);
   }
   for (const f of summary.failures) console.error(`plane-guard: ${f.type} failed${f.sha ? ` for ${f.sha.slice(0, 8)}` : ""}: ${f.reason}`);
+
+  for (const f of summary.foreignMarkers) {
+    console.error(`plane-guard: issue #${f.number} carries this guard's marker for ${String(f.sha).slice(0, 8)} but was filed by ${f.author}, not ${PLANE_GUARD_ISSUE_AUTHOR} — ignored for dedupe and reported here.`);
+  }
 
   if (summary.dedupeIndexTruncated) {
     console.error(`plane-guard: the open-issue read returned a full page of ${ISSUES_PER_PAGE} — the dedupe index may be incomplete,`);

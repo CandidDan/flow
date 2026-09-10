@@ -47,6 +47,7 @@ import {
   formatViolation,
   isStorePath,
   markedIssues,
+  foreignMarkedIssues,
   mergedPulls,
   offendingPaths,
   parseGitLog,
@@ -259,7 +260,7 @@ test("criterion 2: the issue body says this is detection, never prevention, and 
 test("a re-run comments on the existing issue rather than filing a second one", async () => {
   const sha = "3".repeat(40);
   const violation = classifyCommit({ sha, author: "Dan", message: "m", paths: ["x.md"], pulls: [] });
-  const openIssues = [{ number: 7, body: `${violationMarker(sha)}\n\nolder report` }];
+  const openIssues = [{ number: 7, user: { login: "github-actions[bot]" }, body: `${violationMarker(sha)}\n\nolder report` }];
 
   const { actions } = planIssueActions({ repo: "o/r", violations: [violation], openIssues, now: 0 });
   assert.equal(actions.length, 1);
@@ -267,7 +268,7 @@ test("a re-run comments on the existing issue rather than filing a second one", 
   assert.equal(actions[0].issueNumber, 7);
 
   assert.deepEqual([...markedIssues(openIssues).keys()], [sha]);
-  assert.equal(markedIssues([{ number: 8, body: "a human filed this by hand" }]).size, 0,
+  assert.equal(markedIssues([{ number: 8, user: { login: "github-actions[bot]" }, body: "a human filed this by hand" }]).size, 0,
     "an issue with no marker is never acted on — this must not corrupt the inbox it feeds");
 });
 
@@ -898,7 +899,7 @@ test("the comment write path is exercised end to end, URL template included", as
   const io = fakeIO({
     commits: [{ sha, author: "Dan", message: "m", paths: ["x.md"] }],
     pulls: { [sha]: [] },
-    issues: [{ number: 42, body: `${violationMarker(sha)}\n\nfiled on an earlier run` }],
+    issues: [{ number: 42, user: { login: "github-actions[bot]" }, body: `${violationMarker(sha)}\n\nfiled on an earlier run` }],
   });
 
   const summary = await runPlaneGuard({ io, repo: "CandidDan/flow", range: "x..y", now: 0, fileIssues: true });
@@ -928,9 +929,37 @@ test("a failed open-issues read fails the job rather than filing blind", async (
   assert.equal(exitCodeFor(summary), 1);
 });
 
+test("a decoy issue carrying a forged marker does not suppress the real alert", async () => {
+  // flow-review's security check: the marker is an HTML comment in a body anyone who can open a
+  // labelled issue could write, so a decoy naming a commit about to be pushed would make the guard
+  // treat the real violation as tracked and merely comment on the decoy — downgrading the alert
+  // exactly when it matters. Authorship is now part of the match, and the attempt is REPORTED rather
+  // than silently skipped, so it becomes a signal instead of a no-op.
+  const sha = "c".repeat(40);
+  const decoy = { number: 5, user: { login: "not-the-guard" }, body: `${violationMarker(sha)}\n\nnothing to see here` };
+  const io = fakeIO({
+    commits: [{ sha, author: "Dan", message: "sneaky", paths: ["payload.mjs"] }],
+    pulls: { [sha]: [] },
+    issues: [decoy],
+  });
+
+  const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0, fileIssues: true });
+
+  assert.deepEqual(summary.actions.map((a) => a.type), ["file"], "a FRESH issue is filed, not a comment on the decoy");
+  assert.deepEqual(summary.foreignMarkers, [{ number: 5, author: "not-the-guard", sha }],
+    "and the forged marker is reported, so the attempt is visible");
+  assert.ok(io._writes.some((w) => w.path === "/repos/o/r/issues"), "the real alert reached the inbox");
+  assert.ok(!io._writes.some((w) => w.path.includes("/issues/5/")), "the decoy was never commented on");
+
+  assert.equal(markedIssues([decoy]).size, 0, "a forged marker never enters the dedupe index");
+  assert.deepEqual(foreignMarkedIssues([decoy]).map((f) => f.author), ["not-the-guard"]);
+  // An issue with no marker at all is not "foreign" — it is simply none of this guard's business.
+  assert.deepEqual(foreignMarkedIssues([{ number: 6, user: { login: "someone" }, body: "hand-filed" }]), []);
+});
+
 test("nothing is ever closed from here — a commit on main does not recover on its own", () => {
   const clean = classifyCommit({ sha: "f".repeat(40), author: "w", message: "m", paths: [".flow/tasks/a.md"] });
-  const openIssues = [{ number: 3, body: violationMarker("f".repeat(40)) }];
+  const openIssues = [{ number: 3, user: { login: "github-actions[bot]" }, body: violationMarker("f".repeat(40)) }];
   const { actions } = planIssueActions({ repo: "o/r", violations: [], openIssues, now: 0 });
   assert.deepEqual(actions, [], "no close action exists: unlike a dead workflow, this never self-resolves");
   assert.equal(clean.violation, false);
@@ -1170,7 +1199,7 @@ test("a full page of open issues is reported as a possibly-incomplete dedupe ind
   // Past ISSUES_PER_PAGE concurrently-open findings the index is incomplete and the guard would
   // start filing duplicates. Mild, but it must not be SILENT.
   const sha = "a".repeat(40);
-  const many = Array.from({ length: ISSUES_PER_PAGE }, (_, i) => ({ number: i + 1, body: violationMarker(`other${i}`) }));
+  const many = Array.from({ length: ISSUES_PER_PAGE }, (_, i) => ({ number: i + 1, user: { login: "github-actions[bot]" }, body: violationMarker(`other${i}`) }));
   const io = fakeIO({ commits: [{ sha, author: "Dan", message: "m", paths: ["x.md"] }], pulls: { [sha]: [] }, issues: many });
 
   const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0, fileIssues: true });
@@ -1183,7 +1212,7 @@ test("a full page of open issues is reported as a possibly-incomplete dedupe ind
 
 test("a short page of open issues is trusted as complete", async () => {
   const sha = "b".repeat(40);
-  const io = fakeIO({ commits: [{ sha, author: "Dan", message: "m", paths: ["x.md"] }], pulls: { [sha]: [] }, issues: [{ number: 1, body: "unrelated" }] });
+  const io = fakeIO({ commits: [{ sha, author: "Dan", message: "m", paths: ["x.md"] }], pulls: { [sha]: [] }, issues: [{ number: 1, user: { login: "github-actions[bot]" }, body: "unrelated" }] });
   const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0, fileIssues: true });
   assert.equal(summary.dedupeIndexTruncated, false);
 });
