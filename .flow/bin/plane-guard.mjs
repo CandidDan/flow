@@ -24,11 +24,19 @@
 // follow-up rather than attempted here. It also never reverts anything: a guard that rewrites
 // `main` on its own judgment is a larger blast radius than the problem it is policing.
 //
-// "ASSOCIATED WITH A PULL REQUEST" IS ASKED OF GITHUB, NOT INFERRED FROM THE COMMIT GRAPH. Squash,
-// merge-commit and rebase merges leave three different shapes in history, and a check keyed on any
-// one of them fires on the other two. `/repos/{owner}/{repo}/commits/{sha}/pulls` answers the
-// question directly for all three, which is exactly why the rule is phrased as *has an associated
-// merged PR* rather than as a property of the parents.
+// HOW "DID A PULL REQUEST PUT THIS ON THE BRANCH?" IS ANSWERED — the graph says WHERE a commit came
+// from, the API says WHETHER a pull request is behind it, and neither is sufficient alone:
+//
+//   · A commit ON the first-parent line was either squash-merged or pushed directly. The graph cannot
+//     tell those apart, so the API must: a merged PR based on this branch means squash, none means a
+//     direct push.
+//   · A commit OFF the line arrived through a merge commit. The graph identifies WHICH merge; the API
+//     then has to confirm a merged PR into this branch produced it (`merge_commit_sha`). "A merge
+//     happened" is not "a PR merge happened" — `git merge --no-ff && git push` is an ordinary local
+//     workflow and it must not be excused.
+//
+// Squash, merge-commit and rebase merges leave three different shapes in history, which is why the
+// rule is phrased in terms of pull requests at all rather than as a property of the parents.
 //
 // IO IS INJECTED, in the same shape as `flightdeck/bin/watchdog.mjs`, so every decision branch
 // below is a table test with no network, no clock and no git of its own. The one real IO
@@ -126,6 +134,21 @@ export function mergedPulls(pulls, { baseBranch = DEFAULT_BASE_BRANCH } = {}) {
   return (pulls ?? []).filter((p) => !!p?.merged_at && p?.base?.ref === baseBranch);
 }
 
+// Did a merged PR into the policed branch actually PRODUCE this merge commit? `merge_commit_sha` is
+// the field that ties a PR to the commit its merge created, so this is the question the graph alone
+// cannot answer: "a merge happened" versus "a pull request's merge happened".
+//
+// Without it the graph signal is a full bypass, and not only an adversarial one — `git merge --no-ff
+// feature && git push` is an ordinary local workflow. It lands the branch's commits off the
+// first-parent line with no PR anywhere, and a guard that excuses them is quieter about that mistake
+// than about a plain direct commit, which is the wrong way round. flow-review's code-review
+// reproduced it and escalated it to blocking; it was right to.
+export function pullsProducingMerge(pulls, mergeSha, { baseBranch = DEFAULT_BASE_BRANCH } = {}) {
+  const target = String(mergeSha ?? "").toLowerCase();
+  if (!target) return [];
+  return mergedPulls(pulls, { baseBranch }).filter((p) => String(p?.merge_commit_sha ?? "").toLowerCase() === target);
+}
+
 // ── pure: one commit -> one verdict ──────────────────────────────────────────────────────────
 //
 // `commit` is `{ sha, author, message, paths, pulls }` — whatever the IO layer assembled. `pulls`
@@ -155,32 +178,35 @@ export function classifyCommit(commit, { baseBranch = DEFAULT_BASE_BRANCH } = {}
   if (base.paths.length === 0) return { ...base, verdict: "no-paths", violation: false };
   if (offending.length === 0) return { ...base, verdict: "store-only", violation: false };
 
-  // SIGNAL ONE — THE COMMIT GRAPH. A commit that is NOT on the policed branch's first-parent line
-  // got there on the second-parent side of a merge commit, which is what a merge-style or
-  // rebase-style PR merge produces — including one merged up a stack of branches, which no API
-  // answer expresses. Nothing but a merge puts a commit there, so this needs no API call and cannot
-  // be fooled by which PR the API happens to name.
+  // SIGNAL ONE — THE COMMIT GRAPH, which LOCATES the merge rather than excusing it. A commit not on the
+  // policed branch's first-parent line got there on the second-parent side of a merge commit. That is
+  // what the graph can prove and all it can prove: which merge introduced the commit.
   //
-  // Measured against this repo's real history, the separation is exact: all 18 commits the audit
-  // found are on the first-parent line, and every legitimately merged commit checked is not.
+  // The graph locates the MERGE that introduced the commit; the API then has to confirm a pull request
+  // produced that merge. An earlier version stopped at the graph, which excused any commit that
+  // arrived through any merge — including a locally built `git merge --no-ff` with no PR in existence.
+  // The graph shows "a merge happened", never "a PR merge happened", and only `merge_commit_sha`
+  // closes the distance.
   //
-  // NAMED LIMITATION, ACCEPTED RATHER THAN OVERLOOKED. This signal proves "arrived through a merge",
-  // NOT "arrived through a pull request". A locally built `git merge --no-ff feature` pushed straight
-  // to the policed branch puts its commits off the first-parent line with no PR anywhere, and they are
-  // excused here. The merge commit itself lands ON the line, but an ordinary merge has an empty
-  // `--name-only` diff, so it carries no offending paths and is not judged either — that is the
-  // actual shape of the gap.
-  //
-  // It is accepted because the alternative is worse: requiring a PR for merge-borne commits means
-  // asking the API about all of them, and the API's answer for a commit merged up a stack names only
-  // the first PR — which is how base filtering came to falsely accuse `de72f18`, a reviewed commit.
-  // The threat model here is a trusted-but-fallible pusher, not an adversary: this guard is detection
-  // for the mistake of committing straight to `main`, which is what the 18 real findings all are.
-  // Closing it properly means judging the MERGE COMMIT (parents >= 2, on the line, no merged PR based
-  // on the branch) and reporting the paths its second-parent side introduced. That is a real
-  // improvement and a separate task — flow-review's code-review raised it, and it is written down
-  // here so nobody has to re-derive it from the absence of a test.
-  if (c.arrivedByMerge) return { ...base, verdict: "merged-parent", violation: false };
+  // Why this does NOT reintroduce the false positive that plain base-filtering caused: the question is
+  // asked about the MERGE COMMIT on the policed branch's first-parent line, not about the commit
+  // itself. For `de72f18` — merged up a stack, and the case that broke base-filtering — the
+  // introducing merge is `0c3430c`, and merged PR #62 into `main` carries exactly that
+  // `merge_commit_sha`. So it is excused for the right reason rather than by accident.
+  if (c.mergeSha) {
+    if (pullsProducingMerge(c.mergePulls, c.mergeSha, { baseBranch }).length > 0) {
+      return { ...base, verdict: "merged-parent", violation: false, mergeSha: c.mergeSha };
+    }
+    return {
+      ...base,
+      verdict: c.pullLookupError ? "unresolved" : "violation",
+      violation: true,
+      mergeSha: c.mergeSha,
+      // Distinguished in the report because the remedy differs: this is not "someone committed
+      // straight to main", it is "someone merged a branch into main without opening a PR".
+      viaUnreviewedMerge: !c.pullLookupError,
+    };
+  }
 
   // SIGNAL TWO — THE PR API, for the case the graph cannot resolve. A SQUASH merge lands a single
   // commit ON the first-parent line, exactly where a direct push lands, so the graph cannot tell
@@ -216,9 +242,14 @@ export function checkCommits(commits, { baseBranch = DEFAULT_BASE_BRANCH } = {})
 // paths — the four things needed to act, on one line so a log scan finds them all.
 export function formatViolation(v) {
   const paths = (v?.offending ?? []).join(", ");
-  const why = v?.pullLookupError
-    ? `and its PR lookup FAILED (${v.pullLookupError}) — reported because this guard fails closed`
-    : "with no merged PR";
+  let why;
+  if (v?.pullLookupError) {
+    why = `and its PR lookup FAILED (${v.pullLookupError}) — reported because this guard fails closed`;
+  } else if (v?.viaUnreviewedMerge) {
+    why = `via merge ${String(v.mergeSha ?? "").slice(0, 8)}, which no merged PR produced`;
+  } else {
+    why = "with no merged PR";
+  }
   return `plane-guard: ${String(v?.sha ?? "").slice(0, 8)} by ${v?.author ?? "unknown"} — "${v?.message ?? ""}" touches ${paths} ${why}`;
 }
 
@@ -261,6 +292,12 @@ export function renderIssueBody({ repo, violation, now }) {
     `**Paths outside ${codeSpan(STORE_PREFIX)}:**`,
     ...(v.offending ?? []).map((p) => `- ${codeSpan(p)}`),
     "",
+    ...(v.viaUnreviewedMerge
+      ? [`It arrived through merge commit ${codeSpan(v.mergeSha ?? "?")}, which **no merged pull request produced** —`,
+         "a branch merged into this one locally and pushed, rather than through a pull request. The remedy",
+         "differs from a plain direct commit, so it is called out separately.",
+         ""]
+      : []),
     "Flow's two-planes rule: task state commits straight to `main`; code and docs go through a",
     "branch and a pull request. `_flow-gates.yml` enforces the branch half (a PR may not touch",
     "`.flow/tasks/`). This is the `main` half — a direct push may touch **only** the store.",
@@ -353,6 +390,17 @@ export async function collectCommits({ io, range }) {
   // An EMPTY set is a broken read, not a repo whose every commit arrived by merge. Treating it as the
   // latter would route every commit to the PR API and judge it on that alone, which is exactly where
   // the false positives live — so it fails the way an unresolvable range does.
+  // One API answer per introducing merge, not per commit it carried.
+  const mergePullCache = new Map();
+
+  // Built lazily and once, on the first merge-borne commit that actually needs judging. A push
+  // carrying only store commits, or only commits on the first-parent line, never pays for it.
+  let introducedBy = null;
+  const introducingMerge = async (sha) => {
+    if (introducedBy === null) introducedBy = await io.introducedByMerge();
+    return introducedBy.get(sha) ?? null;
+  };
+
   let firstParent = null;
   const onFirstParentLine = async (sha) => {
     if (firstParent === null) {
@@ -368,10 +416,36 @@ export async function collectCommits({ io, range }) {
   for (const c of commits ?? []) {
     if (offendingPaths(c.paths).length === 0) { out.push(c); continue; }
 
-    // Not on the first-parent line -> it arrived through a merge. Settled from the graph, so no API
-    // call is spent: on this repo that is two thirds of the commits that would otherwise be asked
-    // about.
-    if (!(await onFirstParentLine(c.sha))) { out.push({ ...c, arrivedByMerge: true }); continue; }
+    // Off the first-parent line -> it arrived through a merge. WHICH merge is a graph question; whether
+    // a pull request produced that merge is an API one. The answer is cached per merge commit, so a PR
+    // that brought in twenty commits costs one call, not twenty.
+    if (!(await onFirstParentLine(c.sha))) {
+      let mergeSha = null;
+      try {
+        mergeSha = await introducingMerge(c.sha);
+      } catch (err) {
+        out.push({ ...c, pulls: [], pullLookupError: `could not locate the merge that introduced this commit: ${err?.message || err}` });
+        continue;
+      }
+      if (!mergeSha) {
+        // Off the line with no first-parent-line merge above it should not happen for a commit
+        // reachable from the policed branch. Fail closed rather than invent an excuse.
+        out.push({ ...c, pulls: [], pullLookupError: "off the first-parent line but no introducing merge found" });
+        continue;
+      }
+      if (!mergePullCache.has(mergeSha)) {
+        try {
+          mergePullCache.set(mergeSha, { pulls: await io.pullsFor(mergeSha) });
+        } catch (err) {
+          mergePullCache.set(mergeSha, { error: `${err?.message || err}` });
+        }
+      }
+      const cached = mergePullCache.get(mergeSha);
+      out.push(cached.error
+        ? { ...c, mergeSha, mergePulls: [], pullLookupError: cached.error }
+        : { ...c, mergeSha, mergePulls: cached.pulls });
+      continue;
+    }
 
     try {
       out.push({ ...c, pulls: await io.pullsFor(c.sha) });
@@ -553,6 +627,50 @@ export function resolveFirstParentShas(baseBranch, { cwd, exec = execFileSync } 
   throw new Error(`could not walk the first-parent line of the policed branch \`${baseBranch}\` — tried ${candidates.join(", ")}. ${problems.join("; ")}`);
 }
 
+// Every commit a merge brought onto `baseBranch`, as {commit -> the merge commit that introduced it}.
+//
+// Built by asking each merge ON the first-parent line what its non-first parents contributed
+// (`rev-list M^2 … --not M^1`) — the exact definition of "this merge brought these commits in", and the
+// only formulation that survived contact with real history.
+//
+// THE ATTEMPT THIS REPLACES, recorded because it looked right and was not: a single
+// `rev-list --ancestry-path --first-parent <sha>..<base>`, taking the oldest result. It gave the
+// correct merge for the two commits it was spot-checked on and returned NOTHING for most others —
+// `--first-parent` confines the walk to first-parent links, so a commit off that line usually has no
+// path at all under it. In the audit that turned 57 legitimately merged commits into `unresolved`.
+// Two spot-checks are not a verification; the audit is.
+//
+// Iterated OLDEST merge first so a commit reachable through more than one merge is attributed to the
+// first one that put it on the branch.
+export function gitIntroducedByMerge(baseBranch, { cwd, exec = execFileSync } = {}) {
+  const git = (...args) => {
+    try {
+      return exec("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    } catch (err) {
+      const detail = String(err?.stderr || err?.message || err).split("\n")[0];
+      throw new Error(`git ${args.join(" ")} failed: ${detail}`);
+    }
+  };
+
+  const merges = git("rev-list", "--first-parent", "--merges", "--end-of-options", baseBranch)
+    .split("\n").map((l) => l.trim()).filter(Boolean).reverse();
+
+  const out = new Map();
+  for (const merge of merges) {
+    // Every parent after the first, so an octopus merge is handled rather than silently half-read.
+    const parents = git("rev-list", "--parents", "-1", "--end-of-options", merge).trim().split(/\s+/).slice(1);
+    if (parents.length < 2) continue;
+    // No `--end-of-options` here, deliberately: it would make the `--not` that follows it a REVISION
+    // rather than a flag, and the whole query silently returns the wrong set (it cost three failing
+    // tests to notice). Safe to omit — every value in this call is a 40-hex sha git itself just
+    // printed, not user input. `--end-of-options` stays on the calls that take `baseBranch`.
+    const introduced = git("rev-list", ...parents.slice(1), "--not", parents[0])
+      .split("\n").map((l) => l.trim()).filter(Boolean);
+    for (const sha of introduced) if (!out.has(sha)) out.set(sha, merge);
+  }
+  return out;
+}
+
 export function createIO({ token, cwd, repo, baseBranch = DEFAULT_BASE_BRANCH } = {}) {
   async function request(method, path, body) {
     const res = await fetch(`${GITHUB_API}${path}`, {
@@ -576,6 +694,7 @@ export function createIO({ token, cwd, repo, baseBranch = DEFAULT_BASE_BRANCH } 
     commits: async (range) => gitCommitsInRange(range, { cwd }),
     // Derived from the SAME `baseBranch` the PR-base check uses, so the two signals cannot disagree.
     firstParentShas: async () => resolveFirstParentShas(baseBranch, { cwd }),
+    introducedByMerge: async () => gitIntroducedByMerge(baseBranch, { cwd }),
     pullsFor: async (sha) => request("GET", `/repos/${repo}/commits/${sha}/pulls`),
     rest: (path) => request("GET", path),
     write: (method, path, body) => request(method, path, body),

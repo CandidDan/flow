@@ -58,6 +58,8 @@ import {
   gitCommitsInRange,
   gitFirstParentShas,
   resolveFirstParentShas,
+  gitIntroducedByMerge,
+  pullsProducingMerge,
   createIO,
   violationMarker,
   issueTitle,
@@ -134,12 +136,18 @@ const OPEN = (number) => [{ number, merged_at: null, base: { ref: "main" } }];
 // A no-network IO. `commits` returns what it was given; `pullsFor` reads a map keyed by sha, and
 // THROWS for a sha it does not know — so a test that forgets to supply an answer fails loudly
 // rather than silently taking the fail-closed path and looking like it proved something.
-function fakeIO({ commits = [], pulls = {}, issues = [], writes = [], failWrites = false, firstParent = null } = {}) {
+function fakeIO({ commits = [], pulls = {}, issues = [], writes = [], failWrites = false, firstParent = null, introducing = {} } = {}) {
   return {
     commits: async () => commits,
     // Default: every supplied commit is ON the first-parent line, so a test that says nothing about
     // the graph exercises the PR-API path it was written for. Pass `firstParent` to say otherwise.
     firstParentShas: async () => new Set(firstParent ?? commits.map((c) => c.sha)),
+    // Which merge brought each off-the-line commit in. `introducing` maps sha -> merge sha; an Error
+    // value makes the whole map read throw, which is how the real git call fails.
+    introducedByMerge: async () => {
+      for (const v of Object.values(introducing ?? {})) if (v instanceof Error) throw v;
+      return new Map(Object.entries(introducing ?? {}).filter(([, v]) => v));
+    },
     pullsFor: async (sha) => {
       if (!(sha in pulls)) throw new Error(`no fixture answer for ${sha}`);
       const answer = pulls[sha];
@@ -299,25 +307,35 @@ test("criterion 3: an OPEN pull request does not excuse the commit — only a me
   assert.equal(mergedPulls(MERGED(99)).length, 1);
 });
 
-test("criterion 3: a commit that arrived on the second-parent side of a merge is excused from the graph alone", async () => {
-  // The half of the rule the PR API cannot express. `/commits/{sha}/pulls` names the PR whose HEAD
-  // branch the commit was pushed to, not every PR that later carried it — so a commit merged up a
-  // stack (feature -> integration -> main) reports only the first PR, based on the integration
-  // branch. Real in this repo: `de72f18` reached `main` via merged PR #62 while the API reports only
-  // PR #61 with base `vision/intent-layer`. Judged on the API alone it is a false accusation against
-  // reviewed work; judged on the graph it is plainly a merge.
-  const merged = "de72f18".padEnd(40, "0");
+test("criterion 3: a merge-borne commit is excused when a merged PR PRODUCED the introducing merge", async () => {
+  // The graph locates the merge; the API confirms a pull request produced it. This is the stacked-merge
+  // case that broke plain base-filtering: `/commits/{sha}/pulls` for `de72f18` names only PR #61, based
+  // on an integration branch — but the merge that brought it onto `main` is `0c3430c`, and merged PR #62
+  // into `main` carries exactly that `merge_commit_sha`. So it is excused for the right reason.
+  const commit = "de72f18".padEnd(40, "0");
+  const mergeSha = "0c3430c".padEnd(40, "1");
   const io = fakeIO({
-    commits: [{ sha: merged, author: "Dan", message: "vision: audience", paths: ["VISION.md"] }],
-    // Deliberately NOT on the first-parent line, and deliberately no `pulls` fixture: reaching the
-    // API here would throw, so this also proves no call is spent on a commit the graph settles.
-    firstParent: ["something-else"],
+    commits: [{ sha: commit, author: "Dan", message: "vision: audience", paths: ["VISION.md"] }],
+    firstParent: [mergeSha],                     // the commit is NOT on the line; the merge is
+    introducing: { [commit]: mergeSha },
+    pulls: { [mergeSha]: [{ number: 62, merged_at: "2026-09-09T05:13:09Z", base: { ref: "main" }, merge_commit_sha: mergeSha }] },
   });
 
   const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0 });
-  assert.deepEqual(summary.violations, [], "a merge-borne commit must not be reported");
+  assert.deepEqual(summary.violations, [], "a merge a PR produced must not be reported");
   assert.equal(summary.results[0].verdict, "merged-parent");
+  assert.equal(summary.results[0].mergeSha, mergeSha);
+
+  // The PR must have produced THIS merge. A merged PR into `main` whose merge_commit_sha is some other
+  // commit proves nothing about this one — that is the whole point of checking the field.
+  assert.deepEqual(pullsProducingMerge(
+    [{ number: 99, merged_at: "x", base: { ref: "main" }, merge_commit_sha: "f".repeat(40) }],
+    mergeSha), []);
+  assert.equal(pullsProducingMerge(
+    [{ number: 62, merged_at: "x", base: { ref: "main" }, merge_commit_sha: mergeSha.toUpperCase() }],
+    mergeSha).length, 1, "sha comparison is case-insensitive");
 });
+
 
 test("a SQUASH merge lands on the first-parent line, so the graph cannot excuse it and the API must", async () => {
   // Why both signals exist. A squash lands one commit exactly where a direct push lands; only the
@@ -440,45 +458,130 @@ test("resolveFirstParentShas falls through a candidate that resolves but walks n
     /resolved but walked no commits/);
 });
 
-test("the graph signal's gap is a NAMED limitation: a hand-pushed merge is excused", async () => {
-  // Pinned as behaviour rather than left implicit, because a limitation with no test looks like a bug
-  // and a limitation with a test looks like a decision. Signal one proves "arrived through a merge",
-  // not "arrived through a pull request" — and this fixture has no PR anywhere.
+test("a locally built merge pushed straight to the branch is CAUGHT, not excused", async () => {
+  // The bypass flow-review's code-review reproduced and escalated to blocking, now closed. An earlier
+  // version stopped at "not on the first-parent line" and excused these outright — so
+  // `git merge --no-ff feature && git push`, an entirely ordinary local workflow, slipped arbitrary
+  // content past the guard with no red tick and no issue. Quieter than a plain direct commit, which is
+  // the wrong way round.
+  //
+  // Driven off a REAL git graph: `withFixtureRepo` builds exactly that shape, and no PR exists anywhere.
   await withFixtureRepo(async ({ dir, shas }) => {
-    let apiCalls = 0;
     const io = {
       commits: async (range) => gitCommitsInRange(range, { cwd: dir }),
       firstParentShas: async () => resolveFirstParentShas("main", { cwd: dir }),
-      pullsFor: async () => { apiCalls++; return []; },
+      introducedByMerge: async () => gitIntroducedByMerge("main", { cwd: dir }),
+      pullsFor: async () => [],                  // no pull request has ever existed in this repo
       rest: async () => [], write: async () => ({ number: 1 }),
     };
     const summary = await runPlaneGuard({ io, repo: "o/r", range: `${shas.A}..${shas.D}`, now: 0 });
 
-    // B came in through a locally made `git merge --no-ff`, with no PR in existence.
-    assert.equal(summary.results.find((r) => r.sha === shas.B).verdict, "merged-parent");
-    assert.ok(!summary.violations.some((v) => v.sha === shas.B), "excused — this is the accepted gap");
-    assert.equal(apiCalls, 1, "and no API call was spent on it: only D, which is on the first-parent line");
+    const b = summary.results.find((r) => r.sha === shas.B);
+    assert.equal(b.verdict, "violation", "B came in through a local merge with no PR — it must be reported");
+    assert.equal(b.viaUnreviewedMerge, true, "…and flagged as arriving via an unreviewed merge, not as a direct commit");
+    assert.equal(b.mergeSha, shas.M, "naming the merge that brought it in");
+    assert.deepEqual(b.offending, ["b.md"]);
 
-    // The merge commit itself is on the line but touches nothing, so it is not judged either. That is
-    // the actual shape of the gap, and where a future fix would have to look.
-    assert.equal(summary.results.find((r) => r.sha === shas.M).verdict, "no-paths");
+    assert.ok(summary.violations.some((v) => v.sha === shas.D), "and the plain direct commit is still caught");
+    assert.equal(exitCodeFor(summary), 1);
+
+    // The report says which of the two it is, because the remedy differs.
+    assert.match(formatViolation(b), /via merge .*, which no merged PR produced/);
+    assert.match(renderIssueBody({ repo: "o/r", violation: b, now: 0 }), /no merged pull request produced/);
   });
-
-  // And the reasoning is written down where a reader will find it, not only here.
-  const src = readFileSync(join(import.meta.dirname, "plane-guard.mjs"), "utf8");
-  assert.match(src, /NAMED LIMITATION, ACCEPTED RATHER THAN OVERLOOKED/);
-  assert.match(src, /arrived through a merge.*NOT.*pull request/s);
 });
+
+test("the introducing merge is resolved from the real graph, and its PR answer is cached per merge", async () => {
+  await withFixtureRepo(async ({ dir, shas }) => {
+    const map = gitIntroducedByMerge("main", { cwd: dir });
+    assert.equal(map.get(shas.B), shas.M, "B was brought in by the merge M");
+    assert.equal(map.get(shas.D), undefined, "a commit already ON the line was introduced by no merge");
+    assert.equal(map.get(shas.A), undefined);
+    assert.equal(map.size, 1, "exactly the one commit the merge contributed");
+
+    // One API answer per merge, not per commit it carried.
+    const asked = [];
+    const io = {
+      commits: async (range) => gitCommitsInRange(range, { cwd: dir }),
+      firstParentShas: async () => resolveFirstParentShas("main", { cwd: dir }),
+      introducedByMerge: async () => gitIntroducedByMerge("main", { cwd: dir }),
+      pullsFor: async (sha) => { asked.push(sha); return []; },
+      rest: async () => [], write: async () => ({ number: 1 }),
+    };
+    await runPlaneGuard({ io, repo: "o/r", range: `${shas.A}..${shas.D}`, now: 0 });
+    assert.deepEqual(asked.filter((a) => a === shas.M).length, 1, "the merge was asked about exactly once");
+  });
+});
+
+test("gitIntroducedByMerge attributes to the OLDEST merge and skips anything that is not a merge", () => {
+  // Both branches are defensive: this repo's linear first-parent history cannot produce a commit
+  // introduced by two merges (once the older merge lands, the newer merge's first parent already
+  // contains the commit), and `rev-list --merges` only ever returns merges. The fixture repo therefore
+  // cannot distinguish either, and an untested defensive branch is one nobody notices breaking — so
+  // they are driven with an injected exec instead of left uncovered.
+  const M_OLD = "1".repeat(40), M_NEW = "2".repeat(40), PLAIN = "3".repeat(40);
+  const SHARED = "a".repeat(40), ONLY_NEW = "b".repeat(40);
+
+  const exec = (_cmd, args) => {
+    if (args.includes("--merges")) return `${M_NEW}\n${PLAIN}\n${M_OLD}\n`;   // newest-first, as git prints
+    if (args.includes("--parents")) {
+      const rev = args[args.length - 1];
+      if (rev === M_OLD) return `${M_OLD} p1old p2old\n`;
+      if (rev === M_NEW) return `${M_NEW} p1new p2new\n`;
+      return `${PLAIN} p1plain\n`;                                             // one parent: not a merge
+    }
+    // rev-list <parents…> --not <first parent>
+    if (args.includes("p2old")) return `${SHARED}\n`;
+    if (args.includes("p2new")) return `${SHARED}\n${ONLY_NEW}\n`;
+    throw new Error(`unexpected rev-list: ${args.join(" ")}`);
+  };
+
+  const map = gitIntroducedByMerge("main", { exec });
+  assert.equal(map.get(SHARED), M_OLD, "a commit both merges carry belongs to the one that put it on the branch FIRST");
+  assert.equal(map.get(ONLY_NEW), M_NEW);
+  assert.equal(map.size, 2, "the single-parent commit in the merge list contributed nothing");
+  assert.ok(![...map.values()].includes(PLAIN), "a non-merge must never be reported as an introducing merge");
+});
+
+test("a merge-borne commit whose merge lookup fails is unresolved, files nothing, and fails the job", async () => {
+  const commit = "a".repeat(40);
+  const io = fakeIO({
+    commits: [{ sha: commit, author: "Dan", message: "m", paths: ["x.md"] }],
+    firstParent: ["someone-else"],
+    introducing: { [commit]: new Error("500 Internal Server Error") },
+  });
+  const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0, fileIssues: true });
+  assert.equal(summary.violations.length, 1, "fail closed");
+  assert.equal(summary.violations[0].verdict, "unresolved");
+  assert.deepEqual(summary.actions, [], "and file nothing it could not establish");
+  assert.equal(exitCodeFor(summary), 1);
+});
+
+test("off the first-parent line with no introducing merge fails closed rather than inventing an excuse", async () => {
+  const commit = "b".repeat(40);
+  const io = fakeIO({
+    commits: [{ sha: commit, author: "Dan", message: "m", paths: ["x.md"] }],
+    firstParent: ["someone-else"],
+    introducing: { [commit]: null },
+  });
+  const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0 });
+  assert.equal(summary.violations.length, 1);
+  assert.match(summary.violations[0].pullLookupError, /no introducing merge found/);
+});
+
 
 test("the two-signal rule, end to end against a real commit graph", async () => {
   // The rule assembled from real git rather than fixtures: the merge-borne commit is excused with no
   // API call, and the commit pushed straight onto the first-parent line is reported.
   await withFixtureRepo(async ({ dir, shas }) => {
+    // A merged PR into `main` that produced the fixture's merge commit — the legitimate shape.
     const io = {
       commits: async (range) => gitCommitsInRange(range, { cwd: dir }),
-      firstParentShas: async () => gitFirstParentShas("HEAD", { cwd: dir }),
-      // No PR for anything: whatever the graph does not excuse must be reported.
-      pullsFor: async () => [],
+      firstParentShas: async () => resolveFirstParentShas("main", { cwd: dir }),
+      introducedByMerge: async () => gitIntroducedByMerge("main", { cwd: dir }),
+      pullsFor: async (sha) => (sha === shas.M
+        ? [{ number: 1, merged_at: "2026-09-01T00:00:00Z", base: { ref: "main" }, merge_commit_sha: shas.M }]
+        : []),
       rest: async () => [],
       write: async () => ({ number: 1 }),
     };
@@ -486,9 +589,10 @@ test("the two-signal rule, end to end against a real commit graph", async () => 
     const summary = await runPlaneGuard({ io, repo: "o/r", range: `${shas.A}..${shas.D}`, now: 0 });
     const byVerdict = Object.fromEntries(summary.results.map((r) => [r.sha, r.verdict]));
 
-    assert.equal(byVerdict[shas.B], "merged-parent", "B arrived through the merge — excused from the graph, no API call");
+    assert.equal(byVerdict[shas.B], "merged-parent", "B arrived through a merge a PR produced");
     assert.equal(byVerdict[shas.D], "violation", "D was pushed straight onto the first-parent line with no PR");
     assert.equal(byVerdict[shas.D0], "store-only", "D0 touches only .flow/tasks/");
+    assert.equal(byVerdict[shas.M], "no-paths", "the merge commit itself touches nothing");
     assert.deepEqual(summary.violations.map((v) => v.sha), [shas.D]);
   });
 });
