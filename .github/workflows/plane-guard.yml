@@ -113,6 +113,18 @@ jobs:
                 echo "Refusing to write it to \$GITHUB_OUTPUT: a value containing a newline would inject another output key."
                 exit 1
                 ;;
+              # A LEADING DASH IS A FLAG, NOT A RANGE. `--all` is nothing but letters and dashes, so
+              # the allowlist above passes it happily — and git would then read it as an option and
+              # scan every ref instead of the range asked for. `gitCommitsInRange` passes
+              # `--end-of-options` so git rejects it regardless, which is the real defence; this
+              # branch exists so the allowlist stops claiming to "reject anything that isn't a plain
+              # range" while letting that class through, and so the operator gets the accurate error
+              # rather than a git fatal. Raised twice by flow-review's security check.
+              -*)
+                echo "::error::--range looks like a git option, not a revision range: ${AUDIT_RANGE}"
+                echo "A range never starts with '-'. If you meant a single commit, use <sha>^!"
+                exit 1
+                ;;
             esac
 
             # Audit mode. Filing is opt-in: a range covering months of history would otherwise

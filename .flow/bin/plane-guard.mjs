@@ -99,12 +99,31 @@ export function offendingPaths(paths) {
   return (paths ?? []).map((p) => String(p ?? "").replace(/^\.\//, "")).filter((p) => p && !isStorePath(p));
 }
 
-// A commit is excused by a pull request only when that PR actually MERGED. An open PR whose head
-// happens to contain the sha proves nothing about how the commit reached `main` — it is the state
-// a direct push plus a later PR from `main` would leave behind, which is precisely the case this
-// guard must still catch. `merged_at` is the field GitHub sets on merge for all three merge styles.
-export function mergedPulls(pulls) {
-  return (pulls ?? []).filter((p) => !!p?.merged_at);
+// The branch whose plane this guard polices. A default rather than a discovered value: the store
+// plane is defined against one branch, and `.flow/config.yml`'s `git.base_branch` says which.
+export const DEFAULT_BASE_BRANCH = "main";
+
+// A commit is excused by a pull request only when that PR actually MERGED **and merged into the
+// branch being policed**. Two separate ways a laxer rule excuses a commit it shouldn't:
+//
+//   · An OPEN PR whose head happens to contain the sha proves nothing about how the commit reached
+//     `main`. It is exactly the state a direct push followed by a PR *from* `main` leaves behind,
+//     which is the case this guard most needs to catch. `merged_at` is the field GitHub sets on
+//     merge, for all three merge styles.
+//   · A PR merged into some OTHER branch that carries the sha says nothing about `main` either.
+//     `merged_at` alone answers "did some PR carry this?" when the question is "did a PR put this on
+//     `main`?". flow-review's security check raised this, and it is the sharper half of the rule.
+//
+// THE BASE CHECK ALONE IS NOT SAFE, and this is the trap. `/commits/{sha}/pulls` returns the PR
+// whose head branch the commit was pushed to — NOT every PR that later carried it. So a commit
+// merged up a stack (feature -> integration branch -> `main`) reports only the first PR, whose base
+// is the integration branch, and a strict base check calls a fully reviewed commit a violation.
+// That is not hypothetical: `de72f18` in this repo reached `main` through merged PR #62, while the
+// API reports only PR #61 with base `vision/intent-layer`. A guard that files false accusations
+// against reviewed work is the guard that gets switched off. So this function is only half the
+// answer — see `arrivedByMerge` below for the half that keeps it honest.
+export function mergedPulls(pulls, { baseBranch = DEFAULT_BASE_BRANCH } = {}) {
+  return (pulls ?? []).filter((p) => !!p?.merged_at && p?.base?.ref === baseBranch);
 }
 
 // ── pure: one commit -> one verdict ──────────────────────────────────────────────────────────
@@ -113,7 +132,7 @@ export function mergedPulls(pulls) {
 // may be absent, which is not the same as an empty array: `undefined` means "not asked" (the
 // caller skips the API call for a commit with no offending paths, to spend rate limit only where
 // the answer can change the outcome), `[]` means "asked, and there are none".
-export function classifyCommit(commit) {
+export function classifyCommit(commit, { baseBranch = DEFAULT_BASE_BRANCH } = {}) {
   const c = commit ?? {};
   const offending = offendingPaths(c.paths);
   const base = {
@@ -132,7 +151,21 @@ export function classifyCommit(commit) {
 
   if (offending.length === 0) return { ...base, verdict: "store-only", violation: false };
 
-  const merged = mergedPulls(c.pulls);
+  // SIGNAL ONE — THE COMMIT GRAPH. A commit that is NOT on the policed branch's first-parent line
+  // got there on the second-parent side of a merge commit, which is what a merge-style or
+  // rebase-style PR merge produces — including one merged up a stack of branches, which no API
+  // answer expresses. Nothing but a merge puts a commit there, so this needs no API call and cannot
+  // be fooled by which PR the API happens to name.
+  //
+  // Measured against this repo's real history, the separation is exact: all 18 commits the audit
+  // found are on the first-parent line, and every legitimately merged commit checked is not.
+  if (c.arrivedByMerge) return { ...base, verdict: "merged-parent", violation: false };
+
+  // SIGNAL TWO — THE PR API, for the case the graph cannot resolve. A SQUASH merge lands a single
+  // commit ON the first-parent line, exactly where a direct push lands, so the graph cannot tell
+  // them apart and only the API can: a squash carries a merged PR based on the policed branch, a
+  // direct push carries none. Each signal covers the other's blind spot, which is why both are here.
+  const merged = mergedPulls(c.pulls, { baseBranch });
   if (merged.length > 0) {
     return { ...base, verdict: "merged-pr", violation: false, pulls: merged.map((p) => p.number) };
   }
@@ -146,8 +179,8 @@ export function classifyCommit(commit) {
 // mis-computed range, a bad `--range`, a `before` sha the runner's shallow clone cannot reach —
 // all of them produce an empty scan that is indistinguishable from a clean one. So it is a
 // distinct, reported outcome the CLI exits non-zero on, never folded into "no violations".
-export function checkCommits(commits) {
-  const results = (commits ?? []).map(classifyCommit);
+export function checkCommits(commits, { baseBranch = DEFAULT_BASE_BRANCH } = {}) {
+  const results = (commits ?? []).map((c) => classifyCommit(c, { baseBranch }));
   return {
     examined: results.length,
     results,
@@ -290,9 +323,35 @@ export function parseGitLog(stdout) {
 // per store commit for nothing.
 export async function collectCommits({ io, range }) {
   const commits = await io.commits(range);
+
+  // Read once per run, and LAZILY — only when a commit actually needs judging. Two reasons, both
+  // found by a failing test rather than reasoned out: a run with nothing to examine must report
+  // `emptyScan` (its own distinct outcome) rather than fail on a graph read it never needed, and a
+  // push carrying only store commits should cost no git call at all.
+  //
+  // An EMPTY set is a broken read, not a repo whose every commit arrived by merge. Treating it as the
+  // latter would route every commit to the PR API and judge it on that alone, which is exactly where
+  // the false positives live — so it fails the way an unresolvable range does.
+  let firstParent = null;
+  const onFirstParentLine = async (sha) => {
+    if (firstParent === null) {
+      firstParent = await io.firstParentShas();
+      if (!(firstParent instanceof Set) || firstParent.size === 0) {
+        throw new Error("could not read the policed branch's first-parent line — refusing to judge on the PR API alone");
+      }
+    }
+    return firstParent.has(sha);
+  };
+
   const out = [];
   for (const c of commits ?? []) {
     if (offendingPaths(c.paths).length === 0) { out.push(c); continue; }
+
+    // Not on the first-parent line -> it arrived through a merge. Settled from the graph, so no API
+    // call is spent: on this repo that is two thirds of the commits that would otherwise be asked
+    // about.
+    if (!(await onFirstParentLine(c.sha))) { out.push({ ...c, arrivedByMerge: true }); continue; }
+
     try {
       out.push({ ...c, pulls: await io.pullsFor(c.sha) });
     } catch (err) {
@@ -361,9 +420,9 @@ export async function ensureLabel({ io, repo }) {
 // `fileIssues` defaults to FALSE, and audit mode is the reason. The live push check turns it on;
 // an audit over a long range must not open thirty issues for history the operator is reading in
 // one report. Filing is opt-in, reporting always happens.
-export async function runPlaneGuard({ io, repo, range, now = Date.now(), fileIssues = false, dryRun = false }) {
+export async function runPlaneGuard({ io, repo, range, now = Date.now(), fileIssues = false, dryRun = false, baseBranch = DEFAULT_BASE_BRANCH }) {
   const commits = await collectCommits({ io, range });
-  const { examined, results, violations, emptyScan } = checkCommits(commits);
+  const { examined, results, violations, emptyScan } = checkCommits(commits, { baseBranch });
 
   let actions = [];
   let failures = [];
@@ -385,7 +444,7 @@ export async function runPlaneGuard({ io, repo, range, now = Date.now(), fileIss
     failures = failures.concat(outcome.failures);
   }
 
-  return { repo, range, examined, results, violations, emptyScan, actions, failures, dedupeIndexTruncated };
+  return { repo, range, baseBranch, examined, results, violations, emptyScan, actions, failures, dedupeIndexTruncated };
 }
 
 // The exit code, as a pure function of the summary, so the rule is a table test rather than
@@ -432,7 +491,22 @@ export function gitCommitsInRange(range, { cwd, exec = execFileSync } = {}) {
   return parseGitLog(out);
 }
 
-export function createIO({ token, cwd, repo } = {}) {
+// The policed branch's first-parent line. `HEAD` by default rather than the branch NAME: on a push
+// event the checkout is the pushed tip of that branch, and depending on a local branch ref existing
+// is how this would break on a runner. Fails loudly rather than returning an empty set.
+export function gitFirstParentShas(ref = "HEAD", { cwd, exec = execFileSync } = {}) {
+  let out;
+  try {
+    out = exec("git", ["rev-list", "--first-parent", "--end-of-options", ref],
+      { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  } catch (err) {
+    const detail = String(err?.stderr || err?.message || err).split("\n")[0];
+    throw new Error(`git could not walk the first-parent line of \`${ref}\`: ${detail}`);
+  }
+  return new Set(out.split("\n").map((l) => l.trim()).filter(Boolean));
+}
+
+export function createIO({ token, cwd, repo, firstParentRef = "HEAD" } = {}) {
   async function request(method, path, body) {
     const res = await fetch(`${GITHUB_API}${path}`, {
       method,
@@ -453,6 +527,7 @@ export function createIO({ token, cwd, repo } = {}) {
   }
   return {
     commits: async (range) => gitCommitsInRange(range, { cwd }),
+    firstParentShas: async () => gitFirstParentShas(firstParentRef, { cwd }),
     pullsFor: async (sha) => request("GET", `/repos/${repo}/commits/${sha}/pulls`),
     rest: (path) => request("GET", path),
     write: (method, path, body) => request(method, path, body),
@@ -461,7 +536,7 @@ export function createIO({ token, cwd, repo } = {}) {
 
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────
 //
-//   node .flow/bin/plane-guard.mjs --range <before>..<after> [--file-issues] [--dry-run]
+//   node .flow/bin/plane-guard.mjs --range <before>..<after> [--base main] [--file-issues] [--dry-run]
 //   node .flow/bin/plane-guard.mjs --range <tag>..main --json          # audit mode
 //
 // Exits 1 on a violation, on an empty scan, or on a failed write; 0 otherwise.
@@ -471,6 +546,7 @@ export function parseArgs(argv) {
   return {
     range: value("--range") ?? process.env.PLANE_GUARD_RANGE,
     repo: value("--repo") ?? process.env.GITHUB_REPOSITORY,
+    baseBranch: value("--base") ?? process.env.PLANE_GUARD_BASE_BRANCH ?? DEFAULT_BASE_BRANCH,
     fileIssues: a.includes("--file-issues"),
     dryRun: a.includes("--dry-run"),
     json: a.includes("--json"),
@@ -478,7 +554,7 @@ export function parseArgs(argv) {
 }
 
 if (__isMain) {
-  const { range, repo, fileIssues, dryRun, json } = parseArgs(process.argv.slice(2));
+  const { range, repo, baseBranch, fileIssues, dryRun, json } = parseArgs(process.argv.slice(2));
 
   if (!range) {
     console.error("plane-guard: no range — pass --range <before>..<after> or set PLANE_GUARD_RANGE");
@@ -492,7 +568,7 @@ if (__isMain) {
   const io = createIO({ token: process.env.GITHUB_TOKEN, repo });
   let summary;
   try {
-    summary = await runPlaneGuard({ io, repo, range, fileIssues, dryRun });
+    summary = await runPlaneGuard({ io, repo, range, baseBranch, fileIssues, dryRun });
   } catch (err) {
     console.error(`plane-guard: ${err?.message || err}`);
     console.error("Nothing was checked, so this is a failure and not a pass.");
@@ -509,7 +585,7 @@ if (__isMain) {
     process.exit(1);
   }
 
-  console.log(`plane-guard: examined ${summary.examined} commit(s) in \`${range}\`.`);
+  console.log(`plane-guard: examined ${summary.examined} commit(s) in \`${range}\`, policing the \`${summary.baseBranch}\` plane.`);
   for (const v of summary.violations) console.error(formatViolation(v));
   for (const r of summary.results) {
     if (r.pullLookupError) console.error(`plane-guard: could not resolve PRs for ${r.sha.slice(0, 8)} — treated as a violation: ${r.pullLookupError}`);

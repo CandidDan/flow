@@ -38,6 +38,7 @@ import {
   STORE_PREFIX,
   PLANE_GUARD_LABEL,
   ISSUES_PER_PAGE,
+  DEFAULT_BASE_BRANCH,
   checkCommits,
   classifyCommit,
   collectCommits,
@@ -54,6 +55,7 @@ import {
   ensureLabel,
   runPlaneGuard,
   gitCommitsInRange,
+  gitFirstParentShas,
   violationMarker,
   issueTitle,
   parseArgs,
@@ -64,15 +66,18 @@ const WORKFLOW = join(REPO_ROOT, ".github", "workflows", "plane-guard.yml");
 
 // A merged PR, as GitHub's `/commits/{sha}/pulls` returns it — only the two fields that decide
 // anything, so a fixture cannot accidentally depend on a field the code does not read.
-const MERGED = (number) => [{ number, merged_at: "2026-09-01T00:00:00Z" }];
-const OPEN = (number) => [{ number, merged_at: null }];
+const MERGED = (number, base = "main") => [{ number, merged_at: "2026-09-01T00:00:00Z", base: { ref: base } }];
+const OPEN = (number) => [{ number, merged_at: null, base: { ref: "main" } }];
 
 // A no-network IO. `commits` returns what it was given; `pullsFor` reads a map keyed by sha, and
 // THROWS for a sha it does not know — so a test that forgets to supply an answer fails loudly
 // rather than silently taking the fail-closed path and looking like it proved something.
-function fakeIO({ commits = [], pulls = {}, issues = [], writes = [], failWrites = false } = {}) {
+function fakeIO({ commits = [], pulls = {}, issues = [], writes = [], failWrites = false, firstParent = null } = {}) {
   return {
     commits: async () => commits,
+    // Default: every supplied commit is ON the first-parent line, so a test that says nothing about
+    // the graph exercises the PR-API path it was written for. Pass `firstParent` to say otherwise.
+    firstParentShas: async () => new Set(firstParent ?? commits.map((c) => c.sha)),
     pullsFor: async (sha) => {
       if (!(sha in pulls)) throw new Error(`no fixture answer for ${sha}`);
       const answer = pulls[sha];
@@ -232,6 +237,96 @@ test("criterion 3: an OPEN pull request does not excuse the commit — only a me
   assert.equal(mergedPulls(MERGED(99)).length, 1);
 });
 
+test("criterion 3: a commit that arrived on the second-parent side of a merge is excused from the graph alone", async () => {
+  // The half of the rule the PR API cannot express. `/commits/{sha}/pulls` names the PR whose HEAD
+  // branch the commit was pushed to, not every PR that later carried it — so a commit merged up a
+  // stack (feature -> integration -> main) reports only the first PR, based on the integration
+  // branch. Real in this repo: `de72f18` reached `main` via merged PR #62 while the API reports only
+  // PR #61 with base `vision/intent-layer`. Judged on the API alone it is a false accusation against
+  // reviewed work; judged on the graph it is plainly a merge.
+  const merged = "de72f18".padEnd(40, "0");
+  const io = fakeIO({
+    commits: [{ sha: merged, author: "Dan", message: "vision: audience", paths: ["VISION.md"] }],
+    // Deliberately NOT on the first-parent line, and deliberately no `pulls` fixture: reaching the
+    // API here would throw, so this also proves no call is spent on a commit the graph settles.
+    firstParent: ["something-else"],
+  });
+
+  const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0 });
+  assert.deepEqual(summary.violations, [], "a merge-borne commit must not be reported");
+  assert.equal(summary.results[0].verdict, "merged-parent");
+});
+
+test("a SQUASH merge lands on the first-parent line, so the graph cannot excuse it and the API must", async () => {
+  // Why both signals exist. A squash lands one commit exactly where a direct push lands; only the
+  // API separates them. Same graph position, opposite verdicts, decided by the PR answer alone.
+  const squashed = "5".repeat(40);
+  const pushed = "6".repeat(40);
+  const io = fakeIO({
+    commits: [
+      { sha: squashed, author: "Claude", message: "[flow-0031] squashed", paths: ["docs/x.md"] },
+      { sha: pushed, author: "Dan", message: "quick fix", paths: ["docs/y.md"] },
+    ],
+    firstParent: [squashed, pushed],
+    pulls: { [squashed]: MERGED(63), [pushed]: [] },
+  });
+
+  const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0 });
+  assert.deepEqual(summary.violations.map((v) => v.sha), [pushed], "the squash is excused, the direct push is not");
+  assert.equal(summary.results.find((r) => r.sha === squashed).verdict, "merged-pr");
+});
+
+test("an unreadable first-parent line fails the run rather than judging on the PR API alone", async () => {
+  // An empty set is a broken read, not a repo where everything arrived by merge. Treating it as the
+  // latter would route every commit to signal two — which is exactly where the false positives are.
+  const io = { ...fakeIO({ commits: [{ sha: "a".repeat(40), author: "x", message: "m", paths: ["a.md"] }] }), firstParentShas: async () => new Set() };
+  await assert.rejects(() => runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0 }),
+    /refusing to judge on the PR API alone/);
+});
+
+test("the first-parent walk uses --end-of-options and fails loudly", () => {
+  const exec = () => { const e = new Error("Command failed"); e.stderr = "fatal: bad revision 'nope'\n"; throw e; };
+  assert.throws(() => gitFirstParentShas("nope", { exec }), /could not walk the first-parent line of .nope./);
+
+  // Against the real repo: main's first-parent line is a strict subset of its history, which is the
+  // property the whole rule rests on. If they were equal there would be no merge commits and the
+  // graph signal would be meaningless.
+  const fp = gitFirstParentShas("HEAD", { cwd: REPO_ROOT });
+  assert.ok(fp.size > 0);
+  const all = execFileSync("git", ["rev-list", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).trim().split("\n");
+  assert.ok(fp.size < all.length, "main must contain merge commits, or the graph signal proves nothing");
+  assert.ok(!fp.has("de72f187e2a3e2e0b8b1e3f6c9a4e5d7c1b2a3f4"), "a made-up sha is not on the line");
+});
+
+test("criterion 3: a PR merged into a DIFFERENT branch does not excuse a commit on main", () => {
+  // flow-review's security check: `merged_at` alone answers "did some PR carry this sha?" when the
+  // question is "did a PR put this on the policed branch?". A merge of `main` into a long-lived
+  // branch carries every commit on `main`, this one included, and would excuse a direct push.
+  const onDevelop = classifyCommit({ sha: "d".padEnd(40, "5"), author: "Dan", message: "m", paths: ["VISION.md"], pulls: MERGED(77, "develop") });
+  assert.equal(onDevelop.violation, true, "a PR merged into `develop` says nothing about `main`");
+
+  const onMain = classifyCommit({ sha: "d".padEnd(40, "6"), author: "Dan", message: "m", paths: ["VISION.md"], pulls: MERGED(78, "main") });
+  assert.equal(onMain.violation, false);
+
+  // A PR with no `base` at all is not an excuse either — absence must not read as a match.
+  const noBase = classifyCommit({ sha: "d".padEnd(40, "7"), author: "Dan", message: "m", paths: ["VISION.md"], pulls: [{ number: 79, merged_at: "x" }] });
+  assert.equal(noBase.violation, true, "a PR whose base is unknown cannot prove which plane it merged into");
+
+  assert.deepEqual(mergedPulls(MERGED(1, "develop")), []);
+  assert.equal(mergedPulls(MERGED(1, "develop"), { baseBranch: "develop" }).length, 1,
+    "the policed branch is a parameter, so a repo whose base is not `main` is not silently mis-judged");
+  assert.equal(DEFAULT_BASE_BRANCH, "main", "canonical's own .flow/config.yml declares git.base_branch: main");
+});
+
+test("the policed branch is reported, so a wrong --base is visible rather than silent", async () => {
+  const sha = "9".repeat(40);
+  const io = fakeIO({ commits: [{ sha, author: "w", message: "m", paths: [".flow/tasks/a.md"] }] });
+  const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0, baseBranch: "trunk" });
+  assert.equal(summary.baseBranch, "trunk");
+  assert.equal(parseArgs(["--base", "trunk"]).baseBranch, "trunk");
+  assert.equal(parseArgs([]).baseBranch, "main");
+});
+
 test("a PR lookup that fails is reported as unresolved, fails the job, and files NOTHING", async () => {
   // Fail CLOSED: an unanswerable lookup must not silently excuse the commit. But it must also not
   // assert a violation it did not establish, so no issue is filed — the red tick is the signal.
@@ -250,6 +345,24 @@ test("a PR lookup that fails is reported as unresolved, fails the job, and files
   assert.match(formatViolation(summary.violations[0]), /fails closed/);
   assert.equal(exitCodeFor(summary), 1);
   assert.deepEqual(summary.actions, [], "no issue is filed for a commit whose PR question went unanswered");
+});
+
+test("the graph is not read at all when no commit needs judging", async () => {
+  // Lazy on purpose: a push carrying only store commits should cost no git call, and an empty scan
+  // must reach its own `emptyScan` outcome rather than fail on a read it never needed. `fakeIO`'s
+  // graph reader throws here, so either regression fails this test.
+  const io = {
+    ...fakeIO({ commits: [{ sha: "e".repeat(40), author: "w", message: "claim", paths: [".flow/tasks/a.md"] }] }),
+    firstParentShas: async () => { throw new Error("the graph must not be read when nothing needs judging"); },
+  };
+  const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0 });
+  assert.deepEqual(summary.violations, []);
+  assert.equal(summary.examined, 1);
+
+  const empty = { ...io, commits: async () => [] };
+  const emptySummary = await runPlaneGuard({ io: empty, repo: "o/r", range: "x..y", now: 0 });
+  assert.equal(emptySummary.emptyScan, true, "an empty scan is its own outcome, not a graph-read failure");
+  assert.equal(exitCodeFor(emptySummary), 1);
 });
 
 test("the PR question is asked ONLY for commits with offending paths", async () => {
@@ -501,6 +614,7 @@ test("a failed open-issues read fails the job rather than filing blind", async (
   const sha = "8".repeat(40);
   const io = {
     commits: async () => [{ sha, author: "Dan", message: "m", paths: ["x.md"] }],
+    firstParentShas: async () => new Set([sha]),
     pullsFor: async () => [],
     rest: async (path) => { if (path.includes("/issues?")) throw new Error("502 Bad Gateway"); return {}; },
     write: async () => ({ number: 1 }),
@@ -707,10 +821,14 @@ test("the audit range is validated by an allowlist that RUNS, not just by a comm
   // push fallback uses.
   const pattern = wfSrc.match(/^\s*"" \| (\*\[!.+?\]\*)\)$/m);
   assert.ok(pattern, "the allowlist case pattern must be findable in the workflow");
+  // The second arm — a leading dash is a flag, not a range. Extracted too, so the test exercises the
+  // whole `case`, not the half that is easier to find.
+  assert.match(wfSrc, /^\s*-\*\)$/m, "the flag-shaped-range arm must be present");
 
   const script = `
     case "$1" in
       "" | ${pattern[1]}) echo REJECT ;;
+      -*) echo REJECT ;;
       *) echo ACCEPT ;;
     esac
   `;
@@ -719,7 +837,8 @@ test("the audit range is validated by an allowlist that RUNS, not just by a comm
   for (const ok of ["v1.0.0..main", "d751e977^!", "7307e2ef..origin/main", "HEAD~20..HEAD", "main", "a/b..c/d"]) {
     assert.equal(verdict(ok), "ACCEPT", `${JSON.stringify(ok)} is a legitimate git range and must be accepted`);
   }
-  for (const bad of ["", "a..b\nfile_issues=true", "a..b; rm -rf /", "a..b$(whoami)", "a..b`id`", "a..b|tee x", "a..b'x"]) {
+  for (const bad of ["", "a..b\nfile_issues=true", "a..b; rm -rf /", "a..b$(whoami)", "a..b`id`", "a..b|tee x", "a..b'x",
+                     "--all", "--reverse", "-n5"]) {
     assert.equal(verdict(bad), "REJECT", `${JSON.stringify(bad)} must be rejected`);
   }
 });
