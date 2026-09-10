@@ -391,11 +391,37 @@ export function planIssueActions({ repo, violations, openIssues, now, filedBy = 
 // A merge commit yields NO paths under `--name-only` (git prints the combined diff, which is empty
 // for an ordinary merge). That is the right answer, not an omission: the merge introduces nothing
 // its parents did not already carry, and the parents are examined on their own.
+export const SHA_RE = /^[0-9a-f]{40}$/;
+
 export function parseGitLog(stdout) {
   const commits = [];
   for (const chunk of String(stdout ?? "").split("\x1e")) {
     if (!chunk.trim()) continue;
-    const [sha = "", author = "", message = "", rest = ""] = chunk.split("\x1f");
+    const fields = chunk.split("\x1f");
+    const [sha = "", author = "", message = "", rest = ""] = fields;
+
+    // THE PARSE IS STRICT, AND FAILS RATHER THAN GUESSING. Git permits `\x1e`/`\x1f` in a commit
+    // subject or author name, so a commit carrying one desyncs this split — and the failure is not
+    // merely "degraded": with a `\x1f` in the subject, the text after it lands in the PATH LIST, so
+    // the guard would report a violation against a path that does not exist. Verified against real
+    // git, which accepts `git commit -m $'subject with \x1f a separator'` without complaint.
+    //
+    // A pusher able to craft such a commit already has the write access this guard audits, so this is
+    // not an access-control boundary — but a detection tool whose report can be made wrong has lost
+    // the only thing it has. Failing loudly is the same choice made for an unresolvable range and an
+    // unreadable first-parent line: refuse to answer rather than answer wrongly. flow-review's
+    // security check raised it twice, the second time with the misparse spelled out.
+    //
+    // A NUL-separated format (`-z`) would be structurally immune, since git will not carry a NUL in a
+    // subject at all — worth doing if this format ever needs to grow, but a strict parse closes the
+    // hole today without reshaping what every test reads.
+    if (fields.length !== 4) {
+      throw new Error(`git log output for ${sha.slice(0, 8) || "an unknown commit"} split into ${fields.length} fields, not 4 — its author or subject contains a record separator, so the paths cannot be read reliably`);
+    }
+    if (!SHA_RE.test(sha.trim())) {
+      throw new Error(`git log output began with ${JSON.stringify(sha.slice(0, 48))}, which is not a commit sha — the record separator appears inside a commit message`);
+    }
+
     commits.push({
       sha: sha.trim(),
       author: author.trim(),
@@ -737,7 +763,12 @@ export function createIO({ token, cwd, repo, baseBranch = DEFAULT_BASE_BRANCH } 
     // Derived from the SAME `baseBranch` the PR-base check uses, so the two signals cannot disagree.
     firstParentShas: async () => resolveFirstParentShas(baseBranch, { cwd }),
     introducedByMerge: async (range) => gitIntroducedByMerge(range, { cwd }),
-    pullsFor: async (sha) => request("GET", `/repos/${repo}/commits/${sha}/pulls`),
+    // `per_page=100` stated rather than left at the default 30: a commit normally has one associated
+    // PR, so this is a known constraint rather than an oversight — beyond 100 the answer would be a
+    // page and the guard could miss the PR that excuses the commit, reporting a false violation. At
+    // that point the repo has a stranger problem than this guard. flow-review's code-review asked
+    // whether this was deliberate; it is, and now it says so.
+    pullsFor: async (sha) => request("GET", `/repos/${repo}/commits/${sha}/pulls?per_page=100`),
     rest: (path) => request("GET", path),
     write: (method, path, body) => request(method, path, body),
   };

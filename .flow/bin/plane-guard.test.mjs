@@ -808,6 +808,51 @@ test("the git log parser survives a commit subject containing the characters a d
   assert.deepEqual(parsed[0].paths, ["src/a.mjs"]);
 });
 
+test("a commit whose subject carries a record separator FAILS the parse rather than inventing a path", () => {
+  // Verified against real git: `git commit -m $'subject with \x1f a separator'` is accepted, and the
+  // text after the separator would otherwise land in the PATH LIST — the guard would report a violation
+  // against a path that does not exist. A detection tool whose report can be made wrong has lost the
+  // only thing it has, so it refuses to answer instead. Raised twice by flow-review's security check.
+  const withFieldSep = `\x1e${"1".repeat(40)}\x1fDan\x1fsubject with \x1f a separator\x1f\nf.md\n`;
+  assert.throws(() => parseGitLog(withFieldSep), /split into 5 fields, not 4/);
+
+  // A RECORD separator in the subject splits the record in two instead. Both halves are then
+  // short-field, so the field-count check catches it first — a different message, the same refusal.
+  // (The expectation here was originally the sha check; the test was wrong, not the code.)
+  const withRecordSep = `\x1e${"2".repeat(40)}\x1fDan\x1fsubject with \x1e a separator\x1f\nf.md\n`;
+  assert.throws(() => parseGitLog(withRecordSep), /not 4/);
+
+  // The sha check is the backstop for output that is the right SHAPE but not git's: four fields whose
+  // first is not a commit id. Hard to reach through a crafted commit, which is why it is a backstop.
+  assert.throws(() => parseGitLog(`\x1eNOT-A-SHA\x1fDan\x1fsubject\x1f\nf.md\n`), /is not a commit sha/);
+
+  // An author name is equally attacker-influenced and equally covered.
+  assert.throws(() => parseGitLog(`\x1e${"3".repeat(40)}\x1fDa\x1fn\x1fsubject\x1f\nf.md\n`), /not 4/);
+
+  // And the ordinary case still parses — a strict check that rejected real output would be worse.
+  const ok = parseGitLog(`\x1e${"4".repeat(40)}\x1fDan\x1fan ordinary subject\x1f\nf.md\ng.md\n`);
+  assert.equal(ok.length, 1);
+  assert.deepEqual(ok[0].paths, ["f.md", "g.md"]);
+  assert.equal(ok[0].message, "an ordinary subject");
+});
+
+test("the commit-pulls request asks for a full page, so a multi-PR commit is not read short", () => {
+  // In the real-IO block, which by design no behavioural test reaches — so a source assertion, the
+  // same treatment the CLI's `createIO` call got for the same reason. Reading a short page could miss
+  // the PR that excuses a commit and report a false violation, which is the one error class this guard
+  // must not make.
+  const src = readFileSync(join(import.meta.dirname, "plane-guard.mjs"), "utf8");
+  assert.match(src, /commits\/\$\{sha\}\/pulls\?per_page=100/,
+    "the commit->PR lookup must request a full page rather than the default 30");
+});
+
+test("the failing parse reaches the CLI as an unresolvable-range failure, not a silent empty scan", async () => {
+  // `gitCommitsInRange` wraps the parse, so a crafted commit surfaces through the same loud path as a
+  // bad ref: nothing is examined and the run fails, rather than reporting green on a partial read.
+  const exec = () => `\x1e${"5".repeat(40)}\x1fDan\x1fbad \x1f subject\x1f\nf.md\n`;
+  assert.throws(() => gitCommitsInRange("a..b", { exec }), /not 4/);
+});
+
 test("a merge commit parses to zero paths, which is the right answer and not an omission", () => {
   const parsed = parseGitLog(`\x1e${"8".repeat(40)}\x1fGitHub\x1fMerge pull request #63 from CandidDan/x\x1f\n`);
   assert.deepEqual(parsed[0].paths, [], "git prints an empty combined diff for an ordinary merge");
