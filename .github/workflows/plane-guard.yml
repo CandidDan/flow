@@ -1,0 +1,125 @@
+name: plane-guard
+
+# THE `main` HALF OF THE TWO-PLANES RULE. `_flow-gates.yml` fails a PR whose diff touches
+# `.flow/tasks/` — that is the branch half. This is the mirror: a direct push to `main` may touch
+# ONLY `.flow/tasks/`. Everything else must arrive through a merged pull request.
+#
+# WHY THIS IS NOT BRANCH PROTECTION. The store plane REQUIRES direct pushes to `main` — a worker
+# claiming a task, `flow-status` recording a PR, `flow-done` marking a merge. Lock `main` and Flow
+# stops working. So the check is on CONTENT, not on access.
+#
+# WHAT IT CANNOT DO, STATED HERE SO NOBODY CLAIMS OTHERWISE. A push-triggered workflow runs after
+# the push has landed and cannot reject it. This is DETECTION: it takes time-to-discovery from
+# weeks to minutes. The thing that would actually prevent it is a repository push ruleset with
+# path restrictions — a repo-settings change, human-only, sitting directly on the path every
+# worker pushes through. Named as a follow-up in flow-0035's PR; deliberately not attempted here.
+#
+# CANONICAL-ONLY, LIKE flow-watchdog.yml. There is no `_flow-plane-guard.yml` reusable and no
+# template caller, because whether an adopting repo wants its own `main` policed — and files
+# issues about it — is a decision for that repo, not one canonical gets to make by shipping a
+# caller. flow-0035 names the fleet-wide version as a separate task with its own argument.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      range:
+        description: "Audit mode: a git range to examine, e.g. `v1.0.0..main` or `<sha>..main`"
+        type: string
+        required: true
+      file_issues:
+        description: "File an issue per violation (off by default — an audit over long history would open many)"
+        type: boolean
+        default: false
+
+jobs:
+  plane-guard:
+    runs-on: ubuntu-latest
+
+    # `issues: write` and nothing else writable. This block is the DECLARED BLAST RADIUS of the
+    # job: the guard reads history, asks GitHub whether a commit had a PR, and files an issue. It
+    # never pushes, never reverts and never touches a workflow — a guard that could rewrite `main`
+    # on its own judgment would be a larger blast radius than the violation it reports.
+    # `plane-guard.test.mjs` parses this block and FAILS if `contents` is raised to `write` or any
+    # other write scope appears, so the boundary is mechanical rather than a comment.
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      # `fetch-depth: 0` is load-bearing, not caution. The live check needs the `before` sha of
+      # the push to resolve, and audit mode needs whatever range the operator names; a shallow
+      # clone cannot reach either, and `git log` on an unreachable ref would produce an EMPTY scan
+      # — which the guard fails on rather than reporting green, but failing on a fetch depth is a
+      # red tick nobody learns anything from.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # No `npm ci`: plane-guard.mjs imports only `flightdeck/bin/watchdog.mjs` (for `codeSpan`),
+      # which is dependency-free by design. There is nothing to install and nothing to go stale.
+
+      # Every value reaches the shell through `env:`, never interpolated into the `run:` script.
+      # "Untrusted input reaching `run:` blocks" is a named item in this repo's own
+      # `security.focus`, and a `workflow_dispatch` string input is exactly that — canonical does
+      # not get to ship the pattern it warns everyone else about.
+      - name: Work out what to examine
+        id: range
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+          AUDIT_RANGE: ${{ inputs.range }}
+          AUDIT_FILE_ISSUES: ${{ inputs.file_issues }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            # Audit mode. Filing is opt-in: a range covering months of history would otherwise
+            # open one issue per finding before the operator has read the report.
+            echo "range=${AUDIT_RANGE}" >> "$GITHUB_OUTPUT"
+            if [ "${AUDIT_FILE_ISSUES}" = "true" ]; then
+              echo "file_issues=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "file_issues=false" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          # The live push check. `github.event.before` is all-zeros when the ref was just created
+          # (and after a force-push it points at history that no longer exists), so fall back to
+          # the pushed commit alone rather than producing a range git cannot resolve — which would
+          # surface as an empty scan and a red tick that says nothing about the two planes.
+          if [ -z "${PUSH_BEFORE}" ] || [ "${PUSH_BEFORE}" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
+            echo "::notice::the push before-sha is unusable (new ref or force-push) — examining ${PUSH_AFTER} alone."
+            # `<sha>^!` is "this commit, excluding its parents" — the one single-commit spelling
+            # that also resolves for a ROOT commit, where `<sha>~1..` has nothing to subtract and
+            # git errors out. An initial commit is exactly the case a force-push can produce.
+            echo "range=${PUSH_AFTER}^!" >> "$GITHUB_OUTPUT"
+          else
+            echo "range=${PUSH_BEFORE}..${PUSH_AFTER}" >> "$GITHUB_OUTPUT"
+          fi
+          # A push to `main` is the case this guard exists for, so it files.
+          echo "file_issues=true" >> "$GITHUB_OUTPUT"
+
+      - name: Check the main plane
+        env:
+          # The default GITHUB_TOKEN is enough here: everything the guard touches — commit/PR
+          # association and issues — is in THIS repository. No PAT, and deliberately no
+          # cross-repo reach.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PLANE_GUARD_RANGE: ${{ steps.range.outputs.range }}
+          PLANE_GUARD_FILE_ISSUES: ${{ steps.range.outputs.file_issues }}
+        run: |
+          set -euo pipefail
+          if [ "${PLANE_GUARD_FILE_ISSUES}" = "true" ]; then
+            node .flow/bin/plane-guard.mjs --json --file-issues
+          else
+            node .flow/bin/plane-guard.mjs --json
+          fi
