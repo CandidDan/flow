@@ -75,9 +75,9 @@ jobs:
       security_run: ${{ steps.plan.outputs.security_run }}
       security_reason: ${{ steps.plan.outputs.security_reason }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ inputs.node_version }}
       - name: Plan the review — model, security trigger, bounded context
@@ -109,9 +109,9 @@ jobs:
     needs: plan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ inputs.node_version }}
       - name: Bounded context — the diff and the files it changes
@@ -120,7 +120,7 @@ jobs:
         run: |
           git fetch -q origin "${{ github.base_ref }}"
           node .flow/bin/flow-review.mjs plan
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
         continue-on-error: true          # the verdict step below decides; never this action's exit
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -173,9 +173,9 @@ jobs:
     needs: plan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ inputs.node_version }}
       - name: Bounded context — the diff and the files it changes
@@ -184,7 +184,7 @@ jobs:
         run: |
           git fetch -q origin "${{ github.base_ref }}"
           node .flow/bin/flow-review.mjs plan
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
         continue-on-error: true
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -252,10 +252,10 @@ jobs:
             printf '### Security review — %s\n\n' "$verdict"
             printf '%s\n' "$SECURITY_REASON"
           } | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: ${{ needs.plan.outputs.security_run == 'true' }}
         with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         if: ${{ needs.plan.outputs.security_run == 'true' }}
         with:
           node-version: ${{ inputs.node_version }}
@@ -266,7 +266,7 @@ jobs:
         run: |
           git fetch -q origin "${{ github.base_ref }}"
           node .flow/bin/flow-review.mjs plan
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
         if: ${{ needs.plan.outputs.security_run == 'true' }}
         continue-on-error: true
         with:
