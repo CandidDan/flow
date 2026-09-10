@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0032"
 title: "Amend ADR-0005 with the chosen release repo name and the operational constraints found after it was written"
-status: "in_review"
+status: "done"
 priority: 3
 project: "flow"
 owner: "session_01Fo8Wc8oxHhe8rkbuLpshzR"
