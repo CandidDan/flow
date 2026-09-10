@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0035"
 title: "Catch anything that reaches main without a PR, because the store-guard only watches the branch side"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude/next-task-flow-tywdps"
 created: "2026-09-01"
-started: ""
+started: "2026-09-10T05:05:02Z"
 branch: ""
 pr: ""
 issue: ""
