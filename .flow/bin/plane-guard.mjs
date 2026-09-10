@@ -661,6 +661,21 @@ export function gitFirstParentShas(ref, { cwd, exec = execFileSync } = {}) {
   return new Set(out.split("\n").map((l) => l.trim()).filter(Boolean));
 }
 
+// WALKED FROM THE BRANCH, NOT FROM THE RANGE — deliberately the opposite choice to
+// `gitIntroducedByMerge`, and the asymmetry is load-bearing rather than an oversight.
+//
+// This set answers "is this commit on the POLICED BRANCH's first-parent line?" — a question about the
+// branch, so it has to be computed from the branch. Scoped to a range it would answer a different
+// question: `--range main..feature` would compute *feature*'s first-parent line and then judge commits
+// against it while `mergedPulls` still checked for PRs into `main`, which is the two-signals-disagree
+// bug in a new costume. `gitIntroducedByMerge` can be range-scoped because "which merge introduced this
+// commit" is provably answerable within the range (a commit not reachable from `before` has an
+// introducing merge not reachable from `before` either); membership in a branch's line is not.
+//
+// The cost of not scoping it is one `rev-list`: 244 shas in ~14ms on this repo, against two git calls
+// per merge for the map. Raised by flow-review's code-review as a consistency question; the answer is
+// that consistency here would be wrong.
+//
 // THE TWO SIGNALS MUST DESCRIBE THE SAME BRANCH, and this is the function that guarantees it. The
 // first version defaulted the graph walk to `HEAD` while the PR-base check honoured `baseBranch`, so
 // `--base develop` from a `main` checkout had signal one judging against `main`'s first-parent line

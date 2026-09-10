@@ -412,6 +412,28 @@ test("the graph ref is derived from the policed branch, so the two signals canno
   });
 });
 
+test("the first-parent set is computed from the branch, not the range — the asymmetry is deliberate", () => {
+  // Two reviewers may now wonder why `gitIntroducedByMerge` is range-scoped and this is not, so the
+  // reason is pinned rather than left in a comment alone: this set answers a question about the BRANCH.
+  // Computed from a range it would answer about the range's own line, which for `main..feature` is
+  // feature's — while `mergedPulls` still checks for PRs into `main`. That is the two-signals-disagree
+  // bug in a new costume.
+  withFixtureRepo(({ dir, shas }) => {
+    const fromBranch = resolveFirstParentShas("main", { cwd: dir });
+    assert.ok(fromBranch.has(shas.A), "the branch's line reaches back to the root");
+    assert.ok(!fromBranch.has(shas.B));
+
+    // A range starting after A does not contain A — so a range-scoped walk would answer differently
+    // about the very same commit, which is why the walk is not range-scoped.
+    const fromRange = gitFirstParentShas(`${shas.D0}..${shas.D}`, { cwd: dir });
+    assert.ok(!fromRange.has(shas.A), "…whereas a range-scoped walk omits it");
+  });
+
+  const src = readFileSync(join(import.meta.dirname, "plane-guard.mjs"), "utf8");
+  assert.match(src, /WALKED FROM THE BRANCH, NOT FROM THE RANGE/,
+    "the asymmetry must be explained where someone would otherwise 'fix' it");
+});
+
 test("createIO wires the policed branch into the graph walk", async () => {
   // `createIO` was the uncovered block where the inconsistency lived, so it is constructed here for
   // real. No token and no network: only `firstParentShas` is exercised, which is pure git.
