@@ -410,7 +410,19 @@ export function gitCommitsInRange(range, { cwd, exec = execFileSync } = {}) {
   try {
     out = exec(
       "git",
-      ["log", "--format=%x1e%H%x1f%an%x1f%s%x1f", "--name-only", "--no-color", range],
+      // `--end-of-options` (git >= 2.24) is load-bearing. `execFileSync` with an argv array already
+      // rules out SHELL injection, but it does nothing about GIT parsing the range as an OPTION: a
+      // range of `--all` is letters and dashes, so it passes the workflow's allowlist, and git would
+      // quietly examine every ref instead of the range asked for. `--end-of-options` makes git reject
+      // it — `fatal: option '--all' must come before non-option arguments` — which `gitCommitsInRange`
+      // turns into a loud unresolvable-range failure. The CLI is also invocable directly, with no
+      // workflow allowlist in front of it, so this has to hold here rather than upstream.
+      //
+      // NOT `--`, which flow-review's security check suggested while flagging that it needed
+      // checking. It was right to hedge: `--` starts a PATHSPEC, so `git log ... -- a..b` looks for a
+      // file named `a..b`, finds none, and returns ZERO commits. Verified — it turns the guard into a
+      // permanently empty scan, which is the one outcome worse than the flag it was closing.
+      ["log", "--format=%x1e%H%x1f%an%x1f%s%x1f", "--name-only", "--no-color", "--end-of-options", range],
       { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
     );
   } catch (err) {

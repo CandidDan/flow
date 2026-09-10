@@ -474,6 +474,43 @@ test("a failed label ensure does not skip the filings it precedes", async () => 
   assert.equal(failures.filter((f) => f.type === "label").length, 1, "and the label failure is recorded separately");
 });
 
+test("the comment write path is exercised end to end, URL template included", async () => {
+  // code-review's note: `planIssueActions` proves the DECISION to comment, but nothing drove the
+  // actual write, so a wrong URL template on the comment POST would have gone unnoticed. This asserts
+  // the URL and body that reach `io.write`, not just the plan.
+  const sha = "7".repeat(40);
+  const io = fakeIO({
+    commits: [{ sha, author: "Dan", message: "m", paths: ["x.md"] }],
+    pulls: { [sha]: [] },
+    issues: [{ number: 42, body: `${violationMarker(sha)}\n\nfiled on an earlier run` }],
+  });
+
+  const summary = await runPlaneGuard({ io, repo: "CandidDan/flow", range: "x..y", now: 0, fileIssues: true });
+
+  assert.deepEqual(summary.actions, [{ type: "comment", sha, issueNumber: 42 }]);
+  assert.deepEqual(io._writes.map((w) => `${w.method} ${w.path}`),
+    ["POST /repos/CandidDan/flow/issues/42/comments"],
+    "exactly one comment POST, at the right URL — and no second issue filed");
+  assert.match(io._writes[0].body.body, /Still unresolved/);
+  assert.ok(!io._writes.some((w) => w.path.endsWith("/labels")), "no label ensure: nothing is being filed");
+});
+
+test("a failed open-issues read fails the job rather than filing blind", async () => {
+  // The other uncovered catch. Without the index the guard cannot tell a new finding from one already
+  // tracked, so the failure is recorded and the job fails — it does not proceed to file duplicates.
+  const sha = "8".repeat(40);
+  const io = {
+    commits: async () => [{ sha, author: "Dan", message: "m", paths: ["x.md"] }],
+    pullsFor: async () => [],
+    rest: async (path) => { if (path.includes("/issues?")) throw new Error("502 Bad Gateway"); return {}; },
+    write: async () => ({ number: 1 }),
+  };
+  const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0, fileIssues: true });
+  assert.equal(summary.failures.filter((f) => f.type === "read-issues").length, 1);
+  assert.match(summary.failures[0].reason, /502/);
+  assert.equal(exitCodeFor(summary), 1);
+});
+
 test("nothing is ever closed from here — a commit on main does not recover on its own", () => {
   const clean = classifyCommit({ sha: "f".repeat(40), author: "w", message: "m", paths: [".flow/tasks/a.md"] });
   const openIssues = [{ number: 3, body: violationMarker("f".repeat(40)) }];
@@ -626,6 +663,36 @@ test("the Markdown escaping is imported from watchdog.mjs, not reimplemented", (
   // And it must actually hold: an author name carrying a backtick cannot escape its span.
   const body = renderIssueBody({ repo: "o/r", violation: { sha: "a".repeat(40), author: "a`b", message: "`c`", offending: ["x.md"] }, now: 0 });
   assert.ok(body.includes("``a`b``"), "a backtick in the author name is fenced, not spilled into live Markdown");
+});
+
+test("a range that looks like a git OPTION is rejected by git, not silently honoured", () => {
+  // flow-review's security check spotted that `range` reaches `git log` as a positional argument with
+  // nothing marking the end of options. `execFileSync` with an argv array stops shell injection; it
+  // does nothing about GIT reading the value as a flag. And the workflow's allowlist does not catch
+  // this class: `--all` is letters and dashes, so it passes — and git would examine every ref instead
+  // of the range asked for. The CLI is also invocable directly with no allowlist in front of it.
+  //
+  // Run against the REAL git in this checkout, because the whole question is what git does.
+  assert.throws(() => gitCommitsInRange("--all", { cwd: REPO_ROOT }),
+    /could not resolve the range .--all./, "a flag-shaped range must fail loudly, not quietly widen the scan");
+
+  // …and a legitimate range still works through the same code path, which is the half that would
+  // break if `--end-of-options` were swapped for `--`.
+  const real = gitCommitsInRange("5e2b41c581540d83a432f408516484064ba5c88e^!", { cwd: REPO_ROOT });
+  assert.equal(real.length, 1, "a normal range must still resolve");
+  assert.deepEqual(real[0].paths, ["VISION.md"]);
+});
+
+test("the git invocation uses --end-of-options and NOT `--`, which would silently return zero commits", () => {
+  // `--` starts a pathspec: `git log ... -- a..b` looks for a FILE called `a..b`, finds none, and
+  // returns nothing. Verified against real git — it turns the guard into a permanently empty scan,
+  // worse than the flag-injection it would be closing. Pinned so the tempting one-character
+  // "simplification" fails a test instead of disarming the guard.
+  const src = readFileSync(join(import.meta.dirname, "plane-guard.mjs"), "utf8");
+  const argv = src.match(/\["log",[^\]]*\]/);
+  assert.ok(argv, "the git argv array must be findable");
+  assert.match(argv[0], /"--end-of-options"/, "the range must be marked as not-an-option");
+  assert.doesNotMatch(argv[0], /"--",/, "`--` would make the range a pathspec and the scan always empty");
 });
 
 test("the audit range is validated by an allowlist that RUNS, not just by a comment", () => {
