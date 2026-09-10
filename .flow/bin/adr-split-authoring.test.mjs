@@ -445,16 +445,78 @@ test("the cutover reason is stated in COUNTS, not vaguely", () => {
     "…and how many are real `uses:` references, which are the ones that break at run time");
 });
 
+// The BARE reference, anchored. A substring match for "CandidDan/flow" also hits
+// `CandidDan/flow-protocol` and `CandidDan/flow-plugin` — different repositories, needing no
+// re-pinning — and overstates the exposure by three files. The anchoring is done in JS rather
+// than with `git grep -P`, because -P needs a PCRE-enabled git build and this assertion must not
+// depend on how the runner's git was compiled: git does the cheap narrowing, JS does the logic.
+const BARE_REF = /CandidDan\/flow(?!-)/;
+
+// A `uses:` reference GitHub actually RESOLVES. It parses `uses:` inside `.github/workflows/*.yml`
+// and nowhere else, so the same string in a runbook, in docs/flow-map.html or in a .test.mjs
+// fixture is prose. Counting prose as a reference inflates the number that the whole cutover
+// ordering argument rests on.
+const USES_BARE = /uses:\s*CandidDan\/flow(?!-)/;
+
+function filesNamingBareRef() {
+  const candidates = execFileSync(
+    "git", ["grep", "-lI", "CandidDan/flow", "--", ".", ":(exclude).flow/tasks/"],
+    { cwd: REPO, encoding: "utf8" }).split("\n").filter(Boolean);
+  return candidates.filter((f) => BARE_REF.test(readFileSync(join(REPO, f), "utf8")));
+}
+
+function resolvedCallers(prefix) {
+  return filesNamingBareRef().filter((f) =>
+    f.startsWith(prefix) && /\.ya?ml$/.test(f) &&
+    USES_BARE.test(readFileSync(join(REPO, f), "utf8")));
+}
+
 test("the amendment's file counts still match the working tree", () => {
   // Pins the ADR to the repo rather than to a remembered number, exactly as the dogfooding test
   // above pins its "today" passage. When this fails, the count has drifted and the amendment's
   // paragraph must be updated with it — that drift is the point, not noise.
-  const run = (args) =>
-    execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).split("\n").filter(Boolean).length;
-  const named = run(["grep", "-lI", "CandidDan/flow", "--", ".", ":(exclude).flow/tasks/"]);
+  //
+  // The measurement itself is the part that needs care. The first version of this test counted an
+  // UNANCHORED substring and so asserted the ADR against the same wrong number it had put in the
+  // ADR: consistent, self-confirming, and wrong by three files. A test that re-derives the claim's
+  // own mistake proves only that the mistake was made twice.
   const claimed = parseInt(AMD.match(/\*\*(\d+) files outside the task store/)[1], 10);
-  assert.equal(claimed, named,
-    `the amendment claims ${claimed} files outside the store name CandidDan/flow; git finds ${named}`);
+  const actual = filesNamingBareRef().length;
+  assert.equal(claimed, actual,
+    `the amendment claims ${claimed} files outside the store name the bare CandidDan/flow; ` +
+    `the tree has ${actual}`);
+});
+
+test("the amendment's `uses:` counts distinguish a resolved reference from prose", () => {
+  const own = resolvedCallers(".github/workflows/");
+  const template = resolvedCallers("project-template/.github/workflows/");
+
+  const claimedUses = parseInt(AMD.match(/\*\*(\d+) carry a `uses:` reference/)[1], 10);
+  assert.equal(claimedUses, own.length + template.length,
+    `the amendment claims ${claimedUses} resolved \`uses:\` references; the workflow files have ` +
+    `${own.length + template.length} (${own.length} canonical + ${template.length} template)`);
+
+  const claimedCallers = parseInt(AMD.match(/\*\*(\d+) in `project-template\/\.github\/workflows\/`/)[1], 10);
+  assert.equal(claimedCallers, template.length,
+    `the amendment claims ${claimedCallers} template callers; the tree has ${template.length}`);
+
+  // The blast-radius sentence restates the caller count in prose. If the two ever disagree the
+  // paragraph argues against itself, which is worse than either number being stale.
+  const restated = parseInt(AMD.match(/all (\d+) callers fail to resolve/)[1], 10);
+  assert.equal(restated, template.length,
+    `the blast-radius sentence says ${restated} callers, the count above says ${template.length}`);
+});
+
+test("no file counted as a bare reference merely names a DIFFERENT CandidDan repo", () => {
+  // The specific defect this suite shipped with once. Guards the anchoring itself rather than the
+  // number it produces, so it keeps biting after the count has moved on.
+  for (const f of filesNamingBareRef()) {
+    const text = readFileSync(join(REPO, f), "utf8");
+    const bare = text.match(/CandidDan\/flow(?![-\w])/g) ?? [];
+    assert.ok(bare.length > 0,
+      `${f} was counted as naming CandidDan/flow, but only names a suffixed repo such as ` +
+      `CandidDan/flow-protocol or CandidDan/flow-plugin`);
+  }
 });
 
 test("the amendment records that publication REPLACES the release repo's tree", () => {

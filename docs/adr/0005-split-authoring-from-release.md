@@ -289,15 +289,22 @@ The order is:
 3. **Verify** a green run against the new reference — an actual CI run, not a reading of the diff.
 4. **Only then** flip canonical private.
 
-The reason, in counts rather than vaguely. As of 2026-09-10, **49 files outside the task store name
-`CandidDan/flow`**; the original Consequences recorded 40 on 2026-08-31, and the number has grown,
-not shrunk. **28 of those carry a real `uses:` reference** resolved by GitHub at run time, and
-**11 of them are the workflow callers in `project-template/`** — the files every adopting repo
-ships a copy of.
+The reason, in counts rather than vaguely. As of 2026-09-10, **46 files outside the task store name
+`CandidDan/flow`**. That is the *bare* reference: `CandidDan/flow-protocol` and
+`CandidDan/flow-plugin` are different repositories and need no re-pinning, so a substring count
+overstates the exposure by three files. The original Consequences recorded 40 on 2026-08-31, so the
+number has grown, not shrunk.
+
+Of those, **19 carry a `uses:` reference that GitHub actually resolves at run time** — nine of
+canonical's own callers and **10 in `project-template/.github/workflows/`**, the files every
+adopting repo ships a copy of. The other 27 name the reference in prose, in `docs/flow-map.html`,
+or in a test fixture. That distinction is not pedantry: GitHub parses `uses:` inside
+`.github/workflows/*.yml` and nowhere else, so a runbook that quotes the string is documentation to
+correct at leisure, while a caller that resolves it is a repository that stops working.
 
 That last number is the one that matters. Flipping canonical private before step 3 does not degrade
 gradually: a private repository's reusable workflows cannot be resolved by an outside adopter at
-all, so **all 11 callers fail to resolve in every adopting repo at once**, in *their* CI, with no
+all, so **all 10 callers fail to resolve in every adopting repo at once**, in *their* CI, with no
 local change on their side to explain it. The blast radius is the entire fleet, simultaneously, and
 the symptom appears furthest from the cause.
 
