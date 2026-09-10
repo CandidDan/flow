@@ -430,7 +430,7 @@ export async function collectCommits({ io, range }) {
   // carrying only store commits, or only commits on the first-parent line, never pays for it.
   let introducedBy = null;
   const introducingMerge = async (sha) => {
-    if (introducedBy === null) introducedBy = await io.introducedByMerge();
+    if (introducedBy === null) introducedBy = await io.introducedByMerge(range);
     return introducedBy.get(sha) ?? null;
   };
 
@@ -662,11 +662,18 @@ export function resolveFirstParentShas(baseBranch, { cwd, exec = execFileSync } 
   throw new Error(`could not walk the first-parent line of the policed branch \`${baseBranch}\` — tried ${candidates.join(", ")}. ${problems.join("; ")}`);
 }
 
-// Every commit a merge brought onto `baseBranch`, as {commit -> the merge commit that introduced it}.
+// Every commit a merge brought onto the policed branch WITHIN `rangeSpec`, as
+// {commit -> the merge commit that introduced it}.
 //
 // Built by asking each merge ON the first-parent line what its non-first parents contributed
 // (`rev-list M^2 … --not M^1`) — the exact definition of "this merge brought these commits in", and the
 // only formulation that survived contact with real history.
+//
+// SCOPED TO THE RANGE, and that is correctness as much as cost. A commit inside `before..after` was not
+// reachable from `before`, so neither was the merge that put it on the branch — the introducing merge is
+// therefore inside the same range, always. Walking the branch's whole history instead would return the
+// identical answer for every commit being judged while costing two git calls per merge that ever landed:
+// ~100 on this repo for an ordinary one-merge push. flow-review's code-review flagged the growth.
 //
 // THE ATTEMPT THIS REPLACES, recorded because it looked right and was not: a single
 // `rev-list --ancestry-path --first-parent <sha>..<base>`, taking the oldest result. It gave the
@@ -677,7 +684,7 @@ export function resolveFirstParentShas(baseBranch, { cwd, exec = execFileSync } 
 //
 // Iterated OLDEST merge first so a commit reachable through more than one merge is attributed to the
 // first one that put it on the branch.
-export function gitIntroducedByMerge(baseBranch, { cwd, exec = execFileSync } = {}) {
+export function gitIntroducedByMerge(rangeSpec, { cwd, exec = execFileSync } = {}) {
   const git = (...args) => {
     try {
       return exec("git", args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -687,7 +694,7 @@ export function gitIntroducedByMerge(baseBranch, { cwd, exec = execFileSync } = 
     }
   };
 
-  const merges = git("rev-list", "--first-parent", "--merges", "--end-of-options", baseBranch)
+  const merges = git("rev-list", "--first-parent", "--merges", "--end-of-options", rangeSpec)
     .split("\n").map((l) => l.trim()).filter(Boolean).reverse();
 
   const out = new Map();
@@ -729,7 +736,7 @@ export function createIO({ token, cwd, repo, baseBranch = DEFAULT_BASE_BRANCH } 
     commits: async (range) => gitCommitsInRange(range, { cwd }),
     // Derived from the SAME `baseBranch` the PR-base check uses, so the two signals cannot disagree.
     firstParentShas: async () => resolveFirstParentShas(baseBranch, { cwd }),
-    introducedByMerge: async () => gitIntroducedByMerge(baseBranch, { cwd }),
+    introducedByMerge: async (range) => gitIntroducedByMerge(range, { cwd }),
     pullsFor: async (sha) => request("GET", `/repos/${repo}/commits/${sha}/pulls`),
     rest: (path) => request("GET", path),
     write: (method, path, body) => request(method, path, body),

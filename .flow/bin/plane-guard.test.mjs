@@ -145,7 +145,7 @@ function fakeIO({ commits = [], pulls = {}, issues = [], writes = [], failWrites
     firstParentShas: async () => new Set(firstParent ?? commits.map((c) => c.sha)),
     // Which merge brought each off-the-line commit in. `introducing` maps sha -> merge sha; an Error
     // value makes the whole map read throw, which is how the real git call fails.
-    introducedByMerge: async () => {
+    introducedByMerge: async (_range) => {
       for (const v of Object.values(introducing ?? {})) if (v instanceof Error) throw v;
       return new Map(Object.entries(introducing ?? {}).filter(([, v]) => v));
     },
@@ -471,7 +471,7 @@ test("a locally built merge pushed straight to the branch is CAUGHT, not excused
     const io = {
       commits: async (range) => gitCommitsInRange(range, { cwd: dir }),
       firstParentShas: async () => resolveFirstParentShas("main", { cwd: dir }),
-      introducedByMerge: async () => gitIntroducedByMerge("main", { cwd: dir }),
+      introducedByMerge: async (range) => gitIntroducedByMerge(range, { cwd: dir }),
       pullsFor: async () => [],                  // no pull request has ever existed in this repo
       rest: async () => [], write: async () => ({ number: 1 }),
     };
@@ -495,6 +495,10 @@ test("a locally built merge pushed straight to the branch is CAUGHT, not excused
 test("the introducing merge is resolved from the real graph, and its PR answer is cached per merge", async () => {
   await withFixtureRepo(async ({ dir, shas }) => {
     const map = gitIntroducedByMerge("main", { cwd: dir });
+    // Scoped to a range, the same merge is still found — and a range that excludes it finds nothing.
+    assert.equal(gitIntroducedByMerge(`${shas.A}..${shas.D}`, { cwd: dir }).get(shas.B), shas.M);
+    assert.equal(gitIntroducedByMerge(`${shas.M}..${shas.D}`, { cwd: dir }).size, 0,
+      "a range starting after the merge contains no merge to attribute anything to");
     assert.equal(map.get(shas.B), shas.M, "B was brought in by the merge M");
     assert.equal(map.get(shas.D), undefined, "a commit already ON the line was introduced by no merge");
     assert.equal(map.get(shas.A), undefined);
@@ -505,7 +509,7 @@ test("the introducing merge is resolved from the real graph, and its PR answer i
     const io = {
       commits: async (range) => gitCommitsInRange(range, { cwd: dir }),
       firstParentShas: async () => resolveFirstParentShas("main", { cwd: dir }),
-      introducedByMerge: async () => gitIntroducedByMerge("main", { cwd: dir }),
+      introducedByMerge: async (range) => gitIntroducedByMerge(range, { cwd: dir }),
       pullsFor: async (sha) => { asked.push(sha); return []; },
       rest: async () => [], write: async () => ({ number: 1 }),
     };
@@ -579,7 +583,7 @@ test("the two-signal rule, end to end against a real commit graph", async () => 
     const io = {
       commits: async (range) => gitCommitsInRange(range, { cwd: dir }),
       firstParentShas: async () => resolveFirstParentShas("main", { cwd: dir }),
-      introducedByMerge: async () => gitIntroducedByMerge("main", { cwd: dir }),
+      introducedByMerge: async (range) => gitIntroducedByMerge(range, { cwd: dir }),
       pullsFor: async (sha) => (sha === shas.M
         ? [{ number: 1, merged_at: "2026-09-01T00:00:00Z", base: { ref: "main" }, merge_commit_sha: shas.M }]
         : []),
