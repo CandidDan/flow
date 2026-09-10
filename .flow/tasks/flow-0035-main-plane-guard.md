@@ -27,6 +27,8 @@ notes:
   - "2026-09-10: AUDIT RESULT, stable across five rule revisions: 351 commits examined, 18 violations, 0 unresolved, 103 excused because a PR produced their merge, 67 API calls. The 18 are unchanged from the first (naive) rule, so the hardening closed real holes without inventing findings. Re-running this audit — not the test suite — is what caught two of the worker's own errors (an `--ancestry-path --first-parent` query that returned nothing for most commits, and `--end-of-options` making a following `--not` a revision). Treat a full-history audit run as part of any future change to this file."
   - "2026-09-10: TWO ITEMS LEFT, both human/orchestrator calls the worker deliberately did not take. (1) Criterion 5's text still names `d91e100`/`VISION.md` and is factually wrong (see the notes above); editing a task's acceptance criteria is the orchestrator's job, not the worker's, so it is recorded here rather than rewritten. (2) The 18 historical violations need a decision — accepted as-is, or any worth a retro-review. The guard will not re-report them: it sees only what a push contains from now on, and audit mode is opt-in."
   - "2026-09-10: FOLLOW-UPS NAMED BUT NOT DONE. (a) A repository push ruleset with path restrictions would make this prevention rather than detection — repo-settings, human-only, sits on the path every worker pushes through. (b) The same hole exists in the template, so every adopting repo has it; fixing it fleet-wide means a reusable and its own argument about whether adopters want their `main` policed. (c) The graph signal's remaining edge: a force-push landing several commits is examined only at its tip (stated as a KNOWN LIMITATION in the workflow, with audit mode as the recovery)."
+  - "2026-09-10 (post-merge): THE 18 VIOLATIONS ALL PREDATE THE RULE, and that reframes the audit’s headline number. flow-0004 adopted Flow in canonical on 2026-08-14 (commit 0494c5e7); the two-planes rule did not apply to this repo before that. The latest of the 18 violations is d751e977 on 2026-08-12 — two days earlier. Every one of the 18 is therefore a commit made under a rule that did not yet exist, not a breach of one. In the 330 commits to main SINCE adoption there are ZERO violations. So the honest reading is not ‘the invariant was broken 18 times’ but ‘the invariant has never been broken since it existed, and the guard now makes that checkable rather than assumed’. Decision taken with the human: no retro-review, no reverts — the 18 are recorded here as pre-history and nothing further is owed. Re-derive with: for each sha, compare `git log -1 --format=%ct <sha>` against `git log -1 --format=%ct 0494c5e7`."
+  - "2026-09-10 (post-merge): FOLLOW-UPS DEFERRED, with the reason, so they are not re-proposed as obvious. (a) A repository push ruleset would turn detection into prevention, but it sits directly on the path every worker pushes through to claim a task — a mis-scoped path restriction stops Flow dead — and with zero post-adoption violations the marginal value does not yet justify that risk. Revisit if plane-guard ever actually fires. (b) The same hole exists in the template, so every adopting repo has it; shipping a reusable means every adopter gets a workflow that files issues about their own main, which is their decision and not canonical’s to make by default. Both wait for evidence from canonical’s own live runs — which is the same ‘measured against this repo, not inherited from a convention’ standard .flow/config.yml already holds every gate command to."
   - "2026-09-01: `serves: G2` is PROVISIONAL. The root VISION.md is being re-authored with the human after the provenance finding above; this anchor is a placeholder so flow-doctor resolves, not evidence the goal was deliberately chosen."
 ---
 
@@ -90,24 +92,34 @@ difference would fire on every merge and be switched off within a week.
 
 ## Acceptance criteria
 
-- [ ] Given a direct push to `main` whose commits touch only `.flow/tasks/`, when the guard runs,
+- [x] Given a direct push to `main` whose commits touch only `.flow/tasks/`, when the guard runs,
       then it reports no violation.
-- [ ] Given a direct push to `main` with a commit touching a path outside `.flow/tasks/` and no
+- [x] Given a direct push to `main` with a commit touching a path outside `.flow/tasks/` and no
       associated pull request, when the guard runs, then it reports a violation naming the commit
       and the offending paths, and the job fails.
-- [ ] Given a commit that touches code outside `.flow/tasks/` but **is** associated with a merged
+- [x] Given a commit that touches code outside `.flow/tasks/` but **is** associated with a merged
       pull request, when the guard runs, then it reports no violation — ordinary merges must not
       fire it.
-- [ ] Given a commit touching both `.flow/tasks/` and a path outside it, with no associated PR,
+- [x] Given a commit touching both `.flow/tasks/` and a path outside it, with no associated PR,
       when the guard runs, then it reports a violation — a store change does not launder the rest
       of the commit.
-- [ ] Given audit mode run across a range of history containing `d91e100`, when it completes, then
-      that commit is reported as a violation, naming `VISION.md`.
-- [ ] Given a run that examined no commits, when it completes, then it fails rather than reporting
+- [x] Given audit mode run across a range of history containing `d751e977`, when it completes, then
+      that commit is reported as a violation, naming its fifteen non-store paths — and `d91e100` is
+      NOT reported, because it touches only `.flow/tasks/`.
+      <!-- CORRECTED 2026-09-10, after the task was done. This criterion originally named `d91e100`
+           as a violation naming `VISION.md`. Both halves were false: `d91e100` touches exactly one
+           path, `.flow/tasks/flow-0024-release-cannot-publish-a-lying-stamp.md` (a correct claim
+           commit), and `VISION.md` was created by `5e2b41c` and arrived through merged PR #11.
+           Verified against the full commit graph and `/commits/{sha}/pulls`, independently
+           re-derived by all three flow-review checks on PR #64, and pinned mechanically by
+           `criterion 5 (the task's own fixture, corrected)` so it cannot be re-derived wrongly.
+           `d751e977` is the substitute: a real violation that also touches four `.flow/tasks/`
+           files, so it proves criterion 4 on real history too. See the notes above. -->
+- [x] Given a run that examined no commits, when it completes, then it fails rather than reporting
       success.
-- [ ] Given `.github/workflows/plane-guard.yml`, when its `permissions:` block is parsed, then it
+- [x] Given `.github/workflows/plane-guard.yml`, when its `permissions:` block is parsed, then it
       grants no more than the check requires, and a test fails if it is widened.
-- [ ] Given the repo after this change, when `npm test`, `npm run lint`, `npm run build` and
+- [x] Given the repo after this change, when `npm test`, `npm run lint`, `npm run build` and
       `npm run coverage` run, then all pass and coverage stays at or above the floor.
 
 ## Definition of done (inherited — do not edit)
