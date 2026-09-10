@@ -149,6 +149,10 @@ export function classifyCommit(commit, { baseBranch = DEFAULT_BASE_BRANCH } = {}
     ...(c.pullLookupError ? { pullLookupError: c.pullLookupError } : {}),
   };
 
+  // `no-paths` is distinct from `store-only` so a reader grepping verdicts is not misled: an ordinary
+  // merge commit has an EMPTY `--name-only` diff and touches nothing, which is a different fact from
+  // "it touched the store". Both are `violation: false`. Raised by flow-review's code-review.
+  if (base.paths.length === 0) return { ...base, verdict: "no-paths", violation: false };
   if (offending.length === 0) return { ...base, verdict: "store-only", violation: false };
 
   // SIGNAL ONE — THE COMMIT GRAPH. A commit that is NOT on the policed branch's first-parent line
@@ -159,6 +163,23 @@ export function classifyCommit(commit, { baseBranch = DEFAULT_BASE_BRANCH } = {}
   //
   // Measured against this repo's real history, the separation is exact: all 18 commits the audit
   // found are on the first-parent line, and every legitimately merged commit checked is not.
+  //
+  // NAMED LIMITATION, ACCEPTED RATHER THAN OVERLOOKED. This signal proves "arrived through a merge",
+  // NOT "arrived through a pull request". A locally built `git merge --no-ff feature` pushed straight
+  // to the policed branch puts its commits off the first-parent line with no PR anywhere, and they are
+  // excused here. The merge commit itself lands ON the line, but an ordinary merge has an empty
+  // `--name-only` diff, so it carries no offending paths and is not judged either — that is the
+  // actual shape of the gap.
+  //
+  // It is accepted because the alternative is worse: requiring a PR for merge-borne commits means
+  // asking the API about all of them, and the API's answer for a commit merged up a stack names only
+  // the first PR — which is how base filtering came to falsely accuse `de72f18`, a reviewed commit.
+  // The threat model here is a trusted-but-fallible pusher, not an adversary: this guard is detection
+  // for the mistake of committing straight to `main`, which is what the 18 real findings all are.
+  // Closing it properly means judging the MERGE COMMIT (parents >= 2, on the line, no merged PR based
+  // on the branch) and reporting the paths its second-parent side introduced. That is a real
+  // improvement and a separate task — flow-review's code-review raised it, and it is written down
+  // here so nobody has to re-derive it from the absence of a test.
   if (c.arrivedByMerge) return { ...base, verdict: "merged-parent", violation: false };
 
   // SIGNAL TWO — THE PR API, for the case the graph cannot resolve. A SQUASH merge lands a single
@@ -491,10 +512,9 @@ export function gitCommitsInRange(range, { cwd, exec = execFileSync } = {}) {
   return parseGitLog(out);
 }
 
-// The policed branch's first-parent line. `HEAD` by default rather than the branch NAME: on a push
-// event the checkout is the pushed tip of that branch, and depending on a local branch ref existing
-// is how this would break on a runner. Fails loudly rather than returning an empty set.
-export function gitFirstParentShas(ref = "HEAD", { cwd, exec = execFileSync } = {}) {
+// The first-parent line of ONE named ref. Fails loudly rather than returning an empty set, because an
+// empty set silently routes every commit to the PR API — see `collectCommits`.
+export function gitFirstParentShas(ref, { cwd, exec = execFileSync } = {}) {
   let out;
   try {
     out = exec("git", ["rev-list", "--first-parent", "--end-of-options", ref],
@@ -506,7 +526,34 @@ export function gitFirstParentShas(ref = "HEAD", { cwd, exec = execFileSync } = 
   return new Set(out.split("\n").map((l) => l.trim()).filter(Boolean));
 }
 
-export function createIO({ token, cwd, repo, firstParentRef = "HEAD" } = {}) {
+// THE TWO SIGNALS MUST DESCRIBE THE SAME BRANCH, and this is the function that guarantees it. The
+// first version defaulted the graph walk to `HEAD` while the PR-base check honoured `baseBranch`, so
+// `--base develop` from a `main` checkout had signal one judging against `main`'s first-parent line
+// and signal two against `develop` — an internal disagreement that can flip a verdict with nothing
+// in the output saying so. flow-review's code-review caught it; `--base` was advertised as respected
+// by `parseArgs`, by the workflow docs and by a test, and was only half respected.
+//
+// So the ref is derived from the policed branch, and the spellings are tried in a fixed order rather
+// than falling back to `HEAD`: a silent `HEAD` fallback is exactly the inconsistency being fixed.
+// `refs/remotes/origin/<branch>` is second because a runner checkout may have the remote-tracking ref
+// without the local branch. If neither resolves the run FAILS, naming both — a wrong answer about
+// which branch is policed is worse than no answer.
+export function resolveFirstParentShas(baseBranch, { cwd, exec = execFileSync } = {}) {
+  const candidates = [baseBranch, `refs/remotes/origin/${baseBranch}`];
+  const problems = [];
+  for (const ref of candidates) {
+    try {
+      const shas = gitFirstParentShas(ref, { cwd, exec });
+      if (shas.size > 0) return shas;
+      problems.push(`${ref}: resolved but walked no commits`);
+    } catch (err) {
+      problems.push(`${err?.message || err}`);
+    }
+  }
+  throw new Error(`could not walk the first-parent line of the policed branch \`${baseBranch}\` — tried ${candidates.join(", ")}. ${problems.join("; ")}`);
+}
+
+export function createIO({ token, cwd, repo, baseBranch = DEFAULT_BASE_BRANCH } = {}) {
   async function request(method, path, body) {
     const res = await fetch(`${GITHUB_API}${path}`, {
       method,
@@ -527,7 +574,8 @@ export function createIO({ token, cwd, repo, firstParentRef = "HEAD" } = {}) {
   }
   return {
     commits: async (range) => gitCommitsInRange(range, { cwd }),
-    firstParentShas: async () => gitFirstParentShas(firstParentRef, { cwd }),
+    // Derived from the SAME `baseBranch` the PR-base check uses, so the two signals cannot disagree.
+    firstParentShas: async () => resolveFirstParentShas(baseBranch, { cwd }),
     pullsFor: async (sha) => request("GET", `/repos/${repo}/commits/${sha}/pulls`),
     rest: (path) => request("GET", path),
     write: (method, path, body) => request(method, path, body),
@@ -565,7 +613,7 @@ if (__isMain) {
     process.exit(1);
   }
 
-  const io = createIO({ token: process.env.GITHUB_TOKEN, repo });
+  const io = createIO({ token: process.env.GITHUB_TOKEN, repo, baseBranch });
   let summary;
   try {
     summary = await runPlaneGuard({ io, repo, range, baseBranch, fileIssues, dryRun });

@@ -57,6 +57,8 @@ import {
   runPlaneGuard,
   gitCommitsInRange,
   gitFirstParentShas,
+  resolveFirstParentShas,
+  createIO,
   violationMarker,
   issueTitle,
   parseArgs,
@@ -281,7 +283,7 @@ test("criterion 3: an ordinary merge does not fire the guard — a merged PR exc
   for (const { style, commit } of cases) {
     const r = classifyCommit(commit);
     assert.equal(r.violation, false, `${style} must not be reported`);
-    assert.ok(["merged-pr", "store-only"].includes(r.verdict), `${style} verdict was ${r.verdict}`);
+    assert.ok(["merged-pr", "no-paths"].includes(r.verdict), `${style} verdict was ${r.verdict}`);
   }
 
   const { violations } = checkCommits(cases.map((c) => c.commit));
@@ -362,6 +364,110 @@ test("the first-parent walk uses --end-of-options and fails loudly", () => {
     assert.ok(!fp.has(shas.B), "B arrived through the merge, so it is NOT on the first-parent line — the whole basis of the graph signal");
     assert.ok(all.has(shas.B), "…but it IS in history, which is what makes the distinction meaningful");
   });
+});
+
+test("the graph ref is derived from the policed branch, so the two signals cannot disagree", () => {
+  // The bug flow-review's code-review found: `--base` reached the PR-base check but not the graph
+  // walk, which always used `HEAD`. `--base develop` from a `main` checkout then had signal one
+  // judging `main` and signal two judging `develop`. These assertions pin the wiring itself.
+  withFixtureRepo(({ dir, git, shas }) => {
+    // The local branch name resolves first.
+    const onMain = resolveFirstParentShas("main", { cwd: dir });
+    assert.ok(onMain.has(shas.D) && !onMain.has(shas.B), "main's first-parent line, not HEAD's by accident");
+
+    // A branch that exists but is NOT the one checked out must still resolve to ITS OWN line — the
+    // property a `HEAD` default silently breaks. `feat`'s line contains B; main's does not.
+    const onFeat = resolveFirstParentShas("feat", { cwd: dir });
+    assert.ok(onFeat.has(shas.B), "feat's line contains B");
+    assert.ok(!onFeat.has(shas.D), "…and not D, which is only on main");
+    git("checkout", "-q", "main"); // HEAD is main, yet the walk above answered about feat
+
+    // Remote-tracking fallback, for a runner checkout that has origin/<branch> and no local branch.
+    git("update-ref", "refs/remotes/origin/release", shas.D0);
+    const onRemote = resolveFirstParentShas("release", { cwd: dir });
+    assert.ok(onRemote.has(shas.D0) && !onRemote.has(shas.D), "resolved through refs/remotes/origin/release");
+
+    // Neither spelling resolves -> a loud failure naming both, never a HEAD fallback.
+    assert.throws(() => resolveFirstParentShas("nope", { cwd: dir }),
+      /policed branch .nope. — tried nope, refs\/remotes\/origin\/nope/);
+  });
+});
+
+test("createIO wires the policed branch into the graph walk", async () => {
+  // `createIO` was the uncovered block where the inconsistency lived, so it is constructed here for
+  // real. No token and no network: only `firstParentShas` is exercised, which is pure git.
+  withFixtureRepo(({ dir, shas }) => {
+    const io = createIO({ repo: "o/r", cwd: dir, baseBranch: "feat" });
+    return io.firstParentShas().then((shas2) => {
+      assert.ok(shas2.has(shas.B), "createIO({ baseBranch: 'feat' }) must walk feat, not HEAD");
+      assert.ok(!shas2.has(shas.D));
+    });
+  });
+
+  // And the default is the policed branch's default, not a hardcoded ref.
+  assert.equal(parseArgs([]).baseBranch, DEFAULT_BASE_BRANCH);
+
+  // THE CLI'S OWN CALL, asserted on the source. This is the precise line flow-review's code-review
+  // found wrong, and it lives inside the `__isMain` block, which by design never runs under the test
+  // runner — so no behavioural test can reach it. A source assertion is the only thing that can, and
+  // without it the one-line regression that caused the finding passes the whole suite. (Checked: it
+  // does. Removing `baseBranch` here failed nothing before this assertion existed.)
+  const src = readFileSync(join(import.meta.dirname, "plane-guard.mjs"), "utf8");
+  assert.match(src, /createIO\(\{[^}]*\bbaseBranch\b[^}]*\}\)/,
+    "the CLI must pass baseBranch into createIO, or the graph walks the wrong branch");
+});
+
+test("resolveFirstParentShas falls through a candidate that resolves but walks nothing", () => {
+  // A ref can resolve and still yield no commits. Taking that as the answer hands `collectCommits` an
+  // empty set, which it treats as a broken read — correct, but it would have skipped a candidate that
+  // WOULD have worked. Driven with an injected exec because the case is awkward to build in real git.
+  const calls = [];
+  const exec = (_cmd, args) => {
+    const ref = args[args.length - 1];
+    calls.push(ref);
+    if (ref === "release") return "\n";                    // resolves, walks nothing
+    if (ref === "refs/remotes/origin/release") return "abc\ndef\n";
+    throw Object.assign(new Error("Command failed"), { stderr: "fatal: bad revision\n" });
+  };
+
+  const shas = resolveFirstParentShas("release", { exec });
+  assert.deepEqual([...shas], ["abc", "def"], "the second candidate answered");
+  assert.deepEqual(calls, ["release", "refs/remotes/origin/release"], "…and only after the first was tried");
+
+  // Both empty -> a loud failure that says which candidate did what, not a silent empty set.
+  const bothEmpty = () => "";
+  assert.throws(() => resolveFirstParentShas("release", { exec: bothEmpty }),
+    /resolved but walked no commits/);
+});
+
+test("the graph signal's gap is a NAMED limitation: a hand-pushed merge is excused", async () => {
+  // Pinned as behaviour rather than left implicit, because a limitation with no test looks like a bug
+  // and a limitation with a test looks like a decision. Signal one proves "arrived through a merge",
+  // not "arrived through a pull request" — and this fixture has no PR anywhere.
+  await withFixtureRepo(async ({ dir, shas }) => {
+    let apiCalls = 0;
+    const io = {
+      commits: async (range) => gitCommitsInRange(range, { cwd: dir }),
+      firstParentShas: async () => resolveFirstParentShas("main", { cwd: dir }),
+      pullsFor: async () => { apiCalls++; return []; },
+      rest: async () => [], write: async () => ({ number: 1 }),
+    };
+    const summary = await runPlaneGuard({ io, repo: "o/r", range: `${shas.A}..${shas.D}`, now: 0 });
+
+    // B came in through a locally made `git merge --no-ff`, with no PR in existence.
+    assert.equal(summary.results.find((r) => r.sha === shas.B).verdict, "merged-parent");
+    assert.ok(!summary.violations.some((v) => v.sha === shas.B), "excused — this is the accepted gap");
+    assert.equal(apiCalls, 1, "and no API call was spent on it: only D, which is on the first-parent line");
+
+    // The merge commit itself is on the line but touches nothing, so it is not judged either. That is
+    // the actual shape of the gap, and where a future fix would have to look.
+    assert.equal(summary.results.find((r) => r.sha === shas.M).verdict, "no-paths");
+  });
+
+  // And the reasoning is written down where a reader will find it, not only here.
+  const src = readFileSync(join(import.meta.dirname, "plane-guard.mjs"), "utf8");
+  assert.match(src, /NAMED LIMITATION, ACCEPTED RATHER THAN OVERLOOKED/);
+  assert.match(src, /arrived through a merge.*NOT.*pull request/s);
 });
 
 test("the two-signal rule, end to end against a real commit graph", async () => {
@@ -596,7 +702,11 @@ test("the git log parser survives a commit subject containing the characters a d
 test("a merge commit parses to zero paths, which is the right answer and not an omission", () => {
   const parsed = parseGitLog(`\x1e${"8".repeat(40)}\x1fGitHub\x1fMerge pull request #63 from CandidDan/x\x1f\n`);
   assert.deepEqual(parsed[0].paths, [], "git prints an empty combined diff for an ordinary merge");
-  assert.equal(classifyCommit(parsed[0]).verdict, "store-only", "so it introduces nothing to police");
+  assert.equal(classifyCommit(parsed[0]).verdict, "no-paths",
+    "and its verdict says so — a merge touching nothing is a different fact from one touching only the store");
+  assert.equal(classifyCommit(parsed[0]).violation, false, "either way there is nothing to police");
+  assert.equal(classifyCommit({ sha: "x".repeat(40), author: "w", message: "claim", paths: [".flow/tasks/a.md"] }).verdict,
+    "store-only", "…and a real store commit keeps the label that describes it");
 });
 
 // ── criterion 6 ──────────────────────────────────────────────────────────────────────────────
