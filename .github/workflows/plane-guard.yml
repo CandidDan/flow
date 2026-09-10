@@ -41,11 +41,21 @@ jobs:
     # job: the guard reads history, asks GitHub whether a commit had a PR, and files an issue. It
     # never pushes, never reverts and never touches a workflow — a guard that could rewrite `main`
     # on its own judgment would be a larger blast radius than the violation it reports.
-    # `plane-guard.test.mjs` parses this block and FAILS if `contents` is raised to `write` or any
-    # other write scope appears, so the boundary is mechanical rather than a comment.
+    # `plane-guard.test.mjs` parses this block and FAILS if `contents` is raised to `write`, if any
+    # other write scope appears, or if a scope is dropped — so the boundary is mechanical rather
+    # than a comment.
+    #
+    # `pull-requests: read` is REQUIRED, not defensive, and getting this wrong is a silent
+    # no-guard: once any `permissions:` block is declared, every unlisted scope defaults to `none`,
+    # and `GET /repos/{owner}/{repo}/commits/{sha}/pulls` — the one question this whole check turns
+    # on — is documented under "Repository permissions for Pull requests: read". Without it every
+    # offending commit 403s and comes back `unresolved`: the job fails loudly, which is the right
+    # direction, but the guard establishes nothing. flow-review's code-review raised this before the
+    # first live run and it was verified against GitHub's permissions reference, not assumed.
     permissions:
       contents: read
       issues: write
+      pull-requests: read
 
     steps:
       # `fetch-depth: 0` is load-bearing, not caution. The live check needs the `before` sha of
@@ -100,6 +110,14 @@ jobs:
             # `<sha>^!` is "this commit, excluding its parents" — the one single-commit spelling
             # that also resolves for a ROOT commit, where `<sha>~1..` has nothing to subtract and
             # git errors out. An initial commit is exactly the case a force-push can produce.
+            #
+            # KNOWN LIMITATION, stated rather than left to be discovered: this examines ONLY the
+            # after-commit. A force-push landing several new commits at once has the rest go
+            # unexamined by this run. The alternative — widening to a fixed recent window — would
+            # re-examine commits already checked and file issues for history the operator has
+            # already triaged, which is a worse failure than a gap on a path that is itself already
+            # a protocol violation. Audit mode over an explicit range is the tool for recovering
+            # such a gap, and that is deliberate: it is a human decision, not a default.
             echo "range=${PUSH_AFTER}^!" >> "$GITHUB_OUTPUT"
           else
             echo "range=${PUSH_BEFORE}..${PUSH_AFTER}" >> "$GITHUB_OUTPUT"

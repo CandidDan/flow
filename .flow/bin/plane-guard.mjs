@@ -67,6 +67,15 @@ const GITHUB_API = "https://api.github.com";
 export const STORE_PREFIX = ".flow/tasks/";
 
 export const PLANE_GUARD_LABEL = "plane-violation";
+
+// GitHub's maximum page size for the open-issue read that builds the dedupe index. Past this many
+// concurrently-open `plane-violation` issues the index is INCOMPLETE and the guard would start
+// filing duplicates — a mild degradation, but a silent one, which is the failure mode this repo's
+// guards exist to refuse. `runPlaneGuard` therefore reports `dedupeIndexTruncated` and the CLI says
+// so out loud. It deliberately does NOT fail the job: the consequence is a duplicate issue, which
+// is visible, and a job that failed forever once a repo accumulated 100 open findings would be
+// switched off long before anyone paginated it.
+export const ISSUES_PER_PAGE = 100;
 export const LABEL_COLOR = "d93f0b";
 export const LABEL_DESCRIPTION =
   "Filed by plane-guard: a commit reached main outside .flow/tasks/ with no associated pull request.";
@@ -358,11 +367,15 @@ export async function runPlaneGuard({ io, repo, range, now = Date.now(), fileIss
 
   let actions = [];
   let failures = [];
+  let dedupeIndexTruncated = false;
   if (fileIssues && violations.length > 0) {
     let openIssues = [];
     try {
-      const r = await io.rest(`/repos/${repo}/issues?labels=${PLANE_GUARD_LABEL}&state=open&per_page=100`);
-      openIssues = (Array.isArray(r) ? r : []).filter((i) => !i.pull_request);
+      const r = await io.rest(`/repos/${repo}/issues?labels=${PLANE_GUARD_LABEL}&state=open&per_page=${ISSUES_PER_PAGE}`);
+      const page = Array.isArray(r) ? r : [];
+      // A full page means there may be more, so the dedupe index cannot be assumed complete.
+      if (page.length >= ISSUES_PER_PAGE) dedupeIndexTruncated = true;
+      openIssues = page.filter((i) => !i.pull_request);
     } catch (err) {
       failures.push({ type: "read-issues", sha: null, reason: `${err?.message || err}` });
     }
@@ -372,7 +385,7 @@ export async function runPlaneGuard({ io, repo, range, now = Date.now(), fileIss
     failures = failures.concat(outcome.failures);
   }
 
-  return { repo, range, examined, results, violations, emptyScan, actions, failures };
+  return { repo, range, examined, results, violations, emptyScan, actions, failures, dedupeIndexTruncated };
 }
 
 // The exit code, as a pure function of the summary, so the rule is a table test rather than
@@ -490,6 +503,11 @@ if (__isMain) {
     if (r.pullLookupError) console.error(`plane-guard: could not resolve PRs for ${r.sha.slice(0, 8)} — treated as a violation: ${r.pullLookupError}`);
   }
   for (const f of summary.failures) console.error(`plane-guard: ${f.type} failed${f.sha ? ` for ${f.sha.slice(0, 8)}` : ""}: ${f.reason}`);
+
+  if (summary.dedupeIndexTruncated) {
+    console.error(`plane-guard: the open-issue read returned a full page of ${ISSUES_PER_PAGE} — the dedupe index may be incomplete,`);
+    console.error("so a finding already tracked by an issue beyond that page would be filed again. Not fatal; stated so it is not silent.");
+  }
 
   if (summary.violations.length > 0) {
     console.error(`plane-guard: ${summary.violations.length} commit(s) reached main outside \`${STORE_PREFIX}\` with no merged PR.`);

@@ -36,6 +36,7 @@ import { join } from "node:path";
 import {
   STORE_PREFIX,
   PLANE_GUARD_LABEL,
+  ISSUES_PER_PAGE,
   checkCommits,
   classifyCommit,
   collectCommits,
@@ -503,15 +504,22 @@ const yamlMod = await import("yaml").then((m) => m, () => null);
 const yamlSkip = yamlMod ? false : "needs `npm ci` (yaml) — runs in the per-stack gate job";
 const wfSrc = readFileSync(WORKFLOW, "utf8");
 
-test("criterion 7: plane-guard.yml grants exactly contents:read and issues:write", { skip: yamlSkip }, () => {
+test("criterion 7: plane-guard.yml grants exactly contents:read, issues:write and pull-requests:read", { skip: yamlSkip }, () => {
   const doc = yamlMod.parse(wfSrc);
   const perms = doc?.jobs?.["plane-guard"]?.permissions;
   assert.ok(perms && typeof perms === "object", "the job declares an explicit permissions block");
   assert.equal(perms.contents, "read");
   assert.equal(perms.issues, "write");
+  // Not optional and not defensive. Once a `permissions:` block exists every unlisted scope is
+  // `none`, and `/commits/{sha}/pulls` — the question the entire check turns on — needs
+  // `pull-requests: read`. Drop it and every offending commit 403s into `unresolved`: loud, but the
+  // guard establishes nothing. Asserted so a future "tidy-up" cannot quietly disarm it.
+  assert.equal(perms["pull-requests"], "read",
+    "the commit->PR lookup needs pull-requests: read, or the guard 403s on every commit it must judge");
   assert.deepEqual(Object.entries(perms).filter(([, v]) => v === "write").map(([k]) => k), ["issues"],
     "issues is the ONLY write scope — a guard that could push to main is a larger blast radius than the violation");
-  assert.deepEqual(Object.keys(perms).sort(), ["contents", "issues"], "no scope beyond the two the check uses");
+  assert.deepEqual(Object.keys(perms).sort(), ["contents", "issues", "pull-requests"],
+    "exactly the three scopes the check uses — no more, and no fewer");
   assert.equal(doc.permissions, undefined, "no repo-wide default permissions block");
 });
 
@@ -519,8 +527,8 @@ test("criterion 7 (no-install backstop): the permissions block text grants nothi
   const block = wfSrc.match(/\n {4}permissions:\n((?: {6}\S[^\n]*\n)+)/);
   assert.ok(block, "the permissions block must be findable without a YAML loader");
   const lines = block[1].trim().split("\n").map((l) => l.trim()).sort();
-  assert.deepEqual(lines, ["contents: read", "issues: write"],
-    "any added or widened scope fails here, in the job that has no npm install");
+  assert.deepEqual(lines, ["contents: read", "issues: write", "pull-requests: read"],
+    "any added, widened or DROPPED scope fails here, in the job that has no npm install");
   assert.doesNotMatch(wfSrc, /^permissions:/m, "no repo-wide default permissions block");
 });
 
@@ -612,6 +620,35 @@ test("the Markdown escaping is imported from watchdog.mjs, not reimplemented", (
   // And it must actually hold: an author name carrying a backtick cannot escape its span.
   const body = renderIssueBody({ repo: "o/r", violation: { sha: "a".repeat(40), author: "a`b", message: "`c`", offending: ["x.md"] }, now: 0 });
   assert.ok(body.includes("``a`b``"), "a backtick in the author name is fenced, not spilled into live Markdown");
+});
+
+test("the workflow documents that the force-push fallback examines only the after-commit", () => {
+  // A limitation stated in the file is a limitation; one left to be discovered is a bug. The
+  // reviewer's point stands and the trade-off is recorded where the fallback lives.
+  assert.match(wfSrc, /KNOWN LIMITATION/, "the single-commit fallback's gap must be stated where it is chosen");
+  assert.match(wfSrc, /Audit mode over an explicit range is the tool/, "…along with the way to recover from it");
+});
+
+test("a full page of open issues is reported as a possibly-incomplete dedupe index, not silently trusted", async () => {
+  // Past ISSUES_PER_PAGE concurrently-open findings the index is incomplete and the guard would
+  // start filing duplicates. Mild, but it must not be SILENT.
+  const sha = "a".repeat(40);
+  const many = Array.from({ length: ISSUES_PER_PAGE }, (_, i) => ({ number: i + 1, body: violationMarker(`other${i}`) }));
+  const io = fakeIO({ commits: [{ sha, author: "Dan", message: "m", paths: ["x.md"] }], pulls: { [sha]: [] }, issues: many });
+
+  const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0, fileIssues: true });
+  assert.equal(summary.dedupeIndexTruncated, true, "a full page means there may be more");
+
+  // And it does NOT fail the job on its own: the consequence is a visible duplicate issue, whereas a
+  // job that failed forever past 100 findings would simply be switched off.
+  assert.equal(exitCodeFor({ violations: [], emptyScan: false, failures: [], dedupeIndexTruncated: true }), 0);
+});
+
+test("a short page of open issues is trusted as complete", async () => {
+  const sha = "b".repeat(40);
+  const io = fakeIO({ commits: [{ sha, author: "Dan", message: "m", paths: ["x.md"] }], pulls: { [sha]: [] }, issues: [{ number: 1, body: "unrelated" }] });
+  const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0, fileIssues: true });
+  assert.equal(summary.dedupeIndexTruncated, false);
 });
 
 // ── criterion 8 is the gate itself (build, lint, test, coverage) — proved by running it, and
