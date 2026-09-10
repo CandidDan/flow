@@ -31,6 +31,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
 import {
@@ -569,7 +570,12 @@ test("criterion 7: no `run:` line wraps a shell backtick substitution inside a d
   // where backticks inside a double-quoted shell string are COMMAND SUBSTITUTION — the shell would
   // have tried to run `before`. YAML parsed it. `npm run build` parsed it. `node --check` never saw
   // it. Nothing in the gate looks at shell semantics inside a workflow, so this is the check.
-  const lines = runBlockLines(wfSrc);
+  // Pure `#` comment lines are excluded, and that is precision rather than a loophole: the shell does
+  // not evaluate a comment, so backticks in one are inert. A TRAILING comment on a command line is
+  // still checked — the safer bias, since telling the two apart needs a shell parser. This exclusion
+  // exists because the check flagged its own explanatory prose once the workflow started quoting the
+  // rule it enforces.
+  const lines = runBlockLines(wfSrc).filter((l) => !l.trim().startsWith("#"));
   assert.ok(lines.length > 10, `expected the run: blocks to yield shell lines, got ${lines.length}`);
   for (const line of lines) {
     assert.doesNotMatch(line, /"[^"\n]*`[^"\n]*`[^"\n]*"/,
@@ -620,6 +626,40 @@ test("the Markdown escaping is imported from watchdog.mjs, not reimplemented", (
   // And it must actually hold: an author name carrying a backtick cannot escape its span.
   const body = renderIssueBody({ repo: "o/r", violation: { sha: "a".repeat(40), author: "a`b", message: "`c`", offending: ["x.md"] }, now: 0 });
   assert.ok(body.includes("``a`b``"), "a backtick in the author name is fenced, not spilled into live Markdown");
+});
+
+test("the audit range is validated by an allowlist that RUNS, not just by a comment", () => {
+  // flow-review's security check found that `echo "range=${AUDIT_RANGE}" >> "$GITHUB_OUTPUT"` lets a
+  // newline in a `workflow_dispatch` string inject a second output key (`file_issues=true`, turning
+  // a read-only audit into one that files). No privilege boundary is crossed — dispatch already needs
+  // write access — but it is closed anyway.
+  //
+  // This test EXECUTES the `case` pattern from the workflow rather than asserting the text is
+  // present, because a shell pattern is exactly the kind of thing that looks right and is not: the
+  // first version of this allowlist rejected `<sha>^!`, the single-commit form the workflow's own
+  // push fallback uses.
+  const pattern = wfSrc.match(/^\s*"" \| (\*\[!.+?\]\*)\)$/m);
+  assert.ok(pattern, "the allowlist case pattern must be findable in the workflow");
+
+  const script = `
+    case "$1" in
+      "" | ${pattern[1]}) echo REJECT ;;
+      *) echo ACCEPT ;;
+    esac
+  `;
+  const verdict = (value) => execFileSync("sh", ["-c", script, "sh", value], { encoding: "utf8" }).trim();
+
+  for (const ok of ["v1.0.0..main", "d751e977^!", "7307e2ef..origin/main", "HEAD~20..HEAD", "main", "a/b..c/d"]) {
+    assert.equal(verdict(ok), "ACCEPT", `${JSON.stringify(ok)} is a legitimate git range and must be accepted`);
+  }
+  for (const bad of ["", "a..b\nfile_issues=true", "a..b; rm -rf /", "a..b$(whoami)", "a..b`id`", "a..b|tee x", "a..b'x"]) {
+    assert.equal(verdict(bad), "REJECT", `${JSON.stringify(bad)} must be rejected`);
+  }
+});
+
+test("the audit range is written with the delimited form, not a bare key=value line", () => {
+  assert.match(wfSrc, /echo "range<<PLANE_GUARD_RANGE_EOF"/,
+    "the free-text range must use $GITHUB_OUTPUT's delimited form, so a newline cannot start a new key");
 });
 
 test("the workflow documents that the force-push fallback examines only the after-commit", () => {

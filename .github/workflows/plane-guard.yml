@@ -89,9 +89,42 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            # `$GITHUB_OUTPUT` is parsed LINE BY LINE as `key=value`, so a value carrying a newline
+            # injects a second key — here, `file_issues=true`, turning a read-only audit into one
+            # that files. `workflow_dispatch` already requires write access and such an actor could
+            # set `file_issues` directly, so this crosses no privilege boundary; it is closed anyway
+            # because "untrusted input reaching a `run:` block" is a named item in this repo's own
+            # security.focus, and canonical does not get to ship the pattern it warns others about on
+            # the grounds that today's actor is already trusted. flow-review's security check raised
+            # it as Low; the fix is two lines.
+            #
+            # An allowlist, not an escape: a git revision range is letters, digits and
+            # `. _ / ^ ~ ! -`. Anything else — a newline above all — is rejected rather than
+            # sanitised, because a rejected range is a red tick the operator fixes, while a sanitised
+            # one silently examines something other than what they asked for.
+            #
+            # `!` is in the set on purpose: `<sha>^!` is the single-commit spelling this very workflow
+            # falls back to below, and the first draft of this allowlist rejected it — an allowlist
+            # tight enough to reject the tool's own documented input is a bug, not extra safety. Note
+            # the leading `!` inside the brackets is the pattern's negation; the second one is literal.
+            case "${AUDIT_RANGE}" in
+              "" | *[!A-Za-z0-9._/^~!-]*)
+                echo "::error::--range must be a plain git revision range (letters, digits and . _ / ^ ~ ! -)."
+                echo "Refusing to write it to \$GITHUB_OUTPUT: a value containing a newline would inject another output key."
+                exit 1
+                ;;
+            esac
+
             # Audit mode. Filing is opt-in: a range covering months of history would otherwise
             # open one issue per finding before the operator has read the report.
-            echo "range=${AUDIT_RANGE}" >> "$GITHUB_OUTPUT"
+            #
+            # The delimited form, even though the value is now validated single-line. Defence in
+            # depth costs two lines here and this is the exact write the finding was about.
+            {
+              echo "range<<PLANE_GUARD_RANGE_EOF"
+              echo "${AUDIT_RANGE}"
+              echo "PLANE_GUARD_RANGE_EOF"
+            } >> "$GITHUB_OUTPUT"
             if [ "${AUDIT_FILE_ISSUES}" = "true" ]; then
               echo "file_issues=true" >> "$GITHUB_OUTPUT"
             else
