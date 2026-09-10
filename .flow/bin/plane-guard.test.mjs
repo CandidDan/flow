@@ -30,9 +30,10 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   STORE_PREFIX,
@@ -62,6 +63,65 @@ import {
 } from "./plane-guard.mjs";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
+
+// ── a throwaway repo with a KNOWN graph, built fresh per test ────────────────────────────────
+//
+// WHY NOT THIS CHECKOUT. The first version of the git-behaviour tests below ran against this
+// repository's real history and named a real old sha. That passes locally and FAILS IN CI:
+// `_flow-gates.yml`'s `flow-tooling` job checks out at the default `fetch-depth: 1`, where that sha
+// is not an object at all. flow-review's code-review caught it, reproduced it with
+// `git clone --depth 1`, and it is the same shallow-clone trap the task's own notes describe hitting
+// — introduced right back into the file that documents it.
+//
+// The alternative of skipping on `git rev-parse --is-shallow-repository` was rejected: it would make
+// the assertion silently absent in the one job that runs this suite, which is the failure mode
+// flow-0008 exists to prevent. A fixture repo runs everywhere and proves MORE — the graph below has a
+// real merge commit, so the first-parent rule is exercised against a real second-parent side rather
+// than against a hand-written set.
+//
+//   A ─── D0 ─── M ─── D        <- main's first-parent line
+//          \    /
+//           B ─┘                <- only reachable through the merge
+//
+// Cleanup is promise-AWARE, not a bare `finally`. With an async `fn` a synchronous `finally` deletes
+// the repo before the callback has run a single git command, and the failure surfaces as
+// `spawnSync git ENOENT` — which reads like git is missing rather than like the cwd is gone. Found by
+// exactly that failure.
+function withFixtureRepo(fn) {
+  const dir = mkdtempSync(join(tmpdir(), "plane-guard-fixture-"));
+  const clean = () => rmSync(dir, { recursive: true, force: true });
+  const git = (...args) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+  try {
+    git("init", "-q", "-b", "main");
+    git("config", "user.email", "fixture@example.invalid");
+    git("config", "user.name", "Fixture");
+    const commit = (file, body, message) => {
+      const full = join(dir, file);
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, body);
+      git("add", file);
+      git("commit", "-q", "-m", message);
+      return git("rev-parse", "HEAD");
+    };
+
+    const A = commit("a.md", "a\n", "A: root");
+    git("checkout", "-q", "-b", "feat");
+    const B = commit("b.md", "b\n", "B: on the feature branch");
+    git("checkout", "-q", "main");
+    const D0 = commit(".flow/tasks/t.md", "t\n", "D0: a store-plane commit on main");
+    git("merge", "-q", "--no-ff", "-m", "M: Merge pull request #1 from feat", "feat");
+    const M = git("rev-parse", "HEAD");
+    const D = commit("d.md", "d\n", "D: straight to main");
+
+    const result = fn({ dir, git, shas: { A, B, D0, M, D } });
+    if (result && typeof result.then === "function") return result.finally(clean);
+    clean();
+    return result;
+  } catch (err) {
+    clean();
+    throw err;
+  }
+}
 const WORKFLOW = join(REPO_ROOT, ".github", "workflows", "plane-guard.yml");
 
 // A merged PR, as GitHub's `/commits/{sha}/pulls` returns it — only the two fields that decide
@@ -288,14 +348,43 @@ test("the first-parent walk uses --end-of-options and fails loudly", () => {
   const exec = () => { const e = new Error("Command failed"); e.stderr = "fatal: bad revision 'nope'\n"; throw e; };
   assert.throws(() => gitFirstParentShas("nope", { exec }), /could not walk the first-parent line of .nope./);
 
-  // Against the real repo: main's first-parent line is a strict subset of its history, which is the
-  // property the whole rule rests on. If they were equal there would be no merge commits and the
-  // graph signal would be meaningless.
-  const fp = gitFirstParentShas("HEAD", { cwd: REPO_ROOT });
-  assert.ok(fp.size > 0);
-  const all = execFileSync("git", ["rev-list", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" }).trim().split("\n");
-  assert.ok(fp.size < all.length, "main must contain merge commits, or the graph signal proves nothing");
-  assert.ok(!fp.has("de72f187e2a3e2e0b8b1e3f6c9a4e5d7c1b2a3f4"), "a made-up sha is not on the line");
+  // The property the whole rule rests on, against a real graph with a real merge: the first-parent
+  // line is a STRICT subset of history, and the commit that arrived through the merge is the one
+  // missing from it. If they were equal the graph signal would prove nothing.
+  withFixtureRepo(({ dir, shas }) => {
+    const fp = gitFirstParentShas("HEAD", { cwd: dir });
+    const all = new Set(execFileSync("git", ["rev-list", "HEAD"], { cwd: dir, encoding: "utf8" }).trim().split("\n"));
+
+    assert.ok(fp.size < all.size, "there must be a merge commit, or the graph signal is meaningless");
+    for (const [name, sha] of [["A", shas.A], ["D0", shas.D0], ["M", shas.M], ["D", shas.D]]) {
+      assert.ok(fp.has(sha), `${name} is on main's first-parent line`);
+    }
+    assert.ok(!fp.has(shas.B), "B arrived through the merge, so it is NOT on the first-parent line — the whole basis of the graph signal");
+    assert.ok(all.has(shas.B), "…but it IS in history, which is what makes the distinction meaningful");
+  });
+});
+
+test("the two-signal rule, end to end against a real commit graph", async () => {
+  // The rule assembled from real git rather than fixtures: the merge-borne commit is excused with no
+  // API call, and the commit pushed straight onto the first-parent line is reported.
+  await withFixtureRepo(async ({ dir, shas }) => {
+    const io = {
+      commits: async (range) => gitCommitsInRange(range, { cwd: dir }),
+      firstParentShas: async () => gitFirstParentShas("HEAD", { cwd: dir }),
+      // No PR for anything: whatever the graph does not excuse must be reported.
+      pullsFor: async () => [],
+      rest: async () => [],
+      write: async () => ({ number: 1 }),
+    };
+
+    const summary = await runPlaneGuard({ io, repo: "o/r", range: `${shas.A}..${shas.D}`, now: 0 });
+    const byVerdict = Object.fromEntries(summary.results.map((r) => [r.sha, r.verdict]));
+
+    assert.equal(byVerdict[shas.B], "merged-parent", "B arrived through the merge — excused from the graph, no API call");
+    assert.equal(byVerdict[shas.D], "violation", "D was pushed straight onto the first-parent line with no PR");
+    assert.equal(byVerdict[shas.D0], "store-only", "D0 touches only .flow/tasks/");
+    assert.deepEqual(summary.violations.map((v) => v.sha), [shas.D]);
+  });
 });
 
 test("criterion 3: a PR merged into a DIFFERENT branch does not excuse a commit on main", () => {
@@ -783,18 +872,26 @@ test("a range that looks like a git OPTION is rejected by git, not silently hono
   // flow-review's security check spotted that `range` reaches `git log` as a positional argument with
   // nothing marking the end of options. `execFileSync` with an argv array stops shell injection; it
   // does nothing about GIT reading the value as a flag. And the workflow's allowlist does not catch
-  // this class: `--all` is letters and dashes, so it passes — and git would examine every ref instead
-  // of the range asked for. The CLI is also invocable directly with no allowlist in front of it.
+  // this class on its own: `--all` is letters and dashes. The CLI is also invocable directly with no
+  // allowlist in front of it.
   //
-  // Run against the REAL git in this checkout, because the whole question is what git does.
-  assert.throws(() => gitCommitsInRange("--all", { cwd: REPO_ROOT }),
-    /could not resolve the range .--all./, "a flag-shaped range must fail loudly, not quietly widen the scan");
+  // Run against REAL git — the whole question is what git does — but in a fixture repo, so it holds
+  // in a depth-1 CI checkout too. See `withFixtureRepo`.
+  withFixtureRepo(({ dir, shas }) => {
+    assert.throws(() => gitCommitsInRange("--all", { cwd: dir }),
+      /could not resolve the range .--all./, "a flag-shaped range must fail loudly, not quietly widen the scan");
 
-  // …and a legitimate range still works through the same code path, which is the half that would
-  // break if `--end-of-options` were swapped for `--`.
-  const real = gitCommitsInRange("5e2b41c581540d83a432f408516484064ba5c88e^!", { cwd: REPO_ROOT });
-  assert.equal(real.length, 1, "a normal range must still resolve");
-  assert.deepEqual(real[0].paths, ["VISION.md"]);
+    // …and a legitimate range still resolves through the same code path — the half that breaks if
+    // `--end-of-options` is swapped for `--`, which would make this return zero commits.
+    const one = gitCommitsInRange(`${shas.D}^!`, { cwd: dir });
+    assert.equal(one.length, 1, "a normal range must still resolve");
+    assert.deepEqual(one[0].paths, ["d.md"]);
+    assert.equal(one[0].author, "Fixture");
+    assert.equal(one[0].message, "D: straight to main");
+
+    const span = gitCommitsInRange(`${shas.A}..${shas.D}`, { cwd: dir });
+    assert.ok(span.length >= 4, `a two-dot range must resolve too, got ${span.length}`);
+  });
 });
 
 test("the git invocation uses --end-of-options and NOT `--`, which would silently return zero commits", () => {
