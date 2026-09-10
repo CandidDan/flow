@@ -582,7 +582,12 @@ export async function runPlaneGuard({ io, repo, range, now = Date.now(), fileIss
   let failures = [];
   let dedupeIndexTruncated = false;
   let foreignMarkers = [];
-  if (fileIssues && violations.length > 0) {
+
+  // `unresolved` violations file nothing (see `planIssueActions`), so a batch containing only those
+  // needs no dedupe index and the open-issues GET would be spent for nothing. flow-review's
+  // code-review spotted the wasted call.
+  const wouldFile = violations.some((v) => v.verdict !== "unresolved");
+  if (fileIssues && wouldFile) {
     let openIssues = [];
     try {
       const r = await io.rest(`/repos/${repo}/issues?labels=${PLANE_GUARD_LABEL}&state=open&per_page=${ISSUES_PER_PAGE}`);

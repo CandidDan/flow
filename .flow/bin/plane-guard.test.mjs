@@ -584,6 +584,22 @@ test("a merge-borne commit whose merge lookup fails is unresolved, files nothing
   assert.equal(exitCodeFor(summary), 1);
 });
 
+test("a batch of only unresolved violations spends no open-issues read", async () => {
+  // They file nothing, so the dedupe index cannot change any outcome. `rest` throws here, so the call
+  // being made at all fails the test.
+  const sha = "e".repeat(40);
+  const io = {
+    ...fakeIO({ commits: [{ sha, author: "Dan", message: "m", paths: ["x.md"] }] }),
+    pullsFor: async () => { throw new Error("503"); },
+    rest: async (path) => { throw new Error(`no read should happen, got ${path}`); },
+  };
+  const summary = await runPlaneGuard({ io, repo: "o/r", range: "x..y", now: 0, fileIssues: true });
+  assert.equal(summary.violations[0].verdict, "unresolved");
+  assert.deepEqual(summary.actions, []);
+  assert.deepEqual(summary.failures, [], "and no read-issues failure, because no read was attempted");
+  assert.equal(exitCodeFor(summary), 1, "still fails the job");
+});
+
 test("off the first-parent line with no introducing merge fails closed rather than inventing an excuse", async () => {
   const commit = "b".repeat(40);
   const io = fakeIO({
