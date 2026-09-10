@@ -298,9 +298,20 @@ test("criterion 4: a store change does not launder the rest of the commit", () =
 //
 // See this file's header for why the fixture is `d751e977` rather than the `d91e100` the task names.
 
-// Verbatim `git log --format=%x1e%H%x1f%an%x1f%s%x1f --name-only` output for d751e977 — the shape
-// the real IO produces, so the parser is proved against reality and not against its own idea of it.
-const D751_GITLOG = "\x1ed751e97778f4da3b4084527899e9a5859c141cd7\x1fDan\x1ffix(bin): main-module detection must compare realpaths\x1f\n" +
+// The COMPLETE `git log --format=%x1e%H%x1f%an%x1f%s%x1f --name-only` output for d751e977 — all 19
+// paths, generated from the real commit rather than typed, so the parser is proved against the bytes
+// git actually emits and not against this file's idea of them. The first version trimmed the list to
+// nine paths while calling itself verbatim; flow-review's qa check caught the overstatement, which is
+// the review layer doing its job on a comment rather than on code.
+//
+// Four of the 19 are `.flow/tasks/` files, and that is what makes this one commit prove criterion 4
+// on REAL history too: a genuine store change, in a genuine commit, laundering nothing.
+const D751_GITLOG =
+  // The blank line after the header is git's own, not padding: `--name-only` separates the header
+  // from the path list with one. `parseGitLog` drops empty lines, and a fixture that quietly
+  // deleted it would stop proving that.
+  "\x1ed751e97778f4da3b4084527899e9a5859c141cd7\x1fDan\x1ffix(bin): main-module detection must compare realpaths\x1f\n" +
+  "\n" +
   ".flow/tasks/flow-0005-flow-init-cli.md\n" +
   ".flow/tasks/flow-0006-vendor-neutral-protocol.md\n" +
   ".flow/tasks/flow-0007-review-gates-out-of-session.md\n" +
@@ -308,7 +319,17 @@ const D751_GITLOG = "\x1ed751e97778f4da3b4084527899e9a5859c141cd7\x1fDan\x1ffix(
   "README.md\n" +
   "docs/adr/0003-flow-mcp-server.md\n" +
   "flow-diagnose.sh\n" +
+  "flow-finish.sh\n" +
+  "flow-tidy.sh\n" +
+  "project-template/.flow/bin/apply-board-edits.mjs\n" +
   "project-template/.flow/bin/flow-doctor.mjs\n" +
+  "project-template/.flow/bin/flow-open-pr.mjs\n" +
+  "project-template/.flow/bin/flow-recover.mjs\n" +
+  "project-template/.flow/bin/flow-state.mjs\n" +
+  "project-template/.flow/bin/flow-sync.mjs\n" +
+  "project-template/.flow/bin/main-module.test.mjs\n" +
+  "project-template/.flow/bin/parse-task-id.mjs\n" +
+  "project-template/.flow/bin/pick-task.mjs\n" +
   "project-template/.flow/bin/touches-guard.mjs\n";
 
 test("criterion 5: audit mode over real history reports d751e977 — a real violation, naming its non-store paths", async () => {
@@ -323,9 +344,23 @@ test("criterion 5: audit mode over real history reports d751e977 — a real viol
   assert.equal(summary.violations.length, 1);
   const v = summary.violations[0];
   assert.deepEqual(v.offending, [
-    "README.md", "docs/adr/0003-flow-mcp-server.md", "flow-diagnose.sh",
-    "project-template/.flow/bin/flow-doctor.mjs", "project-template/.flow/bin/touches-guard.mjs",
-  ], "the four .flow/tasks/ paths in the same commit are excused; the five others are not");
+    "README.md",
+    "docs/adr/0003-flow-mcp-server.md",
+    "flow-diagnose.sh",
+    "flow-finish.sh",
+    "flow-tidy.sh",
+    "project-template/.flow/bin/apply-board-edits.mjs",
+    "project-template/.flow/bin/flow-doctor.mjs",
+    "project-template/.flow/bin/flow-open-pr.mjs",
+    "project-template/.flow/bin/flow-recover.mjs",
+    "project-template/.flow/bin/flow-state.mjs",
+    "project-template/.flow/bin/flow-sync.mjs",
+    "project-template/.flow/bin/main-module.test.mjs",
+    "project-template/.flow/bin/parse-task-id.mjs",
+    "project-template/.flow/bin/pick-task.mjs",
+    "project-template/.flow/bin/touches-guard.mjs",
+  ], "the four .flow/tasks/ paths in the same commit are excused; the other fifteen are not");
+  assert.equal(v.paths.length, 19, "the whole commit is carried, so the excused paths are visible too");
   assert.equal(exitCodeFor(summary), 1);
 });
 
