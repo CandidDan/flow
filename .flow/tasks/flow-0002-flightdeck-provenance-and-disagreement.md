@@ -15,6 +15,7 @@ serves: ["G5"]            # provenance and disagreement — knowing how much to 
 touches: ["flightdeck/bin/render-flightdeck.mjs", "flightdeck/bin/render-flightdeck.test.mjs", "flightdeck/.claude/agents/portfolio-manager.md"]
 labels: [flightdeck, ux]
 notes:
+  - "2026-09-14: the human's call, recorded. This will be TOTALLY SUPERSEDED by new work not yet written -- so the open question its blocked_reason held (rescope into the mission-control task, or retire) is closed: neither. Do not rescope it, and do not spend a session re-deriving what ADR-0002 Amendment 1 already settled. It stays `blocked` because the superseding work does not exist yet; retire it when that work lands, not before."
   - "2026-08-18: blocked, not cancelled. flow-0001's PR (#13) closed with 'unblocking flow-0002, which consumes this JSON shape as a contract' — written before Amendment 1 merged, and the next session to read the queue would have built the superseded renderer on the strength of it. The JSON contract flow-0001 produces is still good; what changed is that nothing renders it to HTML any more. Two live options for the human: rescope this task to the mission-control page's render shell, or retire it and let the page task carry its provenance-disclosure criteria."
 ---
 
