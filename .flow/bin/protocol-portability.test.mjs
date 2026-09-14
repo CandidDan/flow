@@ -60,7 +60,7 @@ const PROTOCOL_REF = ".flow/PROTOCOL.md";
 const PRE_MOVE_SECTION_DIGESTS = [
   ["Response style — always TL;DR", "3542b8b979ddb4efa71684a0dace416e60ccc84ba754183e18f6b4605abeee6f"],
   ["The store", "c6dcbc3bb200de6b31be37d0e0d9ca619b6fb8c1a073e527703d8aa6e5af914a"],
-  ["Status lifecycle", "c2f7d6a2d54fe4ac3ed8585cffb4fa0a805e9f372e4d7f9288805fece9712273"],   // rewritten by flow-0039
+  ["Status lifecycle", "f7235e6c6e4d93e5d792a9294bba9d93a5f3d621b0b208d8d39dbf800b577744"],   // rewritten by flow-0039, then flow-0040 (blocked_by)
   ["Concurrency — how parallel sessions don't collide", "42bbc5aa8e43eb1371eaae9b43fcb0d68cf7973df33844914d1137209bb49f6c"],   // rewritten by flow-0039
   ["The loop you run", "501469c1994131fd1ee695e91c1a800352cfe89f0f38cd74b39f8f4f531475d4"],   // rewritten by flow-0007, then flow-0039
   ["Session hygiene — context is a budget", "71c9e144cad9aa9449dd199cf449c713ce90abb81ad3f7e59cc7761b093aebc0"],

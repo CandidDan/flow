@@ -64,8 +64,12 @@ function skillSection(heading) {
 // shows up as a mismatch instead of quietly shrinking both sides of the comparison.
 const INTENDED_KEYS = [
   "id", "title", "status", "priority", "project", "owner", "created", "started",
-  "branch", "pr", "issue", "blocked_reason", "serves", "touches", "labels", "notes",
+  "branch", "pr", "issue", "blocked_reason", "blocked_by", "serves", "touches", "labels", "notes",
 ];
+// `blocked_by` was added by flow-0040, directly under `blocked_reason` — the machine-readable
+// half of the same fact, so it belongs next to it. Listed here because this table is the guard
+// that an addition to the published template is deliberate; updating it is the companion edit,
+// never a way to wave one through.
 
 test("_TEMPLATE.md carries `serves` between blocked_reason and touches, with the other keys unchanged", () => {
   assert.deepEqual(KEY_ORDER, INTENDED_KEYS,
