@@ -13,10 +13,11 @@ pr: ""
 issue: ""
 blocked_reason: ""
 serves: ["G7"]            # the repo's self-report is the thing being made legible
-touches: ["project-template/.flow/bin/flow-doctor.mjs", "project-template/.flow/bin/flow-doctor.test.mjs", "CHANGELOG.md"]
+touches: ["project-template/.flow/bin/flow-doctor.mjs", "project-template/.flow/bin/flow-doctor.test.mjs", "CHANGELOG.md", ".flow/bin/doctor-retired-done.test.mjs"]
 labels: [infra, protocol]
 notes:
   - "2026-09-14: NOT parallel-safe with flow-0043's sibling flow-0040, which is also `ready` and also touches project-template/.flow/bin/flow-doctor.mjs and its test. There is no dependency in either direction — they collide on files, not on logic — so either may go first; they simply must not run at once. The concurrency model enforces this on its own (a ready task is skipped while its touches overlap an in_progress one), so this note is the record, not the mechanism. flow-doctor WARNs on the pair; verified after claiming flow-0043 that the warning does NOT clear on `in_progress` — the overlap check spans the live set regardless of status, so the line stands until one of the two is `done`. Expect it on this PR and do not treat it as a finding."
+  - "2026-09-14: `touches` widened mid-build by one path, .flow/bin/doctor-retired-done.test.mjs -- recorded here rather than drifted into silently. The final acceptance criterion is about canonical's OWN store (the motivating case: 36 warnings across 35 tasks), and the fixture suite in project-template/ cannot reach it. Fixtures prove the rule; the canonical test proves the rule still applies to the real task files, whose frontmatter is written by hand and by three workflows rather than by a test helper. The original `touches` named only template paths, so that criterion had nowhere to live. Note touches-guard ignores all of .flow/**, so this widening was discipline rather than something CI would have caught -- which is exactly why it is written down."
 ---
 
 ## Context
