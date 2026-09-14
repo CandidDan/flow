@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0043"
 title: "Stop flow-doctor warning that finished work serves a retired goal"
-status: "in_review"
+status: "done"
 priority: 3
 project: "flow"
 owner: "session_01Fo8Wc8oxHhe8rkbuLpshzR"
