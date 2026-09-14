@@ -599,3 +599,64 @@ test("list-in-progress emits three tab-separated fields, branch last", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── the sweep must actually USE the prStateKnown rule, not merely have it available ────────
+//
+// classifyStranded refusing to act on an unknown PR state is worthless if the shell never tells
+// it the state was unknown. That gap — a correct, tested rule wired to nothing — is the same
+// shape as the bootstrap-guarded workflow that reported success without reading the store, so it
+// gets the same treatment: assert the wiring, not just the rule.
+
+// Line-based on purpose, NOT YAML-parsed — the same reasoning action-pins.test.mjs states for
+// itself. This file's other workflow tests carry `{ skip }` because they need `yaml`, which the
+// `flow-tooling` gate job does not install (it runs `node --test .flow/bin/*.test.mjs` with no
+// `npm ci`). A guard that skips in one of the two jobs that run it is weaker for no reason when
+// every assertion here is about the shell TEXT: scanning the raw file means this runs in both.
+test("_flow-recover.yml distinguishes a failed gh query from an empty one, and passes it on", () => {
+  const sh = readFileSync(join(WORKFLOWS, "_flow-recover.yml"), "utf8");
+
+  assert.match(sh, /--pr-state-known "\$pr_state_known"/,
+    "classify must be told whether the PR state was actually knowable");
+  assert.match(sh, /if prs_json="\$\(gh pr list/,
+    "the gh call's exit status must be branched on, not discarded");
+  // Whitespace- and quote-tolerant, because the narrow form was not enough. The code review
+  // called hardening this low-value on the grounds that the structural wiring assertions above
+  // already cover the invariant — they do not. `||echo '[]'` (one space less) placed INSIDE the
+  // `if prs_json="$(gh pr list …)"` structure satisfies every other assertion here and restores
+  // the original bug exactly. Verified by doing it.
+  assert.doesNotMatch(sh, /gh pr list[^\n]*\|\|\s*echo\s*["']?\[\]["']?/,
+    "`|| echo '[]'` collapses 'the query failed' into 'there are no PRs' — the bug that let a " +
+    "GitHub 5xx clear a live claim");
+  // Both gh queries must mark the state unknown on failure, and that is asserted INDEPENDENTLY
+  // for each. A single /pr_state_known=0/ match is satisfied by the title path alone, so deleting
+  // the --head path's marker left this guard green — verified by doing exactly that. A guard that
+  // passes while half the thing it guards is missing is the failure shape this whole change is
+  // about, so it is not one this test gets to have.
+  // Asserted per-query and positionally rather than by counting: "gh pr list" also appears inside
+  // the ::warning:: strings, so any count-based check measures the wrong thing.
+  assert.match(sh, /if prs_json="\$\(gh pr list[\s\S]{0,600}?pr_state_known=0/,
+    "the title query's failure branch must mark the PR state unknown");
+  assert.match(sh, /if head_count="\$\(gh pr list --head[\s\S]{0,600}?pr_state_known=0/,
+    "the --head query's own failure branch must mark the state unknown, not lean on the title " +
+    "query's — deleting this one leaves a single /pr_state_known=0/ check green");
+});
+
+// The structural half, which does need a parse: the assertions above are only meaningful if that
+// text actually lives in the sweep step's `run:` block rather than in a comment elsewhere.
+test("the pr-state-known wiring is in the sweep step's run block", { skip }, () => {
+  const step = wfParse("_flow-recover.yml").jobs.sweep.steps
+    .find((s) => s.name && s.name.includes("Sweep"));
+  assert.ok(step, "the sweep step must exist");
+  assert.match(step.run, /--pr-state-known "\$pr_state_known"/);
+});
+
+test("the classify CLI honours --pr-state-known end to end", () => {
+  const args = ["classify", "--status", "in_progress", "--branch-exists", "0", "--ahead", "0",
+                "--has-open-pr", "0", "--age", "9999", "--threshold", "75"];
+  assert.equal(run("flow-recover.mjs", args).stdout.trim(), "reset-to-ready",
+    "omitted flag defaults to known, preserving existing behaviour");
+  assert.equal(run("flow-recover.mjs", [...args, "--pr-state-known", "1"]).stdout.trim(),
+    "reset-to-ready");
+  assert.equal(run("flow-recover.mjs", [...args, "--pr-state-known", "0"]).stdout.trim(), "ok",
+    "an unknown PR state must never reach the destructive branch");
+});

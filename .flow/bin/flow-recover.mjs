@@ -72,6 +72,7 @@ if (__isMain) {
         hasOpenPr: Number(f["has-open-pr"] || 0) > 0,
         aheadOfBase: Number(f.ahead || 0) > 0,
         ageMinutes: Number(f.age || 0),
+        prStateKnown: f["pr-state-known"] === undefined || Number(f["pr-state-known"]) > 0,
       },
       f.threshold ? Number(f.threshold) : DEFAULT_THRESHOLD_MINUTES,
     ) + "\n");
