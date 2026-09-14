@@ -622,7 +622,18 @@ test("_flow-recover.yml distinguishes a failed gh query from an empty one, and p
   assert.doesNotMatch(sh, /gh pr list[^\n]*\|\| echo '\[\]'/,
     "`|| echo '[]'` collapses 'the query failed' into 'there are no PRs' — the bug that let a " +
     "GitHub 5xx clear a live claim");
-  assert.match(sh, /pr_state_known=0/, "a failed query must mark the state unknown");
+  // Both gh queries must mark the state unknown on failure, and that is asserted INDEPENDENTLY
+  // for each. A single /pr_state_known=0/ match is satisfied by the title path alone, so deleting
+  // the --head path's marker left this guard green — verified by doing exactly that. A guard that
+  // passes while half the thing it guards is missing is the failure shape this whole change is
+  // about, so it is not one this test gets to have.
+  // Asserted per-query and positionally rather than by counting: "gh pr list" also appears inside
+  // the ::warning:: strings, so any count-based check measures the wrong thing.
+  assert.match(sh, /if prs_json="\$\(gh pr list[\s\S]{0,600}?pr_state_known=0/,
+    "the title query's failure branch must mark the PR state unknown");
+  assert.match(sh, /if head_count="\$\(gh pr list --head[\s\S]{0,600}?pr_state_known=0/,
+    "the --head query's own failure branch must mark the state unknown, not lean on the title " +
+    "query's — deleting this one leaves a single /pr_state_known=0/ check green");
 });
 
 // The structural half, which does need a parse: the assertions above are only meaningful if that
