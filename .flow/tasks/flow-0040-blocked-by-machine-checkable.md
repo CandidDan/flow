@@ -18,7 +18,15 @@ touches:
   - "project-template/.flow/bin/flow-doctor.test.mjs"
   - "project-template/.flow/PROTOCOL.md"
 labels: [protocol, template]
-notes: []
+notes:
+  - "2026-09-14: branch flow/flow-0040-blocked-by-machine-checkable pushed. Done: blocked_by
+    added to _TEMPLATE.md; blockedByFindings/isBlockedByEntry in the template's flow-doctor
+    (warn on blocked-with-empty, PROBLEM on stale-on-live and on a malformed entry); protocol
+    lifecycle documents it; 14 tests added, all four gate commands green (coverage 94.51%).
+    Out-of-touches but unavoidable: .flow/bin/serves-template.test.mjs (INTENDED_KEYS) and
+    .flow/bin/protocol-portability.test.mjs (Status lifecycle digest) are guards whose own
+    messages require recomputing in the same commit as an intentional template/protocol edit.
+    Next action: open the PR."
 ---
 
 ## Context
