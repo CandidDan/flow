@@ -87,7 +87,17 @@ ready  →  in_progress  →  in_review  →  done
   task correctly stays `in_progress`, and `flow-status` records `branch` and `pr` on it anyway. A
   PR that someone opens directly as non-draft still transitions on `opened`, as before.
 - `done` — set automatically by `flow-done` when the PR **merges**. Never by hand.
-- `blocked` — you hit something undecidable. Set `blocked_reason`, stop, surface it.
+- `blocked` — you hit something undecidable. Set `blocked_reason`, stop, surface it. Also fill
+  **`blocked_by`**: the list of things the block is waiting on, each entry a task id in this repo
+  (`"PROJ-0007"`) or a PR url. `blocked_reason` is the sentence a person reads; `blocked_by` is the
+  same fact in a shape a machine can act on, and it never replaces the sentence. This matters
+  because `blocked` is the only status with no automatic way out — every other transition is owned
+  by a workflow, while a blocked task sits there until someone *remembers* that the PR it waited on
+  merged. If the block genuinely isn't mechanical (you are waiting on a phone call), say so in
+  `blocked_reason` using the words "not machine-checkable" and flow-doctor stops asking. Clear
+  `blocked_by` when the block clears: flow-doctor reports a populated `blocked_by` on a live
+  non-blocked task as stale data. On a `done` task it stays, as the record of what the task waited
+  on.
 
 You hand-write exactly **two** transitions: the claim (it must stay an atomic first-push-wins
 commit — see Concurrency) and `blocked` (a judgment call). Every PR-event transition is owned
