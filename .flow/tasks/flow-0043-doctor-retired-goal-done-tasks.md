@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0043"
 title: "Stop flow-doctor warning that finished work serves a retired goal"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "session_01Fo8Wc8oxHhe8rkbuLpshzR"
 created: "2026-09-14"
-started: ""
+started: "2026-09-14T02:10:04Z"
 branch: ""
 pr: ""
 issue: ""
@@ -16,7 +16,7 @@ serves: ["G7"]            # the repo's self-report is the thing being made legib
 touches: ["project-template/.flow/bin/flow-doctor.mjs", "project-template/.flow/bin/flow-doctor.test.mjs", "CHANGELOG.md"]
 labels: [infra, protocol]
 notes:
-  - "2026-09-14: NOT parallel-safe with flow-0043's sibling flow-0040, which is also `ready` and also touches project-template/.flow/bin/flow-doctor.mjs and its test. There is no dependency in either direction — they collide on files, not on logic — so either may go first; they simply must not run at once. The concurrency model enforces this on its own (a ready task is skipped while its touches overlap an in_progress one), so this note is the record, not the mechanism. flow-doctor WARNs on the pair while both sit `ready`; that warning is correct and clears itself once one is claimed."
+  - "2026-09-14: NOT parallel-safe with flow-0043's sibling flow-0040, which is also `ready` and also touches project-template/.flow/bin/flow-doctor.mjs and its test. There is no dependency in either direction — they collide on files, not on logic — so either may go first; they simply must not run at once. The concurrency model enforces this on its own (a ready task is skipped while its touches overlap an in_progress one), so this note is the record, not the mechanism. flow-doctor WARNs on the pair; verified after claiming flow-0043 that the warning does NOT clear on `in_progress` — the overlap check spans the live set regardless of status, so the line stands until one of the two is `done`. Expect it on this PR and do not treat it as a finding."
 ---
 
 ## Context
