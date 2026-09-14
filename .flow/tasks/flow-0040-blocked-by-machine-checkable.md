@@ -1,14 +1,14 @@
 ---
 id: "flow-0040"
 title: "Give a blocked task a machine-checkable dependency, so something other than a human can tell when it is free"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "flow-0040-worker"
 created: "2026-09-03"
 started: "2026-09-14T06:03:54Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0040-blocked-by-machine-checkable"
+pr: "https://github.com/CandidDan/flow/pull/69"
 issue: ""
 blocked_reason: ""
 serves: ["G7"]
