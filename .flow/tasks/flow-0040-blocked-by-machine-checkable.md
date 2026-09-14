@@ -1,7 +1,7 @@
 ---
 id: "flow-0040"
 title: "Give a blocked task a machine-checkable dependency, so something other than a human can tell when it is free"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "flow-0040-worker"
