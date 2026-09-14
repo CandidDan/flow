@@ -15,7 +15,8 @@ blocked_reason: ""
 serves: ["G10"]           # the fleet's autonomous path currently opens PRs whose gate never fires
 touches: ["CHANGELOG.md", "VERSION", "project-template/.flow/VERSION", ".flow/bin/release-stamp.test.mjs"]
 labels: [infra, release]
-notes: []
+notes:
+  - "2026-09-14: branch `flow/flow-0044-release-1-3-0` pushed with the stamps and the changelog. GENUINELY DONE: both stamps at 1.3.0 (no trailing newline, matching the previous format); the `## 1.3.0 - 2026-09-14 (pending tag + canary)` section written from the enumeration in the task (`git log v1.2.0..HEAD -- .github/workflows/_flow-*.yml project-template/`), 17 entries each with a `[caller action: ...]` clause, flow-0026's queue-runner FLOW_PAT change first with the github-actions[bot] gate-parking symptom as its why; the three Unreleased entries folded in verbatim with `## Unreleased` left empty. NOT DONE YET: `.flow/bin/release-stamp.test.mjs` (criteria 1-3's proving test) and the gate run. MINOR-vs-MAJOR re-checked, not re-litigated: flow-0039's `ready_for_review` DOES need a caller edit or a worker's `gh pr ready` reaches no workflow and the task strands at in_progress - but the task's Scope names that change explicitly and rules it non-blocking, so 1.3.0 stands and the caller action is spelled out in that entry and will be surfaced in the PR description. NEXT ACTION: write `.flow/bin/release-stamp.test.mjs` (properties derived at run time, one literal tombstone for the flow-0026 entry), run `npm run build && npm run lint && npm test && npm run coverage` plus `node .flow/bin/release-guard.mjs`, then open the PR titled `[flow-0044] Stamp and changelog the 1.3.0 release...` with the three human tag steps at the end."
 ---
 
 ## Context
