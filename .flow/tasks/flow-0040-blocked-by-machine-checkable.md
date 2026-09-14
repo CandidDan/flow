@@ -1,12 +1,12 @@
 ---
 id: "flow-0040"
 title: "Give a blocked task a machine-checkable dependency, so something other than a human can tell when it is free"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "flow-0040-worker"
 created: "2026-09-03"
-started: ""
+started: "2026-09-14T06:03:54Z"
 branch: ""
 pr: ""
 issue: ""
