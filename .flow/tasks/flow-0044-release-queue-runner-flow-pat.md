@@ -2,20 +2,21 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0044"
 title: "Stamp and changelog the 1.3.0 release, so the queue-runner FLOW_PAT fix can reach the fleet"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
-owner: "session_flow0044_worker"
+owner: ""
 created: "2026-09-14"
-started: "2026-09-14T13:19:32Z"
-branch: ""
+started: ""
+branch: "flow/flow-0044-release-1-3-0"
 pr: ""
 issue: ""
-blocked_reason: "Not machine-checkable, and not a guess: cutting the release makes `npm test` fail on a test outside this task's `touches`, and widening `touches` is the orchestrator's call. `.flow/bin/triage-author-trust.test.mjs:815` ("the CHANGELOG records this narrowing under Unreleased") locates the flow-0036 entry by hardcoding the Unreleased section: changelog.split(/^-- /m).find(s => s.startsWith("Unreleased")), with -- standing for the two hash characters this parser truncates on. This task's Scope requires that exact entry to be folded into the 1.3.0 section with Unreleased left empty, so the test fails by doing its job, and it would have failed on the FIRST release cut after it merged, whoever cut it. No in-scope fix exists: keeping the entry under Unreleased contradicts the Scope, and duplicating it into both sections to satisfy a stale locator is the wrong shape. The fix is three lines there -- find the section that CONTAINS the flow-0036 entry rather than assuming Unreleased -- which also stops it breaking again at 1.4.0. Decision needed: add .flow/bin/triage-author-trust.test.mjs to this task's `touches` on main, so a worker finishes in one short session, or raise it as its own task and let this one wait behind it. Everything else is done, green and pushed on flow/flow-0044-release-1-3-0 -- see the latest note."
+blocked_reason: ""
 serves: ["G10"]           # the fleet's autonomous path currently opens PRs whose gate never fires
-touches: ["CHANGELOG.md", "VERSION", "project-template/.flow/VERSION", ".flow/bin/release-stamp.test.mjs"]
+touches: ["CHANGELOG.md", "VERSION", "project-template/.flow/VERSION", ".flow/bin/release-stamp.test.mjs", ".flow/bin/triage-author-trust.test.mjs"]
 labels: [infra, release]
 notes:
+  - "2026-09-14 (orchestrator): UNBLOCKED by widening `touches` to include .flow/bin/triage-author-trust.test.mjs — the decision the worker correctly refused to take for itself. Verified rather than accepted: line 815 locates the flow-0036 entry with changelog.split by section heading and then asserts an entry exists inside the Unreleased one, so an empty Unreleased fails it by construction, and it would have failed on the first release cut after it merged whoever cut it. (Reproducing it locally needs `npm ci` — the case carries a skip guard and skips without the yaml dependency, which is why the failure shows up in CI and not in a bare checkout.) Widened rather than split into its own task because the breakage is a direct consequence of THIS task's scope (fold Unreleased into the release section), the fix is three lines in a test, and a separate task means a second session and a second PR while the release waits. The omission was the orchestrator's: the scope implied that file and the touches list did not name it. The widening is bounded — only the section locator changes, every other assertion in that file stays byte-for-byte. Also corrected in Context: the gap is 299 commits, not 94; the 94 was a shallow clone's truncated count and release-guard's mainAhead from a full-depth checkout is authoritative. The branch is the base: do NOT redo the stamps, the changelog or release-stamp.test.mjs — all three are pushed and green."
   - "2026-09-14: BLOCKED at the gate, with the work done and pushed. Branch `flow/flow-0044-release-1-3-0` (3 commits, pushed) carries everything the task asked for. GENUINELY DONE and verified: both stamps at 1.3.0; the `## 1.3.0 - 2026-09-14 (pending tag + canary)` section written from the enumeration, 17 entries each stating a caller action, flow-0026's queue-runner FLOW_PAT change first with the github-actions[bot] gate-parking symptom as its why; the three Unreleased entries folded in verbatim and `## Unreleased` left empty; `.flow/bin/release-stamp.test.mjs` written (7 cases, all passing) with properties derived at run time and literals confined to two tombstone cases. Criterion 4 verified: `node .flow/bin/release-guard.mjs` exits 0 with 0 problems and 1 warning -- rule 4 (silent staleness) correctly stopped firing because the stamp now leads the newest release tag (a release in flight), and its number survives in the JSON facts as mainAhead: 299 alongside aliasBehind: 299 in the rule 5 warning. build PASSES (24 workflows), lint PASSES (80 .mjs), coverage 94.68% lines, far above the 83.5 floor. WHAT ONLY LOOKS DONE: `npm test` is 951/953 with 1 failure, and it is NOT in any file this task wrote -- see blocked_reason. MINOR-vs-MAJOR re-checked and NOT re-litigated: flow-0039's `ready_for_review` genuinely does need a caller edit (without it a worker's `gh pr ready` reaches no workflow and the task strands at in_progress), but the Scope names that change explicitly and rules it non-blocking, so 1.3.0 stands and the caller action is spelled out in full in that changelog entry. NEXT ACTION once touches is widened: apply the three-line locator fix in `.flow/bin/triage-author-trust.test.mjs:815-818`, re-run `npm test` and `npm run coverage`, then open the PR titled `[flow-0044] Stamp and changelog the 1.3.0 release, so the queue-runner FLOW_PAT fix can reach the fleet` with the acceptance checklist and the three human tag steps from the task's hand-off section. Do NOT re-do the stamps, the changelog or the test -- they are on the branch and green."
   - "2026-09-14: branch `flow/flow-0044-release-1-3-0` pushed with the stamps and the changelog. GENUINELY DONE: both stamps at 1.3.0 (no trailing newline, matching the previous format); the `## 1.3.0 - 2026-09-14 (pending tag + canary)` section written from the enumeration in the task (`git log v1.2.0..HEAD -- .github/workflows/_flow-*.yml project-template/`), 17 entries each with a `[caller action: ...]` clause, flow-0026's queue-runner FLOW_PAT change first with the github-actions[bot] gate-parking symptom as its why; the three Unreleased entries folded in verbatim with `## Unreleased` left empty. NOT DONE YET: `.flow/bin/release-stamp.test.mjs` (criteria 1-3's proving test) and the gate run. MINOR-vs-MAJOR re-checked, not re-litigated: flow-0039's `ready_for_review` DOES need a caller edit or a worker's `gh pr ready` reaches no workflow and the task strands at in_progress - but the task's Scope names that change explicitly and rules it non-blocking, so 1.3.0 stands and the caller action is spelled out in that entry and will be surfaced in the PR description. NEXT ACTION: write `.flow/bin/release-stamp.test.mjs` (properties derived at run time, one literal tombstone for the flow-0026 entry), run `npm run build && npm run lint && npm test && npm run coverage` plus `node .flow/bin/release-guard.mjs`, then open the PR titled `[flow-0044] Stamp and changelog the 1.3.0 release...` with the three human tag steps at the end."
 ---
@@ -23,7 +24,9 @@ notes:
 ## Context
 
 `v1` — the alias the whole fleet pins — resolves to `a7a29a2`, tagged `v1.2.0` on 2026-08-20.
-`main` is **94 commits** past it. Everything merged in those three and a half weeks is on
+`main` is **299 commits** past it — `release-guard`'s `mainAhead` from a full-depth checkout. (An
+earlier draft of this task said 94. That was a shallow clone's truncated count; do not re-derive
+this number from a `--depth` clone.) Everything merged in those three and a half weeks is on
 `v1-edge` and has reached nobody else, which is exactly what the canary split is *for* (see
 `docs/flow-versioning-policy.md`) — but steps 4–6 of that policy's release procedure have not been
 taken since, so the canary has been proving releases that were never published.
@@ -77,6 +80,11 @@ than assumed — do not re-litigate it, but do prove it (criterion 4).
 - Fold the three existing `## Unreleased` entries (flow-0043, flow-0027, flow-0036) into the
   `## 1.3.0` section rather than rewriting them, and leave `## Unreleased` in place, empty, for
   the next change.
+- Fix the stale changelog-section locator in `.flow/bin/triage-author-trust.test.mjs` (~line 815)
+  and **nothing else in that file**. It finds the flow-0036 entry by assuming the `## Unreleased`
+  section, so folding that entry into `## 1.3.0` fails it. Make it find the section that
+  *contains* the entry instead, which also stops it breaking again at 1.4.0. Every other assertion
+  in that file stays byte-for-byte: it is flow-0036's proof and this task does not own it.
 - Add a proving test (`.flow/bin/release-stamp.test.mjs`) over the repo's **real** files: the two
   stamps agree and are `MAJOR.MINOR.PATCH`; `CHANGELOG.md` carries a section whose heading is the
   root stamp. Assert those as *properties derived at run time* — a test that hardcodes `1.3.0` in
