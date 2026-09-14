@@ -572,8 +572,24 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
             (ready ? problems : warnings).push(`${t.id}: serves "${entry}", which VISION.md declares a NON-GOAL — ` +
               "that is drift with a paper trail; either the task is wrong or the vision has moved (branch + PR)");
           } else if (goal.retired) {
-            warnings.push(`${t.id}: serves "${entry}", a goal under VISION.md's ## Retired — ` +
-              "re-anchor it to a live goal, or drop the task with the goal it served");
+            // `done` is exempt — and ONLY `done`. This warning offers two remedies and a finished
+            // task can take neither. It cannot be dropped: the completed record is the point. And
+            // it cannot be re-anchored either, not as a matter of taste but by rule — `serves`
+            // records the goal a task was WRITTEN to advance, so back-filling a live id onto
+            // finished work falsifies the history rather than correcting it (task-writer says the
+            // same: don't retrofit `serves` onto in_progress/in_review/done/blocked).
+            //
+            // `blocked`, `in_progress` and `in_review` keep warning, because each is still live
+            // and at least one remedy — dropping it — remains a real call for the reader.
+            //
+            // Without this, retiring several goals at once buries the signal: canonical retired
+            // G1-G5 in a single vision rewrite, and every task predating it warned forever. 28 of
+            // the 36 lines named settled history, and the one `ready` task that genuinely needed
+            // re-anchoring sat 30th in the list. A check nobody can act on is a check nobody reads.
+            if (t.status !== "done") {
+              warnings.push(`${t.id}: serves "${entry}", a goal under VISION.md's ## Retired — ` +
+                "re-anchor it to a live goal, or drop the task with the goal it served");
+            }
           }
         }
       }
