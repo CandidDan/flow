@@ -58,9 +58,19 @@ export const DEFAULT_THRESHOLD_MINUTES = 75;
 // Conservative by construction: only `in_progress` is ever swept, an open PR is never
 // disturbed, and nothing happens before the staleness threshold.
 export function classifyStranded(task, state, thresholdMinutes = DEFAULT_THRESHOLD_MINUTES) {
-  const { branchExists = false, hasOpenPr = false, aheadOfBase = false, ageMinutes = 0 } = state || {};
+  const {
+    branchExists = false, hasOpenPr = false, aheadOfBase = false, ageMinutes = 0,
+    prStateKnown = true,
+  } = state || {};
   if (!task || task.status !== "in_progress") return "ok"; // only in_progress is swept
   if (hasOpenPr) return "ok";                              // progressing — never disturbed
+  // "We could not find a PR" and "we could not ASK about PRs" are different facts, and only the
+  // first is evidence. `gh pr list` failing — a 5xx, a rate limit, an expired token — used to
+  // reduce to the same `0` as a genuine absence, and with the branch glob also missing that gave
+  // hasOpenPr=false on a task whose PR was open and fine. Past the threshold the sweep then
+  // cleared a live claim because GitHub had a bad minute. A destructive action must never be
+  // taken on an unknown, so an unknown is not a quiet default here: the caller states it.
+  if (!prStateKnown) return "ok";
   if (ageMinutes < thresholdMinutes) return "ok";         // no premature rescue
   if (branchExists && aheadOfBase) return "reopen-pr";    // pushed work, PR just never opened
   return "reset-to-ready";                                // nothing to recover -> re-claimable
@@ -183,6 +193,8 @@ if (__isMain) {
         hasOpenPr: Number(f["has-open-pr"] || 0) > 0,
         aheadOfBase: Number(f.ahead || 0) > 0,
         ageMinutes: Number(f.age || 0),
+        // Defaults to known, so a caller that never learned to pass it behaves exactly as before.
+        prStateKnown: f["pr-state-known"] === undefined || Number(f["pr-state-known"]) > 0,
       },
       f.threshold ? Number(f.threshold) : DEFAULT_THRESHOLD_MINUTES,
     );
@@ -203,9 +215,13 @@ if (__isMain) {
     // Reads `gh pr list --json title` output on stdin and prints how many of those PRs belong
     // to this task. Deliberately NOT a jq expression in the workflow: the `[<id>] …` rule is
     // already implemented here, and a second copy in shell is the drift hazard this repo keeps
-    // warning about. Unparseable input prints 0 — recovery must never crash the sweep, and 0 is
-    // also the conservative answer (it can delay a rescue; it cannot cancel a live claim, since
-    // "no PR found" only ever leads to `reset-to-ready` via the age threshold).
+    // warning about.
+    //
+    // Unparseable input prints 0 so the sweep cannot crash — but 0 here is NOT a safe default and
+    // must not be read as one. A count of 0 feeds `hasOpenPr=false`, which past the threshold is
+    // what produces `reset-to-ready`; so "I could not parse the answer" would otherwise become
+    // "there is no PR" and clear a live claim. Whether the question was answerable AT ALL is a
+    // separate fact the caller must establish and pass as `prStateKnown` — see classifyStranded.
     const id = rest[0];
     let raw = "";
     try { raw = readFileSync(0, "utf8"); } catch { raw = ""; }

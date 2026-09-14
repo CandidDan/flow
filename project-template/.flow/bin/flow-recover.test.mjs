@@ -267,3 +267,39 @@ test("readTasks exposes the branch field so the sweep can prefer it", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── prStateKnown: a destructive sweep must never act on an unknown ──
+//
+// `gh pr list` failing used to fall back to `[]`, which is indistinguishable from "this task has
+// no PR". On a task whose branch also could not be found that gives hasOpenPr=false, and past the
+// threshold that is exactly what produces reset-to-ready — so a GitHub 5xx, a rate limit or an
+// expired token was enough to clear a live claim. The two facts are now separate.
+
+test("an unknown PR state is never swept, however old the claim", () => {
+  const stranded = { branchExists: false, aheadOfBase: false, hasOpenPr: false, ageMinutes: 99999 };
+  assert.equal(
+    classifyStranded(inProgress, { ...stranded, prStateKnown: true }, TH),
+    "reset-to-ready",
+    "a KNOWN absence of a PR is still evidence, and still recovers",
+  );
+  assert.equal(
+    classifyStranded(inProgress, { ...stranded, prStateKnown: false }, TH),
+    "ok",
+    "an UNKNOWN PR state must leave the claim alone — the next sweep asks again",
+  );
+});
+
+test("prStateKnown also holds back the non-destructive reopen-pr path", () => {
+  // Less dangerous than a reset, but a PR opened against a branch whose real PR state we could
+  // not read risks a duplicate. Waiting one sweep costs nothing.
+  const pushed = { branchExists: true, aheadOfBase: true, hasOpenPr: false, ageMinutes: 90 };
+  assert.equal(classifyStranded(inProgress, { ...pushed, prStateKnown: true }, TH), "reopen-pr");
+  assert.equal(classifyStranded(inProgress, { ...pushed, prStateKnown: false }, TH), "ok");
+});
+
+test("prStateKnown defaults to true, so an un-updated caller is unaffected", () => {
+  assert.equal(
+    classifyStranded(inProgress, { branchExists: false, aheadOfBase: false, ageMinutes: 9999 }, TH),
+    "reset-to-ready",
+  );
+});

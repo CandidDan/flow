@@ -102,17 +102,39 @@ jobs:
             done < "$cand_file"
 
             # "Is this task progressing?" is asked in TWO branch-independent ways, and either
-            # answer protects the claim. The head match is exact when a branch was found; the
+            # answer protects the claim. Note the title check assumes only trusted collaborators
+            # can open PRs here: on a repo that accepts fork PRs from anyone, a decoy titled
+            # `[<id>] …` would read as progress and defer this task's rescue. That direction of
+            # error is the safe one (a delayed recovery, never a cancelled live claim) and it
+            # self-corrects when the decoy closes — but if that trust assumption ever changes,
+            # this is the line to revisit. The head match is exact when a branch was found; the
             # title match (`[<id>] …`) works even when it was not, which is the case that used to
             # end with a live PR's task being reset to `ready`. --limit 200 because gh defaults to
             # 30 and a quiet repo can still carry more open PRs than that.
-            prs_json="$(gh pr list --state open --limit 200 --json title </dev/null 2>/dev/null || echo '[]')"
-            by_title="$(printf '%s' "$prs_json" | node .flow/bin/flow-recover.mjs count-task-prs "$id")"
-            if [ -n "$branch" ]; then
-              by_head="$(gh pr list --head "$branch" --state open --json number --jq 'length' </dev/null 2>/dev/null || echo 0)"
+            # Whether the query SUCCEEDED is tracked separately from what it returned, and the two
+            # must not be collapsed. A `gh` failure (5xx, rate limit, expired token) previously
+            # fell back to `[]`, which reads as "this task has no PR" — and on a task whose branch
+            # also could not be found, that is what produces `reset-to-ready`. A bad minute at
+            # GitHub was enough to clear a live claim. `--pr-state-known 0` makes the sweep leave
+            # the task alone instead; the next run, three hours later, asks again.
+            pr_state_known=1
+            if prs_json="$(gh pr list --state open --limit 200 --json title </dev/null 2>/dev/null)"; then
+              by_title="$(printf '%s' "$prs_json" | node .flow/bin/flow-recover.mjs count-task-prs "$id")"
             else
-              by_head=0
+              echo "::warning::gh pr list failed for $id — PR state unknown, leaving the task alone."
+              pr_state_known=0; by_title=0
             fi
+
+            by_head=0
+            if [ -n "$branch" ]; then
+              if head_count="$(gh pr list --head "$branch" --state open --json number --jq 'length' </dev/null 2>/dev/null)"; then
+                by_head="$head_count"
+              else
+                echo "::warning::gh pr list --head failed for $branch — PR state unknown."
+                pr_state_known=0
+              fi
+            fi
+
             has_open_pr=0
             [ "${by_title:-0}" -gt 0 ] && has_open_pr=1
             [ "${by_head:-0}" -gt 0 ] && has_open_pr=1
@@ -152,8 +174,9 @@ jobs:
 
             decision="$(node .flow/bin/flow-recover.mjs classify \
               --status in_progress --branch-exists "$branch_exists" --ahead "$ahead" \
-              --has-open-pr "$has_open_pr" --age "$age" --threshold "$THRESHOLD")"
-            echo "$id: branch='${branch:-<none>}' (declared='${declared_branch:-<none>}') ahead=$ahead open_pr=$has_open_pr (title=$by_title head=$by_head) age=${age}m -> $decision"
+              --has-open-pr "$has_open_pr" --age "$age" --threshold "$THRESHOLD" \
+              --pr-state-known "$pr_state_known")"
+            echo "$id: branch='${branch:-<none>}' (declared='${declared_branch:-<none>}') ahead=$ahead open_pr=$has_open_pr (title=$by_title head=$by_head known=$pr_state_known) age=${age}m -> $decision"
 
             case "$decision" in
               reopen-pr)

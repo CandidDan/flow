@@ -599,3 +599,38 @@ test("list-in-progress emits three tab-separated fields, branch last", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── the sweep must actually USE the prStateKnown rule, not merely have it available ────────
+//
+// classifyStranded refusing to act on an unknown PR state is worthless if the shell never tells
+// it the state was unknown. That gap — a correct, tested rule wired to nothing — is the same
+// shape as the bootstrap-guarded workflow that reported success without reading the store, so it
+// gets the same treatment: assert the wiring, not just the rule.
+
+test("_flow-recover.yml distinguishes a failed gh query from an empty one, and passes it on", async () => {
+  const { parse } = await import("yaml");
+  const wf = parse(readFileSync(join(WORKFLOWS, "_flow-recover.yml"), "utf8"));
+  const step = wf.jobs.sweep.steps.find((s) => s.name && s.name.includes("Sweep"));
+  assert.ok(step, "the sweep step must exist");
+  const sh = step.run;
+
+  assert.match(sh, /--pr-state-known "\$pr_state_known"/,
+    "classify must be told whether the PR state was actually knowable");
+  assert.match(sh, /if prs_json="\$\(gh pr list/,
+    "the gh call's exit status must be branched on, not discarded");
+  assert.doesNotMatch(sh, /gh pr list[^\n]*\|\| echo '\[\]'/,
+    "`|| echo '[]'` collapses 'the query failed' into 'there are no PRs' — the bug that let a " +
+    "GitHub 5xx clear a live claim");
+  assert.match(sh, /pr_state_known=0/, "a failed query must mark the state unknown");
+});
+
+test("the classify CLI honours --pr-state-known end to end", () => {
+  const args = ["classify", "--status", "in_progress", "--branch-exists", "0", "--ahead", "0",
+                "--has-open-pr", "0", "--age", "9999", "--threshold", "75"];
+  assert.equal(run("flow-recover.mjs", args).stdout.trim(), "reset-to-ready",
+    "omitted flag defaults to known, preserving existing behaviour");
+  assert.equal(run("flow-recover.mjs", [...args, "--pr-state-known", "1"]).stdout.trim(),
+    "reset-to-ready");
+  assert.equal(run("flow-recover.mjs", [...args, "--pr-state-known", "0"]).stdout.trim(), "ok",
+    "an unknown PR state must never reach the destructive branch");
+});
