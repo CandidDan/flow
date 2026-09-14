@@ -32,6 +32,9 @@ import { canonicalRepoRoot, canonicalTasksDir } from "./flow-state.mjs";
 import { canonicalFlowDir as doctorFlowDir } from "./flow-doctor.mjs";
 import { canonicalFlowDir as editsFlowDir, applyEdits } from "./apply-board-edits.mjs";
 import { canonicalFlowDir as guardFlowDir, findTaskFile } from "./touches-guard.mjs";
+import { canonicalFlowDir as pickFlowDir } from "./pick-task.mjs";
+import { canonicalFlowDir as recoverFlowDir, readTasks as recoverReadTasks } from "./flow-recover.mjs";
+import { canonicalFlowDir as openPrFlowDir } from "./flow-open-pr.mjs";
 import { parseTaskId } from "./parse-task-id.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
@@ -47,7 +50,10 @@ const run = (script, args = [], env = {}) =>
 test("every adapter resolves CANONICAL's store, not the template's fixture store", () => {
   for (const [name, dir] of [["flow-doctor", doctorFlowDir()],
                              ["apply-board-edits", editsFlowDir()],
-                             ["touches-guard", guardFlowDir()]]) {
+                             ["touches-guard", guardFlowDir()],
+                             ["pick-task", pickFlowDir()],
+                             ["flow-recover", recoverFlowDir()],
+                             ["flow-open-pr", openPrFlowDir()]]) {
     assert.equal(dir, FLOW, `${name} must resolve canonical's .flow/`);
     assert.notEqual(dir, TEMPLATE_FLOW,
       `${name} must NOT resolve project-template/.flow — that is the fixture store, and ` +
@@ -469,5 +475,127 @@ test("checkWorkflows parses every workflow in canonical, including the five new 
   assert.deepEqual(failures, [], "npm run build is what stops a malformed reusable reaching the fleet");
   for (const name of ADDED) {
     assert.ok(checked.includes(join(WORKFLOWS, name)), `${name} must be among the parsed files`);
+  }
+});
+
+// ── the adapters the autonomous workflows invoke (and that canonical did not have) ─────────
+//
+// `_flow-queue-runner.yml` runs `.flow/bin/pick-task.mjs` and `_flow-recover.yml` runs
+// `.flow/bin/flow-recover.mjs` + `.flow/bin/flow-open-pr.mjs`, all in the CONSUMING repo —
+// canonical included. All three were absent, and the two workflows failed in opposite ways that
+// were each invisible:
+//
+//   - the recover sweep opens with `if [ ! -f .flow/bin/flow-recover.mjs ]` and exits 0, so 160+
+//     scheduled runs reported success having never read canonical's store;
+//   - the queue runner has NO such guard, so its first dispatched run would have died outright at
+//     the pick step — unnoticed only because that caller is dispatch-only and has never been run.
+//
+// The general rule this encodes: every helper a flow-* workflow invokes by path must exist here.
+
+const WORKFLOW_INVOKED_ADAPTERS = [
+  "flow-doctor.mjs", "apply-board-edits.mjs", "touches-guard.mjs", "parse-task-id.mjs",
+  "flow-review.mjs", "pick-task.mjs", "flow-recover.mjs", "flow-open-pr.mjs",
+];
+
+test("every .flow/bin/<helper>.mjs a workflow canonical CALLS invokes by path exists here", () => {
+  // Derived from the workflows themselves rather than from a hand-kept list, so a helper added to
+  // a reusable tomorrow is covered without anyone remembering to update this.
+  //
+  // Scope is the reachable set, not every file in the directory: canonical AUTHORS reusables it
+  // does not itself call. `_flow-sync.yml` is the standing example — it invokes flow-sync.mjs,
+  // canonical has no flow-sync.mjs adapter, and that is correct rather than a gap, because
+  // canonical is the sync SOURCE and deliberately ships no flow-sync caller. So start from the
+  // thin callers (the non-underscore files), follow their `uses:` into canonical's own reusables,
+  // and check only what that set actually runs.
+  const callers = readdirSync(WORKFLOWS)
+    .filter((n) => /\.ya?ml$/.test(n) && !n.startsWith("_"));
+  assert.ok(callers.length > 0, "an empty scan is a failure, not a pass — no callers found");
+
+  const reachable = new Set(callers);
+  for (const name of callers) {
+    const src = readFileSync(join(WORKFLOWS, name), "utf8");
+    for (const m of src.matchAll(/CandidDan\/flow\/\.github\/workflows\/(_flow-[A-Za-z0-9-]+\.ya?ml)@/g)) {
+      reachable.add(m[1]);
+    }
+  }
+
+  const invoked = new Map();
+  for (const name of reachable) {
+    const file = join(WORKFLOWS, name);
+    if (!existsSync(file)) continue;
+    for (const m of readFileSync(file, "utf8").matchAll(/\.flow\/bin\/([A-Za-z0-9._-]+\.mjs)/g)) {
+      if (!invoked.has(m[1])) invoked.set(m[1], name);
+    }
+  }
+  assert.ok(invoked.size > 0, "an empty scan is a failure, not a pass — no helper refs extracted");
+
+  const missing = [...invoked].filter(([h]) => !existsSync(join(BIN, h)))
+    .map(([h, w]) => `${h} (invoked by ${w})`).sort();
+  assert.deepEqual(missing, [],
+    `these helpers are invoked by a workflow canonical calls, but are absent from .flow/bin/: ` +
+    `${missing.join(", ")}. A bootstrap-guarded caller will report success having done nothing; ` +
+    "an unguarded one dies at the first step.");
+
+  // The exception is real and stays checked, so it cannot quietly become a gap: flow-sync is
+  // referenced by a reusable canonical publishes but does NOT call.
+  assert.ok(!existsSync(join(BIN, "flow-sync.mjs")),
+    "canonical is the sync source and must not adopt flow-sync; if this changes, add a caller too");
+  assert.match(readFileSync(join(WORKFLOWS, "_flow-sync.yml"), "utf8"), /\.flow\/bin\/flow-sync\.mjs/,
+    "the exception is only meaningful while _flow-sync.yml actually invokes the helper");
+});
+
+test("the three autonomous-loop adapters are present and their CLI blocks run", () => {
+  for (const f of ["pick-task.mjs", "flow-recover.mjs", "flow-open-pr.mjs"]) {
+    assert.ok(existsSync(join(BIN, f)), `${f} must exist — a workflow invokes it by this path`);
+    assert.ok(WORKFLOW_INVOKED_ADAPTERS.includes(f));
+  }
+
+  // pick-task against canonical's real store: it must name a task that exists HERE. A copy or a
+  // symlink would read project-template/.flow/tasks (the fixture store) and pick a fixture id.
+  const picked = run("pick-task.mjs").stdout.trim();
+  assert.match(picked, /^flow-\d{4}$/,
+    "pick-task must print a canonical task id — silence here is the symlink failure mode");
+  assert.ok(findTaskFile(join(pickFlowDir(), "tasks"), picked),
+    `pick-task chose ${picked}, which is not in canonical's store`);
+
+  // flow-recover's new subcommands, through the CLI rather than the module.
+  const cands = run("flow-recover.mjs", ["branch-candidates", "flow-0040", "claude/foo-x"]);
+  assert.deepEqual(cands.stdout.trim().split("\n"), ["claude/foo-x", "flow/flow-0040-*"],
+    "the declared branch must be tried before the flow/<id>-… convention");
+
+  const counted = spawnSync(process.execPath, [join(BIN, "flow-recover.mjs"), "count-task-prs", "flow-0040"],
+    { cwd: REPO, encoding: "utf8", input: '[{"title":"[flow-0040] x"},{"title":"re flow-0040"}]' });
+  assert.equal(counted.stdout.trim(), "1", "only a LEADING [id] counts as this task's PR");
+
+  // flow-open-pr's --id override, resolved against canonical's store for the title.
+  const decided = run("flow-open-pr.mjs",
+    ["--branch", "claude/foo-x", "--base", "main", "--ahead", "2", "--has-open-pr", "0",
+     "--id", "flow-0040"]);
+  const payload = JSON.parse(decided.stdout.trim());
+  assert.equal(payload.id, "flow-0040");
+  assert.match(payload.title, /^\[flow-0040\] .+/,
+    "the title must come from canonical's task file, not the template's fixture");
+});
+
+test("list-in-progress emits three tab-separated fields, branch last", () => {
+  // The sweep reads `read -r id started declared_branch`, so the branch must be the third column
+  // and must stay present-but-empty when the task has none — otherwise the columns shift.
+  const dir = tmp("recover-list");
+  try {
+    const tasks = join(dir, "tasks");
+    cpSync(join(FLOW, "tasks"), tasks, { recursive: true });
+    writeFileSync(join(tasks, "9001-x.md"),
+      '---\nid: "flow-9001"\nstatus: "in_progress"\nstarted: "2026-09-14T09:00:00Z"\n' +
+      'branch: "claude/next-task-abc"\n---\nbody\n');
+    writeFileSync(join(tasks, "9002-y.md"),
+      '---\nid: "flow-9002"\nstatus: "in_progress"\nstarted: "2026-09-14T09:00:00Z"\n---\nbody\n');
+
+    const rows = recoverReadTasks(tasks).filter((t) => t.status === "in_progress")
+      .map((t) => `${t.id}\t${t.started}\t${t.branch}`);
+    assert.ok(rows.includes("flow-9001\t2026-09-14T09:00:00Z\tclaude/next-task-abc"));
+    assert.ok(rows.includes("flow-9002\t2026-09-14T09:00:00Z\t"),
+      "a task with no branch keeps the empty third column");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

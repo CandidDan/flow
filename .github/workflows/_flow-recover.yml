@@ -70,8 +70,9 @@ jobs:
           case "$THRESHOLD" in ""|*[!0-9]*) THRESHOLD=75 ;; esac
           [ "$THRESHOLD" -gt 1440 ] && THRESHOLD=1440
 
-          # Each line is "<id>\t<started>" for an in_progress task.
-          node .flow/bin/flow-recover.mjs list-in-progress | while IFS="$(printf '\t')" read -r id started; do
+          # Each line is "<id>\t<started>\t<branch>" for an in_progress task. The third field is
+          # the branch the store recorded at claim time; it is empty until flow-status writes it.
+          node .flow/bin/flow-recover.mjs list-in-progress | while IFS="$(printf '\t')" read -r id started declared_branch; do
             [ -z "$id" ] && continue
             # Validate the id shape before it ever reaches a shell command (git ls-remote, gh).
             # Task files on main are trusted (only Dan / flow-bot write them, and flow-gates
@@ -81,19 +82,52 @@ jobs:
             fi
             echo "::group::$id"
 
-            # Discover the worker branch by convention (flow/<id>-…). A stranded task usually
-            # has an empty `branch` field, since flow-status only records it once a PR opens.
-            branch="$(git ls-remote --heads origin "flow/$id-*" | head -1 | sed 's#.*refs/heads/##')"
+            # Discover the worker branch. The store's own `branch` field comes FIRST and the
+            # `flow/<id>-…` convention second — see recoveryBranchCandidates() in flow-recover.mjs
+            # for why the convention alone was never enough (cloud sessions are handed a
+            # `claude/…` branch they are told not to rename, and the protocol makes the PR title,
+            # not the branch, the load-bearing identifier). The candidate list and its ordering
+            # are decided in the helper; this shell only tries them in turn.
+            # Via a file, not a heredoc or a pipe, and both alternatives are traps rather than
+            # style: a heredoc terminator must sit at column 0, which ends this YAML block scalar
+            # early and makes the workflow unparseable; a `... | while` runs the loop in a subshell,
+            # so the $branch it finds is discarded when the loop exits.
+            cand_file="${RUNNER_TEMP:-/tmp}/flow-recover-candidates"
+            node .flow/bin/flow-recover.mjs branch-candidates "$id" "$declared_branch" > "$cand_file"
+            branch=""
+            while IFS= read -r pattern; do
+              [ -z "$pattern" ] && continue
+              match="$(git ls-remote --heads origin "$pattern" </dev/null | head -1 | sed 's#.*refs/heads/##')"
+              if [ -n "$match" ]; then branch="$match"; break; fi
+            done < "$cand_file"
+
+            # "Is this task progressing?" is asked in TWO branch-independent ways, and either
+            # answer protects the claim. The head match is exact when a branch was found; the
+            # title match (`[<id>] …`) works even when it was not, which is the case that used to
+            # end with a live PR's task being reset to `ready`. --limit 200 because gh defaults to
+            # 30 and a quiet repo can still carry more open PRs than that.
+            prs_json="$(gh pr list --state open --limit 200 --json title </dev/null 2>/dev/null || echo '[]')"
+            by_title="$(printf '%s' "$prs_json" | node .flow/bin/flow-recover.mjs count-task-prs "$id")"
+            if [ -n "$branch" ]; then
+              by_head="$(gh pr list --head "$branch" --state open --json number --jq 'length' </dev/null 2>/dev/null || echo 0)"
+            else
+              by_head=0
+            fi
+            has_open_pr=0
+            [ "${by_title:-0}" -gt 0 ] && has_open_pr=1
+            [ "${by_head:-0}" -gt 0 ] && has_open_pr=1
+
             if [ -n "$branch" ]; then
               branch_exists=1
               # fetch-depth: 0 on the main checkout fetched every origin ref, so the
-              # remote-tracking origin/$branch is present for rev-list without an extra fetch.
-              ahead="$(git rev-list --count "origin/main..origin/$branch")"
-              has_open_pr="$(gh pr list --head "$branch" --state open --json number --jq 'length')"
-              tip_epoch="$(git log -1 --format=%ct "origin/$branch")"
+              # remote-tracking origin/$branch is usually present for rev-list without an extra
+              # fetch. A branch pushed since the checkout is not — count 0 rather than failing the
+              # sweep, which reads as "nothing to recover yet" and is retried next run.
+              ahead="$(git rev-list --count "origin/main..origin/$branch" 2>/dev/null || echo 0)"
+              tip_epoch="$(git log -1 --format=%ct "origin/$branch" 2>/dev/null || echo "$now")"
               age=$(( (now - tip_epoch) / 60 ))
             else
-              branch_exists=0; ahead=0; has_open_pr=0
+              branch_exists=0; ahead=0
               # No branch: age from `started`. A date-only value must be read as the END of that
               # day, not its midnight. `date -d 2026-08-14` resolves to 00:00Z, so a task claimed
               # at 09:23Z measured "563 minutes old" the moment it was claimed — past the 75m
@@ -119,12 +153,15 @@ jobs:
             decision="$(node .flow/bin/flow-recover.mjs classify \
               --status in_progress --branch-exists "$branch_exists" --ahead "$ahead" \
               --has-open-pr "$has_open_pr" --age "$age" --threshold "$THRESHOLD")"
-            echo "$id: branch='${branch:-<none>}' ahead=$ahead open_pr=$has_open_pr age=${age}m -> $decision"
+            echo "$id: branch='${branch:-<none>}' (declared='${declared_branch:-<none>}') ahead=$ahead open_pr=$has_open_pr (title=$by_title head=$by_head) age=${age}m -> $decision"
 
             case "$decision" in
               reopen-pr)
                 # Reuse the CAN-50 decision + gh pr create for the existing branch.
-                d="$(node .flow/bin/flow-open-pr.mjs --branch "$branch" --base main --ahead "$ahead" --has-open-pr "$has_open_pr")"
+                # --id: recovery starts from the task file, so it knows the id even when the
+                # branch is a platform-assigned `claude/…` that flow-open-pr cannot parse. Without
+                # it this call returns nothing and the recovery silently opens no PR.
+                d="$(node .flow/bin/flow-open-pr.mjs --branch "$branch" --base main --ahead "$ahead" --has-open-pr "$has_open_pr" --id "$id")"
                 if [ -n "$d" ]; then
                   title="$(node -e 'console.log(JSON.parse(process.argv[1]).title)' "$d")"
                   task_path="$(grep -rl "^id: \"$id\"" .flow/tasks/ | head -1)"
