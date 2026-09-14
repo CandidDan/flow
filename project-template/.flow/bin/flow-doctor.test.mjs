@@ -635,10 +635,68 @@ test("serves naming an unknown id, or a non-goal, is a PROBLEM in each case", ()
 });
 
 test("serves naming a retired goal → WARNING, not a problem", () => {
-  const d = fixture({ "0001-a.md": task("P-0001", { serves: '["G9"]' }) });
+  // `status` is explicit rather than leaning on the fixture default. The retired-goal warning is
+  // now status-dependent (see below), so a test that let the default supply the status would
+  // silently change meaning the day that default moved — the failure mode where a test keeps
+  // passing while no longer proving what its name claims.
+  const d = fixture({ "0001-a.md": task("P-0001", { status: "ready", serves: '["G9"]' }) });
   const r = runDoctor({ flowDir: d });
   assert.deepEqual(r.problems, []);
   assert.ok(r.warnings.some((w) => w.includes("P-0001") && w.includes("Retired")));
+  cleanup(d);
+});
+
+test("a DONE task serving a retired goal is silent — the warning has no remedy it could take", () => {
+  // Finished work cannot be dropped, and `serves` records the goal the task was WRITTEN to
+  // advance, so it cannot honestly be re-anchored either. Warning about it asks the reader to
+  // falsify history, and at volume it buries the live tasks that can still act on the advice.
+  const d = fixture({ "0001-a.md": task("P-0001", { status: "done", serves: '["G9"]' }) });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.ok(!r.warnings.some((w) => w.includes("P-0001") && w.includes("Retired")),
+    "a done task serving a retired goal should not warn");
+  cleanup(d);
+});
+
+test("every non-done status still warns on a retired goal", () => {
+  // The exemption is `done` and only `done`. Each of these is still live, and at least one of the
+  // two remedies — dropping the task — remains a real call for the reader, so the line earns its
+  // place. Table-driven so adding a status to the lifecycle surfaces here rather than silently
+  // inheriting the exemption.
+  for (const status of ["ready", "in_progress", "in_review", "blocked"]) {
+    const d = fixture({
+      "0001-a.md": task("P-0001", {
+        status,
+        serves: '["G9"]',
+        // in_progress/in_review are only well-formed with a claim on them; without these the
+        // store would fail for an unrelated reason and mask what this test is asking.
+        owner: status === "ready" || status === "blocked" ? "" : "session_x",
+        started: status === "ready" || status === "blocked" ? "" : "2026-09-14T02:10:04Z",
+        blocked_reason: status === "blocked" ? "waiting on something" : "",
+      }),
+    });
+    const r = runDoctor({ flowDir: d });
+    assert.ok(r.warnings.some((w) => w.includes("P-0001") && w.includes("Retired")),
+      `status "${status}" should still warn on a retired goal`);
+    cleanup(d);
+  }
+});
+
+test("the done exemption does not leak to the sibling serves branches", () => {
+  // An aged anchor is forgivable; a broken or self-contradicting one is not. An id VISION.md never
+  // declared, or one it declares a NON-GOAL, still reports on finished work — those say the record
+  // is wrong, not merely old. (On a non-ready task they report as warnings, which is the existing
+  // severity rule and deliberately left alone.)
+  const d = fixture({
+    "0001-a.md": task("P-0001", { status: "done", serves: '["G404"]' }),
+    "0002-b.md": task("P-0002", { status: "done", serves: '["NG1"]' }),
+  });
+  const r = runDoctor({ flowDir: d });
+  const all = [...r.problems, ...r.warnings];
+  assert.ok(all.some((m) => m.includes("P-0001") && m.includes("does not declare")),
+    "a done task naming an undeclared goal id must still report");
+  assert.ok(all.some((m) => m.includes("P-0002") && m.includes("NON-GOAL")),
+    "a done task naming a declared non-goal must still report");
   cleanup(d);
 });
 

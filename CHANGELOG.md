@@ -6,6 +6,22 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+- **`flow-doctor` no longer warns that a `done` task serves a retired goal** (`flow-doctor.mjs`,
+  flow-0043). No caller action. The retired-goal warning tells the reader to "re-anchor it to a
+  live goal, or drop the task with the goal it served" — and a finished task can do neither. It
+  cannot be dropped, because the completed record is the point; and it cannot honestly be
+  re-anchored, because `serves` records the goal a task was *written* to advance, so back-filling
+  a live id onto finished work falsifies history instead of correcting it (`task-writer` states
+  the same rule from the other side: don't retrofit `serves` onto `in_progress`, `in_review`,
+  `done` or `blocked`). The cost of warning anyway is paid in signal: a repo that retires several
+  goals at once gets a warning per pre-existing task, permanently. In canonical, where the
+  2026-09-01 vision rewrite retired G1–G5 in one stroke, that was 36 lines across 35 tasks — 28 of
+  them naming settled history, with the single `ready` task that genuinely needed re-anchoring
+  sitting 30th in the list. It now reports 8: seven `blocked` and that one `ready`. The exemption
+  is `done` and only `done` — `blocked`, `in_progress` and `in_review` still warn, because each is
+  still live and dropping it remains a real call — and it is scoped to the retired-goal branch
+  alone: a `serves` naming an id `VISION.md` never declared, or one it declares a **non-goal**,
+  still reports on finished work, because those say the record is wrong rather than merely old.
 - **`flow-triage` now reads only issues from trusted authors** (`_flow-triage.yml`, flow-0027).
   The sweep used to hand its agent the whole open inbox, with its scope limits written in the
   prompt — guidance to a model, not an enforced boundary, and on a public repo anyone can author
