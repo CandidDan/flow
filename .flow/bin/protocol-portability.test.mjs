@@ -60,7 +60,7 @@ const PROTOCOL_REF = ".flow/PROTOCOL.md";
 const PRE_MOVE_SECTION_DIGESTS = [
   ["Response style — always TL;DR", "3542b8b979ddb4efa71684a0dace416e60ccc84ba754183e18f6b4605abeee6f"],
   ["The store", "c6dcbc3bb200de6b31be37d0e0d9ca619b6fb8c1a073e527703d8aa6e5af914a"],
-  ["Status lifecycle", "c2f7d6a2d54fe4ac3ed8585cffb4fa0a805e9f372e4d7f9288805fece9712273"],   // rewritten by flow-0039
+  ["Status lifecycle", "f7235e6c6e4d93e5d792a9294bba9d93a5f3d621b0b208d8d39dbf800b577744"],   // rewritten by flow-0039, then flow-0040 (blocked_by)
   ["Concurrency — how parallel sessions don't collide", "42bbc5aa8e43eb1371eaae9b43fcb0d68cf7973df33844914d1137209bb49f6c"],   // rewritten by flow-0039
   ["The loop you run", "501469c1994131fd1ee695e91c1a800352cfe89f0f38cd74b39f8f4f531475d4"],   // rewritten by flow-0007, then flow-0039
   ["Session hygiene — context is a budget", "71c9e144cad9aa9449dd199cf449c713ce90abb81ad3f7e59cc7761b093aebc0"],
@@ -410,4 +410,49 @@ test("a real Claude Code session loads the protocol through the CLAUDE.md import
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- flow-0040 criterion 7: the protocol actually documents `blocked_by` -----------------
+//
+// WHY THIS IS NOT COVERED BY THE DIGEST ABOVE. `PRE_MOVE_SECTION_DIGESTS` hashes the "Status
+// lifecycle" section and compares it to a digest recomputed in the same commit as the edit.
+// That proves the section still matches whatever was written — it cannot distinguish "documents
+// blocked_by" from "changed somehow". Swap the new paragraph for unrelated prose, recompute the
+// digest, and that test stays green. Its own docstring says as much: it exists to catch an
+// ACCIDENTAL change and explicitly punts on validating an intentional one.
+//
+// So the digest is a change-detector, not a proof of content, and criterion 7 needs a proof of
+// content. This is that proof, and it asserts the bullet's substance rather than the presence of
+// a keyword — a token check would pass on a paragraph that merely mentions the field in passing.
+
+// One `- \`<status>\` — …` bullet from a Status lifecycle body, continuation lines included.
+export function statusBullet(sectionBody, status) {
+  const hit = sectionBody.split(/^- /m).slice(1).find((p) => p.startsWith(`\`${status}\``));
+  return hit ? `- ${hit}` : null;
+}
+
+test("the protocol's `blocked` bullet documents blocked_by, alongside blocked", () => {
+  const section = new Map(sectionsOf(protocol)).get("Status lifecycle");
+  assert.ok(section, "the Status lifecycle section must exist to document the field");
+
+  const bullet = statusBullet(section, "blocked");
+  assert.ok(bullet, "Status lifecycle must carry a `blocked` bullet");
+
+  // Alongside `blocked` — the criterion's word. Documenting the field in some other section
+  // would leave a reader of the lifecycle unaware it exists.
+  assert.match(bullet, /blocked_by/,
+    "the `blocked` bullet must name `blocked_by`; the digest test cannot tell you this, because " +
+    "it only checks the section matches a hash recomputed alongside the edit");
+
+  // Substance, not a keyword. Each of these is a rule flow-doctor enforces, so a paragraph that
+  // dropped one would leave the validator's behaviour undocumented.
+  assert.match(bullet, /blocked_reason/,
+    "the bullet must keep `blocked_reason` too — `blocked_by` supplements the sentence, never " +
+    "replaces it, and flow-doctor still expects both");
+  assert.match(bullet, /not machine-checkable/,
+    "the bullet must document the opt-out sentinel, or a genuinely non-mechanical block has no " +
+    "way to silence the nudge flow-doctor raises");
+  assert.match(bullet, /\bclear/i,
+    "the bullet must say the field is cleared when the block clears — flow-doctor reports a " +
+    "populated blocked_by on a live non-blocked task as stale data");
 });
