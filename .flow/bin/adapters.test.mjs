@@ -607,12 +607,13 @@ test("list-in-progress emits three tab-separated fields, branch last", () => {
 // shape as the bootstrap-guarded workflow that reported success without reading the store, so it
 // gets the same treatment: assert the wiring, not just the rule.
 
-test("_flow-recover.yml distinguishes a failed gh query from an empty one, and passes it on", async () => {
-  const { parse } = await import("yaml");
-  const wf = parse(readFileSync(join(WORKFLOWS, "_flow-recover.yml"), "utf8"));
-  const step = wf.jobs.sweep.steps.find((s) => s.name && s.name.includes("Sweep"));
-  assert.ok(step, "the sweep step must exist");
-  const sh = step.run;
+// Line-based on purpose, NOT YAML-parsed — the same reasoning action-pins.test.mjs states for
+// itself. This file's other workflow tests carry `{ skip }` because they need `yaml`, which the
+// `flow-tooling` gate job does not install (it runs `node --test .flow/bin/*.test.mjs` with no
+// `npm ci`). A guard that skips in one of the two jobs that run it is weaker for no reason when
+// every assertion here is about the shell TEXT: scanning the raw file means this runs in both.
+test("_flow-recover.yml distinguishes a failed gh query from an empty one, and passes it on", () => {
+  const sh = readFileSync(join(WORKFLOWS, "_flow-recover.yml"), "utf8");
 
   assert.match(sh, /--pr-state-known "\$pr_state_known"/,
     "classify must be told whether the PR state was actually knowable");
@@ -622,6 +623,15 @@ test("_flow-recover.yml distinguishes a failed gh query from an empty one, and p
     "`|| echo '[]'` collapses 'the query failed' into 'there are no PRs' — the bug that let a " +
     "GitHub 5xx clear a live claim");
   assert.match(sh, /pr_state_known=0/, "a failed query must mark the state unknown");
+});
+
+// The structural half, which does need a parse: the assertions above are only meaningful if that
+// text actually lives in the sweep step's `run:` block rather than in a comment elsewhere.
+test("the pr-state-known wiring is in the sweep step's run block", { skip }, () => {
+  const step = wfParse("_flow-recover.yml").jobs.sweep.steps
+    .find((s) => s.name && s.name.includes("Sweep"));
+  assert.ok(step, "the sweep step must exist");
+  assert.match(step.run, /--pr-state-known "\$pr_state_known"/);
 });
 
 test("the classify CLI honours --pr-state-known end to end", () => {
