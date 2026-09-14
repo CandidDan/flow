@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0042"
 title: "Record where mission control lives and how it is served, with the proving test its ADR siblings have"
-status: "in_progress"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude"
