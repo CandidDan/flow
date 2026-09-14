@@ -619,7 +619,12 @@ test("_flow-recover.yml distinguishes a failed gh query from an empty one, and p
     "classify must be told whether the PR state was actually knowable");
   assert.match(sh, /if prs_json="\$\(gh pr list/,
     "the gh call's exit status must be branched on, not discarded");
-  assert.doesNotMatch(sh, /gh pr list[^\n]*\|\| echo '\[\]'/,
+  // Whitespace- and quote-tolerant, because the narrow form was not enough. The code review
+  // called hardening this low-value on the grounds that the structural wiring assertions above
+  // already cover the invariant — they do not. `||echo '[]'` (one space less) placed INSIDE the
+  // `if prs_json="$(gh pr list …)"` structure satisfies every other assertion here and restores
+  // the original bug exactly. Verified by doing it.
+  assert.doesNotMatch(sh, /gh pr list[^\n]*\|\|\s*echo\s*["']?\[\]["']?/,
     "`|| echo '[]'` collapses 'the query failed' into 'there are no PRs' — the bug that let a " +
     "GitHub 5xx clear a live claim");
   // Both gh queries must mark the state unknown on failure, and that is asserted INDEPENDENTLY
