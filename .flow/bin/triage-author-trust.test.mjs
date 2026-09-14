@@ -812,11 +812,15 @@ test("an issue with no comments assembles cleanly and says so", { skip }, () => 
 // Criterion 6 — the change is recorded for the adopters who inherit it
 // ─────────────────────────────────────────────────────────────────────────────────────────
 
-test("the CHANGELOG records this narrowing under Unreleased, with a caller action", { skip }, () => {
+test("the CHANGELOG records this narrowing, with a caller action", { skip }, () => {
   const changelog = readFileSync(join(REPO, "CHANGELOG.md"), "utf8");
-  const unreleased = changelog.split(/^## /m).find((s) => s.startsWith("Unreleased"));
-  assert.ok(unreleased, "the CHANGELOG must carry an `## Unreleased` section");
-  const entry = unreleased.split(/^- /m).find((s) => /flow-0036/.test(s));
+  // Locate the section that CONTAINS the entry rather than assuming it is still `## Unreleased`:
+  // cutting a release folds Unreleased entries into the numbered section, and a locator pinned to
+  // Unreleased fails on the next release cut instead of on any real regression.
+  const entries = (section) => section.split(/^- /m).slice(1);
+  const section = changelog.split(/^## /m).find((s) => entries(s).some((e) => /flow-0036/.test(e)));
+  assert.ok(section, "the CHANGELOG must carry a section holding the flow-0036 entry");
+  const entry = entries(section).find((s) => /flow-0036/.test(s));
   assert.ok(entry, "flow-0036 must have its own entry — adopters inherit this at their next pin " +
     "and it narrows what the sweep reads by default, which is exactly what a changelog is for");
   assert.match(entry, /\[caller action:/,
