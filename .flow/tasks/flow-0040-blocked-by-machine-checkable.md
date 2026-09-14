@@ -27,6 +27,7 @@ notes:
     .flow/bin/protocol-portability.test.mjs (Status lifecycle digest) are guards whose own
     messages require recomputing in the same commit as an intentional template/protocol edit.
     Next action: open the PR."
+  - "2026-09-14: PR #69 open (https://github.com/CandidDan/flow/pull/69). Worker done; awaiting the PR review checks and a human merge."
 ---
 
 ## Context
