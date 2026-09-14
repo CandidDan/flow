@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0044"
 title: "Stamp and changelog the 1.3.0 release, so the queue-runner FLOW_PAT fix can reach the fleet"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0044"
 created: "2026-09-14"
 started: "2026-09-14T13:34:36Z"
 branch: "flow/flow-0044-release-1-3-0"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/71"
 issue: ""
 blocked_reason: ""
 serves: ["G10"]           # the fleet's autonomous path currently opens PRs whose gate never fires
