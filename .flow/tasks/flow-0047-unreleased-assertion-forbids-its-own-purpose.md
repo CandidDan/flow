@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0047"
 title: "Stop the release-stamp test forbidding the thing `## Unreleased` exists for"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude-worker-flow-0047"
