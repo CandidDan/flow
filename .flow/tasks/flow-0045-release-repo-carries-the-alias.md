@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0045"
 title: "Give the release repo the floating `v1` alias the fleet actually pins, moved by the same deliberate act that moves canonical's"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0045"
 created: "2026-09-15"
-started: ""
+started: "2026-09-15T03:37:18Z"
 branch: ""
 pr: ""
 issue: ""
