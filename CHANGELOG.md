@@ -6,6 +6,22 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+- **The release repo now carries the floating `vMAJOR` alias the fleet actually pins**
+  (`flow-release-publish.yml`, `.flow/bin/release-publish.mjs`, flow-0045). Before this,
+  `CandidDan/flow-protocol` held `main` and the exact version tags only — three refs, no `v1` —
+  so repointing a consuming repo's nine `uses:` lines at `.../\_flow-gates.yml@v1` on the release
+  repo would have resolved to nothing, in that repo's CI, with no local change to explain it.
+  The alias is **mirrored from canonical's own `vMAJOR`**, on the `push` event that force-updates
+  it (step 6 of the release procedure), and deliberately **not** advanced by publishing: an alias
+  that followed every publish would delete the canary the two-alias split exists to preserve, one
+  repository removed from where anyone would look for it. The immutable `vX.Y.Z` rule is
+  unchanged and both rules are now pinned by tests against the same `ls-remote` output, so a
+  later tidy-up cannot collapse them into one. A release whose tag lands but whose alias does not
+  now fails with `decision=published-without-its-alias` in the verdict and the job summary,
+  rather than reporting success while every pinned caller resolves the previous release.
+  [caller action: **none.** Adopting repos still pin canonical; flow-0030 is the task that
+  repoints them, and this change is its prerequisite.]
+
 ## 1.3.0 — 2026-09-14 (pending tag + canary)
 
 The first release since `v1.2.0` (2026-08-20). Everything below has been on `v1-edge` since it

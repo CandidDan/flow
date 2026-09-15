@@ -26,8 +26,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  aliasTag,
+  ALIAS_OUTCOME,
   auditEntries,
   checkTargetRepo,
+  decideAliasMove,
+  formatAliasReport,
   formatReport,
   globToRegExp,
   makeGitRunner,
@@ -35,12 +39,14 @@ import {
   MANIFEST,
   neverPublishes,
   NEVER_PUBLISH,
+  parseRefs,
   readTargetMeta,
   readVersion,
   releaseReadme,
   releaseTag,
   reportAndExit,
   resolveManifest,
+  runAliasMirror,
   runPublish,
   tagIsFree,
 } from "./release-publish.mjs";
@@ -633,4 +639,329 @@ test("releaseReadme points contributions at issues and never links the private a
   assert.match(md, /Apache-2\.0/);
   assert.match(md, /NOTICE/);
   assert.match(md, /carries no history/i);
+});
+
+// ── flow-0045: the floating alias the fleet actually pins ───────────────────────────────
+//
+// THE PROPERTY UNDER TEST IS AN ASYMMETRY. `vX.Y.Z` and `vX` are both tags on the same remote
+// and the rules for them are opposites: the release tag is REFUSED when it already exists, the
+// alias is moved BECAUSE it already exists. A later simplification that notices "two tag checks,
+// surely one function" breaks the fleet in whichever direction it picks — either the alias stops
+// moving (every adopting repo silently frozen on the previous release) or the immutable tag
+// starts moving (every pinned adopter silently running different code). So the two rules are
+// asserted against the SAME ls-remote output, in the same file, deliberately adjacent.
+//
+// The decisions are proved as pure functions over `ls-remote` output and the stamp, as
+// `tagIsFree` already is — not by a live push. A live push proves a fixture; the bare-repo
+// tests below are the belt to that braces, not the proof.
+
+// One target's refs: the release repo after v1.2.0 and v1.3.0 have been published and `v1`
+// still points at the older of the two. This is the exact state canonical was in on 2026-09-15,
+// minus the `v1` that did not exist at all.
+const TARGET_REFS = [
+  "1111111111111111111111111111111111111111\trefs/heads/main",
+  "2222222222222222222222222222222222222222\trefs/tags/v1.2.0",
+  "3333333333333333333333333333333333333333\trefs/tags/v1.3.0",
+  "2222222222222222222222222222222222222222\trefs/tags/v1",
+].join("\n");
+
+test("criterion 1 — the alias is decided onto the same commit as the release tag it names", () => {
+  const d = decideAliasMove({ lsRemoteOutput: TARGET_REFS, version: "1.3.0", pushedRef: "v1" });
+  assert.deepEqual(d.problems, []);
+  assert.equal(d.alias, "v1");
+  assert.equal(d.tag, "v1.3.0");
+  assert.equal(d.target, "3333333333333333333333333333333333333333",
+    "the alias must land on the commit v1.3.0 points at — that is what `@v1` resolving to this release means");
+  assert.equal(d.current, "2222222222222222222222222222222222222222");
+  assert.equal(d.move, true);
+  assert.deepEqual(d.refsTouched, ["refs/tags/v1"], "one ref moves, and it is the alias");
+});
+
+test("criterion 1 — after the mirror, vX and vX.Y.Z are the same commit on the target", () => {
+  const root = fixtureTree("1.3.0");
+  const bare = fixtureRemote();
+  const work = join(tmp("alias"), "a");
+  try {
+    assert.equal(runPublish({ sourceRoot: root, workDir: join(tmp("w"), "s"), remote: bare, git, targetMeta: PUBLIC_TARGET }).published, true);
+    assert.ok(!refsIn(bare).includes("refs/tags/v1"),
+      "publishing must NOT create the alias — that is the canary-preserving half of this task");
+
+    const v = runAliasMirror({ sourceRoot: root, remote: bare, git, workDir: work, pushedRef: "v1" });
+    assert.deepEqual(v.problems, []);
+    assert.equal(v.outcome, ALIAS_OUTCOME.moved);
+    assert.equal(v.moved, true);
+    assert.ok(refsIn(bare).includes("refs/tags/v1"), "the ref the fleet pins now exists on the release repo");
+    assert.equal(git(["rev-parse", "v1^{commit}"], { cwd: bare }).trim(),
+                 git(["rev-parse", "v1.3.0^{commit}"], { cwd: bare }).trim());
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(bare, { recursive: true, force: true }); }
+});
+
+test("criterion 1 — a mirror that has nothing to do says so and pushes nothing", () => {
+  const d = decideAliasMove({ lsRemoteOutput: TARGET_REFS, version: "1.2.0", pushedRef: "v1" });
+  assert.deepEqual(d.problems, []);
+  assert.equal(d.move, false, "v1 already points at v1.2.0's commit");
+  assert.deepEqual(d.refsTouched, [], "a no-op must not claim to have written a ref");
+});
+
+test("criterion 1 — the alias is refused when the release it names is not on the target", () => {
+  const d = decideAliasMove({ lsRemoteOutput: TARGET_REFS, version: "1.4.0", pushedRef: "v1" });
+  assert.equal(d.move, false);
+  assert.ok(d.problems.some((p) => p.includes("does not carry v1.4.0")),
+    "pointing the fleet's alias at a release nobody published is worse than not moving it");
+  assert.deepEqual(d.refsTouched, []);
+});
+
+test("criterion 1 — a ref the stamp does not name is refused, not mirrored", () => {
+  const d = decideAliasMove({ lsRemoteOutput: TARGET_REFS, version: "1.3.0", pushedRef: "v2" });
+  assert.equal(d.move, false);
+  assert.ok(d.problems.some((p) => p.includes('the ref that moved is "v2"')),
+    "a v2 pushed onto a tree stamped 1.3.0 would point the fleet's v2 at a 1.x release");
+});
+
+test("criterion 2 — the SAME target state refuses the release tag and moves the alias", () => {
+  // Both rules, one ls-remote output, one test. This is the assertion that stops a later
+  // "surely these two tag checks are the same function" from shipping.
+  assert.equal(tagIsFree(TARGET_REFS, "v1.3.0"), false,
+    "v1.3.0 exists on the target — a publish must refuse it");
+  assert.equal(decideAliasMove({ lsRemoteOutput: TARGET_REFS, version: "1.3.0" }).move, true,
+    "v1 exists on the target too — and is moved anyway, because an alias's whole job is to move");
+});
+
+test("criterion 2 — a re-publish still refuses the immutable tag while the alias stays movable", () => {
+  const root = fixtureTree("1.3.0");
+  const bare = fixtureRemote();
+  try {
+    runPublish({ sourceRoot: root, workDir: join(tmp("w1"), "s"), remote: bare, git, targetMeta: PUBLIC_TARGET });
+    const frozen = git(["rev-parse", "v1.3.0"], { cwd: bare }).trim();
+
+    put(root, "CHANGELOG.md", "# changed after the first release\n");
+    const second = runPublish({ sourceRoot: root, workDir: join(tmp("w2"), "s"), remote: bare, git, targetMeta: PUBLIC_TARGET });
+    assert.equal(second.published, false);
+    assert.ok(second.problems.some((p) => p.includes("refusing to move it")),
+      "the existing 'refusing to move it' problem must survive this change verbatim");
+    assert.equal(git(["rev-parse", "v1.3.0"], { cwd: bare }).trim(), frozen);
+
+    // Same repo, same moment: the alias moves. Twice, to prove the second move is not refused.
+    for (const _ of [0, 1]) {
+      const v = runAliasMirror({ sourceRoot: root, remote: bare, git, workDir: join(tmp("a"), "a") });
+      assert.ok([ALIAS_OUTCOME.moved, ALIAS_OUTCOME.current].includes(v.outcome), v.problems.join(" | "));
+    }
+    assert.equal(git(["rev-parse", "v1^{commit}"], { cwd: bare }).trim(),
+                 git(["rev-parse", "v1.3.0^{commit}"], { cwd: bare }).trim());
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(bare, { recursive: true, force: true }); }
+});
+
+test("criterion 3 — the alias is derived from the stamp, so 2.0.0 touches v2 and never v1", () => {
+  assert.equal(aliasTag("1.3.0"), "v1");
+  assert.equal(aliasTag("2.0.0"), "v2");
+  assert.equal(aliasTag("10.4.2"), "v10", "the major is a segment, not a character");
+  assert.equal(aliasTag("v1.3.0"), null);
+  assert.equal(aliasTag("1.3"), null);
+  assert.equal(aliasTag("1.3.0-rc1"), null);
+  assert.equal(aliasTag(undefined), null);
+
+  const refs = `${TARGET_REFS}\n4444444444444444444444444444444444444444\trefs/tags/v2.0.0`;
+  const d = decideAliasMove({ lsRemoteOutput: refs, version: "2.0.0", pushedRef: "v2" });
+  assert.equal(d.alias, "v2");
+  assert.equal(d.tag, "v2.0.0");
+  assert.equal(d.target, "4444444444444444444444444444444444444444");
+  assert.deepEqual(d.refsTouched, ["refs/tags/v2"]);
+  assert.ok(!d.refsTouched.includes("refs/tags/v1"),
+    "a major bump must leave the 1.x fleet exactly where it is — nothing moves until it opts in");
+
+  // And the refusal path, so a bad stamp cannot be coerced into an alias.
+  const bad = decideAliasMove({ lsRemoteOutput: refs, version: "not-a-version" });
+  assert.equal(bad.alias, null);
+  assert.deepEqual(bad.refsTouched, []);
+  assert.ok(bad.problems.some((p) => p.includes("expected MAJOR.MINOR.PATCH")));
+});
+
+test("criterion 4 — a release whose tag lands and whose alias does not FAILS, and is named", () => {
+  // A git runner that reads happily and refuses exactly the alias push: the partial state.
+  const failing = (args, opts) => {
+    if (args[0] === "push") throw new Error("remote: Permission to CandidDan/flow-protocol.git denied");
+    return git(args, opts);
+  };
+  const root = fixtureTree("1.3.0");
+  const bare = fixtureRemote();
+  try {
+    runPublish({ sourceRoot: root, workDir: join(tmp("w"), "s"), remote: bare, git, targetMeta: PUBLIC_TARGET });
+    const v = runAliasMirror({ sourceRoot: root, remote: bare, git: failing, workDir: join(tmp("a"), "a"), pushedRef: "v1" });
+
+    assert.equal(v.moved, false);
+    assert.equal(v.outcome, ALIAS_OUTCOME.orphaned);
+    assert.equal(v.outcome, "published-without-its-alias",
+      "the verdict must distinguish this from a success — the tag list looks healthy either way");
+    assert.ok(v.problems.length > 0, "problems drive the non-zero exit; an empty list would exit 0");
+    assert.ok(v.problems.some((p) => p.includes("PUBLISHED WITHOUT ITS ALIAS") && p.includes("v1")));
+
+    // The job summary is the publisher's stdout, so the distinction has to survive formatting.
+    const lines = formatAliasReport(v);
+    assert.equal(lines.at(-1), "release-alias: decision=published-without-its-alias alias=v1");
+    assert.ok(lines.some((l) => l.startsWith("PROBLEM:")));
+
+    // And the exit code, which is what actually reddens the job.
+    let code = null;
+    reportAndExit(v, { log: () => {}, exit: (c) => { code = c; }, format: formatAliasReport });
+    assert.equal(code, 1, "a run that published without the ref the fleet pins must not report success");
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(bare, { recursive: true, force: true }); }
+});
+
+test("criterion 4 — a successful mirror and a dry run are each distinguishable in the report", () => {
+  const moved = formatAliasReport({
+    version: "1.3.0", alias: "v1", tag: "v1.3.0", target: "3".repeat(40), current: "2".repeat(40),
+    outcome: ALIAS_OUTCOME.moved, moved: true, refsTouched: ["refs/tags/v1"], problems: [], notes: ["moved"],
+  });
+  assert.match(moved[0], /version=1\.3\.0 alias=v1 release-tag=v1\.3\.0/);
+  assert.equal(moved.at(-1), "release-alias: decision=alias-moved alias=v1");
+
+  const root = fixtureTree("1.3.0");
+  const bare = fixtureRemote();
+  try {
+    runPublish({ sourceRoot: root, workDir: join(tmp("w"), "s"), remote: bare, git, targetMeta: PUBLIC_TARGET });
+    const dry = runAliasMirror({ sourceRoot: root, remote: bare, git, workDir: join(tmp("a"), "a"), dryRun: true });
+    assert.equal(dry.outcome, ALIAS_OUTCOME.dryRun);
+    assert.equal(dry.moved, false);
+    assert.ok(!refsIn(bare).includes("refs/tags/v1"), "a dry run must push nothing");
+    assert.ok(dry.notes.some((n) => n.includes("would move v1")));
+    // The one condition that would stop the real run is still reported by the dry run.
+    assert.deepEqual(dry.problems, []);
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(bare, { recursive: true, force: true }); }
+});
+
+test("criterion 4 — a publish names the alias it deliberately did not move", () => {
+  const root = fixtureTree("1.3.0");
+  const bare = fixtureRemote();
+  try {
+    const v = runPublish({ sourceRoot: root, workDir: join(tmp("w"), "s"), remote: bare, git, targetMeta: PUBLIC_TARGET });
+    assert.equal(v.published, true);
+    assert.equal(v.alias, "v1");
+    assert.ok(v.notes.some((n) => n.includes("deliberately NOT moved")),
+      "'published' and 'published, alias still on the previous release' must be readable apart");
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(bare, { recursive: true, force: true }); }
+});
+
+test("a mirror run refuses rather than crashing when it has nothing to work with", () => {
+  const empty = tmp("empty");
+  try {
+    const v = runAliasMirror({ sourceRoot: empty, remote: "/nowhere.git", git });
+    assert.equal(v.outcome, ALIAS_OUTCOME.refused);
+    assert.ok(v.problems.some((p) => p.includes("no readable VERSION")));
+
+    const root = fixtureTree("1.3.0");
+    const noRemote = runAliasMirror({ sourceRoot: root, git });
+    assert.ok(noRemote.problems.some((p) => p.includes("nothing to mirror to")));
+    const noGit = runAliasMirror({ sourceRoot: root, remote: "/nowhere.git" });
+    assert.ok(noGit.problems.some((p) => p.includes("no git runner")));
+    const unreadable = runAliasMirror({ sourceRoot: root, remote: "/nowhere.git", git });
+    assert.ok(unreadable.problems.some((p) => p.includes("could not read tags from")));
+    rmSync(root, { recursive: true, force: true });
+  } finally { rmSync(empty, { recursive: true, force: true }); }
+});
+
+test("parseRefs resolves an annotated tag to its commit, not to the tag object", () => {
+  const ls = [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/tags/v1.3.0",
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\trefs/tags/v1.3.0^{}",
+  ].join("\n");
+  assert.equal(parseRefs(ls).get("refs/tags/v1.3.0"), "b".repeat(40),
+    "the alias must point at the commit — an alias on a tag object is not what `@v1` resolves for a caller");
+  // Order-independent: the peeled line wins wherever it appears.
+  assert.equal(parseRefs(ls.split("\n").reverse().join("\n")).get("refs/tags/v1.3.0"), "b".repeat(40));
+  assert.equal(parseRefs("").size, 0);
+  assert.equal(parseRefs(null).size, 0);
+  assert.equal(parseRefs("garbage with no tab").size, 0);
+});
+
+// ── criterion 5: the policy document and the code agree ──
+
+const POLICY = readFileSync(join(REPO, "docs/flow-versioning-policy.md"), "utf8");
+
+test("criterion 5 — the policy says which refs the release repo carries, who moves them and when", () => {
+  const section = POLICY.split("## What the release repo carries")[1];
+  assert.ok(section, "the policy must have a section about the release repo's refs at all");
+  const body = section.split("\n## ")[0];
+
+  // Which refs.
+  for (const ref of ["`main`", "`vMAJOR.MINOR.PATCH`", "`vMAJOR`", "`vMAJOR-edge`"]) {
+    assert.ok(body.includes(ref), `the section must say what happens to ${ref}`);
+  }
+  // Who moves the alias, and at what point in the procedure. Both named, not implied.
+  assert.match(body, /mirror-alias/, "the job that moves it must be named, so the doc is checkable against the code");
+  assert.match(body, /step 6/, "the alias move must be tied to a numbered step of the release procedure");
+  assert.match(body, /published-without-its-alias/, "the failure mode the code emits must be the one the doc names");
+  // And the canary reason, which is the rule a later simplification would break.
+  assert.match(body, /never when a release is published/i);
+});
+
+test("criterion 5 — the doc's claims match what the code actually does", () => {
+  const body = POLICY.split("## What the release repo carries")[1].split("\n## ")[0];
+
+  // The doc names a job. It has to exist, or the doc is describing a resolution path nobody has.
+  assert.ok(existsSync(WORKFLOW));
+  const wfText = readFileSync(WORKFLOW, "utf8");
+  assert.ok(wfText.includes("mirror-alias:"), "the doc names `mirror-alias`; the workflow must define it");
+
+  // The doc names a verdict string. It has to be the one the module emits.
+  assert.equal(ALIAS_OUTCOME.orphaned, "published-without-its-alias");
+  assert.ok(body.includes(ALIAS_OUTCOME.orphaned));
+
+  // The doc says v1-edge is NOT published to the release repo. The manifest must agree — the
+  // module has no edge alias at all, and aliasTag never produces one.
+  assert.ok(!aliasTag("1.3.0").includes("edge"));
+  assert.match(body, /`vMAJOR-edge` \| nobody/);
+
+  // The doc says the mirror refuses a release the target does not carry. That is asserted as
+  // behaviour above; here we only check the doc has not drifted into promising the opposite.
+  assert.match(body, /refuses to point `vX` at a release the target does not carry/);
+});
+
+// ── the workflow half: two entry points that must never be the same event ──
+
+test("criterion 1 — the alias mirror is a separate job on a separate trigger", { skip }, () => {
+  const on = wf.on ?? wf[true];
+  assert.deepEqual(on.push?.tags, ["v[0-9]*", "!v*.*", "!v*-edge"],
+    "only the bare vMAJOR alias: every exact version and the edge channel are excluded");
+  assert.ok(wf.jobs["mirror-alias"], "the alias move must be its own job, not a step of the publish");
+
+  const mirrorRun = wf.jobs["mirror-alias"].steps.map((s) => String(s.run ?? "")).join("\n");
+  assert.ok(mirrorRun.includes("--mirror-alias"), "the job must invoke the mirror, not the publisher");
+
+  const publishRun = wf.jobs.publish.steps.map((s) => String(s.run ?? "")).join("\n");
+  assert.ok(!publishRun.includes("--mirror-alias"),
+    "publishing must never move the alias — that would delete the canary the two-alias split exists for");
+});
+
+test("criterion 1 — the publish and the mirror never fire on each other's event", { skip }, () => {
+  assert.match(String(wf.jobs.publish.if), /github\.event_name != 'push'/,
+    "a tag push must not trigger a second publish of an already-released version");
+  assert.match(String(wf.jobs["mirror-alias"].if), /github\.event_name == 'push'/);
+  assert.ok(!/event_name == 'release'/.test(String(wf.jobs["mirror-alias"].if)),
+    "the alias must not move as a side effect of a release being published");
+});
+
+test("criterion 6 — the mirror job is dormant, unprivileged and handles the PAT as the publish does", { skip }, () => {
+  const job = wf.jobs["mirror-alias"];
+  assert.match(String(job.if), /vars\.FLOW_RELEASE_PUBLISH/, "merging this must turn nothing on");
+  assert.equal(job.permissions, undefined, "the top-level contents: read is the whole grant");
+
+  const steps = job.steps.map((s) => String(s.run ?? ""));
+  const all = steps.join("\n");
+  assert.ok(!/echo[^\n]*FLOW_RELEASE_PAT/.test(all), "the PAT must never be echoed");
+  assert.ok(!/https:\/\/[^\s"']*\$\{?FLOW_RELEASE_PAT/.test(all),
+    "the PAT must not be interpolated into a remote URL — git echoes a failing remote into stderr");
+  assert.ok(!/(^|\s)(-H|--header)\s+\S*FLOW_RELEASE_PAT/.test(all), "the PAT must not land in argv");
+  assert.ok(!/git config --global/.test(all), "the credential must not outlive this command's process tree");
+  assert.ok(all.includes("::add-mask::") && all.includes("GIT_CONFIG_COUNT=1"));
+  assert.equal(job.steps[0].with?.["persist-credentials"], false,
+    "this job runs `git push` to another remote; GITHUB_TOKEN must not be left configured");
+
+  const uses = job.steps.map((s) => s.uses).filter(Boolean);
+  assert.ok(uses.length > 0, "an assertion over an empty list is not a check");
+  for (const u of uses) assert.match(u, /@[0-9a-f]{40}$/, `"${u}" must be pinned to a commit SHA`);
+
+  // `if: always()` on the summary, because the run this matters most for is the failed one.
+  const summary = job.steps.at(-1);
+  assert.equal(summary.if, "always()", "the published-without-its-alias verdict must reach the job summary");
+  assert.ok(String(summary.run).includes("GITHUB_STEP_SUMMARY"));
 });
