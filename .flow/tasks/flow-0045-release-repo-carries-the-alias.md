@@ -82,153 +82,128 @@ notes:
     returns `Resource not accessible by personal access token`. That is why a worker's branch push
     does not fire `flow-open-pr` here — the push never happens.
 
-    THE PENDING PATCH (`git apply` this on the branch):
+    THE PENDING PATCH. Base64, not a raw diff, and deliberately: a unified diff's `--- a/` and
+    `+++ b/` lines and its leading-space context columns do not survive a frontmatter scanner
+    or an editor that trims trailing whitespace, and a patch that silently stops applying is
+    worse than no patch. On the branch, run:
 
-      diff --git a/.github/workflows/flow-release-publish.yml b/.github/workflows/flow-release-publish.yml
-      index ae7848f..0122d9a 100644
-      --- a/.github/workflows/flow-release-publish.yml
-      +++ b/.github/workflows/flow-release-publish.yml
-      @@ -27,15 +27,50 @@ name: flow-release-publish
-       # fleet resolves. flow-0031 makes this a checked rule across the directory; it is done here at
-       # authoring time so that task finds nothing to fix. Comments name the version the SHA is.
-       
-      +# TWO ENTRY POINTS, TWO JOBS, AND THEY ARE NOT THE SAME EVENT.
-      +#
-      +#   release: published   -> `publish`      — the snapshot and its immutable `vX.Y.Z` tag.
-      +#   push: tags: v<major> -> `mirror-alias` — the floating `vX` every adopting repo pins.
-      +#
-      +# The second is triggered by CANONICAL'S OWN `v1` MOVING, which is step 6 of the release
-      +# procedure in docs/flow-versioning-policy.md — `git tag -f v1 v1.3.0 && git push -f origin v1`
-      +# fires a `push` event on `refs/tags/v1`, force-updates included. That makes one deliberate
-      +# human act move both aliases, instead of two acts a human has to remember in two
-      +# repositories. This repo is the evidence that the second one gets forgotten: canonical's `v1`
-      +# sat 305 commits behind `main` for three and a half weeks while release-guard measured the gap
-      +# as a warning nobody read.
-      +#
-      +# WHY NOT JUST MOVE THE ALIAS AT THE END OF THE PUBLISH. Because that deletes the canary. The
-      +# policy makes `vMAJOR` a deliberate act taken only after the edge has proven itself, precisely
-      +# because auto-advancing a single alias means a bad reusable reaches the whole fleet before
-      +# anyone has run it once in anger. An alias that advanced on publish would reintroduce exactly
-      +# that, one repository removed from where anyone would look for it. `release-publish.mjs` keeps
-      +# the two runs apart and its tests pin the asymmetry (immutable tag refused, alias moved).
-      +#
-      +# The tag filter admits ONLY the bare alias: `v[0-9]*` with `!v*.*` excluding every exact
-      +# version and `!v*-edge` excluding the canary channel, which is not published to the release
-      +# repo at all (nothing pins it there yet — see flow-0045's Scope). The job re-derives the alias
-      +# from VERSION and refuses a ref the stamp does not name, so the filter is a narrowing, not the
-      +# check.
-      +
-       on:
-         release:
-           types: [published]
-      +  push:
-      +    tags:
-      +      - "v[0-9]*"
-      +      - "!v*.*"
-      +      - "!v*-edge"
-         workflow_dispatch:
-           inputs:
-             dry_run:
-               description: "Report the file list and the tag, write nothing, push nothing"
-               type: boolean
-               default: true
-      +      mirror_alias:
-      +        description: "Mirror the floating vMAJOR alias instead of publishing (recovery path for a missed tag-push event)"
-      +        type: boolean
-      +        default: false
-       
-       # LEAST PRIVILEGE, and this block is the declared blast radius rather than a log of which token
-       # happened to be used. It governs GITHUB_TOKEN, which reaches CANONICAL only — and canonical is
-      @@ -54,7 +89,10 @@ concurrency:
-       
-       jobs:
-         publish:
-      -    if: vars.FLOW_RELEASE_PUBLISH == 'true'
-      +    # Never on a tag push: that event is the alias mirror's, and a publish fired by it would be
-      +    # a second snapshot of an already-released version — refused by the immutable-tag rule, but
-      +    # refused loudly, in a red job, every time a human moved `v1`.
-      +    if: vars.FLOW_RELEASE_PUBLISH == 'true' && github.event_name != 'push' && !inputs.mirror_alias
-           runs-on: ubuntu-latest
-       
-           env:
-      @@ -178,3 +216,77 @@ jobs:
-                   cat "$RUNNER_TEMP/publish.log" 2>/dev/null || echo "(no publisher output — an earlier step failed)"
-                   echo '```'
-                 } >> "$GITHUB_STEP_SUMMARY"
-      +
-      +  # ── the floating alias the fleet actually pins ──────────────────────────────────────────
-      +  # Runs when canonical's own `vX` moves (step 6 of the release procedure), never when a
-      +  # release is published. See the header for why those must not be the same act.
-      +  mirror-alias:
-      +    if: vars.FLOW_RELEASE_PUBLISH == 'true' && (github.event_name == 'push' || inputs.mirror_alias)
-      +    runs-on: ubuntu-latest
-      +
-      +    env:
-      +      FLOW_RELEASE_REPO: ${{ vars.FLOW_RELEASE_REPO || 'CandidDan/flow-protocol' }}
-      +      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
-      +      # Only a tag push carries a moved ref. A manual dispatch runs from `main`, whose ref name
-      +      # is not an alias, so passing it would trip the module's own "a ref this release does not
-      +      # name" refusal — the recovery path deliberately supplies nothing and lets the stamp decide.
-      +      PUSHED_REF: ${{ github.event_name == 'push' && github.ref_name || '' }}
-      +
-      +    steps:
-      +      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      +        with:
-      +          # The commit the alias was just moved TO — that is the tree whose VERSION decides both
-      +          # the alias name and the release tag it points at. Depth 1: nothing here needs history,
-      +          # and this job runs `git push` to another remote.
-      +          fetch-depth: 1
-      +          persist-credentials: false
-      +
-      +      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-      +        with:
-      +          node-version: 22
-      +
-      +      # Invocation only, same division as the publish step. Every decision — which alias the
-      +      # stamp derives, whether the release it would point at is even on the target, and what
-      +      # "the release tag landed but the alias did not" is called — lives in release-publish.mjs
-      +      # and is proved by tests over `ls-remote` output rather than by a live push.
-      +      #
-      +      # The credential is handled exactly as the publish step handles it, and for the same three
-      +      # reasons spelled out there: not in the remote URL, not in argv, not in the runner's
-      +      # global git config. GIT_CONFIG_COUNT scopes it to this command's process tree, which the
-      +      # git children the module spawns inherit.
-      +      - name: Mirror the alias to the release repo
-      +        env:
-      +          FLOW_RELEASE_PAT: ${{ secrets.FLOW_RELEASE_PAT }}
-      +        run: |
-      +          set -euo pipefail
-      +          AUTH="$(printf 'x-access-token:%s' "$FLOW_RELEASE_PAT" | base64 -w0)"
-      +          echo "::add-mask::$AUTH"
-      +
-      +          ARGS=(--mirror-alias
-      +                --remote "https://github.com/$FLOW_RELEASE_REPO.git"
-      +                --work-dir "$RUNNER_TEMP/flow-release-alias")
-      +          if [ -n "$PUSHED_REF" ]; then ARGS+=(--pushed-ref "$PUSHED_REF"); fi
-      +          if [ "$DRY_RUN" = "true" ]; then ARGS+=(--dry-run); fi
-      +
-      +          GIT_CONFIG_COUNT=1 \
-      +          GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
-      +          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH" \
-      +            node .flow/bin/release-publish.mjs "${ARGS[@]}" | tee "$RUNNER_TEMP/alias.log"
-      +
-      +      # `if: always()`, because the run this summary matters most for is the FAILED one: a
-      +      # release whose tag landed and whose alias did not is the state that looks fine from the
-      +      # release repo's tag list and resolves to the previous release from every caller. The
-      +      # module's last line carries `decision=published-without-its-alias`, so the distinction
-      +      # survives into the summary rather than living only in the exit code.
-      +      - name: Summarise the alias move
-      +        if: always()
-      +        run: |
-      +          set -euo pipefail
-      +          {
-      +            echo "### flow-release-publish / alias -> \`$FLOW_RELEASE_REPO\`"
-      +            echo ""
-      +            if [ "$DRY_RUN" = "true" ]; then echo "**Dry run** — nothing was pushed."; echo ""; fi
-      +            echo '```'
-      +            cat "$RUNNER_TEMP/alias.log" 2>/dev/null || echo "(no output — an earlier step failed)"
-      +            echo '```'
-      +          } >> "$GITHUB_STEP_SUMMARY"
+      grep -oE '^ +[A-Za-z0-9+/=]{40,}$' <this file> | tr -d ' \n' | base64 -d | git apply -
+
+    (or paste the block into `base64 -d > /tmp/p.patch && git apply /tmp/p.patch`). It targets
+    `.github/workflows/flow-release-publish.yml` only, and `sha256sum` of the decoded patch is
+    9c0e2a398bad259f9c3e0ccdbe1741f3b4c95c3275888cfcf09f7e83d1670cf9.
+
+
+      ZGlmZiAtLWdpdCBhLy5naXRodWIvd29ya2Zsb3dzL2Zsb3ctcmVsZWFzZS1wdWJsaXNoLnltbCBiLy5naXRodWIvd29ya2Zs
+      b3dzL2Zsb3ctcmVsZWFzZS1wdWJsaXNoLnltbAppbmRleCBhZTc4NDhmLi4wMTIyZDlhIDEwMDY0NAotLS0gYS8uZ2l0aHVi
+      L3dvcmtmbG93cy9mbG93LXJlbGVhc2UtcHVibGlzaC55bWwKKysrIGIvLmdpdGh1Yi93b3JrZmxvd3MvZmxvdy1yZWxlYXNl
+      LXB1Ymxpc2gueW1sCkBAIC0yNywxNSArMjcsNTAgQEAgbmFtZTogZmxvdy1yZWxlYXNlLXB1Ymxpc2gKICMgZmxlZXQgcmVz
+      b2x2ZXMuIGZsb3ctMDAzMSBtYWtlcyB0aGlzIGEgY2hlY2tlZCBydWxlIGFjcm9zcyB0aGUgZGlyZWN0b3J5OyBpdCBpcyBk
+      b25lIGhlcmUgYXQKICMgYXV0aG9yaW5nIHRpbWUgc28gdGhhdCB0YXNrIGZpbmRzIG5vdGhpbmcgdG8gZml4LiBDb21tZW50
+      cyBuYW1lIHRoZSB2ZXJzaW9uIHRoZSBTSEEgaXMuCiAKKyMgVFdPIEVOVFJZIFBPSU5UUywgVFdPIEpPQlMsIEFORCBUSEVZ
+      IEFSRSBOT1QgVEhFIFNBTUUgRVZFTlQuCisjCisjICAgcmVsZWFzZTogcHVibGlzaGVkICAgLT4gYHB1Ymxpc2hgICAgICAg
+      4oCUIHRoZSBzbmFwc2hvdCBhbmQgaXRzIGltbXV0YWJsZSBgdlguWS5aYCB0YWcuCisjICAgcHVzaDogdGFnczogdjxtYWpv
+      cj4gLT4gYG1pcnJvci1hbGlhc2Ag4oCUIHRoZSBmbG9hdGluZyBgdlhgIGV2ZXJ5IGFkb3B0aW5nIHJlcG8gcGlucy4KKyMK
+      KyMgVGhlIHNlY29uZCBpcyB0cmlnZ2VyZWQgYnkgQ0FOT05JQ0FMJ1MgT1dOIGB2MWAgTU9WSU5HLCB3aGljaCBpcyBzdGVw
+      IDYgb2YgdGhlIHJlbGVhc2UKKyMgcHJvY2VkdXJlIGluIGRvY3MvZmxvdy12ZXJzaW9uaW5nLXBvbGljeS5tZCDigJQgYGdp
+      dCB0YWcgLWYgdjEgdjEuMy4wICYmIGdpdCBwdXNoIC1mIG9yaWdpbiB2MWAKKyMgZmlyZXMgYSBgcHVzaGAgZXZlbnQgb24g
+      YHJlZnMvdGFncy92MWAsIGZvcmNlLXVwZGF0ZXMgaW5jbHVkZWQuIFRoYXQgbWFrZXMgb25lIGRlbGliZXJhdGUKKyMgaHVt
+      YW4gYWN0IG1vdmUgYm90aCBhbGlhc2VzLCBpbnN0ZWFkIG9mIHR3byBhY3RzIGEgaHVtYW4gaGFzIHRvIHJlbWVtYmVyIGlu
+      IHR3bworIyByZXBvc2l0b3JpZXMuIFRoaXMgcmVwbyBpcyB0aGUgZXZpZGVuY2UgdGhhdCB0aGUgc2Vjb25kIG9uZSBnZXRz
+      IGZvcmdvdHRlbjogY2Fub25pY2FsJ3MgYHYxYAorIyBzYXQgMzA1IGNvbW1pdHMgYmVoaW5kIGBtYWluYCBmb3IgdGhyZWUg
+      YW5kIGEgaGFsZiB3ZWVrcyB3aGlsZSByZWxlYXNlLWd1YXJkIG1lYXN1cmVkIHRoZSBnYXAKKyMgYXMgYSB3YXJuaW5nIG5v
+      Ym9keSByZWFkLgorIworIyBXSFkgTk9UIEpVU1QgTU9WRSBUSEUgQUxJQVMgQVQgVEhFIEVORCBPRiBUSEUgUFVCTElTSC4g
+      QmVjYXVzZSB0aGF0IGRlbGV0ZXMgdGhlIGNhbmFyeS4gVGhlCisjIHBvbGljeSBtYWtlcyBgdk1BSk9SYCBhIGRlbGliZXJh
+      dGUgYWN0IHRha2VuIG9ubHkgYWZ0ZXIgdGhlIGVkZ2UgaGFzIHByb3ZlbiBpdHNlbGYsIHByZWNpc2VseQorIyBiZWNhdXNl
+      IGF1dG8tYWR2YW5jaW5nIGEgc2luZ2xlIGFsaWFzIG1lYW5zIGEgYmFkIHJldXNhYmxlIHJlYWNoZXMgdGhlIHdob2xlIGZs
+      ZWV0IGJlZm9yZQorIyBhbnlvbmUgaGFzIHJ1biBpdCBvbmNlIGluIGFuZ2VyLiBBbiBhbGlhcyB0aGF0IGFkdmFuY2VkIG9u
+      IHB1Ymxpc2ggd291bGQgcmVpbnRyb2R1Y2UgZXhhY3RseQorIyB0aGF0LCBvbmUgcmVwb3NpdG9yeSByZW1vdmVkIGZyb20g
+      d2hlcmUgYW55b25lIHdvdWxkIGxvb2sgZm9yIGl0LiBgcmVsZWFzZS1wdWJsaXNoLm1qc2Aga2VlcHMKKyMgdGhlIHR3byBy
+      dW5zIGFwYXJ0IGFuZCBpdHMgdGVzdHMgcGluIHRoZSBhc3ltbWV0cnkgKGltbXV0YWJsZSB0YWcgcmVmdXNlZCwgYWxpYXMg
+      bW92ZWQpLgorIworIyBUaGUgdGFnIGZpbHRlciBhZG1pdHMgT05MWSB0aGUgYmFyZSBhbGlhczogYHZbMC05XSpgIHdpdGgg
+      YCF2Ki4qYCBleGNsdWRpbmcgZXZlcnkgZXhhY3QKKyMgdmVyc2lvbiBhbmQgYCF2Ki1lZGdlYCBleGNsdWRpbmcgdGhlIGNh
+      bmFyeSBjaGFubmVsLCB3aGljaCBpcyBub3QgcHVibGlzaGVkIHRvIHRoZSByZWxlYXNlCisjIHJlcG8gYXQgYWxsIChub3Ro
+      aW5nIHBpbnMgaXQgdGhlcmUgeWV0IOKAlCBzZWUgZmxvdy0wMDQ1J3MgU2NvcGUpLiBUaGUgam9iIHJlLWRlcml2ZXMgdGhl
+      IGFsaWFzCisjIGZyb20gVkVSU0lPTiBhbmQgcmVmdXNlcyBhIHJlZiB0aGUgc3RhbXAgZG9lcyBub3QgbmFtZSwgc28gdGhl
+      IGZpbHRlciBpcyBhIG5hcnJvd2luZywgbm90IHRoZQorIyBjaGVjay4KKwogb246CiAgIHJlbGVhc2U6CiAgICAgdHlwZXM6
+      IFtwdWJsaXNoZWRdCisgIHB1c2g6CisgICAgdGFnczoKKyAgICAgIC0gInZbMC05XSoiCisgICAgICAtICIhdiouKiIKKyAg
+      ICAgIC0gIiF2Ki1lZGdlIgogICB3b3JrZmxvd19kaXNwYXRjaDoKICAgICBpbnB1dHM6CiAgICAgICBkcnlfcnVuOgogICAg
+      ICAgICBkZXNjcmlwdGlvbjogIlJlcG9ydCB0aGUgZmlsZSBsaXN0IGFuZCB0aGUgdGFnLCB3cml0ZSBub3RoaW5nLCBwdXNo
+      IG5vdGhpbmciCiAgICAgICAgIHR5cGU6IGJvb2xlYW4KICAgICAgICAgZGVmYXVsdDogdHJ1ZQorICAgICAgbWlycm9yX2Fs
+      aWFzOgorICAgICAgICBkZXNjcmlwdGlvbjogIk1pcnJvciB0aGUgZmxvYXRpbmcgdk1BSk9SIGFsaWFzIGluc3RlYWQgb2Yg
+      cHVibGlzaGluZyAocmVjb3ZlcnkgcGF0aCBmb3IgYSBtaXNzZWQgdGFnLXB1c2ggZXZlbnQpIgorICAgICAgICB0eXBlOiBi
+      b29sZWFuCisgICAgICAgIGRlZmF1bHQ6IGZhbHNlCiAKICMgTEVBU1QgUFJJVklMRUdFLCBhbmQgdGhpcyBibG9jayBpcyB0
+      aGUgZGVjbGFyZWQgYmxhc3QgcmFkaXVzIHJhdGhlciB0aGFuIGEgbG9nIG9mIHdoaWNoIHRva2VuCiAjIGhhcHBlbmVkIHRv
+      IGJlIHVzZWQuIEl0IGdvdmVybnMgR0lUSFVCX1RPS0VOLCB3aGljaCByZWFjaGVzIENBTk9OSUNBTCBvbmx5IOKAlCBhbmQg
+      Y2Fub25pY2FsIGlzCkBAIC01NCw3ICs4OSwxMCBAQCBjb25jdXJyZW5jeToKIAogam9iczoKICAgcHVibGlzaDoKLSAgICBp
+      ZjogdmFycy5GTE9XX1JFTEVBU0VfUFVCTElTSCA9PSAndHJ1ZScKKyAgICAjIE5ldmVyIG9uIGEgdGFnIHB1c2g6IHRoYXQg
+      ZXZlbnQgaXMgdGhlIGFsaWFzIG1pcnJvcidzLCBhbmQgYSBwdWJsaXNoIGZpcmVkIGJ5IGl0IHdvdWxkIGJlCisgICAgIyBh
+      IHNlY29uZCBzbmFwc2hvdCBvZiBhbiBhbHJlYWR5LXJlbGVhc2VkIHZlcnNpb24g4oCUIHJlZnVzZWQgYnkgdGhlIGltbXV0
+      YWJsZS10YWcgcnVsZSwgYnV0CisgICAgIyByZWZ1c2VkIGxvdWRseSwgaW4gYSByZWQgam9iLCBldmVyeSB0aW1lIGEgaHVt
+      YW4gbW92ZWQgYHYxYC4KKyAgICBpZjogdmFycy5GTE9XX1JFTEVBU0VfUFVCTElTSCA9PSAndHJ1ZScgJiYgZ2l0aHViLmV2
+      ZW50X25hbWUgIT0gJ3B1c2gnICYmICFpbnB1dHMubWlycm9yX2FsaWFzCiAgICAgcnVucy1vbjogdWJ1bnR1LWxhdGVzdAog
+      CiAgICAgZW52OgpAQCAtMTc4LDMgKzIxNiw3NyBAQCBqb2JzOgogICAgICAgICAgICAgY2F0ICIkUlVOTkVSX1RFTVAvcHVi
+      bGlzaC5sb2ciIDI+L2Rldi9udWxsIHx8IGVjaG8gIihubyBwdWJsaXNoZXIgb3V0cHV0IOKAlCBhbiBlYXJsaWVyIHN0ZXAg
+      ZmFpbGVkKSIKICAgICAgICAgICAgIGVjaG8gJ2BgYCcKICAgICAgICAgICB9ID4+ICIkR0lUSFVCX1NURVBfU1VNTUFSWSIK
+      KworICAjIOKUgOKUgCB0aGUgZmxvYXRpbmcgYWxpYXMgdGhlIGZsZWV0IGFjdHVhbGx5IHBpbnMg4pSA4pSA4pSA4pSA4pSA
+      4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA
+      4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSACisgICMgUnVucyB3aGVuIGNhbm9uaWNhbCdzIG93biBg
+      dlhgIG1vdmVzIChzdGVwIDYgb2YgdGhlIHJlbGVhc2UgcHJvY2VkdXJlKSwgbmV2ZXIgd2hlbiBhCisgICMgcmVsZWFzZSBp
+      cyBwdWJsaXNoZWQuIFNlZSB0aGUgaGVhZGVyIGZvciB3aHkgdGhvc2UgbXVzdCBub3QgYmUgdGhlIHNhbWUgYWN0LgorICBt
+      aXJyb3ItYWxpYXM6CisgICAgaWY6IHZhcnMuRkxPV19SRUxFQVNFX1BVQkxJU0ggPT0gJ3RydWUnICYmIChnaXRodWIuZXZl
+      bnRfbmFtZSA9PSAncHVzaCcgfHwgaW5wdXRzLm1pcnJvcl9hbGlhcykKKyAgICBydW5zLW9uOiB1YnVudHUtbGF0ZXN0CisK
+      KyAgICBlbnY6CisgICAgICBGTE9XX1JFTEVBU0VfUkVQTzogJHt7IHZhcnMuRkxPV19SRUxFQVNFX1JFUE8gfHwgJ0NhbmRp
+      ZERhbi9mbG93LXByb3RvY29sJyB9fQorICAgICAgRFJZX1JVTjogJHt7IGdpdGh1Yi5ldmVudF9uYW1lID09ICd3b3JrZmxv
+      d19kaXNwYXRjaCcgJiYgaW5wdXRzLmRyeV9ydW4gfX0KKyAgICAgICMgT25seSBhIHRhZyBwdXNoIGNhcnJpZXMgYSBtb3Zl
+      ZCByZWYuIEEgbWFudWFsIGRpc3BhdGNoIHJ1bnMgZnJvbSBgbWFpbmAsIHdob3NlIHJlZiBuYW1lCisgICAgICAjIGlzIG5v
+      dCBhbiBhbGlhcywgc28gcGFzc2luZyBpdCB3b3VsZCB0cmlwIHRoZSBtb2R1bGUncyBvd24gImEgcmVmIHRoaXMgcmVsZWFz
+      ZSBkb2VzIG5vdAorICAgICAgIyBuYW1lIiByZWZ1c2FsIOKAlCB0aGUgcmVjb3ZlcnkgcGF0aCBkZWxpYmVyYXRlbHkgc3Vw
+      cGxpZXMgbm90aGluZyBhbmQgbGV0cyB0aGUgc3RhbXAgZGVjaWRlLgorICAgICAgUFVTSEVEX1JFRjogJHt7IGdpdGh1Yi5l
+      dmVudF9uYW1lID09ICdwdXNoJyAmJiBnaXRodWIucmVmX25hbWUgfHwgJycgfX0KKworICAgIHN0ZXBzOgorICAgICAgLSB1
+      c2VzOiBhY3Rpb25zL2NoZWNrb3V0QDExZDU5NjBhMzI2NzUwZDU4MzgwNzhlMzZjZjM4Yjg1YWY2NzcyNjIgIyB2NC40LjAK
+      KyAgICAgICAgd2l0aDoKKyAgICAgICAgICAjIFRoZSBjb21taXQgdGhlIGFsaWFzIHdhcyBqdXN0IG1vdmVkIFRPIOKAlCB0
+      aGF0IGlzIHRoZSB0cmVlIHdob3NlIFZFUlNJT04gZGVjaWRlcyBib3RoCisgICAgICAgICAgIyB0aGUgYWxpYXMgbmFtZSBh
+      bmQgdGhlIHJlbGVhc2UgdGFnIGl0IHBvaW50cyBhdC4gRGVwdGggMTogbm90aGluZyBoZXJlIG5lZWRzIGhpc3RvcnksCisg
+      ICAgICAgICAgIyBhbmQgdGhpcyBqb2IgcnVucyBgZ2l0IHB1c2hgIHRvIGFub3RoZXIgcmVtb3RlLgorICAgICAgICAgIGZl
+      dGNoLWRlcHRoOiAxCisgICAgICAgICAgcGVyc2lzdC1jcmVkZW50aWFsczogZmFsc2UKKworICAgICAgLSB1c2VzOiBhY3Rp
+      b25zL3NldHVwLW5vZGVANDk5MzNlYTUyODhjYWVjYTg2NDJkMWU4NGFmYmQzZjdkNjgyMDAyMCAjIHY0LjQuMAorICAgICAg
+      ICB3aXRoOgorICAgICAgICAgIG5vZGUtdmVyc2lvbjogMjIKKworICAgICAgIyBJbnZvY2F0aW9uIG9ubHksIHNhbWUgZGl2
+      aXNpb24gYXMgdGhlIHB1Ymxpc2ggc3RlcC4gRXZlcnkgZGVjaXNpb24g4oCUIHdoaWNoIGFsaWFzIHRoZQorICAgICAgIyBz
+      dGFtcCBkZXJpdmVzLCB3aGV0aGVyIHRoZSByZWxlYXNlIGl0IHdvdWxkIHBvaW50IGF0IGlzIGV2ZW4gb24gdGhlIHRhcmdl
+      dCwgYW5kIHdoYXQKKyAgICAgICMgInRoZSByZWxlYXNlIHRhZyBsYW5kZWQgYnV0IHRoZSBhbGlhcyBkaWQgbm90IiBpcyBj
+      YWxsZWQg4oCUIGxpdmVzIGluIHJlbGVhc2UtcHVibGlzaC5tanMKKyAgICAgICMgYW5kIGlzIHByb3ZlZCBieSB0ZXN0cyBv
+      dmVyIGBscy1yZW1vdGVgIG91dHB1dCByYXRoZXIgdGhhbiBieSBhIGxpdmUgcHVzaC4KKyAgICAgICMKKyAgICAgICMgVGhl
+      IGNyZWRlbnRpYWwgaXMgaGFuZGxlZCBleGFjdGx5IGFzIHRoZSBwdWJsaXNoIHN0ZXAgaGFuZGxlcyBpdCwgYW5kIGZvciB0
+      aGUgc2FtZSB0aHJlZQorICAgICAgIyByZWFzb25zIHNwZWxsZWQgb3V0IHRoZXJlOiBub3QgaW4gdGhlIHJlbW90ZSBVUkws
+      IG5vdCBpbiBhcmd2LCBub3QgaW4gdGhlIHJ1bm5lcidzCisgICAgICAjIGdsb2JhbCBnaXQgY29uZmlnLiBHSVRfQ09ORklH
+      X0NPVU5UIHNjb3BlcyBpdCB0byB0aGlzIGNvbW1hbmQncyBwcm9jZXNzIHRyZWUsIHdoaWNoIHRoZQorICAgICAgIyBnaXQg
+      Y2hpbGRyZW4gdGhlIG1vZHVsZSBzcGF3bnMgaW5oZXJpdC4KKyAgICAgIC0gbmFtZTogTWlycm9yIHRoZSBhbGlhcyB0byB0
+      aGUgcmVsZWFzZSByZXBvCisgICAgICAgIGVudjoKKyAgICAgICAgICBGTE9XX1JFTEVBU0VfUEFUOiAke3sgc2VjcmV0cy5G
+      TE9XX1JFTEVBU0VfUEFUIH19CisgICAgICAgIHJ1bjogfAorICAgICAgICAgIHNldCAtZXVvIHBpcGVmYWlsCisgICAgICAg
+      ICAgQVVUSD0iJChwcmludGYgJ3gtYWNjZXNzLXRva2VuOiVzJyAiJEZMT1dfUkVMRUFTRV9QQVQiIHwgYmFzZTY0IC13MCki
+      CisgICAgICAgICAgZWNobyAiOjphZGQtbWFzazo6JEFVVEgiCisKKyAgICAgICAgICBBUkdTPSgtLW1pcnJvci1hbGlhcwor
+      ICAgICAgICAgICAgICAgIC0tcmVtb3RlICJodHRwczovL2dpdGh1Yi5jb20vJEZMT1dfUkVMRUFTRV9SRVBPLmdpdCIKKyAg
+      ICAgICAgICAgICAgICAtLXdvcmstZGlyICIkUlVOTkVSX1RFTVAvZmxvdy1yZWxlYXNlLWFsaWFzIikKKyAgICAgICAgICBp
+      ZiBbIC1uICIkUFVTSEVEX1JFRiIgXTsgdGhlbiBBUkdTKz0oLS1wdXNoZWQtcmVmICIkUFVTSEVEX1JFRiIpOyBmaQorICAg
+      ICAgICAgIGlmIFsgIiREUllfUlVOIiA9ICJ0cnVlIiBdOyB0aGVuIEFSR1MrPSgtLWRyeS1ydW4pOyBmaQorCisgICAgICAg
+      ICAgR0lUX0NPTkZJR19DT1VOVD0xIFwKKyAgICAgICAgICBHSVRfQ09ORklHX0tFWV8wPSJodHRwLmh0dHBzOi8vZ2l0aHVi
+      LmNvbS8uZXh0cmFoZWFkZXIiIFwKKyAgICAgICAgICBHSVRfQ09ORklHX1ZBTFVFXzA9IkFVVEhPUklaQVRJT046IGJhc2lj
+      ICRBVVRIIiBcCisgICAgICAgICAgICBub2RlIC5mbG93L2Jpbi9yZWxlYXNlLXB1Ymxpc2gubWpzICIke0FSR1NbQF19IiB8
+      IHRlZSAiJFJVTk5FUl9URU1QL2FsaWFzLmxvZyIKKworICAgICAgIyBgaWY6IGFsd2F5cygpYCwgYmVjYXVzZSB0aGUgcnVu
+      IHRoaXMgc3VtbWFyeSBtYXR0ZXJzIG1vc3QgZm9yIGlzIHRoZSBGQUlMRUQgb25lOiBhCisgICAgICAjIHJlbGVhc2Ugd2hv
+      c2UgdGFnIGxhbmRlZCBhbmQgd2hvc2UgYWxpYXMgZGlkIG5vdCBpcyB0aGUgc3RhdGUgdGhhdCBsb29rcyBmaW5lIGZyb20g
+      dGhlCisgICAgICAjIHJlbGVhc2UgcmVwbydzIHRhZyBsaXN0IGFuZCByZXNvbHZlcyB0byB0aGUgcHJldmlvdXMgcmVsZWFz
+      ZSBmcm9tIGV2ZXJ5IGNhbGxlci4gVGhlCisgICAgICAjIG1vZHVsZSdzIGxhc3QgbGluZSBjYXJyaWVzIGBkZWNpc2lvbj1w
+      dWJsaXNoZWQtd2l0aG91dC1pdHMtYWxpYXNgLCBzbyB0aGUgZGlzdGluY3Rpb24KKyAgICAgICMgc3Vydml2ZXMgaW50byB0
+      aGUgc3VtbWFyeSByYXRoZXIgdGhhbiBsaXZpbmcgb25seSBpbiB0aGUgZXhpdCBjb2RlLgorICAgICAgLSBuYW1lOiBTdW1t
+      YXJpc2UgdGhlIGFsaWFzIG1vdmUKKyAgICAgICAgaWY6IGFsd2F5cygpCisgICAgICAgIHJ1bjogfAorICAgICAgICAgIHNl
+      dCAtZXVvIHBpcGVmYWlsCisgICAgICAgICAgeworICAgICAgICAgICAgZWNobyAiIyMjIGZsb3ctcmVsZWFzZS1wdWJsaXNo
+      IC8gYWxpYXMgLT4gXGAkRkxPV19SRUxFQVNFX1JFUE9cYCIKKyAgICAgICAgICAgIGVjaG8gIiIKKyAgICAgICAgICAgIGlm
+      IFsgIiREUllfUlVOIiA9ICJ0cnVlIiBdOyB0aGVuIGVjaG8gIioqRHJ5IHJ1bioqIOKAlCBub3RoaW5nIHdhcyBwdXNoZWQu
+      IjsgZWNobyAiIjsgZmkKKyAgICAgICAgICAgIGVjaG8gJ2BgYCcKKyAgICAgICAgICAgIGNhdCAiJFJVTk5FUl9URU1QL2Fs
+      aWFzLmxvZyIgMj4vZGV2L251bGwgfHwgZWNobyAiKG5vIG91dHB1dCDigJQgYW4gZWFybGllciBzdGVwIGZhaWxlZCkiCisg
+      ICAgICAgICAgICBlY2hvICdgYGAnCisgICAgICAgICAgfSA+PiAiJEdJVEhVQl9TVEVQX1NVTU1BUlkiCg==
+
 ---
 
 ## Context
