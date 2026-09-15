@@ -8,6 +8,33 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 _(next changes accumulate here until the alias is advanced)_
 
+## 1.2.1 — 2026-09-15
+
+A single-change patch release, cut onto the `v1.2.0` lineage rather than onto `main`. Prose only:
+no reusable workflow, no `.flow/bin/` helper and no lifecycle or gate semantics move with it.
+
+**Why this release exists at all.** `main` carries this fix already, as part of what its CHANGELOG
+calls 1.3.0/1.3.1 — but that body of work changes eight per-repo *caller* workflows, which
+`docs/flow-versioning-policy.md` classifies as MAJOR, and it is being re-cut as `2.0.0`. A repo
+pinned to `@v1` must therefore not receive it. This release carries the one fix that is genuinely
+caller-action-free across to the 1.2.x line, so the fleet is not held hostage to a major adoption
+it has not opted into.
+
+- **`Session hygiene` no longer trips on harness-side truncation**
+  (`project-template/.flow/PROTOCOL.md`). The trip condition *"a tool result landed that you could
+  not read in full"* was firing on routine truncation of tool output. Harnesses that cap search
+  results by default elide grep hits and directory listings as a matter of course, so the condition
+  was satisfied by the first repository search of a session and the worker handed off, correctly by
+  the letter of the rule, before implementation began. The rule inverted its own rationale — its
+  cost model is about a large result *entering* context, whereas truncation is the harness spending
+  *less* of the budget by keeping bytes out. The condition now measures what entered context; a new
+  *"What is not a trip condition"* block names the three routine behaviours that were
+  false-positiving; the re-read condition is qualified with *"and cannot recall what it said"*; and
+  a new floor states that no trip condition fires before there is work worth preserving.
+  [caller action: **none.** No caller, workflow input or secret changes. A repo picks this up by
+  re-syncing `.flow/PROTOCOL.md`. The change only ever loosens conditions, so no session that was
+  compliant before becomes non-compliant now.]
+
 ## 1.1.0 — 2026-07-03 (pending tag + canary)
 
 - **`flow-state` resolver added** (`.flow/bin/flow-state.mjs` + tests) — the trusted, on-demand
