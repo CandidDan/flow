@@ -48,6 +48,14 @@ const PROTOCOL_REF = ".flow/PROTOCOL.md";
 // protocol in this repo, so the expectation cannot be a second one. It also needs no git
 // history, which a shallow CI checkout would not have.
 //
+// UPDATED AGAIN (one entry, marked below) for the Session hygiene section. The trip condition
+// "a tool result you could not read in full" was firing on routine harness-side truncation —
+// capped search hits — which is the harness spending LESS context, not more. Agents were
+// handing off on their first repo search, before implementation began. The section now
+// separates what entered context from what the harness kept out, and adds a floor: a handoff
+// with no progress in it is the failure the section exists to prevent. Digest recomputed in
+// the same commit as the edit, per the procedure below.
+//
 // UPDATED BY flow-0007 (two entries, marked below). That task moved the three Definition-of-Done
 // reviewers out of the worker's session and onto the PR, so "The gate" and "The loop you run" had
 // to say where they now run. The digests were recomputed in the same commit as the edit, which is
@@ -63,7 +71,7 @@ const PRE_MOVE_SECTION_DIGESTS = [
   ["Status lifecycle", "f7235e6c6e4d93e5d792a9294bba9d93a5f3d621b0b208d8d39dbf800b577744"],   // rewritten by flow-0039, then flow-0040 (blocked_by)
   ["Concurrency — how parallel sessions don't collide", "42bbc5aa8e43eb1371eaae9b43fcb0d68cf7973df33844914d1137209bb49f6c"],   // rewritten by flow-0039
   ["The loop you run", "501469c1994131fd1ee695e91c1a800352cfe89f0f38cd74b39f8f4f531475d4"],   // rewritten by flow-0007, then flow-0039
-  ["Session hygiene — context is a budget", "71c9e144cad9aa9449dd199cf449c713ce90abb81ad3f7e59cc7761b093aebc0"],
+  ["Session hygiene — context is a budget", "163e66bcb11a2eb81d42754c37dbec11ead699806c44bd64ccf8a3f2b48ab20c"], // UPDATED: harness-truncation false positive
   ["The gate — Definition of Done (every task, every stack)", "b4a7356cba7beb92a670375a59959cab46b91a4cb7648873b115300ecc4ea750"],   // rewritten by flow-0007
   ["Hard rules", "1c7c64687eb78d96e8d6e9f2c7648d95c99ae0455c03fd4a7c701e6bc2285e50"],   // rewritten by flow-0039
   ["What stays out of here", "24bd8ebcce937389248fb3c7e00ff8a4ec48db0912ec39d982abbab1397f00b3"],
