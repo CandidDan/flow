@@ -66,7 +66,7 @@ const PRE_MOVE_SECTION_DIGESTS = [
   ["Status lifecycle", "bcce4f4fda874d9e0fce488e8ba948d90b7ccb7fb92bf88fdd03c43212744263"],
   ["Concurrency — how parallel sessions don't collide", "363cc65c5b717b605681212e13ec4079cb9d944c06c1c347619627e3c691ab37"],
   ["The loop you run", "4c2277d20c5d186d31993437ee8271345ea55e4f9f4a3811ef898b38763fd197"],
-  ["Session hygiene — context is a budget", "163e66bcb11a2eb81d42754c37dbec11ead699806c44bd64ccf8a3f2b48ab20c"], // UPDATED: harness-truncation false positive,
+  ["Session hygiene — context is a budget", "0026b46d1af9d1f8dc503fda8f1c711ae575c46e09dbd003f919f3a1db64751c"], // UPDATED: harness-truncation false positive
   ["The gate — Definition of Done (every task, every stack)", "5e0f578306ef2f6644934a51c233a53ff099fa163e90fc1e178918ad8836e6ca"],
   ["Hard rules", "15388fcda35f81aad61e1d8ecf8e94382e28833854277a23edccb31e4e1cd447"],
   ["What stays out of here", "24bd8ebcce937389248fb3c7e00ff8a4ec48db0912ec39d982abbab1397f00b3"],
@@ -369,4 +369,67 @@ test("a real Claude Code session loads the protocol through the CLAUDE.md import
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- the protocol actually documents what is NOT a trip condition ------------------------
+//
+// WHY THIS IS NOT COVERED BY THE DIGEST ABOVE. Same reason criterion 7 needed its own proof:
+// `PRE_MOVE_SECTION_DIGESTS` hashes the "Session hygiene" section and compares it to a digest
+// recomputed in the same commit as the edit. That proves the section still matches whatever was
+// written — it cannot distinguish "documents the truncation carve-out" from "changed somehow".
+// Swap this text for unrelated prose, recompute the digest, and that test stays green.
+//
+// The carve-out is worth a proof of content because its absence is what caused the incident it
+// was written for: workers on a harness that truncates search output by default read "a tool
+// result you could not read in full" as satisfied by their first repository search, and handed
+// off — honestly, and before implementation began. Losing this text silently reinstates that.
+test("Session hygiene names harness truncation as NOT a trip condition", () => {
+  const section = new Map(sectionsOf(protocol)).get("Session hygiene — context is a budget");
+  assert.ok(section, "the Session hygiene section must exist to carry the trip conditions");
+
+  assert.match(section, /What is not a trip condition/,
+    "Session hygiene must keep its explicit non-trip block; without it every routine tool " +
+    "behaviour reads as a trip condition, which is the false positive this text exists for");
+
+  // The three routine behaviours that were false-positiving. Substance, not a keyword: a
+  // paragraph that merely mentioned truncation in passing would not tell a worker it is safe.
+  assert.match(section, /truncated or elided/,
+    "the block must name harness-side truncation/elision — the behaviour that fired on the " +
+    "first search of every session");
+  assert.match(section, /spending\s+\*?less\*?\s+of your context/,
+    "the block must say truncation spends LESS context, not more; that inversion is the whole " +
+    "reason the old wording misfired");
+  assert.match(section, /more matches than you read/,
+    "the block must name a partially-read search as routine");
+  assert.match(section, /A re-read you chose/,
+    "the block must name a deliberate verification re-read as routine");
+
+  // The trip condition itself must measure what ARRIVED, not what was withheld.
+  assert.match(section, /landed in your context large enough to rival the task body/,
+    "the tool-result condition must measure what entered context; the old wording (\"could " +
+    "not read in full\") could not tell a large result from a withheld one");
+  assert.match(section, /cannot recall what it said/,
+    "the re-read condition must be qualified by recall failure, or deliberate verification " +
+    "trips it");
+});
+
+// The floor, and the three conditions it deliberately does NOT cover. Both halves matter: a
+// floor over every condition would tell a session to keep working through a compaction signal,
+// which is the degraded-context failure the section opens by warning about.
+test("the floor covers the staleness conditions and exempts compaction", () => {
+  const section = new Map(sectionsOf(protocol)).get("Session hygiene — context is a budget");
+  assert.ok(section, "the Session hygiene section must exist to carry the floor");
+
+  assert.match(section, /a handoff must hand something off/,
+    "the floor must exist, or a zero-progress handoff reads as compliance rather than as the " +
+    "waste this section opens by describing");
+  assert.match(section, /work worth preserving/,
+    "the floor must state what it requires before a stale-thread condition fires");
+
+  assert.match(section, /have no floor and take no account of progress/,
+    "the floor must say which conditions it does NOT cover; unbounded, it contradicts them");
+  assert.match(section, /Compaction[\s\S]{0,200}?it still fires/,
+    "compaction must be named as firing regardless of progress — it means the budget is " +
+    "already spent, so a floor that silenced it would reinstate forced continuation in a " +
+    "context the harness has flagged");
 });
