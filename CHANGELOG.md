@@ -6,6 +6,30 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 1.3.1 — 2026-09-15 (pending tag + canary)
+
+A single-change patch release. Prose only: no reusable workflow, no `.flow/bin/` helper and no
+lifecycle or gate semantics move with it.
+
+- **`Session hygiene` no longer trips on harness-side truncation** (`project-template/.flow/PROTOCOL.md`).
+  The trip condition *"a tool result landed that you could not read in full"* was firing on routine
+  truncation of tool output. Harnesses that cap search results by default — Codex among them — elide
+  grep hits and directory listings as a matter of course, so the condition was satisfied by the first
+  repository search of a session and the worker handed off, correctly by the letter of the rule,
+  before implementation began. Observed in an adopting repo on 2026-09-15: every fresh worker session
+  claimed its task, searched once, wrote a handoff note reading *"claimed and preserved, but
+  implementation did not begin"*, and ended. The rule inverted its own rationale — its cost model is
+  about a large result **entering** context, whereas truncation is the harness spending *less* of the
+  budget by keeping bytes out. The condition now measures what entered context; a new
+  *"What is not a trip condition"* block names the three routine behaviours that were false-positiving
+  (harness truncation or elision, a search returning more matches than you read, and a re-read you
+  chose to verify a string); the re-read condition is qualified with *"and cannot recall what it
+  said"*; and a new floor states that no trip condition fires before there is work worth preserving,
+  because nothing previously required a handoff to contain any progress.
+  [caller action: **none.** No caller, workflow input or secret changes. A repo picks this up by
+  re-syncing `.flow/PROTOCOL.md` in the usual way — `flow-sync` opens the PR. The change only ever
+  loosens conditions, so no session that was compliant under 1.3.0 becomes non-compliant under 1.3.1.]
+
 ## 1.3.0 — 2026-09-14 (pending tag + canary)
 
 The first release since `v1.2.0` (2026-08-20). Everything below has been on `v1-edge` since it
