@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0047"
 title: "Stop the release-stamp test forbidding the thing `## Unreleased` exists for"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-worker-flow-0047"
 created: "2026-09-15"
 started: "2026-09-15T07:54:25Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0047-unreleased-exists"
+pr: "https://github.com/CandidDan/flow/pull/75"
 issue: ""
 blocked_reason: ""
 blocked_by: []
