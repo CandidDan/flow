@@ -14,7 +14,7 @@ issue: ""
 blocked_reason: ""
 blocked_by: []
 serves: ["maintenance"]   # release plumbing; no live VISION goal names it (see the note on G4)
-touches: ["project-template/.flow/bin/release-publish.mjs", "project-template/.flow/bin/release-publish.test.mjs", ".flow/bin/release-publish.mjs", ".flow/bin/release-publish.test.mjs", ".github/workflows/flow-release-publish.yml", "docs/flow-versioning-policy.md", "CHANGELOG.md"]
+touches: [".flow/bin/release-publish.mjs", ".flow/bin/release-publish.test.mjs", ".github/workflows/flow-release-publish.yml", "docs/flow-versioning-policy.md", "CHANGELOG.md"]
 labels: [infra, release, fleet]
 notes:
   - "2026-09-15: found while publishing 1.3.0 by hand. `git ls-remote https://github.com/CandidDan/flow-protocol` returns exactly three refs — refs/heads/main, refs/tags/v1.2.0, refs/tags/v1.3.0. No `v1`. The publisher pushes one tag (`release-publish.mjs`, the single `git push <remote> refs/tags/<tag>`) and `tagIsFree` makes re-pushing it a problem rather than a move, which is correct for an immutable release and leaves the alias unimplemented. Every adopting repo pins the ALIAS: Nudge and write both carry nine `@v1` callers. So flow-0030 would repin the fleet at a ref that does not exist — nine broken callers per repo, in their CI, with no local change to explain it. This task is the prerequisite, not a tidy-up."
@@ -120,10 +120,14 @@ its own work. Build, lint, test and coverage are the worker's, and are owed befo
 
 ## Notes / open questions
 
-- **Shared logic goes in `project-template/.flow/bin/release-publish.mjs`**, not in canonical's
-  adapter. The adapter is the CLI shell plus canonical's store location; a change to publishing
-  behaviour belongs where every repo gets it. Do not replace the adapter with a copy or a symlink
-  — every helper resolves its store as `dirname(realpath(import.meta.url))/..`.
+- **CORRECTION (2026-09-15, orchestrator).** This note originally said the shared logic belongs in
+  `project-template/.flow/bin/release-publish.mjs` and `touches` named that file and its test.
+  **Both were wrong and have been removed.** No such file exists: `.flow/bin/release-publish.mjs`
+  is canonical-only and says so in its own header — "NOT AN ADAPTER … like check-workflows.mjs: an
+  adopting repo consumes Flow, it never publishes it, so there is no template counterpart for this
+  to adapt and shipping one would hand every adopter a publisher aimed at a repository that is not
+  theirs." The adapter rule in the root `CLAUDE.md` is real but does not reach this file. Edit
+  `.flow/bin/release-publish.mjs` directly, and do not create a template counterpart.
 - **The credential is not this task's to create.** `FLOW_RELEASE_PAT` already exists and pushes to
   the target. If moving a ref needs a scope it lacks, that is a finding for the human, not a
   secret to mint — say so in the PR and mark the task `blocked` rather than widening a token.
