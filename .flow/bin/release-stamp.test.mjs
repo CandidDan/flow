@@ -135,14 +135,82 @@ test("every entry in the stamp's section names its caller action", () => {
   }
 });
 
-test("`## Unreleased` survives the release, empty, for the next change", () => {
-  const unreleased = sectionFor("Unreleased");
-  assert.ok(unreleased, `${CHANGELOG_PATH} lost its "## Unreleased" section — the next change has ` +
-    `nowhere to land, and the pressure is then to write it into a shipped section.`);
+// ── The `## Unreleased` section: a permanent property, not a moment-in-time one ────────────────
+//
+// This case used to read "`## Unreleased` survives the release, empty, for the next change" and
+// assert, unconditionally, that the section held zero entries. Empty is true for exactly as long
+// as it takes somebody to record a change — so the section was empty-or-red, and the first task
+// that needed a changelog entry (flow-0045) had a red gate and no in-scope fix. `## Unreleased`
+// exists *to hold* the entries of changes made since the last release; holding them is the
+// purpose being served, not a violation of it. Fixed by flow-0047.
+//
+// What the old case was reaching for is real and is kept. Cutting a release folds Unreleased's
+// entries into the numbered section, and the hazard is that the fold takes the heading with them,
+// leaving the next change nowhere to land. That is the regression, and it is the only thing
+// asserted now — against a mutated copy as well as the real file, because a check nobody has
+// seen fail is not known to be checking anything.
+function assertUnreleasedPresent(text, path = CHANGELOG_PATH) {
+  assert.ok(
+    sectionFor("Unreleased", text),
+    `${path} lost its "## Unreleased" section — folding a release's entries into the numbered ` +
+    `section must leave the heading behind. Without it the next change has nowhere to land, and ` +
+    `the pressure is then to write it into a shipped section. Headings present: ` +
+    `${[...sections(text).keys()].join(", ")}`,
+  );
+}
+
+// Fixtures, so the two legal states can both be exercised on demand rather than only in whichever
+// state `CHANGELOG.md` happens to be in on the day the suite runs. The real file proves one of
+// them at a time; these prove the rule does not care which.
+const FIXTURE_HEAD = "# Fixture — CHANGELOG\n\nPreamble prose that is not a section.\n\n";
+const FIXTURE_RELEASED = "## 9.9.9 — 2026-01-01\n\n- a shipped thing. [caller action: none.]\n";
+const fixture = (unreleasedBody) =>
+  `${FIXTURE_HEAD}## Unreleased\n${unreleasedBody}${FIXTURE_RELEASED}`;
+
+test("`## Unreleased` exists — that is the whole property, on the real changelog", () => {
+  assertUnreleasedPresent(changelog);
+});
+
+test("a populated `## Unreleased` passes — holding entries is what the section is for", () => {
+  const text = fixture("\n- the change this PR makes. [caller action: none.]\n\n");
+  const section = sectionFor("Unreleased", text);
+  assert.ok(section, "fixture is malformed — it must carry an `## Unreleased` section");
+  assert.ok(
+    entries(section.body).length > 0,
+    "fixture is malformed — the populated case must actually hold an entry, or it proves nothing",
+  );
+  assert.doesNotThrow(
+    () => assertUnreleasedPresent(text, "fixture"),
+    "a changelog recording changes since the last release must pass — that is the section's purpose",
+  );
+});
+
+test("an empty `## Unreleased` passes too — the state right after a release is equally legal", () => {
+  const text = fixture("\n");
+  const section = sectionFor("Unreleased", text);
+  assert.ok(section, "fixture is malformed — it must carry an `## Unreleased` section");
   assert.equal(
-    entries(unreleased.body).length, 0,
-    `"## Unreleased" still lists entries after a release — they belong in the released section, ` +
-    `or the stamp moved without them.`,
+    entries(section.body).length, 0,
+    "fixture is malformed — the empty case must actually be empty",
+  );
+  assert.doesNotThrow(
+    () => assertUnreleasedPresent(text, "fixture"),
+    `an empty "## Unreleased" is what a freshly-cut release leaves behind — forbidding it would ` +
+    `be the same mistake as the old assertion, mirrored.`,
+  );
+});
+
+test("mutation: delete `## Unreleased` and the check fails, naming the loss", () => {
+  // Mutate the REAL changelog rather than a hand-written near-miss: this is the exact edit a
+  // careless release fold makes — the heading goes with the entries it was holding.
+  const mutated = changelog.replace("## Unreleased\n", "");
+  assert.notEqual(mutated, changelog, "the mutation did not apply, so it proves nothing");
+  assert.equal(sectionFor("Unreleased", mutated), null, "the mutation did not remove the section");
+  assert.throws(
+    () => assertUnreleasedPresent(mutated),
+    (err) => err instanceof assert.AssertionError && /## Unreleased/.test(err.message)
+      && new RegExp(CHANGELOG_PATH).test(err.message),
+    "losing the section must fail, and the message must name what was lost",
   );
 });
 

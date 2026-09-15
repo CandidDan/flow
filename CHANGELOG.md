@@ -6,6 +6,24 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+- **`## Unreleased` may hold entries again** (`.flow/bin/release-stamp.test.mjs`, flow-0047).
+  flow-0044 shipped a case named "`## Unreleased` survives the release, empty, for the next
+  change" that asserted, unconditionally, that the section held zero entries. Empty is true at
+  the instant a release is cut and false every moment after, so the section was empty-or-red and
+  the first task that needed a changelog entry (flow-0045) had a red gate with no in-scope fix —
+  its only ways out were editing shipped history or opening a release stamp for a change that was
+  not a release. The case now asserts the permanent property the old name was reaching for: the
+  section **exists**. Both states are legal, and neither is asserted — swapping one prohibition
+  for its opposite would be the same mistake mirrored. The regression it was written for survives,
+  and is now proved rather than assumed: a release fold that takes the `## Unreleased` heading
+  away with the entries it was holding fails, verified by mutating the real changelog, plus
+  fixtures for the populated and empty states. The three released-section cases and the two
+  tombstones are untouched.
+  [caller action: **none.** `.flow/bin/release-stamp.test.mjs` is canonical's own gate over
+  canonical's own stamps — it is not part of `project-template/`, so nothing about it rides the
+  `v1` alias into an adopting repo. This entry's own presence, with the gate green, is the proof
+  the fix works.]
+
 ## 1.3.1 — 2026-09-15 (pending tag + canary)
 
 A single-change patch release. Prose only: no reusable workflow, no `.flow/bin/` helper and no
