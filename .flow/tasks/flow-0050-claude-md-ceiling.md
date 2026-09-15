@@ -1,6 +1,6 @@
 ---
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
-id: "flow-0049"
+id: "flow-0050"
 title: "Enforce the CLAUDE.md ceiling against resolved context, not file bytes"
 status: "ready"
 priority: 2
@@ -27,7 +27,8 @@ labels: [infra, gate, context]
 notes:
   - "2026-09-15 (orchestrator): `serves` is G9, and the fit is exact rather than convenient. G9 says 'No threshold is set deliberately; if one is ever set, it belongs here.' `claude_md_max` is a token-cost threshold, so by G9's own words the number's existence is a vision matter. This task does NOT amend VISION.md — that is vision-writer's job on its own branch, and it is the human's call. Flagging it so the amendment is a decision someone makes rather than one this task makes by omission."
   - "2026-09-15 (orchestrator): the honest justification is adherence, not space. Measured in a live CandidDan/Nudge session: CLAUDE.md was 14.2k tokens against a 1M window — 1.4%, with 75.7% of the window free. Nothing is running out. The cost of a large always-on instruction block is that every rule competes with every other rule for adherence, and that does not improve as windows grow. Do not let a reviewer talk this into a 'context pressure' framing; the data refutes that framing and the task does not rest on it."
-  - "2026-09-15 (orchestrator): sequencing — `touches` overlaps flow-0047 (CHANGELOG.md, currently in_progress) and flow-0048 (CHANGELOG.md, ready). Per the concurrency rule this task waits for a clear window rather than running alongside either. It is otherwise independent of both: flow-0048 fixes what flow-sync copies, this fixes what the gate measures."
+  - "2026-09-15 (orchestrator): this task was written as flow-0049 and renumbered to flow-0050 within minutes — another session had allocated flow-0049 (queue-runner-summary) concurrently, and the collision only surfaced on `git pull --rebase` after the first push. flow-doctor caught it as a duplicate id. Recording it as live evidence for flow-0021 (atomic task id allocation), which is still `ready`: `allocate-task-id.mjs` exists and I did not use it, which is exactly the failure mode a manual id pick invites."
+  - "2026-09-15 (orchestrator): sequencing — `touches` overlaps flow-0047 (CHANGELOG.md, in_progress) and flow-0048 (CHANGELOG.md, ready). Per the concurrency rule this task waits for a clear window rather than running alongside either. It is otherwise independent of both: flow-0048 fixes what flow-sync copies, this fixes what the gate measures."
 ---
 
 ## Context
