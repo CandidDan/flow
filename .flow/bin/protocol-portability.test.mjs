@@ -48,6 +48,14 @@ const PROTOCOL_REF = ".flow/PROTOCOL.md";
 // protocol in this repo, so the expectation cannot be a second one. It also needs no git
 // history, which a shallow CI checkout would not have.
 //
+// UPDATED (one entry, marked below) for the Session hygiene section. The trip condition
+// "a tool result you could not read in full" was firing on routine harness-side truncation —
+// capped search hits — which is the harness spending LESS context, not more. Agents were
+// handing off on their first repo search, before implementation began. The section now
+// separates what entered context from what the harness kept out, and adds a floor: a handoff
+// with no progress in it is the failure the section exists to prevent. Digest recomputed in
+// the same commit as the edit, per the procedure below.
+//
 // These pin that the MOVE was lossless. They are not a freeze on the protocol: an intentional
 // edit to `.flow/PROTOCOL.md` is expected to fail this test, and the fix is to re-run the
 // digest in the SAME commit that makes the edit (see the failure message), not to relax it.
@@ -58,7 +66,7 @@ const PRE_MOVE_SECTION_DIGESTS = [
   ["Status lifecycle", "bcce4f4fda874d9e0fce488e8ba948d90b7ccb7fb92bf88fdd03c43212744263"],
   ["Concurrency — how parallel sessions don't collide", "363cc65c5b717b605681212e13ec4079cb9d944c06c1c347619627e3c691ab37"],
   ["The loop you run", "4c2277d20c5d186d31993437ee8271345ea55e4f9f4a3811ef898b38763fd197"],
-  ["Session hygiene — context is a budget", "71c9e144cad9aa9449dd199cf449c713ce90abb81ad3f7e59cc7761b093aebc0"],
+  ["Session hygiene — context is a budget", "163e66bcb11a2eb81d42754c37dbec11ead699806c44bd64ccf8a3f2b48ab20c"], // UPDATED: harness-truncation false positive,
   ["The gate — Definition of Done (every task, every stack)", "5e0f578306ef2f6644934a51c233a53ff099fa163e90fc1e178918ad8836e6ca"],
   ["Hard rules", "15388fcda35f81aad61e1d8ecf8e94382e28833854277a23edccb31e4e1cd447"],
   ["What stays out of here", "24bd8ebcce937389248fb3c7e00ff8a4ec48db0912ec39d982abbab1397f00b3"],
