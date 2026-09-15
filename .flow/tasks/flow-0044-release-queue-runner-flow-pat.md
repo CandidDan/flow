@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0044"
 title: "Stamp and changelog the 1.3.0 release, so the queue-runner FLOW_PAT fix can reach the fleet"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0044"
