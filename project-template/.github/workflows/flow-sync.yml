@@ -30,6 +30,14 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # Required, and required HERE. A called workflow can never hold a permission its caller did
+      # not grant, so `_flow-sync.yml` declaring `workflows: write` is not enough on its own —
+      # this block is the ceiling. flow-sync copies canonical's thin callers into
+      # `.github/workflows/`, and GitHub rejects a push touching that directory from a token
+      # without `workflows`. Omit this line and every sync that adds or changes a caller fails at
+      # the push with "remote rejected ... without `workflows` permission", on a schedule, with
+      # nothing reaching a human.
+      workflows: write
     uses: CandidDan/flow/.github/workflows/_flow-sync.yml@v1
     with:
       canonical_ref: ${{ inputs.canonical_ref }}
