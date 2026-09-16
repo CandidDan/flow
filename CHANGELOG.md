@@ -6,6 +6,25 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+- **The published callers pin `@v2`, and so does the sync's adopt source** (`project-template/.github/workflows/flow-*.yml`,
+  `_flow-sync.yml`, flow-0056). 2.0.0 shipped the version stamp without the pins: ten callers still
+  read `_flow-<name>.yml@v1`, and `_flow-sync.yml` checked canonical out at
+  `${{ inputs.canonical_ref || 'v1' }}` — which is the ref a scheduled sync actually uses, because
+  the thin caller forwards an empty `canonical_ref`. Both refs now track the major in root
+  `VERSION`. The consequence that made this priority 1 is `flow-sync`'s own copied surface: it
+  includes `.github/workflows/flow-*.yml`, so the first sync into a repo overwrites that repo's
+  `flow-sync.yml` with the template's. While the template pinned `@v1`, that meant handing back
+  `_flow-sync.yml@v1` — the version without flow-0051's `workflows: write` — so a repo hand-edited
+  to escape that bug re-acquired it on its first sync. `.flow/bin/caller-pins.test.mjs` derives the
+  expected ref from `VERSION` rather than hard-coding `v2`, and fails naming the file, the line and
+  both refs; a fixture at a hypothetical 3.0.0 proves it follows the stamp instead of quietly
+  ceasing to mean anything at the next major. Canonical's own callers still pin `@main` by design
+  and are excluded by scope, proved rather than assumed.
+  [caller action: **none beyond flow-0051's, and none you make by hand.** See the 2.0.0 section:
+  `flow-sync` delivers the `@v2` pins as part of the copied surface once `v2` is moved onto this
+  merge commit. The human step this cannot do for itself is moving that tag — and it must happen
+  after this merges and before any repo adopts.]
+
 - **`flow-sync` can push the workflow files it exists to deliver** (`_flow-sync.yml`,
   `project-template/.github/workflows/flow-sync.yml`, flow-0051). GitHub refuses any push that
   creates or modifies a file under `.github/workflows/` unless the pushing token carries the
@@ -71,6 +90,27 @@ that repo chooses `@v2`.
 currently has no `workflows: write` grant — so it cannot push the files that carry them. The
 bootstrap is one hand-edit per repo (`flow-sync.yml`, adding the grant), after which `flow-sync`
 delivers the rest. Do not begin the fleet migration before that lands.
+
+**Adopting v2 means pinning the callers `@v2`.** The version stamp and the reusables are two
+halves of one release, and only the stamp travelled in the re-cut: on `main` at VERSION 2.0.0 all
+ten published callers still read `_flow-<name>.yml@v1`. A repo that adopted that tree got 2.0.0's
+copied surface — `.flow/bin/`, the callers, `.flow/VERSION` — wired to the **v1** reusables, and
+nothing said so, because a caller pinned at a tag that still resolves is indistinguishable from a
+correct one. `_flow-sync.yml`'s own canonical checkout defaulted to `v1` the same way, so a v2 repo
+would have adopted v1 content every week on the cron. flow-0056 moves both: the ten `uses:` pins and
+the `canonical_ref` fallback, derived from root `VERSION` and held there by
+`.flow/bin/caller-pins.test.mjs`, which fails if a published caller ever pins a major the stamp does
+not. [caller action: **required, and `flow-sync` delivers it.** The callers are part of the copied
+surface, so once flow-0056 is merged and `v2` points at it, the first sync into a repo rewrites that
+repo's `.github/workflows/flow-*.yml` with the `@v2` pins. You do not hand-edit ten files — you
+hand-edit the one from flow-0051 above and let the sync carry the rest. **Order matters, in both
+directions.** `v2` must be moved onto the merge commit *before* any repo adopts: a caller pinned at
+a tag that does not resolve fails every workflow in that repo, which is worse than the state this
+fixes. And a repo hand-edited **before** flow-0056 lands has its `flow-sync.yml` **overwritten** by
+its very first sync — the template's copy replaces yours, and while the template still pinned `@v1`
+that copy was the version *without* `workflows: write`, so the flow-0051 fix reverted itself and the
+next sync died at the push again. That is why this ordering is a blocker for the fleet migration
+rather than a tidy-up after it.]
 
 - **Re-sync `flow-queue-runner.yml` and set the `FLOW_PAT` secret** (flow-0026). The worker now
   pushes as a real actor instead of `github-actions[bot]`, so the Definition-of-Done gate runs on

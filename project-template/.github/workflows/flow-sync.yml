@@ -9,7 +9,7 @@ name: flow-sync
 # flow repo.
 #
 # Safe to run anytime: it only ever opens a reviewed PR (never auto-merges, never pushes to main),
-# so it needs no FLOW_AI gate. Bump `canonical_ref` if your other callers pin a tag other than v1.
+# so it needs no FLOW_AI gate. Bump `canonical_ref` if your other callers pin a tag other than v2.
 
 on:
   schedule:
@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       canonical_ref:
-        description: "Canonical ref to adopt from (tag/branch). Default v1."
+        description: "Canonical ref to adopt from (tag/branch). Default v2."
         required: false
         type: string
 
@@ -38,7 +38,7 @@ jobs:
       # the push with "remote rejected ... without `workflows` permission", on a schedule, with
       # nothing reaching a human.
       workflows: write
-    uses: CandidDan/flow/.github/workflows/_flow-sync.yml@v1
+    uses: CandidDan/flow/.github/workflows/_flow-sync.yml@v2
     with:
       canonical_ref: ${{ inputs.canonical_ref }}
     secrets:
