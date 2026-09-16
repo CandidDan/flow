@@ -6,6 +6,29 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+- **`flow-sync` can push the workflow files it exists to deliver** (`_flow-sync.yml`,
+  `project-template/.github/workflows/flow-sync.yml`, flow-0051). GitHub refuses any push that
+  creates or modifies a file under `.github/workflows/` unless the pushing token carries the
+  `workflows` permission. `_flow-sync.yml` granted `contents` and `pull-requests` only — yet the
+  thin callers (`.github/workflows/flow-*.yml`) are part of the copied surface by design, because
+  copying them is how canonical ships a caller a repo has never had. So the first sync that added
+  one (`flow-compass.yml`, flow-0013) died at `git push` with *"! [remote rejected] … refusing to
+  allow a GitHub App to create or update workflow … without `workflows` permission"*, and every
+  sync since has died the same way. Both files now grant `workflows: write`, and
+  `.flow/bin/sync-permissions.test.mjs` fails if the grant and the copy step ever drift apart in
+  either direction — narrowing the copied surface to dodge the permission would quietly turn every
+  future new workflow into a manual adopt, which is the gap this closes, not a fix for it.
+  [caller action: **required, and it is the one caller edit `flow-sync` cannot deliver for you.**
+  Every adopting repo must hand-edit its own `.github/workflows/flow-sync.yml` to add
+  `workflows: write` to the `jobs.flow-sync.permissions` block — a called workflow can never hold a
+  permission its caller withheld, so canonical's grant is inert until yours exists. Until you make
+  that edit your syncs keep failing at the push with `remote rejected`, weekly, emitting nothing a
+  human sees. **A repo whose syncs have been failing silently may be many versions behind** —
+  `CandidDan/Nudge` sat at `.flow/VERSION` 1.0.0 for weeks this way. Run `flow-doctor`: its
+  version-drift warning is what tells you how far behind you are, and it has been correct and
+  unheeded the whole time. Once this one file is fixed, `flow-sync` carries the remaining caller
+  updates itself.]
+
 - **`## Unreleased` may hold entries again** (`.flow/bin/release-stamp.test.mjs`, flow-0047).
   flow-0044 shipped a case named "`## Unreleased` survives the release, empty, for the next
   change" that asserted, unconditionally, that the section held zero entries. Empty is true at
