@@ -1,7 +1,7 @@
 ---
 id: "flow-0059"
 title: "A lost race on main silently discards a task's status — flow-status and flow-done never retry"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "session_01DMaRd7oebwiqpEiJLpJafB"
