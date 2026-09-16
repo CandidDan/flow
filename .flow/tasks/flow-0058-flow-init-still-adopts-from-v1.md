@@ -1,7 +1,7 @@
 ---
 id: "flow-0058"
 title: "flow-init still adopts from v1 — a repo onboarded today is born on the previous major"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
 owner: ""
@@ -10,7 +10,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Half cleared. flow-0056 merged as PR #78 (merge commit 63959b5) so the template callers now pin @v2, but the `v2` tag itself does not exist yet and only a human can move it. Defaulting flow-init to a ref that does not resolve would write callers pointing at a ref GitHub cannot find into every newly onboarded repo — strictly worse than the v1 default it replaces. Unblocks the moment `v2` is cut."
+blocked_reason: ""
 blocked_by: []
 serves: ["maintenance"]
 touches:
@@ -25,6 +25,7 @@ notes:
   - "2026-09-16 (orchestrator): `blocked_by: [\"flow-0056\"]` is mechanical, not courtesy. `v2` does not exist yet, and flow-0056's merge is the commit the human moves it onto. A `flow-init` that defaults to `@v2` before that tag resolves would write callers referencing a ref GitHub cannot find, which fails every workflow in the new repo from its first push — strictly worse than the v1 default it replaces. Land flow-0056, move the tag, then this."
   - "2026-09-16 (orchestrator): derive it, do not retype it. flow-0056 establishes the pattern — `.flow/bin/caller-pins.test.mjs` computes the expected ref from the major component of root `VERSION` rather than hard-coding `v2`, explicitly because a hard-coded literal 'would pass today and stop meaning anything the moment 3.0.0 is cut — which is exactly how the tree arrived in the state this task fixes'. A constant here re-creates the same trap one file over. Whether the value is read from `VERSION` at call time or asserted against it by a test is the implementer's call; state which and why, but a bare `\"v2\"` string with no check is not acceptable."
   - "2026-09-16 (orchestrator): the `--help` text at :504 is part of the fix, not cosmetics. flow-0056's worker added a check for exactly this class after finding `_flow-sync.yml`'s input description still advertising 'Default v1', on the grounds that a description a human copies a ref out of is how a stale pin gets re-introduced by hand after the code was corrected. The same argument applies verbatim to `--help`."
+  - "2026-09-16 (orchestrator): unblocked. flow-0056 merged as PR #78 and the `v2` tag is now cut at 63959b5 — verified self-consistent at that ref: `VERSION` 2.0.0, all ten template callers pinned `@v2`, and `_flow-sync.yml`'s `canonical_ref` fallback at `v2`. Both halves of the block are gone, so `flow-init` can now default to the ref the stamp declares without writing an unresolvable one. Note the ordering hazard is now INVERTED: every day this sits, a repo onboarded through `flow-init` is born on v1 against a v2 canonical."
 ---
 
 ## Context
