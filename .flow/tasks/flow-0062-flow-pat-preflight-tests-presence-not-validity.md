@@ -1,7 +1,7 @@
 ---
 id: "flow-0062"
 title: "The FLOW_PAT preflight tests presence, not validity — an expired token sails past it"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "session_01XLRpJnVjHzVTBKVBjpQNXe"
