@@ -8,6 +8,14 @@
 // FLOW_AI gate, its optional-secret declaration and its idempotent label step, the thin
 // caller's wiring, and the SKILL.md boundaries that back the mechanical checks up. See the
 // "compass" section below.
+//
+// And the flow-0060 criteria, in the "permission keys" section at the bottom:
+//   · "a workflow declaring any `permissions:` key outside GitHub's documented set fails the
+//      build, naming the file, the key and the valid set"
+//   · "a fixture carrying `workflows: write` fails — the exact key flow-0051 invented, pinned
+//      by name as a regression case"
+//   · "fixtures using every valid key, including the rare ones, all pass — a validator that
+//      rejects legitimate keys would be a worse outage than the one it prevents"
 
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -26,7 +34,7 @@ import test from "node:test";
 // gate result at all.
 const mod = await import("./check-workflows.mjs").then((m) => m, () => null);
 const skip = mod ? false : "needs `npm ci` (yaml) — runs in the per-stack gate job";
-const { DEFAULT_WORKFLOW_DIR, checkWorkflows } = mod ?? {};
+const { DEFAULT_WORKFLOW_DIR, DEFAULT_WORKFLOW_DIRS, GITHUB_TOKEN_PERMISSIONS, checkWorkflows, invalidPermissionKeys } = mod ?? {};
 
 const yamlMod = await import("yaml").then((m) => m, () => null);
 const yamlSkip = yamlMod ? false : "needs `npm ci` (yaml) — runs in the per-stack gate job";
@@ -36,6 +44,7 @@ const REPO = resolve(BIN, "..", "..");
 const TEMPLATE = join(REPO, "project-template");
 const SCRIPT = join(BIN, "check-workflows.mjs");
 const WORKFLOWS = join(REPO, DEFAULT_WORKFLOW_DIR ?? ".github/workflows");
+const TEMPLATE_WORKFLOWS = join(TEMPLATE, ".github/workflows");
 
 const tmp = (name) => mkdtempSync(join(tmpdir(), `flow-cw-${name}-`));
 const run = (args, cwd = REPO) =>
@@ -238,4 +247,129 @@ test("the skill's calibration defines material, requires batching trivia, and ba
   assert.match(calibration, /accept/i);
   assert.match(calibration, /materially grown|grown/i,
     "a finding the human already accepted must not be re-filed unless it has genuinely worsened");
+});
+
+// ── flow-0060: GitHub's `permissions:` keys are a closed set, and the build now knows it ──────
+//
+// The bug this section exists to prevent: `workflows: write` is valid YAML and not a permission
+// that exists. It parsed, shipped to four repos and behind the `v2` tag, and GitHub then refused
+// to start the workflow at all. Parsing was never going to catch it — only knowing the set could.
+
+const workflowWith = (permissions) =>
+  `name: fixture\non: push\npermissions:\n${permissions}jobs:\n  a:\n    runs-on: ubuntu-latest\n`;
+
+const inDir = (name, files) => {
+  const dir = tmp(name);
+  for (const [file, body] of Object.entries(files)) writeFileSync(join(dir, file), body);
+  return dir;
+};
+
+test("REGRESSION (flow-0051): a workflow carrying `workflows: write` fails the check", { skip }, () => {
+  const dir = inDir("workflows-key", { "bad.yml": workflowWith("  contents: write\n  workflows: write\n") });
+  try {
+    const { checked, failures } = checkWorkflows(dir);
+    assert.deepEqual(checked, [], "a workflow GitHub refuses to start has not been checked");
+    assert.equal(failures.length, 1);
+    assert.match(failures[0].file, /bad\.yml$/, "the offending file must be named");
+    assert.match(failures[0].message, /'workflows' is not a GITHUB_TOKEN permission/);
+    assert.match(failures[0].message, /fine-grained-PAT scope/,
+      "the message must say WHY the key cannot exist, not just that it is unknown — that is the " +
+      "part flow-0051 needed and did not have");
+    assert.match(failures[0].message, /actions, attestations, checks, contents/,
+      "the valid set must be printed, so the fix does not require a doc hunt");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the same key in a JOB's permissions block fails too — that is where the caller carried it", { skip }, () => {
+  // project-template/.github/workflows/flow-sync.yml declared it at job level, not workflow level.
+  //
+  // The `uses:` owner is a PLACEHOLDER on purpose. `adr-split-authoring.test.mjs` counts every
+  // tracked file that names canonical's bare owner/repo and pins that count in an ADR, precisely
+  // so the release-repo cutover cannot lose a reference. A synthetic fixture is not a reference to
+  // canonical, and spelling it as one would inflate that count and make this file look like
+  // something the cutover has to re-pin. (Which is also why this comment does not spell it out.)
+  const dir = inDir("job-level", {
+    "caller.yml":
+      "name: caller\non: push\njobs:\n  flow-sync:\n    permissions:\n      contents: write\n" +
+      "      workflows: write\n    uses: EXAMPLE-OWNER/example/.github/workflows/_flow-sync.yml@v2\n",
+  });
+  try {
+    const { failures } = checkWorkflows(dir);
+    assert.equal(failures.length, 1);
+    assert.match(failures[0].message, /^jobs\.flow-sync\.permissions: 'workflows'/,
+      "the failure must name the exact YAML path to edit, not just the file");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI: an invented permission key fails the build and names file, key and valid set", { skip }, () => {
+  const dir = inDir("cli-invented", { "x.yml": workflowWith("  contents: read\n  workfloww: write\n") });
+  try {
+    const r = run([dir]);
+    assert.notEqual(r.status, 0, "an unparseable-by-GitHub workflow must fail `npm run build`");
+    assert.match(r.stderr, /x\.yml/, "the file");
+    assert.match(r.stderr, /'workfloww'/, "the key — any invented key, not just `workflows`");
+    assert.match(r.stderr, /repository-projects/, "the valid set");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("every valid key passes, including the rare ones a naive list would omit", { skip }, () => {
+  // A validator that rejects a legitimate key is a worse outage than the one it prevents: it
+  // blocks the gate on correct code, in every adopting repo at once.
+  const body = GITHUB_TOKEN_PERMISSIONS.map((k) => `  ${k}: write\n`).join("");
+  const dir = inDir("all-valid", { "all.yml": workflowWith(body) });
+  try {
+    const { checked, failures } = checkWorkflows(dir);
+    assert.deepEqual(failures, [], "no documented permission may be rejected");
+    assert.equal(checked.length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  for (const rare of ["id-token", "models", "attestations", "repository-projects"]) {
+    assert.ok(GITHUB_TOKEN_PERMISSIONS.includes(rare), `${rare} is a real permission and must be allowed`);
+    assert.deepEqual(invalidPermissionKeys({ permissions: { [rare]: "write" } }), [],
+      `${rare} must pass on its own, not only inside the full set`);
+  }
+});
+
+test("`workflows` is absent from the allowed set, and stays absent", { skip }, () => {
+  assert.ok(!GITHUB_TOKEN_PERMISSIONS.includes("workflows"),
+    "adding it here would re-open flow-0051: it is a GitHub App / fine-grained-PAT scope, and " +
+    "GITHUB_TOKEN cannot be granted it at all");
+  assert.equal(GITHUB_TOKEN_PERMISSIONS.length, 15, "the set is closed; grow it only with a doc link");
+});
+
+test("the shorthands, an empty block and an absent block are all accepted", { skip }, () => {
+  for (const shorthand of ["read-all", "write-all"]) {
+    assert.deepEqual(invalidPermissionKeys({ permissions: shorthand }), [],
+      `permissions: ${shorthand} names no keys and is valid`);
+  }
+  assert.deepEqual(invalidPermissionKeys({ permissions: {} }), [], "`permissions: {}` drops all scopes");
+  assert.deepEqual(invalidPermissionKeys({ permissions: null }), [], "a bare `permissions:` is null, not a key");
+  assert.deepEqual(invalidPermissionKeys({}), [], "most workflows declare none at all");
+  assert.deepEqual(invalidPermissionKeys(null), [], "a non-object document must not throw");
+  assert.deepEqual(invalidPermissionKeys({ permissions: 7 }), [], "a nonsense scalar is the YAML schema's problem, not this check's");
+  assert.deepEqual(invalidPermissionKeys({ jobs: { a: null, b: "x" } }), [],
+    "a null or scalar job must be skipped rather than crash the build");
+  assert.deepEqual(invalidPermissionKeys({ permissions: "read-only" }), [{ where: "permissions", key: "read-only" }],
+    "an invented SHORTHAND is caught too — `read-only` is the plausible-looking one that does not exist");
+});
+
+test("both of canonical's shipped workflow trees are checked by default, and both are clean", { skip }, () => {
+  assert.deepEqual([...DEFAULT_WORKFLOW_DIRS], [".github/workflows", "project-template/.github/workflows"],
+    "the published thin callers are API too — flow-0060's invalid key sat in that tree, unbuilt");
+  for (const dir of [WORKFLOWS, TEMPLATE_WORKFLOWS]) {
+    const { checked, failures } = checkWorkflows(dir);
+    assert.deepEqual(failures, [], `${dir} must be free of invented permission keys`);
+    assert.ok(checked.length > 0, `${dir} must not be empty`);
+  }
+  const r = run([]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /project-template\/\.github\/workflows/,
+    "the default run must say it looked at the template tree, so a green build is not a silent one");
 });

@@ -6,6 +6,50 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+- **`workflows: write` is not a permission, and never was — `flow-sync` is fixed with a credential
+  instead** (`_flow-sync.yml`, `project-template/.github/workflows/flow-sync.yml`,
+  `.flow/bin/check-workflows.mjs`, flow-0060). flow-0051 (below) diagnosed the right bug and
+  reached for a permission that does not exist. `GITHUB_TOKEN`'s `permissions:` set is **closed** —
+  `actions`, `attestations`, `checks`, `contents`, `deployments`, `discussions`, `id-token`,
+  `issues`, `models`, `packages`, `pages`, `pull-requests`, `repository-projects`,
+  `security-events`, `statuses` — and `workflows` is not in it. That scope belongs to GitHub Apps
+  and fine-grained PATs only, which is precisely *why* `GITHUB_TOKEN` may not push a file under
+  `.github/workflows/`: the permission it would need cannot be granted to it, so no `permissions:`
+  block was ever going to fix this. GitHub's parser said so directly, asked to run the result:
+  `failed to parse workflow: (Line: 43, Col: 7): Unexpected value 'workflows'`. The invalid key
+  stopped the workflow **starting at all**, in both files here, behind the `v2` tag, and on the
+  default branches of `CandidDan/Nudge` and `CandidDan/TanPlan` — strictly worse than the push
+  failure it replaced, which at least ran. The fix is the **credential**: `_flow-sync.yml`'s
+  `actions/checkout` of the repo being synced now takes `token: ${{ secrets.FLOW_PAT }}`, so the
+  `git push` is authenticated by a token that *can* carry the `workflows` scope, and a first step
+  fails the run naming `FLOW_PAT` and **Workflows: Write** when that secret is unset — before the
+  push, instead of dying on GitHub's opaque `refusing to allow a GitHub App to create or update
+  workflow` at the end.
+
+  The deletion is not the point. Four checks passed a change that could not run — `build` parsed
+  YAML rather than GitHub's schema; `sync-permissions.test.mjs` asserted the *string*
+  `workflows: write` was present, i.e. tested that the wrong thing was there; canonical has no
+  `flow-sync` caller of its own so the reusable never executed here; and GitHub validates a
+  workflow only when it runs one, which a schedule/dispatch-only workflow never did. (A fifth
+  signal existed and was missed: a push carrying an unparseable workflow produces a startup-failure
+  run that is *not* attached to the PR as a check.) So `check-workflows.mjs` now knows the closed
+  set and fails `npm run build` on **any** key outside it — workflow-level or job-level — naming
+  the file, the key and the valid set, with fixtures covering the rarer legitimate keys
+  (`id-token`, `models`, `attestations`, `repository-projects`) so the validator cannot become a
+  worse outage than the bug. `build` also now parses `project-template/.github/workflows/` as well
+  as `.github/workflows/`: the published thin callers are API too, and the invalid key sat in that
+  tree entirely unbuilt. `sync-permissions.test.mjs` is rewritten — every assertion in it would
+  have failed against the broken tree.
+  [caller action: **required, and it replaces flow-0051's instruction — do not follow that one.**
+  (1) If you hand-added `workflows: write` to your `.github/workflows/flow-sync.yml`, **delete that
+  line**; while it is there your workflow does not parse and `flow-sync` cannot run at all. (2) Set
+  your repo's `FLOW_PAT` secret to a **fine-grained PAT carrying Workflows: Write** (plus Contents
+  and Pull requests, read and write). Without it `flow-sync` now stops on its first step with a
+  message naming exactly that, rather than failing opaquely at the push. A repo that adopted the
+  broken version needs **both** halves corrected — its own caller *and* the `v2` alias it points at
+  — before any sync can deliver anything, and neither half can be delivered by `flow-sync` itself,
+  because `flow-sync` is the thing that is broken.]
+
 - **The published callers pin `@v2`, and so does the sync's adopt source** (`project-template/.github/workflows/flow-*.yml`,
   `_flow-sync.yml`, flow-0056). 2.0.0 shipped the version stamp without the pins: ten callers still
   read `_flow-<name>.yml@v1`, and `_flow-sync.yml` checked canonical out at
@@ -37,7 +81,10 @@ after a canary passes). Note any **caller action** required (a caller change is 
   `.flow/bin/sync-permissions.test.mjs` fails if the grant and the copy step ever drift apart in
   either direction — narrowing the copied surface to dodge the permission would quietly turn every
   future new workflow into a manual adopt, which is the gap this closes, not a fix for it.
-  [caller action: **required, and it is the one caller edit `flow-sync` cannot deliver for you.**
+  [caller action: ~~**required**~~ **SUPERSEDED BY flow-0060 (above) — do not follow this.** The
+  `workflows: write` edit it asks for is not a valid permission key and stops your workflow
+  parsing. The original text is kept for the record:
+  ~~required, and it is the one caller edit `flow-sync` cannot deliver for you.~~
   Every adopting repo must hand-edit its own `.github/workflows/flow-sync.yml` to add
   `workflows: write` to the `jobs.flow-sync.permissions` block — a called workflow can never hold a
   permission its caller withheld, so canonical's grant is inert until yours exists. Until you make

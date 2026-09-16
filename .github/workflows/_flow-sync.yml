@@ -21,8 +21,11 @@ name: _flow-sync (reusable)
 # store-guard (which only blocks .flow/tasks/ edits) passes — yet flow-gates' flow-tooling job
 # runs the *synced* tests + flow-doctor, so the gate validates the update for free.
 #
-# Opens with FLOW_PAT (CAN-58) so flow-gates fires on the sync PR too; falls back to GITHUB_TOKEN
-# when unset (the PR opens, just ungated). The thin caller passes it by name, not `secrets: inherit`.
+# Opens with FLOW_PAT (CAN-58) so flow-gates fires on the sync PR too. FLOW_PAT is REQUIRED here,
+# not optional: the copied surface includes `.github/workflows/flow-*.yml`, and only a token that
+# carries the `workflows` scope may push a file under that directory. GITHUB_TOKEN never can — see
+# the permissions block below for why that is not fixable with a permission. The thin caller passes
+# it by name, not `secrets: inherit`.
 
 on:
   workflow_call:
@@ -38,27 +41,58 @@ on:
 permissions:
   contents: write          # push the sync branch
   pull-requests: write     # open the sync PR
-  # workflows: write is not optional here — it is the permission this workflow's whole purpose
-  # depends on. The copied surface includes `.github/workflows/flow-*.yml` (the thin callers), and
-  # GitHub refuses any push that creates or modifies a file under `.github/workflows/` unless the
-  # pushing token carries `workflows`. Without it, the first sync that adds or changes a caller
-  # dies at `git push` with "refusing to allow a GitHub App to create or update workflow ...
-  # without `workflows` permission" — which is how CandidDan/Nudge sat at .flow/VERSION 1.0.0 for
-  # weeks while its weekly sync failed silently. Do NOT drop this and narrow the copy step to
-  # match: shipping a NEW caller to a repo that has never heard of it is exactly what the copy
-  # step is for. `.flow/bin/sync-permissions.test.mjs` fails if the grant and the copy step ever
-  # drift apart, in either direction.
-  workflows: write         # push `.github/workflows/flow-*.yml` — the copied caller surface
+  # There is deliberately NO `workflows:` key here, and there cannot be one. GITHUB_TOKEN's
+  # permission set is CLOSED — actions, attestations, checks, contents, deployments, discussions,
+  # id-token, issues, models, packages, pages, pull-requests, repository-projects, security-events,
+  # statuses — and `workflows` is not a member of it. That scope exists only for GitHub Apps and
+  # fine-grained PATs, which is precisely WHY GITHUB_TOKEN may not push a file under
+  # `.github/workflows/`: the permission it would need cannot be granted to it, so the answer was
+  # never going to be found in a permissions block.
+  #
+  # flow-0051 wrote `workflows: write` here anyway. GitHub's parser rejected the entire file —
+  #   failed to parse workflow: (Line: 43, Col: 7): Unexpected value 'workflows'
+  # — so the workflow stopped starting at all, in every repo that had adopted it. The copied
+  # surface still needs that scope; it now comes from the CREDENTIAL instead. `Checkout this repo`
+  # below takes `token: ${{ secrets.FLOW_PAT }}`, so the `git push` is made by a fine-grained PAT
+  # that can carry Workflows: Write, and the `Require FLOW_PAT` step fails loudly up front when
+  # that secret is absent.
+  #
+  # `.flow/bin/check-workflows.mjs` now fails `npm run build` on any permission key outside the
+  # closed set listed above, so an invented key cannot reach a tag again (flow-0060).
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
+      # Fail HERE, naming the fix, rather than forty lines later at `git push` with GitHub's
+      # opaque "refusing to allow a GitHub App to create or update workflow ... without
+      # `workflows` permission". FLOW_PAT stays `required: false` at the workflow_call boundary on
+      # purpose: flipping it to `required: true` fails at call time with GitHub's own generic
+      # secret-missing message, which says nothing about Workflows: Write — and the whole lesson
+      # of flow-0051 is that the opaque message is what cost the weeks.
+      - name: "Require FLOW_PAT (Workflows: Write)"
+        env:
+          FLOW_PAT: ${{ secrets.FLOW_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FLOW_PAT}" ]; then
+            echo "::error title=FLOW_PAT missing::flow-sync cannot run. It copies canonical's thin callers into .github/workflows/, and GitHub refuses that push from GITHUB_TOKEN: workflows is not one of GITHUB_TOKEN's permissions and cannot be granted to it. Set the FLOW_PAT secret on this repository to a fine-grained PAT with Workflows: Write (plus Contents: Read and write, and Pull requests: Read and write), and forward it from your flow-sync.yml caller."
+            exit 1
+          fi
+          echo "FLOW_PAT is present — the sync push will be made by it, not by GITHUB_TOKEN."
+
       - name: Checkout this repo
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: main
           fetch-depth: 0
+          # THE FIX (flow-0060). checkout persists whatever token it is given as this clone's
+          # remote credential, so this line — not the permissions block — decides who the
+          # `git push` further down authenticates as. Left at its default it is GITHUB_TOKEN, and
+          # a push that creates or modifies `.github/workflows/flow-*.yml` is refused server-side
+          # however the permissions block is written. FLOW_PAT is a fine-grained PAT, so it CAN
+          # carry Workflows: Write, and it is the only credential that makes this push legal.
+          token: ${{ secrets.FLOW_PAT }}
 
       - name: Checkout canonical
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -73,7 +107,10 @@ jobs:
 
       - name: Adopt canonical infra if behind
         env:
-          GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
+          # No `|| github.token` fallback: the `Require FLOW_PAT` step above has already proved
+          # FLOW_PAT is set, and a fallback here would only re-introduce the failure mode as a
+          # `gh` call that succeeds while the push it accompanies cannot.
+          GH_TOKEN: ${{ secrets.FLOW_PAT }}
         run: |
           set -euo pipefail
           CANON_TPL=".flow-canonical/project-template"
