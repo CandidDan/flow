@@ -50,14 +50,81 @@ jobs:
           fi
           echo "Marking $id done (PR #$PR_NUM merged)."
           printf '{"updates":[{"id":"%s","status":"done"}]}\n' "$id" > .flow/board-edits.json
+
+          # `apply-board-edits.mjs` CONSUMES the edits file, and the retry below re-derives this
+          # edit against a fresh tip on every attempt — so keep the payload and the message.
+          EDITS="$(cat .flow/board-edits.json)"
+          COMMIT_MSG="flow: $id -> done (PR #$PR_NUM merged)"
+          TRANSITION="done"
+
           node .flow/bin/apply-board-edits.mjs
 
           if git diff --quiet -- .flow/tasks/; then
             echo "No state change for $id (already done, or not found) — nothing to commit."
             exit 0
           fi
+
+          # >>> flow-0059 state-push-retry — byte-identical in _flow-status.yml and _flow-done.yml >>>
+          # `main` is written constantly: the queue-runner claiming, this workflow on a PR event,
+          # flow-done on merge, flow-recover sweeping, and humans. A single `git push origin main`
+          # therefore loses whenever anything else lands between this job's checkout and its push —
+          # the transition is computed correctly, committed on the runner, refused with
+          # `! [rejected] main -> main (fetch first)`, and then destroyed with the container. That is
+          # not bad luck; concurrent writes are the normal case. Observed on run 35058472116, which
+          # dropped flow-0056's `in_review` and needed a human to replay it.
+          #
+          # The shape is allocate-task-id.mjs's, for the identical race: DISCARD the attempt and REDO
+          # it against the new tip. Deliberately absent: `pull`, `rebase`, `merge`, `--force` — each
+          # of those COMBINES a stale edit with someone else's rather than re-deriving it, and a
+          # rebase-then-push still loses inside the window between the rebase and the push.
+          # Exhausting the attempts exits NON-ZERO naming the task and the transition: a state change
+          # that vanishes quietly is the entire defect, so swallowing the last failure would rebuild
+          # the bug with more code in front of it.
+          MAX_PUSH_ATTEMPTS=5
+
+          # The task file this run edits, and its content at the tip we started from. Read off the
+          # diff rather than guessed from `$id`, so it is exactly the file about to be committed.
+          task_file="$(git diff --name-only -- .flow/tasks/ | head -1)"
+          base_blob="$(git rev-parse --verify --quiet "HEAD:$task_file" || true)"
+
           git config user.name  "flow-bot"
           git config user.email "flow-bot@users.noreply.github.com"
           git add .flow/tasks/
-          git commit -m "flow: $id -> done (PR #$PR_NUM merged)"
-          git push origin main
+          git commit -m "$COMMIT_MSG"
+
+          attempt=1
+          until git push origin HEAD:main; do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -gt "$MAX_PUSH_ATTEMPTS" ]; then
+              echo "::error::flow: LOST STATE CHANGE — $id -> $TRANSITION could not be pushed to main after $MAX_PUSH_ATTEMPTS attempts. $task_file on main is STALE and no other workflow will re-fire this transition. Re-run this workflow, or apply it by hand."
+              exit 1
+            fi
+
+            # Throw our commit away and re-read `main`. A reset, not a pull: there is no local work
+            # worth preserving, and the next attempt re-derives the edit from scratch.
+            sleep "$attempt"
+            git fetch origin main --quiet
+            git reset --hard FETCH_HEAD
+
+            printf '%s\n' "$EDITS" > .flow/board-edits.json
+            node .flow/bin/apply-board-edits.mjs
+
+            if git diff --quiet -- .flow/tasks/; then
+              echo "$id is already at '$TRANSITION' on main — someone else landed it. Nothing left to push."
+              exit 0
+            fi
+
+            # Our task file moved under us and re-applying still changes it, so another actor wrote
+            # something ELSE into it. Pushing now would silently overwrite their change, which is
+            # worse than the drop this loop exists to prevent. Refuse, and say both facts out loud.
+            now_blob="$(git rev-parse --verify --quiet "HEAD:$task_file" || true)"
+            if [ "$now_blob" != "$base_blob" ]; then
+              echo "::error::flow: CONFLICTING EDIT — $task_file changed on main while $id -> $TRANSITION was being pushed. Refusing to overwrite that change, so this transition was NOT applied."
+              exit 1
+            fi
+
+            git add .flow/tasks/
+            git commit -m "$COMMIT_MSG"
+          done
+          echo "$id -> $TRANSITION landed on main (attempt $attempt of $MAX_PUSH_ATTEMPTS)."
+          # <<< flow-0059 state-push-retry <<<

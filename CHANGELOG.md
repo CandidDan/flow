@@ -6,6 +6,34 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+- **A lost race on `main` no longer discards a task's status** (`_flow-status.yml`,
+  `_flow-done.yml`, flow-0059). Both workflows computed a transition, committed it on the runner
+  and then ran a bare `git push origin main`. `main` is written constantly — the queue-runner
+  claiming, `flow-status` on every PR event, `flow-done` on merge, `flow-recover` sweeping, and
+  humans — so anything landing between the job's checkout and its push made that push a
+  non-fast-forward, and git's refusal destroyed the state change with the container. Observed, not
+  theorised: run 35058472116 logged `PR #78 marked ready for review -> flow-0056 in_review`,
+  committed it, died at `! [rejected] main -> main (fetch first)`, and a human replayed it by hand
+  in `cb793a7`. `_flow-done.yml` is the case that matters most — a lost `-> done` leaves a task at
+  `in_review` with a **merged** PR permanently, because nothing re-fires `flow-done`, and
+  `flow-recover` can then sweep it back to `ready` and have the queue-runner re-work already-merged
+  code. Both now share one byte-identical block that takes up to **5 attempts**, and each retry
+  **discards and redoes** the edit against the freshly fetched tip — the shape
+  `allocate-task-id.mjs` already uses for this race. Deliberately absent: `pull`, `rebase`, `merge`
+  and `--force`, each of which combines a stale edit with someone else's instead of re-deriving it
+  (and rebase-then-push still loses inside the window between the rebase and the push). Exhausting
+  the attempts **exits non-zero**, naming the task and the transition, because a state change that
+  vanishes quietly is the whole defect. A concurrent edit to the *same* task file fails the same
+  way rather than being overwritten: a retry that wins by clobbering is worse than the drop it
+  replaces. `.flow/bin/state-push-retry.test.mjs` proves each of these by running the workflows'
+  own shell against real repositories with a real competing pusher, not by reading the script.
+  `_flow-recover.yml` keeps its `pull --rebase` and is left for its own task — it is on a cron, so
+  a reset it loses is recomputed and re-pushed next sweep, which is exactly what these two can
+  never do.
+  [caller action: **none.** Both files are reusables, referenced by thin callers that gain no
+  input, permission or secret; the fix reaches every repo the moment the `v2` alias moves, with no
+  `flow-sync` and no caller edit.]
+
 - **The published callers pin `@v2`, and so does the sync's adopt source** (`project-template/.github/workflows/flow-*.yml`,
   `_flow-sync.yml`, flow-0056). 2.0.0 shipped the version stamp without the pins: ten callers still
   read `_flow-<name>.yml@v1`, and `_flow-sync.yml` checked canonical out at
