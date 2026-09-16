@@ -289,8 +289,9 @@ Cut from the 1.2.x line, not from `main` — see 2.0.0 for why. Carries one chan
 Its tree is the `release/1.2.x` branch; `main` has never held this version.
 
 - **`Session hygiene` no longer trips on harness-side truncation**
-  (`project-template/.flow/PROTOCOL.md`). Identical text to the 1.3.1 entry below — the section is
-  byte-for-byte the same on both lineages, verified by digest at release time. Workers on a harness
+  (`project-template/.flow/PROTOCOL.md`). Ships the identical `PROTOCOL.md` section as the 1.3.1
+  entry below: this bullet is a condensed retelling, but the protocol text the two releases carry
+  is byte-for-byte the same on both lineages, verified by digest at release time. Workers on a harness
   that caps search output were handing off on their first repository search, before implementation
   began. [caller action: **none.** Re-sync `.flow/PROTOCOL.md` in the usual way. The change only
   loosens conditions, so nothing compliant becomes non-compliant.]
