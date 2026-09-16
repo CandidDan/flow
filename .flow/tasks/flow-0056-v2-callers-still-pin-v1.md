@@ -1,12 +1,12 @@
 ---
 id: "flow-0056"
 title: "Point the v2 template callers at v2 — today they ship 2.0.0 wired to the v1 reusables"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "session_01DTKfbYYGSWy8xdqLC7a6Dw"
 created: "2026-09-16"
-started: ""
+started: "2026-09-16T04:56:00Z"
 branch: ""
 pr: ""
 issue: ""
