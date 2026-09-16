@@ -1,27 +1,33 @@
-// sync-permissions.test.mjs — proving tests for flow-0051.
+// sync-permissions.test.mjs — proving tests for flow-0060 (superseding flow-0051's).
 //
-// The defect: `_flow-sync.yml` copies canonical's thin callers into the adopting repo's
-// `.github/workflows/`, and GitHub refuses any push that creates or modifies a file under that
-// directory unless the pushing token carries the `workflows` permission. The workflow granted
-// `contents` and `pull-requests` only, so the first sync that added a caller — `flow-compass.yml`,
-// a file most repos have never had — died at `git push` with:
+// flow-0051 diagnosed a real bug — `_flow-sync.yml` could not push the
+// `.github/workflows/flow-*.yml` callers it exists to deliver — and fixed it by adding
+// `workflows: write` to both permission blocks. There is no such permission. GITHUB_TOKEN's set is
+// closed (actions, attestations, checks, contents, deployments, discussions, id-token, issues,
+// models, packages, pages, pull-requests, repository-projects, security-events, statuses);
+// `workflows` belongs to GitHub Apps and fine-grained PATs, which is exactly WHY GITHUB_TOKEN may
+// not push under `.github/workflows/`. GitHub's parser answered the point directly:
 //
-//   ! [remote rejected] flow-sync/1.3.0 -> flow-sync/1.3.0
-//     (refusing to allow a GitHub App to create or update workflow
-//      `.github/workflows/flow-compass.yml` without `workflows` permission)
+//   failed to parse workflow: (Line: 43, Col: 7): Unexpected value 'workflows'
 //
-// weekly, on a schedule, with nothing reaching a human. Criteria proved here:
+// So the workflow stopped starting at all, in canonical and in every repo that had adopted it —
+// strictly worse than the push failure it replaced.
 //
-//   · `_flow-sync.yml`'s permissions block includes `workflows: write`
-//   · `project-template/.github/workflows/flow-sync.yml` grants it to the called workflow
-//     (a called workflow can never hold a permission its caller withheld, so the caller is the
-//     ceiling and both halves are load-bearing)
-//   · removing the grant from EITHER file fails, naming the file that lost it — demonstrated by
-//     mutating a copy of the real file and re-running the check, not by asserting a literal
-//   · removing the copy step fails too: the grant and the copy it exists to serve must not drift
-//     apart in either direction. Narrowing the copied surface to dodge the permission is the
-//     wrong fix (it turns every future new caller into a manual adopt), so the check is
-//     symmetric by construction.
+// THIS FILE USED TO ASSERT THE STRING `workflows: write` WAS PRESENT. That is the fourth of the
+// five checks flow-0060 found passing on a change that could not run: a test that pins the wrong
+// thing in place is worse than no test, because it makes removing the defect look like a
+// regression. Every assertion below would have FAILED against the broken tree. Criteria proved:
+//
+//   · neither `_flow-sync.yml` nor the published thin caller declares a `workflows:` permission
+//     key, at workflow level or job level — it is not a key that exists
+//   · `_flow-sync.yml`'s checkout of the repo being synced takes `token: secrets.FLOW_PAT`, so
+//     the `git push` is authenticated by a credential that CAN carry the workflows scope. This is
+//     the actual fix: a credential, not a permission
+//   · a step earlier than the push fails the run when FLOW_PAT is unset, naming FLOW_PAT and
+//     Workflows: Write — not GitHub's opaque refusal forty lines later
+//   · each of those, removed from a mutated copy of the real file, fails the check by name
+//   · removing the copy step fails too: the copied caller surface is WHY the credential is
+//     needed, so narrowing it to dodge the requirement must fail as loudly
 //   · end to end: run the workflow's OWN copy loop against a fixture repo whose
 //     `.github/workflows/` lacks a caller canonical ships, and the resulting commit — the diff
 //     the sync PR carries — contains that caller.
@@ -51,9 +57,16 @@ const REUSABLE = join(REPO, ".github/workflows/_flow-sync.yml");
 const CALLER = join(REPO, "project-template/.github/workflows/flow-sync.yml");
 const CANON_TPL = join(REPO, "project-template");
 
+const REUSABLE_LABEL = "_flow-sync.yml";
+const CALLER_LABEL = "project-template/.github/workflows/flow-sync.yml";
+
 // The caller canonical ships that a long-adopted repo has never had. flow-0013 added it, and it is
 // the file named in every one of Nudge's rejected pushes.
 const NEW_CALLER = "flow-compass.yml";
+
+// The credential the push must be made with. Compared as the literal expression, because what
+// `actions/checkout` persists as the remote credential is decided by this exact string.
+const FLOW_PAT_EXPR = "${{ secrets.FLOW_PAT }}";
 
 // ---------------------------------------------------------------------------------------------
 // The check, written over file CONTENT rather than paths, so a test can hand it a mutated copy.
@@ -67,6 +80,15 @@ const runScripts = (wf) =>
     .map((step) => step?.run)
     .filter((run) => typeof run === "string")
     .join("\n");
+
+/** [path, block] for the workflow-level permissions block and every job's. */
+const permissionBlocks = (wf) => {
+  const blocks = [["permissions", wf?.permissions]];
+  for (const [id, job] of Object.entries(wf?.jobs ?? {})) {
+    if (job && typeof job === "object") blocks.push([`jobs.${id}.permissions`, job.permissions]);
+  }
+  return blocks;
+};
 
 /** Does this reusable still copy canonical's thin callers into `.github/workflows/`? */
 const copiesCallers = (script) =>
@@ -87,40 +109,83 @@ const extractCopyLoop = (reusable) => {
   return match[0];
 };
 
-function checkSyncPermissions({ reusable, caller }) {
+const syncSteps = (wf) => wf?.jobs?.sync?.steps ?? [];
+
+function checkSyncCredential({ reusable, caller }) {
   const problems = [];
   const reusableWf = yamlMod.parse(reusable);
   const callerWf = yamlMod.parse(caller);
 
-  const copies = copiesCallers(runScripts(reusableWf));
-  const reusableGrant = reusableWf?.permissions?.workflows;
-  const callerGrant = callerWf?.jobs?.["flow-sync"]?.permissions?.workflows;
+  // 1. `workflows` is not a GITHUB_TOKEN permission. Neither file may name it, anywhere.
+  for (const [label, wf] of [[REUSABLE_LABEL, reusableWf], [CALLER_LABEL, callerWf]]) {
+    for (const [where, block] of permissionBlocks(wf)) {
+      if (block && typeof block === "object" && Object.keys(block).includes("workflows")) {
+        problems.push(
+          `${label}: ${where} declares 'workflows'. That is not a GITHUB_TOKEN permission — the ` +
+          "set is closed and does not contain it — so GitHub refuses to parse the whole file: " +
+          "\"Unexpected value 'workflows'\". The workflow does not start. The scope must come " +
+          "from FLOW_PAT, passed to actions/checkout as `token:`.",
+        );
+      }
+    }
+  }
 
-  if (!copies) {
+  // 2. The copy step is why a workflows-scoped credential is needed at all.
+  if (!copiesCallers(runScripts(reusableWf))) {
     problems.push(
-      "_flow-sync.yml no longer copies `.github/workflows/flow-*.yml` from canonical. That copy " +
-      "is how canonical ships a NEW thin caller to a repo that has never heard of it; dropping " +
-      "it turns every future workflow into a manual adopt (flow-0051, note 4). If the copy is " +
-      "genuinely gone, the `workflows: write` grants below are unexplained privilege and must go " +
-      "with it — that is why this check is symmetric.",
+      `${REUSABLE_LABEL} no longer copies \`.github/workflows/flow-*.yml\` from canonical. That ` +
+      "copy is how canonical ships a NEW thin caller to a repo that has never heard of it; " +
+      "dropping it turns every future workflow into a manual adopt (flow-0051, note 4). If the " +
+      "copy is genuinely gone, the FLOW_PAT requirement below is unexplained privilege and must " +
+      "go with it — that is why this check is symmetric.",
     );
   }
-  if (reusableGrant !== "write") {
+
+  // 3. THE FIX: the push credential. checkout persists its `token:` as the remote credential, so
+  //    this line and not the permissions block decides who `git push` authenticates as.
+  const steps = syncSteps(reusableWf);
+  const checkout = steps.find(
+    (s) => String(s?.uses ?? "").startsWith("actions/checkout") && !s?.with?.repository,
+  );
+  if (!checkout) {
     problems.push(
-      "_flow-sync.yml: permissions.workflows is " + JSON.stringify(reusableGrant ?? null) +
-      ", expected \"write\". Without it every sync that adds or changes a thin caller dies at " +
-      "`git push` with \"refusing to allow a GitHub App to create or update workflow ... " +
-      "without `workflows` permission\" — silently, on the weekly cron.",
+      `${REUSABLE_LABEL}: no \`actions/checkout\` step for the repo being synced — the push ` +
+      "credential cannot be verified. Re-read the job and update this check.",
+    );
+  } else if (checkout.with?.token !== FLOW_PAT_EXPR) {
+    problems.push(
+      `${REUSABLE_LABEL}: the checkout of the synced repo has token ` +
+      JSON.stringify(checkout.with?.token ?? null) + `, expected ${JSON.stringify(FLOW_PAT_EXPR)}. ` +
+      "Left at its default it is GITHUB_TOKEN, and a push that creates or modifies a file under " +
+      "`.github/workflows/` is refused server-side however the permissions block is written. " +
+      "Only a fine-grained PAT can carry the workflows scope.",
     );
   }
-  if (callerGrant !== "write") {
+
+  // 4. The preflight, and that it really is pre-flight — before the push, not after it.
+  const pushIdx = steps.findIndex((s) => /git push/.test(String(s?.run ?? "")));
+  const guardIdx = steps.findIndex(
+    (s) =>
+      /FLOW_PAT/.test(String(s?.run ?? "")) &&
+      /Workflows: Write/.test(String(s?.run ?? "")) &&
+      /exit 1/.test(String(s?.run ?? "")),
+  );
+  if (pushIdx < 0) {
+    problems.push(`${REUSABLE_LABEL}: no step runs \`git push\` — re-read the job and update this check.`);
+  } else if (guardIdx < 0) {
     problems.push(
-      "project-template/.github/workflows/flow-sync.yml: jobs.flow-sync.permissions.workflows is " +
-      JSON.stringify(callerGrant ?? null) + ", expected \"write\". A called workflow can never " +
-      "hold a permission its caller did not grant, so the reusable's own declaration is inert " +
-      "without this one — the caller is the ceiling.",
+      `${REUSABLE_LABEL}: no step fails the run when FLOW_PAT is unset while naming FLOW_PAT and ` +
+      "Workflows: Write. Without it the run dies at `git push` with GitHub's \"refusing to allow " +
+      "a GitHub App to create or update workflow ... without `workflows` permission\", which " +
+      "names neither the secret nor the scope — the opacity that cost flow-0051 weeks.",
+    );
+  } else if (guardIdx > pushIdx) {
+    problems.push(
+      `${REUSABLE_LABEL}: the FLOW_PAT check runs at step ${guardIdx}, after the push at step ` +
+      `${pushIdx}. A check that fires after the failure it predicts is not a preflight.`,
     );
   }
+
   return problems;
 }
 
@@ -130,36 +195,67 @@ const readPair = () => ({
 });
 
 // ---------------------------------------------------------------------------------------------
-// The grants, and the removals that must fail.
+// The shipped pair, and the mutations that must fail.
 // ---------------------------------------------------------------------------------------------
 
-test("_flow-sync.yml and the thin caller both grant `workflows: write`", { skip }, () => {
-  assert.deepEqual(checkSyncPermissions(readPair()), [],
-    "flow-sync exists to deliver `.github/workflows/flow-*.yml`; it cannot push them without " +
-    "`workflows`, and the reusable cannot exceed what the caller granted");
+test("the shipped reusable and thin caller are coherent: no invalid key, and FLOW_PAT pushes", { skip }, () => {
+  assert.deepEqual(checkSyncCredential(readPair()), [],
+    "flow-sync exists to deliver `.github/workflows/flow-*.yml`; only a token carrying the " +
+    "workflows scope may push them, and no permissions block can grant that scope");
 });
 
-test("removing the grant from _flow-sync.yml fails, naming that file", { skip }, () => {
+test("re-adding `workflows: write` to _flow-sync.yml fails, naming that file", { skip }, () => {
   const pair = readPair();
-  const mutated = pair.reusable.replace(/^\s*workflows: write.*$/m, "");
-  assert.notEqual(mutated, pair.reusable, "the mutation must actually remove the grant line");
+  // The exact regression: flow-0051's line, back in flow-0051's place.
+  const mutated = pair.reusable.replace(
+    /^permissions:\n/m, "permissions:\n  workflows: write\n");
+  assert.notEqual(mutated, pair.reusable, "the mutation must actually add the key");
 
-  const problems = checkSyncPermissions({ ...pair, reusable: mutated });
-  assert.equal(problems.length, 1, "exactly the reusable's grant is missing: " + problems.join(" | "));
-  assert.match(problems[0], /^_flow-sync\.yml:/,
-    "the failure must name the file that lost the grant, so the fix is obvious from the log");
+  const problems = checkSyncCredential({ ...pair, reusable: mutated });
+  assert.equal(problems.length, 1, "exactly the invalid key: " + problems.join(" | "));
+  assert.match(problems[0], /^_flow-sync\.yml: permissions declares 'workflows'/,
+    "the failure must name the file and the block, so the fix is obvious from the log");
+  assert.match(problems[0], /does not start/,
+    "and must say the consequence — an unparseable workflow is not a degraded workflow");
 });
 
-test("removing the grant from the thin caller fails, naming that file", { skip }, () => {
+test("re-adding it to the thin caller's job block fails, naming the caller", { skip }, () => {
   const pair = readPair();
-  const mutated = pair.caller.replace(/^\s*workflows: write.*$/m, "");
-  assert.notEqual(mutated, pair.caller, "the mutation must actually remove the grant line");
+  const mutated = pair.caller.replace(
+    /^      pull-requests: write$/m, "      pull-requests: write\n      workflows: write");
+  assert.notEqual(mutated, pair.caller, "the mutation must actually add the key");
 
-  const problems = checkSyncPermissions({ ...pair, caller: mutated });
-  assert.equal(problems.length, 1, "exactly the caller's grant is missing: " + problems.join(" | "));
-  assert.match(problems[0], /^project-template\/\.github\/workflows\/flow-sync\.yml:/,
+  const problems = checkSyncCredential({ ...pair, caller: mutated });
+  assert.equal(problems.length, 1, "exactly the invalid key: " + problems.join(" | "));
+  assert.match(problems[0], /^project-template\/\.github\/workflows\/flow-sync\.yml: jobs\.flow-sync\.permissions/,
     "the failure must name the caller, not the reusable — they are different edits with " +
     "different owners (canonical vs. every adopting repo)");
+});
+
+test("dropping `token: secrets.FLOW_PAT` from the checkout fails — that IS the fix", { skip }, () => {
+  const pair = readPair();
+  const mutated = pair.reusable.replace(/^          token: \$\{\{ secrets\.FLOW_PAT \}\}$/m, "");
+  assert.notEqual(mutated, pair.reusable, "the mutation must actually remove the token line");
+
+  const problems = checkSyncCredential({ ...pair, reusable: mutated });
+  assert.equal(problems.length, 1, "exactly the push credential is gone: " + problems.join(" | "));
+  assert.match(problems[0], /the checkout of the synced repo has token null/);
+  assert.match(problems[0], /GITHUB_TOKEN/,
+    "the message must say what the default silently becomes — the whole defect is that the " +
+    "absence looks like nothing at all");
+});
+
+test("removing the FLOW_PAT preflight fails — the run must not die at the push instead", { skip }, () => {
+  const pair = readPair();
+  const mutated = pair.reusable.replace(/^          set -euo pipefail\n          if \[ -z "\$\{FLOW_PAT\}" \][\s\S]*?\n          fi\n/m,
+    "          echo noop\n");
+  assert.notEqual(mutated, pair.reusable, "the mutation must actually remove the guard");
+
+  const problems = checkSyncCredential({ ...pair, reusable: mutated });
+  assert.equal(problems.length, 1, "only the preflight is gone: " + problems.join(" | "));
+  assert.match(problems[0], /no step fails the run when FLOW_PAT is unset/);
+  assert.match(problems[0], /Workflows: Write/,
+    "the replacement must name the scope, or the operator still has to go and find out why");
 });
 
 test("removing the copy of `.github/workflows/flow-*.yml` fails too — no silent narrowing", { skip }, () => {
@@ -170,11 +266,33 @@ test("removing the copy of `.github/workflows/flow-*.yml` fails too — no silen
     loop.match(/^[ \t]*/)[0] + "# (thin-caller copy step removed)");
   assert.notEqual(mutated, pair.reusable, "the mutation must actually remove the copy loop");
 
-  const problems = checkSyncPermissions({ ...pair, reusable: mutated });
+  const problems = checkSyncCredential({ ...pair, reusable: mutated });
   assert.equal(problems.length, 1, "only the copy step is gone: " + problems.join(" | "));
   assert.match(problems[0], /no longer copies/,
-    "dropping the copied caller surface to avoid needing the permission is the wrong fix, and " +
-    "must fail as loudly as dropping the permission");
+    "dropping the copied caller surface to avoid needing the credential is the wrong fix, and " +
+    "must fail as loudly as dropping the credential");
+});
+
+test("the preflight's message names the secret AND the scope AND how to set it", { skip }, () => {
+  const wf = yamlMod.parse(readFileSync(REUSABLE, "utf8"));
+  const guard = syncSteps(wf).find((s) => /FLOW_PAT/.test(String(s?.run ?? "")) && /exit 1/.test(String(s?.run ?? "")));
+  assert.ok(guard, "the preflight step must exist");
+  const script = String(guard.run);
+  assert.match(script, /::error/, "it must be a GitHub annotation, not a line buried in the log");
+  assert.match(script, /Workflows: Write/, "the scope the PAT needs");
+  assert.match(script, /fine-grained PAT/, "the KIND of token — a classic PAT's scopes are named differently");
+  assert.match(script, /flow-sync\.yml caller/, "where to forward it from");
+  assert.ok(!/\$\{\{ *secrets\./.test(script),
+    "the secret must reach the script through `env:`, never interpolated into the shell source");
+});
+
+test("the reusable authenticates `gh` with FLOW_PAT and no GITHUB_TOKEN fallback", { skip }, () => {
+  const wf = yamlMod.parse(readFileSync(REUSABLE, "utf8"));
+  const adopt = syncSteps(wf).find((s) => /git push/.test(String(s?.run ?? "")));
+  assert.ok(adopt, "the adopt step must exist");
+  assert.equal(adopt.env?.GH_TOKEN, FLOW_PAT_EXPR,
+    "a `|| github.token` fallback would let `gh pr create` succeed on a run whose push could " +
+    "never have been legal — the preflight already proved FLOW_PAT is set");
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -220,11 +338,14 @@ test("a sync into a repo lacking a caller commits that caller — the diff the P
     "the copied caller must be canonical's, byte for byte",
   );
 
-  // And this is precisely the push GitHub rejects without `workflows`: a diff that creates a file
-  // under `.github/workflows/`. The local push in this fixture cannot demonstrate the refusal —
-  // it is server-side policy, not git — so assert the named precondition instead.
+  // And this is precisely the push GitHub rejects unless the pushing token carries the workflows
+  // scope: a diff that creates a file under `.github/workflows/`. The local push in this fixture
+  // cannot demonstrate the refusal — it is server-side policy, not git — so assert the named
+  // precondition instead, and then that the credential which satisfies it is wired up.
   assert.ok(diff.some((p) => p.startsWith(".github/workflows/")),
     "the sync diff touches `.github/workflows/`, which is the condition for GitHub's refusal");
-  assert.deepEqual(checkSyncPermissions(readPair()), [],
-    "…and both permission blocks grant `workflows: write`, which is what makes that push legal");
+  assert.deepEqual(checkSyncCredential(readPair()), [],
+    "…and the push is made by FLOW_PAT, which is what makes it legal. Note what this test can " +
+    "and cannot prove: a fixture repo has no GitHub server to refuse it, so the proof that the " +
+    "real push now succeeds is a real sync run in an adopting repo, not anything runnable here.");
 });
