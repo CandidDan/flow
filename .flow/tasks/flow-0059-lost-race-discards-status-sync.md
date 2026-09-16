@@ -1,12 +1,12 @@
 ---
 id: "flow-0059"
 title: "A lost race on main silently discards a task's status — flow-status and flow-done never retry"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "session_01DMaRd7oebwiqpEiJLpJafB"
 created: "2026-09-16"
-started: ""
+started: "2026-09-16T06:08:13Z"
 branch: ""
 pr: ""
 issue: ""
