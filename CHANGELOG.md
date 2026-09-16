@@ -24,7 +24,53 @@ after a canary passes). Note any **caller action** required (a caller change is 
   `v1` alias into an adopting repo. This entry's own presence, with the gate green, is the proof
   the fix works.]
 
-## 1.3.1 — 2026-09-15 (pending tag + canary)
+## 2.0.0 — 2026-09-16 (pending tag + canary)
+
+**This is 1.3.0 and 1.3.1, renumbered. No new work ships here** — the same tree, correctly
+classified. The sections below for 1.3.0 and 1.3.1 are left exactly as they were: they are the
+record of what was tagged on 2026-09-14, and rewriting them would be the thing this release exists
+to stop pretending about.
+
+**Why the number changed.** `docs/flow-versioning-policy.md` states the tell: *"if a change
+requires editing the per-repo callers, it is MAJOR — it cannot silently propagate via an alias."*
+`git diff --name-only v1.2.0 v1.3.0 -- project-template/.github/workflows/` lists **eight** caller
+workflows. 1.3.0 was a major release wearing a minor's number, and on 2026-09-15 `v1` was advanced
+onto it. Every repo pinned `@v1` whose callers were still 1.2.0-shaped went red at once — a
+referenced check in `_flow-gates.yml` had come to depend on a copied capability in
+`.flow/bin/touches-guard.mjs`, which only `flow-sync` can deliver.
+
+**What was done about it.** `v1` was rolled back the same day and now points at `v1.2.1`
+(`888b012`), a patch cut from the 1.2.x line carrying only the caller-action-free session-hygiene
+fix. `v1.3.0` remains tagged and immutable; nothing pins it. The work below reaches a repo when
+that repo chooses `@v2`.
+
+**Adopting v2 needs `flow-0051` first.** Every action below is a caller edit, and `flow-sync`
+currently has no `workflows: write` grant — so it cannot push the files that carry them. The
+bootstrap is one hand-edit per repo (`flow-sync.yml`, adding the grant), after which `flow-sync`
+delivers the rest. Do not begin the fleet migration before that lands.
+
+- **Re-sync `flow-queue-runner.yml` and set the `FLOW_PAT` secret** (flow-0026). The worker now
+  pushes as a real actor instead of `github-actions[bot]`, so the Definition-of-Done gate runs on
+  its PR. [caller action: **two steps, and the fix is inert without both** — the caller must pass
+  `FLOW_PAT` through, and the secret must exist in the repo. One without the other leaves the
+  worker exactly where it was.]
+- **Re-sync `flow-status.yml`** (flow-0039). The auto-opened PR is now a draft and `in_review`
+  moves on `gh pr ready`. [caller action: **required** — the trigger must list `ready_for_review`
+  in `on.pull_request.types`. A caller left at the old trigger never sees the PR become ready, so
+  the task never leaves `in_progress`.]
+- **Re-sync `flow-review.yml` and add a `review:` block to `.flow/config.yml`** (flow-0007). The
+  three Definition-of-Done reviewers moved out of the worker's session and onto the PR.
+  [caller action: **required** — without the caller the reviewers do not run, and the gate goes
+  green on build/lint/test/coverage alone, which is the certifying-your-own-work failure the task
+  exists to end.]
+- **Copy `flow-compass.yml`** (flow-0013). A new scheduled drift audit. [caller action: **opt-in**
+  — a new reusable reaches nobody without a caller, so this one is a deliberate add rather than a
+  re-sync. Skipping it costs you the audit and breaks nothing.]
+- Everything else in 1.3.0 and 1.3.1 rides the reference and needs no caller edit; the per-entry
+  detail stays in those sections rather than being duplicated here.
+  [caller action: none for these.]
+
+## 1.3.1 — 2026-09-15 (superseded by 2.0.0; never tagged, never carried by `v1`)
 
 A single-change patch release. Prose only: no reusable workflow, no `.flow/bin/` helper and no
 lifecycle or gate semantics move with it.
@@ -48,7 +94,7 @@ lifecycle or gate semantics move with it.
   re-syncing `.flow/PROTOCOL.md` in the usual way — `flow-sync` opens the PR. The change only ever
   loosens conditions, so no session that was compliant under 1.3.0 becomes non-compliant under 1.3.1.]
 
-## 1.3.0 — 2026-09-14 (pending tag + canary)
+## 1.3.0 — 2026-09-14 (tagged `v1.3.0`; carried by `v1` 2026-09-15 only, rolled back same day — see 2.0.0)
 
 The first release since `v1.2.0` (2026-08-20). Everything below has been on `v1-edge` since it
 merged and has reached nobody pinned to `v1`. Entries cover only what an adopting repo consumes —
@@ -235,6 +281,19 @@ the reusables in `.github/workflows/_flow-*.yml` and everything under `project-t
   the sweep. The opt-out is the variable that already exists — `FLOW_TRIAGE_TRUSTED_ASSOCIATIONS`.
   There is deliberately **no second variable**: both boundaries read that one set, so widening the
   inbox widens comments by exactly the same step, and neither can be widened without the other.]
+
+## 1.2.1 — 2026-09-15 (tagged `v1.2.1`; **this is what `v1` points at today**)
+
+Cut from the 1.2.x line, not from `main` — see 2.0.0 for why. Carries one change, the only one in
+1.3.1 that was genuinely caller-action-free, so the fleet could have it without adopting a major.
+Its tree is the `release/1.2.x` branch; `main` has never held this version.
+
+- **`Session hygiene` no longer trips on harness-side truncation**
+  (`project-template/.flow/PROTOCOL.md`). Identical text to the 1.3.1 entry below — the section is
+  byte-for-byte the same on both lineages, verified by digest at release time. Workers on a harness
+  that caps search output were handing off on their first repository search, before implementation
+  began. [caller action: **none.** Re-sync `.flow/PROTOCOL.md` in the usual way. The change only
+  loosens conditions, so nothing compliant becomes non-compliant.]
 
 ## 1.1.0 — 2026-07-03 (pending tag + canary)
 
