@@ -1,7 +1,7 @@
 ---
 id: "flow-0060"
 title: "`workflows: write` is not a real permission — flow-0051 shipped a workflow GitHub refuses to parse"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "session_01AGXF2nXiccFaQxPJgoiEsT"
