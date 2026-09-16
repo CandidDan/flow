@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "flow-0056 must merge and the `v2` tag must be moved onto that commit first. Defaulting flow-init to a ref that does not resolve yet would fail every workflow in a newly onboarded repo from its first push — strictly worse than the v1 default it replaces."
-blocked_by: ["flow-0056"]
+blocked_reason: "Half cleared. flow-0056 merged as PR #78 (merge commit 63959b5) so the template callers now pin @v2, but the `v2` tag itself does not exist yet and only a human can move it. Defaulting flow-init to a ref that does not resolve would write callers pointing at a ref GitHub cannot find into every newly onboarded repo — strictly worse than the v1 default it replaces. Unblocks the moment `v2` is cut."
+blocked_by: []
 serves: ["maintenance"]
 touches:
   - "project-template/.flow/bin/flow-init.mjs"
