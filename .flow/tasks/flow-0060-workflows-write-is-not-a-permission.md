@@ -1,14 +1,14 @@
 ---
 id: "flow-0060"
 title: "`workflows: write` is not a real permission — flow-0051 shipped a workflow GitHub refuses to parse"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "session_01AGXF2nXiccFaQxPJgoiEsT"
 created: "2026-09-16"
 started: "2026-09-16T06:47:32Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0060-workflows-write-is-not-a-permission"
+pr: "https://github.com/CandidDan/flow/pull/80"
 issue: ""
 blocked_reason: ""
 blocked_by: []
@@ -29,6 +29,7 @@ notes:
   - "2026-09-16 (orchestrator): do NOT stop at deleting the bad line. The reason this reached four repos is that nothing mechanical knows which permission keys exist, so `check-workflows.mjs` must learn the valid set — that is the part which prevents the NEXT invented key, and it is cheap because the list is short, closed and public. Equally, `sync-permissions.test.mjs` has to stop asserting a string is present and start asserting the thing that is actually true of a working sync. A fix that leaves both checks as they are re-earns this bug at the next permission someone guesses at."
   - "2026-09-16 (orchestrator): the two adopting repos cannot be repaired by `flow-sync`, for the second time in this chain. Their `flow-sync.yml` carries the invalid key, so their caller will not parse; and even once it does, `_flow-sync.yml@v2` is invalid too. Both halves have to be corrected and the alias moved before any sync can deliver anything. Their hand-edits are the human's to make and are out of this task's scope — name them in the PR body so the sequencing is written down somewhere other than a chat log."
   - "2026-09-16 (orchestrator): there was a FIFTH missed signal, and it is the most damning because GitHub reported the breakage immediately and for free. Every push carrying the invalid file produced a failed run in `CandidDan/Nudge` — run 8 (04:55:38, the first push to the PR branch), run 9 (05:01:51), run 10 (06:05:16, the merge to main). All three are `event: push` against a `flow-sync.yml` that declares only `schedule` and `workflow_dispatch`: GitHub records a synthetic startup-failure run for any push containing an unparseable workflow. The tells are unmistakable in the API — `created_at` and `updated_at` identical to the second, and `name` is the literal path `.github/workflows/flow-sync.yml` rather than `flow-sync`, because the parser never reached the `name:` field. So the defect was visible in the repo over an hour before anyone read GitHub's parser error. It was missed because a startup-failure run is NOT attached to the pull request as a check run: `get_check_runs` on PR #274 returned nine green checks while this sat red in the Actions tab. Any detection story that relies on a PR's check list — the orchestrator's included — has this hole in it."
+  - "2026-09-16 (worker session_01AGXF2nXiccFaQxPJgoiEsT): DONE and handed off. Branch `flow/flow-0060-workflows-write-is-not-a-permission`, PR #80 (ready for review, not draft, so flow-review's qa/security/code-review actually run). Six files, exactly the declared `touches`; store-guard clean. Gate all green: build 34 workflow files (was 24 — build now parses `project-template/.github/workflows/` too, which is where the invalid key sat unbuilt), lint 82 .mjs, test 984 pass / 0 fail / 1 pre-existing FLOW_LIVE_AGENT_CHECK skip, coverage 94.72% lines vs floor 83.5 (not lowered). Decisions a fresh session should not re-litigate: (a) the fix is the CREDENTIAL — `token: ${{ secrets.FLOW_PAT }}` on _flow-sync.yml's checkout of the synced repo — plus a first-step preflight that fails naming FLOW_PAT and Workflows: Write; FLOW_PAT stays `required: false` at the workflow_call boundary because `required: true` fails with GitHub's generic message, and opacity is the whole lesson; (b) `GH_TOKEN` lost its `|| github.token` fallback deliberately; (c) check-workflows.mjs validates permission KEYS only, against the closed 15-key set, at workflow and job level, and now covers BOTH workflow trees — that widening is intentional and argued in the PR body; (d) sync-permissions.test.mjs was rewritten, its mutation cases now ADD the key back and require a failure. One real finding, reported not worked around: adr-split-authoring.test.mjs pins the count of tracked files naming canonical's bare owner/repo, and my new fixture (then my own comment about it) each added one; fixed in-scope with a placeholder owner rather than editing the ADR, which is outside `touches`. NOT PROVEN and not claimed: a successful sync push. Canonical has no flow-sync caller (flow-0015, by design) so the reusable cannot execute here — that absence is precisely why the defect survived, and adding a caller to manufacture the proof would be out of scope. Human to-dos are the PR body's ordered checklist: merge, then move/re-cut `v2` off 63959b5, confirm FLOW_PAT carries Workflows: Write, and hand-edit Nudge and TanPlan to drop the invalid line. Next action if kicked back: work PR #80's branch, re-run the five gate commands, do not touch .flow/tasks/ from the branch."
 ---
 
 ## Context
