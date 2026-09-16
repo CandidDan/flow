@@ -1,7 +1,7 @@
 ---
 id: "flow-0058"
 title: "flow-init still adopts from v1 — a repo onboarded today is born on the previous major"
-status: "ready"
+status: "blocked"
 priority: 1
 project: "flow"
 owner: ""
@@ -10,7 +10,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
+blocked_reason: "flow-0056 must merge and the `v2` tag must be moved onto that commit first. Defaulting flow-init to a ref that does not resolve yet would fail every workflow in a newly onboarded repo from its first push — strictly worse than the v1 default it replaces."
 blocked_by: ["flow-0056"]
 serves: ["maintenance"]
 touches:
