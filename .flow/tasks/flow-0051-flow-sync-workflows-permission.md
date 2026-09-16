@@ -1,12 +1,12 @@
 ---
 id: "flow-0051"
 title: "Give `flow-sync` permission to push the workflow files it exists to deliver"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0051"
 created: "2026-09-15"
-started: ""
+started: "2026-09-16T02:32:08Z"
 branch: ""
 pr: ""
 issue: ""
