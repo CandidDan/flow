@@ -1,7 +1,7 @@
 ---
 id: "flow-0051"
 title: "Give `flow-sync` permission to push the workflow files it exists to deliver"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude-worker-flow-0051"
