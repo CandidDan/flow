@@ -12,7 +12,7 @@ pr: ""
 issue: ""
 blocked_reason: ""
 blocked_by: []
-serves: ["G2", "G7"]
+serves: ["G7"]
 touches:
   - "project-template/.flow/bin/flow-doctor.mjs"
   - "project-template/.flow/bin/flow-doctor.test.mjs"
@@ -23,7 +23,7 @@ notes:
   - "2026-09-15 (orchestrator): observed on canonical's own `main`, not inferred. `eca1ba0` (07:59:08) landed `.flow/tasks/flow-0049-claude-md-ceiling.md` and `4e21cbd` (08:04:12) landed `.flow/tasks/flow-0049-queue-runner-summary-states-the-real-outcome.md` — two files, both carrying `id: \"flow-0049\"`, five minutes apart, from two different sessions. It was cleared by hand at 08:09:42 in `55e7adf` (`flow: renumber flow-0049 -> flow-0050 (id collision)`). Nothing mechanical reported it."
   - "2026-09-15 (orchestrator): this is NOT a defect in flow-0021. `allocate-task-id.mjs` reads `origin/main` via `git ls-tree`+`git show`, never the working tree, and re-allocates on a refused push — it is correct, and its tests prove it. The hole is that using it is optional. A session that hand-writes a task file and commits it bypasses the allocator completely, and git raises nothing, because two different slugs are two different paths: `flow-0049-claude-md-ceiling.md` and `flow-0049-queue-runner-*.md` merge cleanly. flow-0021 made correct allocation possible; this makes incorrect allocation detectable. Defence in depth, not a rewrite — do not change the allocator."
   - "2026-09-15 (orchestrator): the harm is silent, which is why this is worth a gate rather than a convention. `flightdeck/bin/mission-control.mjs:188` builds `new Map((tasks ?? []).map((t) => [t.id, t]))`. Two tasks with one id means the second overwrites the first and one task vanishes from mission control with no error — the repo reports its own state, confidently, minus a task."
-  - "2026-09-15 (orchestrator): `serves` is G2 and G7, and both are load-bearing. G2 because this is a guard that does not exist yet (flow-0021's own anchor, and this is its gate-side complement). G7 because the observable harm is the state report dropping a row. `maintenance` was considered and rejected: the store is what a Flow repo answers WITH, so its integrity is not canonical housekeeping."
+  - "2026-09-16 (orchestrator): `serves` corrected from [\"G2\", \"G7\"] to [\"G7\"]. G2 was taken from flow-0021, this task's allocator-side counterpart, without checking it was still live — VISION.md retired G1-G5 in the 2026-09-01 rewrite, so anchoring to it was drift wearing an anchor, the exact move the task-writer skill warns against. G7 stands on its own and is the honest one: the observable harm is `mission-control.mjs:188` keying tasks by id, so a duplicate makes one task vanish from the state report with no error. `maintenance` was considered and rejected: the store is what a Flow repo answers WITH, so its integrity is not canonical housekeeping."
 ---
 
 ## Context

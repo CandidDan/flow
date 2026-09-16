@@ -12,6 +12,7 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: "Depends on flow-0019 (mission control). Flow has no dependency field — a gap ADR-0002 recorded — so `blocked` is how sequencing is expressed. Retiring these views before mission control exists AND has been trusted in practice leaves a window with no cross-project view at all. UNBLOCK: flip to ready once flow-0019 has merged and the human confirms the page actually answers 'where is every project up to'. Also sequence behind flow-0017, which claims project-template/.flow/bin/flow-doctor.mjs and its test; if flow-0017 is still live at unblock time, either wait for it or split the doctor edit out."
+blocked_by: ["flow-0053"]   # ADR-0006's ordering constraint, moved out of prose: the watchdog leaves canonical before the flightdeck does
 serves: ["G4"]            # what canonical says is what the fleet runs — stop shipping infra canonical doesn't run
 touches: ["project-template/.flow/board.html", "project-template/.claude/skills/board-builder/SKILL.md", "project-template/.claude/settings.json", "project-template/.flow/bin/flow-doctor.mjs", "project-template/.flow/bin/flow-doctor.test.mjs", "project-template/.gitattributes", ".gitattributes", ".gitignore", ".flow/bin/protocol-docs.test.mjs", "flightdeck/bin/flightdeck-state.mjs", "flightdeck/bin/flightdeck-state.test.mjs", "flightdeck/projects.example.yml", "flightdeck/.claude/agents/portfolio-manager.md", "flightdeck/CLAUDE.md", "flightdeck/README.md", "CHANGELOG.md"]
 labels: [infra, flightdeck, cleanup]
