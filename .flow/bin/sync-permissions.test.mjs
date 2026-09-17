@@ -32,12 +32,29 @@
 //     `.github/workflows/` lacks a caller canonical ships, and the resulting commit — the diff
 //     the sync PR carries — contains that caller.
 //
+// flow-0062 EXTENDS this file; it does not relitigate flow-0060. flow-0060's preflight tested
+// PRESENCE — `[ -z "${FLOW_PAT}" ]` — which is exactly right for the case it was built for (a
+// fresh adoption that never set the secret) and wrong about two others. An expired token is
+// present. A revoked token is present. A token without Workflows: Write is present. All three
+// sailed past the guard and died at `git push` with GitHub's opaque refusal. The two classes need
+// different mechanisms and conflating them gives a wrong answer:
+//
+//   · EXPIRY/REVOCATION is detectable up front — an authenticated read the token must be able to
+//     make answers 401 when the credential is dead. Proved below by RUNNING the shipped `case`
+//     block against each status code, because the property that matters is a negative one: only
+//     401 may be fatal. A 5xx, a rate limit or a network blip must warn and continue, since
+//     sending someone to rotate a working PAT is worse than the bug.
+//   · SCOPE is NOT detectable — a fine-grained PAT exposes no scope-introspection endpoint, so
+//     Workflows: Write can only be tested by attempting the thing it authorises. The push IS that
+//     attempt, and therefore the only place the scope case can ever be named. Proved below by
+//     running the shipped failure branch against a `git` that refuses the way GitHub refuses.
+//
 // Why this is canonical's own test rather than the template's: it asserts facts about
 // `.github/workflows/_flow-sync.yml`, which exists only here. An adopting repo has the thin
 // caller, not the reusable.
 
-import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -109,6 +126,26 @@ const extractCopyLoop = (reusable) => {
   return match[0];
 };
 
+// flow-0062's two blocks, lifted from the shipped `run:` scripts for the same reason the copy
+// loop is: a paraphrase would only prove the paraphrase. If either stops matching, the step was
+// reshaped — re-read it and update the extractor, never relax the behaviour asserted below.
+const PROBE_CASE = /^\s*case "\$CODE" in$[\s\S]*?^\s*esac$/m;
+const PUSH_GUARD = /^\s*if ! git push origin "\$BRANCH"; then$[\s\S]*?^\s*fi$/m;
+
+const extractBlock = (reusable, pattern, what) => {
+  const match = runScripts(yamlMod.parse(reusable)).match(pattern);
+  assert.ok(match, `could not find ${what} in _flow-sync.yml's run scripts — it was reshaped; ` +
+    "update this extractor and re-verify the behaviour below still holds");
+  return match[0];
+};
+
+/** The whole `Probe FLOW_PAT validity` step's run script, located by what it does. */
+const probeScript = (wf) =>
+  String(syncSteps(wf).find((s) => PROBE_CASE.test(String(s?.run ?? "")))?.run ?? "");
+
+/** Every `::error`/`::warning` annotation line in a script. */
+const annotations = (script) => script.split("\n").filter((line) => /::(error|warning)/.test(line));
+
 const syncSteps = (wf) => wf?.jobs?.sync?.steps ?? [];
 
 function checkSyncCredential({ reusable, caller }) {
@@ -163,10 +200,13 @@ function checkSyncCredential({ reusable, caller }) {
   }
 
   // 4. The preflight, and that it really is pre-flight — before the push, not after it.
+  //    LOCATED BY THE EMPTINESS TEST, not merely by "a step that mentions FLOW_PAT and exits":
+  //    flow-0062 added a second fatal FLOW_PAT step (the validity probe) and a third mention at
+  //    the push, and a locator that cannot tell the three apart reports the wrong one missing.
   const pushIdx = steps.findIndex((s) => /git push/.test(String(s?.run ?? "")));
   const guardIdx = steps.findIndex(
     (s) =>
-      /FLOW_PAT/.test(String(s?.run ?? "")) &&
+      /-z\s+"?\$\{?FLOW_PAT\}?"?/.test(String(s?.run ?? "")) &&
       /Workflows: Write/.test(String(s?.run ?? "")) &&
       /exit 1/.test(String(s?.run ?? "")),
   );
@@ -184,6 +224,61 @@ function checkSyncCredential({ reusable, caller }) {
       `${REUSABLE_LABEL}: the FLOW_PAT check runs at step ${guardIdx}, after the push at step ` +
       `${pushIdx}. A check that fires after the failure it predicts is not a preflight.`,
     );
+  }
+
+  // 5. flow-0062: PRESENCE IS NOT VALIDITY. A set-but-dead token passes check 4 unchallenged, so
+  //    a second preflight must fail the run on a 401 — and must do so before FLOW_PAT's first
+  //    consumer, the checkout, whose own failure text ("Authentication failed") names neither the
+  //    secret nor its expiry.
+  const probeIdx = steps.findIndex(
+    (s) =>
+      /FLOW_PAT/.test(String(s?.run ?? "")) &&
+      /\b401\b/.test(String(s?.run ?? "")) &&
+      /exit 1/.test(String(s?.run ?? "")),
+  );
+  const checkoutIdx = steps.indexOf(checkout);
+  if (pushIdx >= 0) {
+    if (probeIdx < 0) {
+      problems.push(
+        `${REUSABLE_LABEL}: no step fails the run when FLOW_PAT is SET but rejected as invalid ` +
+        "(HTTP 401). Check 4 tests PRESENCE, and an expired or revoked token is present — it " +
+        "walks past that guard and dies at `git push` with GitHub's opaque refusal, which is the " +
+        "precise failure the preflight exists to prevent. Probe the credential up front with one " +
+        "authenticated read, and treat 401 as the only fatal verdict.",
+      );
+    } else if (probeIdx > pushIdx) {
+      problems.push(
+        `${REUSABLE_LABEL}: the FLOW_PAT validity probe runs at step ${probeIdx}, after the push ` +
+        `at step ${pushIdx}. A check that fires after the failure it predicts is not a preflight.`,
+      );
+    } else if (checkoutIdx >= 0 && probeIdx > checkoutIdx) {
+      problems.push(
+        `${REUSABLE_LABEL}: the FLOW_PAT validity probe runs at step ${probeIdx}, after the ` +
+        `checkout at step ${checkoutIdx} that authenticates with the same token. A dead token ` +
+        "then surfaces as git's \"Authentication failed\" and the probe never speaks.",
+      );
+    }
+  }
+
+  // 6. flow-0062: the half that cannot be preflighted. `git push` is the ONLY test of
+  //    Workflows: Write in existence, so leaving it bare under `set -euo pipefail` throws away
+  //    the one chance to name the scope case.
+  if (pushIdx >= 0) {
+    const pushScript = String(steps[pushIdx]?.run ?? "");
+    const guarded = /if\s+!\s*git push\b/.test(pushScript) || /git push[^\n]*\|\|/.test(pushScript);
+    const translated = annotations(pushScript).some(
+      (line) => /::error/.test(line) && /FLOW_PAT/.test(line) && /Workflows: Write/.test(line),
+    );
+    if (!guarded || !translated) {
+      problems.push(
+        `${REUSABLE_LABEL}: \`git push\` is bare — under \`set -euo pipefail\` a rejection aborts ` +
+        "the run with git's text and nothing else, which names neither FLOW_PAT nor the scope. " +
+        "This push is the only test of Workflows: Write that can exist (a fine-grained PAT " +
+        "exposes no scope introspection, so the permission can only be checked by using it), " +
+        "which makes it the only place the scope case can ever be named. Catch the failure and " +
+        "re-emit it as an ::error naming FLOW_PAT and Workflows: Write, alongside git's own text.",
+      );
+    }
   }
 
   return problems;
@@ -293,6 +388,162 @@ test("the reusable authenticates `gh` with FLOW_PAT and no GITHUB_TOKEN fallback
   assert.equal(adopt.env?.GH_TOKEN, FLOW_PAT_EXPR,
     "a `|| github.token` fallback would let `gh pr create` succeed on a run whose push could " +
     "never have been legal — the preflight already proved FLOW_PAT is set");
+});
+
+// ---------------------------------------------------------------------------------------------
+// flow-0062 — presence is not validity. The three cases the flow-0060 preflight cannot see.
+// Each mutation below reconstructs the tree as it stood BEFORE this task, so each of these tests
+// fails against it.
+// ---------------------------------------------------------------------------------------------
+
+// Everything from the probe step's `- name:` up to the next step. Removing it is exactly "the
+// tree before flow-0062".
+const PROBE_STEP = /^      - name: "Probe FLOW_PAT validity[\s\S]*?(?=^      - name: Checkout this repo$)/m;
+
+test("removing the validity probe fails — a set-but-expired FLOW_PAT would sail past again", { skip }, () => {
+  const pair = readPair();
+  const mutated = pair.reusable.replace(PROBE_STEP, "");
+  assert.notEqual(mutated, pair.reusable, "the mutation must actually remove the probe step");
+
+  const problems = checkSyncCredential({ ...pair, reusable: mutated });
+  assert.equal(problems.length, 1, "only the probe is gone: " + problems.join(" | "));
+  assert.match(problems[0], /no step fails the run when FLOW_PAT is SET but rejected as invalid/);
+  assert.match(problems[0], /PRESENCE/,
+    "the message must name the distinction, because the surviving guard LOOKS like it covers this");
+});
+
+test("reverting the push to a bare `git push` fails — the scope case would go unnamed", { skip }, () => {
+  const pair = readPair();
+  // flow-0060's exact line, back in flow-0060's place. Keep the block scalar's indentation, or
+  // the mutant fails as malformed YAML and proves nothing about the check.
+  const mutated = pair.reusable.replace(PUSH_GUARD, (block) =>
+    block.match(/^[ \t]*/)[0] + 'git push origin "$BRANCH"');
+  assert.notEqual(mutated, pair.reusable, "the mutation must actually bare the push");
+
+  const problems = checkSyncCredential({ ...pair, reusable: mutated });
+  assert.equal(problems.length, 1, "only the push translation is gone: " + problems.join(" | "));
+  assert.match(problems[0], /`git push` is bare/);
+  assert.match(problems[0], /Workflows: Write/,
+    "and must say what is lost: the only test of the scope there is");
+});
+
+test("flow-0060's absent-secret message is byte-for-byte unchanged", { skip }, () => {
+  // Deliberately a literal, not a pattern. flow-0060 argued its wording out; flow-0062 extends
+  // that preflight and has no licence to reword it, and a paraphrase-tolerant check would let a
+  // later edit drift it silently.
+  const wf = yamlMod.parse(readFileSync(REUSABLE, "utf8"));
+  const guard = syncSteps(wf).find((s) => /-z\s+"\$\{FLOW_PAT\}"/.test(String(s?.run ?? "")));
+  assert.ok(guard, "the absent-secret preflight must still exist");
+  assert.match(
+    String(guard.run),
+    /::error title=FLOW_PAT missing::flow-sync cannot run\. It copies canonical's thin callers into \.github\/workflows\/, and GitHub refuses that push from GITHUB_TOKEN: workflows is not one of GITHUB_TOKEN's permissions and cannot be granted to it\. Set the FLOW_PAT secret on this repository to a fine-grained PAT with Workflows: Write \(plus Contents: Read and write, and Pull requests: Read and write\), and forward it from your flow-sync\.yml caller\."$/m,
+    "the absent-secret case is already right — extending the preflight must not touch its message",
+  );
+});
+
+// --- The probe, RUN. The property that matters is a negative one, so assert it by execution. ---
+
+const runProbeVerdict = (code) =>
+  spawnSync("bash", ["-uo", "pipefail", "-c", extractBlock(readFileSync(REUSABLE, "utf8"), PROBE_CASE, "the FLOW_PAT probe's verdict block")], {
+    encoding: "utf8",
+    // A neutral slug on purpose. This step runs in the ADOPTING repo, not in canonical, and
+    // `adr-split-authoring.test.mjs` censuses every file naming the bare canonical ref —
+    // a fixture string is prose to a reader and a data point to that census.
+    env: { ...process.env, CODE: code, GITHUB_REPOSITORY: "octo-org/adopting-repo", GITHUB_API_URL: "https://api.github.com" },
+  });
+
+test("the probe's ONLY fatal verdict is 401 — a set-but-expired token fails before the push", { skip }, () => {
+  const res = runProbeVerdict("401");
+  assert.equal(res.status, 1, "a 401 must fail the run, not warn: the push can never succeed");
+  const out = res.stdout + res.stderr;
+  assert.match(out, /::error/, "a GitHub annotation, not a line buried in the log");
+  assert.match(out, /FLOW_PAT/, "it must name the secret");
+  assert.match(out, /expired or has been revoked/, "and say what is wrong with it — not that it is absent");
+  assert.match(out, /ROTATION|rotate|rotation/, "and point at the fix, which is rotation");
+  assert.match(out, /NOT the missing-secret case/,
+    "and steer the reader OFF flow-0060's fix, which is a different fix and would waste the " +
+    "one morning nobody has spare");
+});
+
+test("a 5xx, a rate limit or a network failure does NOT accuse the token", { skip }, () => {
+  // Rotating a working PAT because GitHub had a bad minute is a worse outcome than the bug this
+  // task fixes, so every non-401 outcome must warn and continue.
+  for (const code of ["000", "403", "404", "429", "500", "502", "503"]) {
+    const res = runProbeVerdict(code);
+    const out = res.stdout + res.stderr;
+    assert.equal(res.status, 0, `HTTP ${code} must not fail the run — it says nothing about the token`);
+    assert.doesNotMatch(out, /::error/, `HTTP ${code} must not be reported as an error`);
+    assert.match(out, /::warning/, `HTTP ${code} must still be visible — it is inconclusive, not fine`);
+    assert.match(out, /not 401/, `HTTP ${code}'s message must say why it is not a verdict`);
+  }
+});
+
+test("a live token costs one API call and changes nothing — no annotation, no delay, exit 0", { skip }, () => {
+  for (const code of ["200", "201"]) {
+    const res = runProbeVerdict(code);
+    assert.equal(res.status, 0, `HTTP ${code} is healthy`);
+    assert.doesNotMatch(res.stdout + res.stderr, /::(error|warning)/,
+      "a healthy sync must not be annotated, slowed or altered by the probe");
+  }
+  const script = probeScript(yamlMod.parse(readFileSync(REUSABLE, "utf8")));
+  assert.ok(script, "the probe step must exist");
+  assert.equal((script.match(/\bcurl\b/g) ?? []).length, 1,
+    "at most one API call: the acceptance criterion is a budget, and a second call here is paid " +
+    "by every healthy sync in the fleet, forever");
+  assert.ok(!/\$\{\{ *secrets\./.test(script),
+    "the secret must reach the script through `env:`, never interpolated into the shell source");
+});
+
+// --- The push translation, RUN, against a `git` that refuses the way GitHub refuses. ---
+
+test("a refused push is translated — FLOW_PAT and Workflows: Write, alongside git's own text", { skip }, (t) => {
+  const bin = mkdtempSync(join(tmpdir(), "flow-sync-git-shim-"));
+  t.after(() => rmSync(bin, { recursive: true, force: true }));
+
+  // GitHub's actual refusal, verbatim — the message flow-0051 spent weeks failing to decode.
+  const REFUSAL =
+    "remote: refusing to allow a GitHub App to create or update workflow " +
+    "`.github/workflows/flow-compass.yml` without `workflows` permission";
+  writeFileSync(join(bin, "git"), `#!/usr/bin/env bash\ncat >&2 <<'EOF'\n${REFUSAL}\nEOF\nexit 1\n`);
+  chmodSync(join(bin, "git"), 0o755);
+
+  const res = spawnSync(
+    "bash",
+    ["-uo", "pipefail", "-c", extractBlock(readFileSync(REUSABLE, "utf8"), PUSH_GUARD, "the push-failure translation")],
+    { encoding: "utf8", env: { ...process.env, BRANCH: "flow-sync/2.1.0", PATH: `${bin}:${process.env.PATH}` } },
+  );
+
+  assert.equal(res.status, 1,
+    "the run must still fail — translating a rejection is not forgiving it, and a sync that " +
+    "reported success on an unpushed branch would be worse than the opaque abort");
+  assert.match(res.stderr, /without `workflows` permission/,
+    "git's own text is the primary evidence and must survive; this is a reading of it, not a " +
+    "replacement for it");
+  const annotation = annotations(res.stdout).find((line) => /::error/.test(line));
+  assert.ok(annotation, "the failure must be a GitHub annotation, not a line buried in the log");
+  assert.match(annotation, /FLOW_PAT/, "naming the secret");
+  assert.match(annotation, /Workflows: Write/, "and the scope — the thing that can only be discovered here");
+  assert.match(annotation, /flow-sync\/2\.1\.0/, "and the branch, so the log says which push");
+  assert.match(annotation, /no scope introspection|exposes no scope/,
+    "and WHY this could not have been caught earlier, so nobody files the same bug again");
+});
+
+test("the probe precedes both FLOW_PAT's first consumer and the push", { skip }, () => {
+  const steps = syncSteps(yamlMod.parse(readFileSync(REUSABLE, "utf8")));
+  const idx = (pred) => steps.findIndex(pred);
+  const absent = idx((s) => /-z\s+"\$\{FLOW_PAT\}"/.test(String(s?.run ?? "")));
+  const probe = idx((s) => PROBE_CASE.test(String(s?.run ?? "")));
+  const checkout = idx((s) => String(s?.uses ?? "").startsWith("actions/checkout") && !s?.with?.repository);
+  const push = idx((s) => /git push/.test(String(s?.run ?? "")));
+
+  assert.ok(absent >= 0 && probe >= 0 && checkout >= 0 && push >= 0,
+    `all four landmarks must exist: absent=${absent} probe=${probe} checkout=${checkout} push=${push}`);
+  assert.ok(absent < probe,
+    "the cheap test comes first: there is nothing to probe with when the secret is unset");
+  assert.ok(probe < checkout,
+    "and the probe must beat the checkout, which authenticates with the same token and would " +
+    "otherwise report a dead PAT as a bare `Authentication failed`");
+  assert.ok(checkout < push, "the ordering flow-0060 established still holds end to end");
 });
 
 // ---------------------------------------------------------------------------------------------

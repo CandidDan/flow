@@ -6,6 +6,39 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+- **A set-but-invalid `FLOW_PAT` no longer sails past the `flow-sync` preflight** (`_flow-sync.yml`,
+  `.flow/bin/sync-permissions.test.mjs`, flow-0062). flow-0060 (below) added a first step that
+  fails the run when `FLOW_PAT` is unset, naming the secret and **Workflows: Write** rather than
+  letting the job die forty lines later at `git push`. It tests `[ -z "${FLOW_PAT}" ]` — which is
+  **presence**. An expired token is present. A revoked token is present. A token lacking
+  Workflows: Write is present. All three walked past the guard and hit the push anyway, with
+  GitHub's opaque `refusing to allow a GitHub App to create or update workflow … without
+  \`workflows\` permission` — the precise failure the step's own comment says it exists to prevent.
+  This matters on a date, not in the abstract: a fine-grained PAT expires on a day chosen when it
+  was created, GitHub does not warn the workflows that use it, and every repo sharing a token meets
+  the gap on the same morning.
+
+  The two failure classes are not the same shape and one check cannot cover both.
+  **Expiry/revocation** is detectable up front, so a new `Probe FLOW_PAT validity` step makes one
+  authenticated read (`GET /repos/{owner}/{repo}`) before the checkout that first uses the token,
+  and fails with a message that says the token was **rejected as invalid** and that the fix is
+  **rotation** — explicitly *not* flow-0060's missing-secret fix, which would send the reader the
+  wrong way. **401 is the only fatal verdict**: a 5xx, a rate limit, an SSO block or a network blip
+  warns and continues, because sending someone to rotate a working PAT is a worse outcome than the
+  bug. **Scope is not detectable at all** — a fine-grained PAT exposes no scope-introspection
+  endpoint, so Workflows: Write can only be tested by attempting the thing it authorises. The push
+  *is* that attempt, and it was bare under `set -euo pipefail`; it now catches its own rejection
+  and re-emits it as an annotation naming `FLOW_PAT` and Workflows: Write **alongside** git's text,
+  which stays in the log as the primary evidence. flow-0060's absent-secret message is untouched
+  and pinned byte-for-byte by a test, and `FLOW_PAT` stays `required: false` at the
+  `workflow_call` boundary for the reason flow-0060 gave. The probe's verdict block and the push's
+  failure branch are proved by **running the shipped shell**, not by reading it — every status code
+  through the real `case`, and a `git` that refuses the way GitHub refuses.
+  [caller action: **none for the workflow** — this is canonical-side only and arrives with your
+  next `flow-sync`. But if your `FLOW_PAT` is near its expiry date, rotate it now: a fine-grained
+  PAT with Workflows: Write, plus Contents and Pull requests (read and write), set as the
+  `FLOW_PAT` secret on every repo that has adopted Flow. Tokens issued together expire together.]
+
 - **`workflows: write` is not a permission, and never was — `flow-sync` is fixed with a credential
   instead** (`_flow-sync.yml`, `project-template/.github/workflows/flow-sync.yml`,
   `.flow/bin/check-workflows.mjs`, flow-0060). flow-0051 (below) diagnosed the right bug and

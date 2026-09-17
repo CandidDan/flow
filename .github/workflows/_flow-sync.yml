@@ -55,7 +55,9 @@ permissions:
   # surface still needs that scope; it now comes from the CREDENTIAL instead. `Checkout this repo`
   # below takes `token: ${{ secrets.FLOW_PAT }}`, so the `git push` is made by a fine-grained PAT
   # that can carry Workflows: Write, and the `Require FLOW_PAT` step fails loudly up front when
-  # that secret is absent.
+  # that secret is absent. Absence is not the only way that credential fails, so a second step
+  # probes it for expiry/revocation before anything uses it, and the push translates its own
+  # rejection — see both steps' comments below (flow-0062).
   #
   # `.flow/bin/check-workflows.mjs` now fails `npm run build` on any permission key outside the
   # closed set listed above, so an invented key cannot reach a tag again (flow-0060).
@@ -80,6 +82,52 @@ jobs:
             exit 1
           fi
           echo "FLOW_PAT is present — the sync push will be made by it, not by GITHUB_TOKEN."
+
+      # PRESENCE IS NOT VALIDITY (flow-0062). The step above proves the secret is SET. An expired
+      # token is set. A revoked one is set. A token without Workflows: Write is set. All three
+      # walked past that guard and died forty lines later at `git push` with GitHub's opaque
+      # rejection — the exact failure the guard's own comment says it exists to prevent.
+      #
+      # Of the two invalidity classes only ONE is detectable up front, and they need different
+      # mechanisms. EXPIRY or REVOCATION is cheap to detect: one authenticated read the token must
+      # be able to make anyway answers 401 when the credential is dead. SCOPE is not detectable at
+      # all — a fine-grained PAT exposes no scope-introspection endpoint, so Workflows: Write can
+      # only be tested by attempting the thing it authorises. That half is handled where it can be
+      # handled, at the push itself; see the translation further down.
+      #
+      # 401 IS THE ONLY FATAL VERDICT. A 5xx, a rate limit, an SSO block, a DNS blip or a proxy
+      # eating the call says nothing whatever about the token, and reporting a transient as an
+      # expired credential would send an operator to rotate a PAT that works — a worse outcome
+      # than the bug this fixes. Everything that is not 401 is inconclusive, warns, and continues.
+      #
+      # It runs BEFORE `Checkout this repo` because that step is FLOW_PAT's first consumer: left to
+      # checkout, a dead token surfaces as git's "Authentication failed", naming neither the secret
+      # nor its expiry.
+      - name: "Probe FLOW_PAT validity (expired or revoked)"
+        env:
+          FLOW_PAT: ${{ secrets.FLOW_PAT }}
+        run: |
+          set -euo pipefail
+          API="${GITHUB_API_URL:-https://api.github.com}"
+          # Exactly one API call, and the cheapest authenticated read there is: the repository the
+          # next step is about to clone with this same token. A healthy sync pays one request.
+          CODE="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+                    -H "Authorization: Bearer ${FLOW_PAT}" \
+                    -H "Accept: application/vnd.github+json" \
+                    -H "X-GitHub-Api-Version: 2022-11-28" \
+                    "${API}/repos/${GITHUB_REPOSITORY}")" || CODE="000"
+          case "$CODE" in
+            2??)
+              echo "FLOW_PAT authenticated against ${GITHUB_REPOSITORY} (HTTP ${CODE}) — the credential is live."
+              ;;
+            401)
+              echo "::error title=FLOW_PAT rejected as invalid::FLOW_PAT is SET, but GitHub rejected it - an authenticated read of ${GITHUB_REPOSITORY} returned 401. This is NOT the missing-secret case and re-adding the secret will not help; the token itself is expired or has been revoked. Fine-grained PATs expire on a date chosen when they are created, and GitHub does not warn the workflows that use them. The fix is ROTATION - issue a replacement fine-grained PAT with Workflows: Write (plus Contents: Read and write, and Pull requests: Read and write) on this repository, then update this repo's FLOW_PAT secret. Every other repo that adopted Flow with the same token expires with it and needs the same rotation."
+              exit 1
+              ;;
+            *)
+              echo "::warning title=FLOW_PAT validity unverified::The FLOW_PAT validity probe returned HTTP ${CODE}. That is not 401, so it says nothing about the token - a 5xx, a rate limit or a network failure is a transient, and reporting one as an expired credential would send you to rotate a PAT that works. Continuing. If the token really is bad, the push below fails and names it."
+              ;;
+          esac
 
       - name: Checkout this repo
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -157,7 +205,18 @@ jobs:
           git checkout -b "$BRANCH"
           git add -A
           git commit -m "flow: adopt canonical Flow infra $CANON_VER"
-          git push origin "$BRANCH"
+          # THE HALF THAT CANNOT BE PREFLIGHTED (flow-0062). Workflows: Write is not introspectable:
+          # a fine-grained PAT exposes no endpoint that reports its own permissions, so the ONLY
+          # test of the scope is to attempt the thing it authorises. This push IS that test, and it
+          # is therefore the first and last moment the scope case can ever be named. Left bare under
+          # `set -e` a rejection aborted the run with git's text alone, which mentions neither
+          # FLOW_PAT nor the scope. Catch it and translate it - git's own message still reaches the
+          # log immediately above the annotation, because it is the primary evidence and this
+          # translation is a reading of it, not a replacement for it.
+          if ! git push origin "$BRANCH"; then
+            echo "::error title=flow-sync push refused::git push of '$BRANCH' failed. Git's own message is immediately above this line and is the primary evidence - read it first. If it says GitHub is refusing to allow a GitHub App to create or update workflow files without the 'workflows' permission, then FLOW_PAT authenticated but LACKS Workflows: Write - this commit writes files under .github/workflows/, and GitHub accepts that only from a credential carrying that permission. It cannot be checked before this point - a fine-grained PAT exposes no scope introspection, so using the permission is the only way to test it. Fix - re-issue FLOW_PAT as a fine-grained PAT with Workflows: Write (plus Contents: Read and write, and Pull requests: Read and write), and update this repo's FLOW_PAT secret. If git reported an authentication failure instead, FLOW_PAT expired between the preflight and now, and rotation is the fix. Any other git message (a network failure, a non-fast-forward) is what it says it is and is not about FLOW_PAT."
+            exit 1
+          fi
 
           TITLE="$($SYNC pr-title --local "$LOCAL_VER" --canonical "$CANON_VER")"
           BODY="$($SYNC pr-body --local "$LOCAL_VER" --canonical "$CANON_VER" --files "$CHANGED")"
