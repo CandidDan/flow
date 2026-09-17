@@ -2,21 +2,22 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0045"
 title: "Give the release repo the floating `v1` alias the fleet actually pins, moved by the same deliberate act that moves canonical's"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
-owner: "claude-worker-flow-0045"
+owner: ""
 created: "2026-09-15"
-started: "2026-09-15T03:37:18Z"
+started: ""
 branch: "flow/flow-0045-release-repo-alias"
 pr: ""
 issue: ""
-blocked_reason: "ONE blocker remains, and it is not machine-checkable: the credential. No credential in the worker session can push a `.github/workflows/` change, so the `mirror-alias` job — the whole mechanism — cannot reach the branch. FLOW_PAT must carry BOTH `Contents: Read and write` (it had none — 403 on every `git push` and on the REST contents API) AND `Workflows: Read and write`. A rotation is in progress; this task flips to `ready` once the rotated PAT is confirmed to carry Contents write, not Workflows alone. The SCOPE blocker (the `## Unreleased` CHANGELOG collision) is CLEARED — flow-0047 is done, so `blocked_by` is now empty by design rather than by omission."
+blocked_reason: ""
 blocked_by: []
 serves: ["maintenance"]   # release plumbing; no live VISION goal names it (see the note on G4)
 touches: [".flow/bin/release-publish.mjs", ".flow/bin/release-publish.test.mjs", ".github/workflows/flow-release-publish.yml", "docs/flow-versioning-policy.md", "CHANGELOG.md"]
 labels: [infra, release, fleet]
 notes:
+  - "2026-09-17 (orchestrator): unblocked on both halves, and the reason cleared rather than left behind as stale data. SCOPE: flow-0047 is done, so the `## Unreleased` CHANGELOG collision that reddened every changelog-bearing PR is gone, and `blocked_by` was emptied earlier today. CREDENTIAL: the human confirms FLOW_PAT now carries `Contents: Read and write` as well as `Workflows: Read and write` — the rotation prompted by flow-0051/flow-0060 delivered both scopes, not Workflows alone, which was the specific risk raised before this flip. The earlier orchestrator note withheld dispatch until both cleared; both have, so that condition is discharged and the task is claimable. `owner` and `started` are cleared so the claim is atomic again. The original worker session is gone, but its branch `flow/flow-0045-release-repo-alias` is pushed with two commits and carries everything except one file — the worker note further down records the remaining patch, and a session that starts without reading it will rebuild work that already exists."
   - "2026-09-15: found while publishing 1.3.0 by hand. `git ls-remote https://github.com/CandidDan/flow-protocol` returns exactly three refs — refs/heads/main, refs/tags/v1.2.0, refs/tags/v1.3.0. No `v1`. The publisher pushes one tag (`release-publish.mjs`, the single `git push <remote> refs/tags/<tag>`) and `tagIsFree` makes re-pushing it a problem rather than a move, which is correct for an immutable release and leaves the alias unimplemented. Every adopting repo pins the ALIAS: Nudge and write both carry nine `@v1` callers. So flow-0030 would repin the fleet at a ref that does not exist — nine broken callers per repo, in their CI, with no local change to explain it. This task is the prerequisite, not a tidy-up."
   - "2026-09-15: `serves` is `maintenance` deliberately rather than G4. G4 (\"a repo stays current by reference\") is the goal flow-0030 names and it sits under VISION.md's `## Retired` after the 2026-09-01 rewrite; naming it here would anchor new work to a dead goal, which task-writer calls out as the one move that makes drift look anchored. No live goal (G6-G11) names release plumbing, so the reserved id is the honest answer."
   - "2026-09-15 (orchestrator): both blockers accepted as correctly refused, neither widened into this task. (2) THE CHANGELOG COLLISION IS AN ORCHESTRATOR DEFECT, now flow-0047 (ready, priority 1): flow-0044's criterion said `## Unreleased` survives the release 'empty', which is true for an instant and became an unconditional assertion, so the section is empty-or-red and no PR can record a change until it is fixed. Raised as its own task rather than widened into this one, because it blocks every changelog-bearing PR in the repo, not just this task — that is not this task's scope, it is a live trap in canonical's gate. `blocked_by` now names it, so this task's unblock is machine-checkable on that half. (1) THE CREDENTIAL STAYS HUMAN and stays out of blocked_by deliberately: FLOW_PAT needs Contents: Read and write PLUS Workflows: Read and write, and no task or PR can grant it. The worker's reading is right and checked — a GitHub App token cannot write workflow files without the `workflows` permission, and there is no `workflows:` key in a job `permissions:` block to grant it in YAML. Do NOT dispatch another worker at this task before both are cleared: the patch it needs is in the note below and a fresh session would rediscover the same wall."
