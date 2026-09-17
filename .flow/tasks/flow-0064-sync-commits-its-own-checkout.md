@@ -2,13 +2,13 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0064"
 title: "flow-sync commits its own canonical checkout as a dangling submodule — every sync PR carries a `.flow-canonical` gitlink with no `.gitmodules` entry"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0064"
 created: "2026-09-17"
-started: ""
-branch: ""
+started: "2026-09-17T06:52:00Z"
+branch: "flow/flow-0064-sync-commits-its-own-checkout"
 pr: ""
 issue: ""
 blocked_reason: ""
@@ -16,7 +16,7 @@ blocked_by: []
 serves: ["maintenance"]   # sync plumbing; same anchor as flow-0051, same subsystem, no live goal names it
 touches:
   - ".github/workflows/_flow-sync.yml"
-  - "project-template/.flow/bin/flow-sync.test.mjs"
+  - ".flow/bin/sync-checkout-isolation.test.mjs"
   - "CHANGELOG.md"
 labels: [infra, sync, fleet]
 notes:
@@ -25,6 +25,8 @@ notes:
   - "2026-09-17 (orchestrator): WHY IT HAS NEVER BEEN SEEN BEFORE. `flow-sync` could not push `.github/workflows/` files until flow-0060 fixed the checkout credential, and TanPlan's flow-sync had never recorded a successful run at all. The job reached `git add -A` in earlier runs but the push was rejected, so the gitlink never survived into a PR. Fixing the push is precisely what exposed this. That ordering is worth recording: it is the second defect in a row that only became observable once the layer above it started working."
   - "2026-09-17 (orchestrator): THE FIX IS THE CHECKOUT PATH, NOT AN IGNORE RULE. Moving the checkout outside the working tree (a `${{ runner.temp }}` path, with `CANON_TPL` at :164 updated to match) removes the cause. Adding `.flow-canonical` to `.gitignore` or to an rsync exclude would suppress the symptom while leaving a full second checkout of canonical sitting inside the repo being synced, which is also what makes `git add -A` a loaded gun here — a future file that escapes the ignore list reintroduces it. Prefer the path change; if an ignore rule is added as well, it is belt-and-braces, not the fix."
   - "2026-09-17 (orchestrator): SCOPE NOTE ON WHERE THIS CANNOT BE FIXED. The two PRs already carrying the gitlink are sync PRs in adopting repos, and the protocol's hard rule is that Flow infra is authored in canonical and repos adopt it. Hand-patching TanPlan#26 or Nudge#286 to delete `.flow-canonical` would produce a green PR whose content no longer matches what canonical would generate, and the next sync would reintroduce it. The correct sequence is: fix here, cut the tag, close or supersede those two PRs, re-dispatch. That sequencing is the human's call and is recorded rather than assumed."
+  - "2026-09-17 (worker, session claude-worker-flow-0064): TWO CORRECTIONS TO THIS TASK AS WRITTEN, both mine, both found on claiming it. (1) `touches` named `project-template/.flow/bin/flow-sync.test.mjs`. Wrong tree: the defect is in `.github/workflows/_flow-sync.yml`, which exists only in canonical — an adopting repo has the thin caller, not the reusable. The precedent is `.flow/bin/sync-permissions.test.mjs`, which says so in its own header, so the proving test goes to `.flow/bin/sync-checkout-isolation.test.mjs` and `touches` is corrected. (2) The proposed fix said to move the checkout to a `${{ runner.temp }}` path. That is NOT AVAILABLE to `actions/checkout`: its `path:` input is documented as a relative path UNDER `$GITHUB_WORKSPACE` and the action refuses anything outside it. Since the first checkout lands at the workspace root, any `path:` for the second is necessarily inside the first repo's working tree — the collision is structural to using `actions/checkout` twice, not a bad path string."
+  - "2026-09-17 (worker, session claude-worker-flow-0064): THE FIX THAT SURVIVES THAT CORRECTION. `CandidDan/flow` is PUBLIC (`private: false` on the repository API), which is also why the existing canonical-checkout step passes no token and still works from other repos. A public clone needs no credential, so the canonical tree can be fetched with a plain `git clone` into `$RUNNER_TEMP` — genuinely outside the working tree — instead of a second `actions/checkout`. That keeps the original intent of the fix (canonical's tree never enters the synced repo, so `git add -A` cannot see it) rather than falling back to an ignore rule, which was the outcome this task argued against."
   - "2026-09-17 (orchestrator): SEPARATE AND NOT IN THIS TASK — the `flow-tooling` job also reports unit-test failures on both PRs, 2 of 345 in Nudge and 16 of 345 in TanPlan. Identical shipped code producing different failure counts in different repos suggests tests that read real repository state rather than fixtures, but THIS IS A HYPOTHESIS: the failing test names could not be extracted from the retrievable log window, and nobody should act on the guess without them. It wants its own task once someone has read the failures. It is called out here only so a worker fixing the gitlink does not assume a green `flow-tooling` job proves their fix."
 ---
 
