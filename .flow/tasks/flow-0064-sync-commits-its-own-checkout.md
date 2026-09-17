@@ -9,7 +9,7 @@ owner: "claude-worker-flow-0064"
 created: "2026-09-17"
 started: "2026-09-17T06:52:00Z"
 branch: "flow/flow-0064-sync-commits-its-own-checkout"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/83"
 issue: ""
 blocked_reason: ""
 blocked_by: []
