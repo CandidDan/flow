@@ -54,6 +54,23 @@ const REUSABLE = join(REPO, ".github/workflows/_flow-sync.yml");
 // and prove the check would have caught the real defect. Returns human-readable problems; an
 // empty list means the workflow keeps canonical's tree out of the synced repo's working tree.
 
+// Shell line continuations make a single logical command span several lines, and a regex written
+// with `[^\n]*` silently stops at the first of them. Assertions about a command's WHOLE form have
+// to see it whole, so they run over this rather than the raw script.
+export function joinContinuations(script) {
+  return script.replace(/\\\n\s*/g, " ");
+}
+
+// The command lines of a shell script, continuations joined and comments dropped. Comments are
+// dropped because this file's own prose explains why `--` is right for `git clone` and wrong for
+// `git checkout` — and a naive scan for `git clone` matched that sentence and asserted against it.
+export function commandLines(script) {
+  return joinContinuations(script)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"));
+}
+
 export function checkCheckoutIsolation(text, yaml) {
   const problems = [];
   const doc = yaml.parse(text);
@@ -162,15 +179,30 @@ test("the shipped workflow clones canonical under RUNNER_TEMP and exports it", {
 
   assert.match(runs, /CANON_DIR="\$\{RUNNER_TEMP\}\/flow-canonical"/,
     "the clone must target $RUNNER_TEMP, which is outside $GITHUB_WORKSPACE");
-  assert.match(runs, /git clone .*https:\/\/github\.com\/CandidDan\/flow\.git/,
-    "canonical is fetched by plain clone, the one way to reach a path outside the workspace");
   assert.match(runs, /echo "CANON_DIR=\$\{CANON_DIR\}" >> "\$GITHUB_ENV"/,
     "later steps read CANON_DIR from the environment, so the clone step must export it");
-  // The clone carries no credential on purpose: CandidDan/flow is public, and the step this
-  // replaced passed no token either. A token appearing here would be a new secret exposure in a
-  // shell command, which is a different and worse thing than the bug being fixed.
-  assert.doesNotMatch(runs, /git clone[^\n]*(secrets\.|x-access-token|@github\.com)/,
-    "the canonical clone must stay credential-free");
+
+  // EVERY clone is checked, not whichever one happened to fit on a single line. The first version
+  // of this assertion was `/git clone[^\n]*(secrets\.|…)/` over the raw text, and the shallow
+  // clone line-continues with `\` before its URL — so `[^\n]*` stopped at the newline and the
+  // check never reached the thing it existed to inspect. It passed while blind, which is the
+  // failure mode sync-permissions.test.mjs names in its own header: a test that pins the wrong
+  // thing is worse than no test. Raised by this PR's code review; verified by mutation (splicing
+  // a credential into the shallow clone left the old assertion green) before being replaced.
+  const clones = commandLines(runs).filter((l) => /(^|[^\w-])git clone\b/.test(l));
+
+  assert.ok(clones.length >= 2,
+    `expected the shallow clone and its full-clone fallback; found ${clones.length}`);
+
+  for (const cmd of clones) {
+    // Public by design: CandidDan/flow is public, and the actions/checkout step this replaced
+    // passed no token either. A credential here would be a new secret in a shell command — a
+    // different and worse thing than the bug being fixed.
+    assert.doesNotMatch(cmd, /secrets\.|x-access-token|:[^/@\s]+@github\.com/,
+      `a canonical clone carries a credential: ${cmd}`);
+    assert.match(cmd, /(^|\s)https:\/\/github\.com\/CandidDan\/flow\.git(\s|$)/,
+      `a canonical clone does not target the expected public URL: ${cmd}`);
+  }
 });
 
 test("a canonical_ref starting with '-' is refused, and the checkout form is the safe one", { skip }, () => {
@@ -208,6 +240,22 @@ test("a failed shallow clone replays git's own error instead of asserting a caus
   assert.match(runs, /sed 's\/\^\/ {2}\/' "\$CLONE_ERR"/, "…and replayed before the retry");
   assert.doesNotMatch(runs, /retrying as a full clone \(a commit SHA reaches here\)/,
     "the message must not assert a cause it has not established");
+});
+
+test("the credential check now catches a token in the LINE-CONTINUED clone", { skip }, () => {
+  // The regression this guards is the assertion's own blindness, not the workflow's behaviour.
+  // Mutate the shallow clone — the line-continued one — and the check must go red. The version
+  // this replaced stayed green against exactly this mutation.
+  const mutated = readFileSync(REUSABLE, "utf8")
+    .replace("-- https://github.com/CandidDan/flow.git",
+             "-- https://x-access-token:TOKEN@github.com/CandidDan/flow.git");
+
+  const clones = commandLines(mutated).filter((l) => /(^|[^\w-])git clone\b/.test(l));
+
+  const caught = clones.filter((c) => /secrets\.|x-access-token|:[^/@\s]+@github\.com/.test(c));
+  assert.equal(caught.length, 1,
+    "a credential spliced into the shallow clone must be seen; the old [^\\n]* form never was");
+  assert.match(caught[0], /--depth 1/, "…and it is the shallow clone that was caught, not the fallback");
 });
 
 // ---------------------------------------------------------------------------------------------
