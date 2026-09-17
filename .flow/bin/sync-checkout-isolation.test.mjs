@@ -173,6 +173,25 @@ test("the shipped workflow clones canonical under RUNNER_TEMP and exports it", {
     "the canonical clone must stay credential-free");
 });
 
+test("a canonical_ref starting with '-' is refused, and the checkout form is the safe one", { skip }, () => {
+  const runs = Object.values(yamlMod.parse(readFileSync(REUSABLE, "utf8")).jobs)
+    .flatMap((j) => j.steps ?? [])
+    .map((s) => (typeof s.run === "string" ? s.run : ""))
+    .join("\n");
+
+  assert.match(runs, /case "\$CANONICAL_REF" in\s*\n\s*-\*\)/,
+    "a ref beginning with '-' is rejected up front rather than defended against per-command");
+
+  // flow-0064's security review proposed `git checkout -- "$CANONICAL_REF"`. In `git checkout`,
+  // `--` separates revisions from PATHS, so that form looks for a FILE named e.g. `v2` and exits 1
+  // with `pathspec 'v2' did not match any file(s) known to git`. It would have broken the SHA
+  // fallback. This pins the correct ordering so the suggestion cannot be re-applied later.
+  assert.doesNotMatch(runs, /checkout[^\n]*\s--\s+"\$CANONICAL_REF"/,
+    "a LEADING `--` before the ref makes git read it as a pathspec, not a revision");
+  assert.match(runs, /checkout --quiet "\$CANONICAL_REF" --/,
+    "the separator belongs after the revision, where it means 'that was a rev, not a path'");
+});
+
 // ---------------------------------------------------------------------------------------------
 // The mechanism, reproduced. The assertions above are about the workflow's text; this one proves
 // the thing the text is avoiding is real, so that nobody later reads the rule as superstition.

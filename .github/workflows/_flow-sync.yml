@@ -169,14 +169,29 @@ jobs:
           set -euo pipefail
           CANON_DIR="${RUNNER_TEMP}/flow-canonical"
           rm -rf "$CANON_DIR"
+          # A ref beginning with `-` is refused outright rather than defended against per-command.
+          # Raised by flow-0064's security review as Low and not exploitable — `canonical_ref` is a
+          # workflow_call input set by the calling repo's own YAML, never request data — and closed
+          # here because it is one line. The review proposed a `--` separator on each git command
+          # instead; that is right for `git clone` and WRONG for `git checkout`, where `--`
+          # separates revisions from PATHS, so `git checkout -- v2` looks for a file called `v2`
+          # and exits 1 with `pathspec 'v2' did not match any file(s) known to git` — it would have
+          # broken the fallback below. The `--branch` value needs no guard at all: git's option
+          # parser consumes the next argv as the value, so `--branch --upload-pack=x` is read as a
+          # branch named `--upload-pack=x`. The separators kept below are free, not load-bearing.
+          case "$CANONICAL_REF" in
+            -*) echo "::error title=Invalid canonical_ref::canonical_ref '${CANONICAL_REF}' starts with '-'. It names a tag or branch in CandidDan/flow and cannot begin with a dash."; exit 1 ;;
+          esac
           # --branch takes a tag or a branch, which is what `canonical_ref` is documented to be.
           # A raw commit SHA is not valid there, and actions/checkout used to accept one, so fall
           # back to a full clone and an explicit checkout rather than silently dropping support.
           if ! git clone --quiet --depth 1 --branch "$CANONICAL_REF" \
-                 https://github.com/CandidDan/flow.git "$CANON_DIR" 2>/dev/null; then
+                 -- https://github.com/CandidDan/flow.git "$CANON_DIR" 2>/dev/null; then
             echo "Shallow clone of '$CANONICAL_REF' failed — retrying as a full clone (a commit SHA reaches here)."
-            git clone --quiet https://github.com/CandidDan/flow.git "$CANON_DIR"
-            git -C "$CANON_DIR" checkout --quiet "$CANONICAL_REF"
+            git clone --quiet -- https://github.com/CandidDan/flow.git "$CANON_DIR"
+            # Trailing `--`, never leading: it tells git the argument before it is a REVISION and
+            # not a path. Leading, it would mean the opposite. See the guard above.
+            git -C "$CANON_DIR" checkout --quiet "$CANONICAL_REF" --
           fi
           echo "CANON_DIR=${CANON_DIR}" >> "$GITHUB_ENV"
           echo "Cloned CandidDan/flow@${CANONICAL_REF} to ${CANON_DIR} (outside ${GITHUB_WORKSPACE})."
