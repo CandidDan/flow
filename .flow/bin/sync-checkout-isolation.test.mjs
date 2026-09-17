@@ -192,6 +192,24 @@ test("a canonical_ref starting with '-' is refused, and the checkout form is the
     "the separator belongs after the revision, where it means 'that was a rev, not a path'");
 });
 
+test("a failed shallow clone replays git's own error instead of asserting a cause", { skip }, () => {
+  const runs = Object.values(yamlMod.parse(readFileSync(REUSABLE, "utf8")).jobs)
+    .flatMap((j) => j.steps ?? [])
+    .map((s) => (typeof s.run === "string" ? s.run : ""))
+    .join("\n");
+
+  // flow-0049's defect class, guarded at the point it would otherwise be reintroduced: the retry
+  // message used to say "a commit SHA reaches here", which is a CAUSE it has not established. A
+  // network failure or a deleted tag arrives by the same branch and would have been reported as a
+  // SHA. git's stderr is captured and replayed so the real reason survives.
+  assert.doesNotMatch(runs, /git clone[^\n]*2>\/dev\/null/,
+    "discarding git's stderr leaves the retry message as the only diagnostic");
+  assert.match(runs, /2>"\$CLONE_ERR"/, "the shallow clone's stderr is captured");
+  assert.match(runs, /sed 's\/\^\/ {2}\/' "\$CLONE_ERR"/, "…and replayed before the retry");
+  assert.doesNotMatch(runs, /retrying as a full clone \(a commit SHA reaches here\)/,
+    "the message must not assert a cause it has not established");
+});
+
 // ---------------------------------------------------------------------------------------------
 // The mechanism, reproduced. The assertions above are about the workflow's text; this one proves
 // the thing the text is avoiding is real, so that nobody later reads the rule as superstition.

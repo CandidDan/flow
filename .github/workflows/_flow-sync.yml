@@ -185,14 +185,26 @@ jobs:
           # --branch takes a tag or a branch, which is what `canonical_ref` is documented to be.
           # A raw commit SHA is not valid there, and actions/checkout used to accept one, so fall
           # back to a full clone and an explicit checkout rather than silently dropping support.
+          # git's own stderr is CAPTURED, not discarded, and replayed before the retry. It is
+          # suppressed on the happy path only because a SHA reaching here fails this clone as a
+          # matter of course, and that expected noise would read as a fault. Raised by this PR's
+          # code review as non-blocking; taken anyway, because the message it replaced asserted a
+          # cause ("a commit SHA reaches here") that it had not established — a network failure or
+          # a deleted tag would have been reported as a SHA and sent the next reader the wrong way.
+          # That is flow-0049's defect class, and shipping a new instance of it inside flow-0064
+          # would be the same mistake one layer along.
+          CLONE_ERR="$(mktemp)"
           if ! git clone --quiet --depth 1 --branch "$CANONICAL_REF" \
-                 -- https://github.com/CandidDan/flow.git "$CANON_DIR" 2>/dev/null; then
-            echo "Shallow clone of '$CANONICAL_REF' failed — retrying as a full clone (a commit SHA reaches here)."
+                 -- https://github.com/CandidDan/flow.git "$CANON_DIR" 2>"$CLONE_ERR"; then
+            echo "Shallow clone of '$CANONICAL_REF' failed. git said:"
+            sed 's/^/  /' "$CLONE_ERR"
+            echo "Retrying as a full clone. That succeeds when the ref is a commit SHA, which --branch does not accept; if it fails too, the message above is the real cause."
             git clone --quiet -- https://github.com/CandidDan/flow.git "$CANON_DIR"
             # Trailing `--`, never leading: it tells git the argument before it is a REVISION and
             # not a path. Leading, it would mean the opposite. See the guard above.
             git -C "$CANON_DIR" checkout --quiet "$CANONICAL_REF" --
           fi
+          rm -f "$CLONE_ERR"
           echo "CANON_DIR=${CANON_DIR}" >> "$GITHUB_ENV"
           echo "Cloned CandidDan/flow@${CANONICAL_REF} to ${CANON_DIR} (outside ${GITHUB_WORKSPACE})."
 
