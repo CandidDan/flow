@@ -17,6 +17,7 @@ serves: ["maintenance"]   # sync plumbing; same anchor as flow-0051, same subsys
 touches:
   - ".github/workflows/_flow-sync.yml"
   - ".flow/bin/sync-checkout-isolation.test.mjs"
+  - "docs/adr/0005-split-authoring-from-release.md"
   - "CHANGELOG.md"
 labels: [infra, sync, fleet]
 notes:
