@@ -142,12 +142,44 @@ jobs:
           # carry Workflows: Write, and it is the only credential that makes this push legal.
           token: ${{ secrets.FLOW_PAT }}
 
-      - name: Checkout canonical
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          repository: CandidDan/flow
-          ref: ${{ inputs.canonical_ref || 'v2' }}
-          path: .flow-canonical
+      # THE FIX (flow-0064). This used to be a second `actions/checkout` with
+      # `path: .flow-canonical`, which put canonical's tree INSIDE the working tree of the repo
+      # being synced. `git add -A` further down then staged it, and because that directory carries
+      # its own `.git`, git could not store it as a tree and recorded a GITLINK instead — a
+      # submodule entry with no `.gitmodules` stanza. Both of the first two real sync PRs carried
+      # one, and every job that ran `git submodule foreach` against them ended:
+      #
+      #   fatal: No url found for submodule path '.flow-canonical' in .gitmodules
+      #
+      # Merging such a PR writes that entry into the adopting repo's history permanently, after
+      # which `git clone --recurse-submodules` fails outright for everyone.
+      #
+      # It cannot be fixed by choosing a better `path:`. That input is documented as a relative
+      # path UNDER $GITHUB_WORKSPACE and the action refuses anything outside it, and the checkout
+      # above lands at the workspace root — so with two `actions/checkout` steps the second tree is
+      # always inside the first. A plain clone is not bound by that rule. CandidDan/flow is public,
+      # which is why the step this replaces never needed a token either, so no credential is
+      # involved and none is exposed. An ignore rule was considered and rejected: it would leave a
+      # second full checkout sitting inside the repo, one `git add -f` or one missed pattern away
+      # from the same commit.
+      - name: Clone canonical (outside the working tree)
+        env:
+          CANONICAL_REF: ${{ inputs.canonical_ref || 'v2' }}
+        run: |
+          set -euo pipefail
+          CANON_DIR="${RUNNER_TEMP}/flow-canonical"
+          rm -rf "$CANON_DIR"
+          # --branch takes a tag or a branch, which is what `canonical_ref` is documented to be.
+          # A raw commit SHA is not valid there, and actions/checkout used to accept one, so fall
+          # back to a full clone and an explicit checkout rather than silently dropping support.
+          if ! git clone --quiet --depth 1 --branch "$CANONICAL_REF" \
+                 https://github.com/CandidDan/flow.git "$CANON_DIR" 2>/dev/null; then
+            echo "Shallow clone of '$CANONICAL_REF' failed — retrying as a full clone (a commit SHA reaches here)."
+            git clone --quiet https://github.com/CandidDan/flow.git "$CANON_DIR"
+            git -C "$CANON_DIR" checkout --quiet "$CANONICAL_REF"
+          fi
+          echo "CANON_DIR=${CANON_DIR}" >> "$GITHUB_ENV"
+          echo "Cloned CandidDan/flow@${CANONICAL_REF} to ${CANON_DIR} (outside ${GITHUB_WORKSPACE})."
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -161,7 +193,10 @@ jobs:
           GH_TOKEN: ${{ secrets.FLOW_PAT }}
         run: |
           set -euo pipefail
-          CANON_TPL=".flow-canonical/project-template"
+          # Set by the clone step above, via $GITHUB_ENV. Outside $GITHUB_WORKSPACE by design —
+          # see flow-0064's note on that step. Nothing below may reintroduce a path inside the
+          # working tree, or `git add -A` gets its gitlink back.
+          CANON_TPL="${CANON_DIR}/project-template"
           # Use canonical's OWN flow-sync logic (the authority), never this repo's possibly-stale copy.
           SYNC="node $CANON_TPL/.flow/bin/flow-sync.mjs"
 
