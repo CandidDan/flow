@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0064"
 title: "flow-sync commits its own canonical checkout as a dangling submodule — every sync PR carries a `.flow-canonical` gitlink with no `.gitmodules` entry"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-worker-flow-0064"
