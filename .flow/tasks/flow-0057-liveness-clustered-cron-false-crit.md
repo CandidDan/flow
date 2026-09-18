@@ -1,12 +1,12 @@
 ---
 id: "flow-0057"
 title: "Liveness calls a clustered cron dead every night — the average interval hides the real gap"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "session_018H1cKZqBRNbZdkotje35W3"
 created: "2026-09-16"
-started: ""
+started: "2026-09-18T08:19:08Z"
 branch: ""
 pr: ""
 issue: ""
