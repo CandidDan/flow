@@ -1,14 +1,14 @@
 ---
 id: "flow-0057"
 title: "Liveness calls a clustered cron dead every night — the average interval hides the real gap"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "session_018H1cKZqBRNbZdkotje35W3"
 created: "2026-09-16"
 started: "2026-09-18T08:19:08Z"
-branch: ""
-pr: ""
+branch: "claude/can-this-be-resolved-of6kjq"
+pr: "https://github.com/CandidDan/flow/pull/85"
 issue: ""
 blocked_reason: ""
 blocked_by: []
