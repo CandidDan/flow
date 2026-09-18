@@ -6,6 +6,31 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+- **`flow-sync` no longer commits its own canonical checkout as a dangling submodule**
+  (`_flow-sync.yml`, `.flow/bin/sync-checkout-isolation.test.mjs`, flow-0064). Canonical was
+  fetched by a second `actions/checkout` at `path: .flow-canonical`. The repo being synced is
+  checked out at the workspace root, so that path sat **inside its working tree**, and the
+  `git add -A` further down staged it. Because the directory carries its own `.git`, git cannot
+  store it as a tree — it records a **gitlink**, a submodule entry, and nothing writes the
+  `.gitmodules` stanza that would make it valid. Both of the first two real sync PRs carried one,
+  and every job afterwards ended `fatal: No url found for submodule path '.flow-canonical' in
+  .gitmodules` with git exiting 128. Merging such a PR writes that entry into the adopting repo's
+  history permanently, after which `git clone --recurse-submodules` fails outright for anyone.
+
+  It had never been observable before: the push carrying it was rejected every time until
+  flow-0060 fixed the checkout credential, so the gitlink never survived into a PR. Fixing the
+  push is what exposed it — the second defect in a row surfaced by the layer above it starting to
+  work.
+
+  **A better `path:` could not fix it.** That input is documented as a relative path under
+  `$GITHUB_WORKSPACE` and `actions/checkout` refuses anything outside it, so with two checkout
+  steps the second tree is *always* inside the first. The step is therefore replaced by a plain
+  `git clone` into `$RUNNER_TEMP`, which is not bound by that rule; `CandidDan/flow` is public, so
+  no credential is involved, exactly as the step it replaces passed no token. An ignore rule was
+  considered and rejected — it would leave a full second checkout of canonical sitting inside the
+  repo being synced, one missed pattern away from the same commit. **No caller action:** the thin
+  callers are unchanged.
+
 - **A set-but-invalid `FLOW_PAT` no longer sails past the `flow-sync` preflight** (`_flow-sync.yml`,
   `.flow/bin/sync-permissions.test.mjs`, flow-0062). flow-0060 (below) added a first step that
   fails the run when `FLOW_PAT` is unset, naming the secret and **Workflows: Write** rather than

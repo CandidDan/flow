@@ -289,7 +289,7 @@ The order is:
 3. **Verify** a green run against the new reference — an actual CI run, not a reading of the diff.
 4. **Only then** flip canonical private.
 
-The reason, in counts rather than vaguely. As of 2026-09-10, **46 files outside the task store name
+The reason, in counts rather than vaguely. As of 2026-09-17, **47 files outside the task store name
 `CandidDan/flow`**. That is the *bare* reference: `CandidDan/flow-protocol` and
 `CandidDan/flow-plugin` are different repositories and need no re-pinning, so a substring count
 overstates the exposure by three files. The original Consequences recorded 40 on 2026-08-31, so the
@@ -297,7 +297,7 @@ number has grown, not shrunk.
 
 Of those, **19 carry a `uses:` reference that GitHub actually resolves at run time** — nine of
 canonical's own callers and **10 in `project-template/.github/workflows/`**, the files every
-adopting repo ships a copy of. The other 27 name the reference in prose, in `docs/flow-map.html`,
+adopting repo ships a copy of. The other 28 name the reference in prose, in `docs/flow-map.html`,
 or in a test fixture. That distinction is not pedantry: GitHub parses `uses:` inside
 `.github/workflows/*.yml` and nowhere else, so a runbook that quotes the string is documentation to
 correct at leisure, while a caller that resolves it is a repository that stops working.
