@@ -115,13 +115,18 @@ function cronMatchesMinute(fields, epochMinutes) {
   return domRestricted ? domHit : dowHit;
 }
 
-// The average interval (in hours) between firings of one or more cron expressions, measured by
-// counting distinct fire-minutes across a fixed window and dividing the window by that count.
-// Deliberately an AVERAGE, not a worst-case gap: a weekday-morning cron has a ~60h weekend gap
-// that would make every Monday read `crit` under a worst-case rule, which is exactly the false
-// alarm an average interval avoids while still deriving entirely from the cron text — never a
-// hardcoded constant. The window is a fixed multiple of 7 days from a fixed epoch anchor (not
-// "now"), so the result is deterministic and independent of when it's computed.
+// ── cadence from cron text: the average interval, and the longest gap ──────────────────────
+//
+// Two numbers come out of the same fire-minute set, and the difference between them is the whole
+// of flow-0057. The AVERAGE divides the window by the number of firings. The LONGEST GAP asks how
+// far apart two consecutive firings actually get. For an evenly spaced cron they are the same
+// number; for a CLUSTERED one — many firings packed into a bounded daily window — the count rises
+// while the longest gap does not move, so the average collapses underneath a gap that was always
+// there and a healthy workflow reads `crit` for most of the week.
+//
+// Both derive from a fixed window anchored at the Unix epoch, never from "now", so every result is
+// deterministic and testable without freezing a clock. The window is a multiple of 7 days so a
+// weekly cron's pattern tiles it exactly, which is what makes the wrap below sound.
 const WINDOW_DAYS_DEFAULT = 28; // four weeks — long enough to average out a weekly cron cleanly
 
 // Brute-forces every minute in the window (40,320 at the default 28 days) per distinct cron set —
@@ -129,46 +134,118 @@ const WINDOW_DAYS_DEFAULT = 28; // four weeks — long enough to average out a w
 // `*/N` shape. Called once per scheduled workflow classified, so a page load's total cost is
 // bounded by workflow count, not repo count squared; fine at fleet sizes Flow actually reaches.
 // Worth revisiting only if a single repo's scheduled-workflow count grows far past today's ~3-4.
-export function cronIntervalHours(crons, { windowDays = WINDOW_DAYS_DEFAULT } = {}) {
+//
+// Returns fire-minutes in ascending order, or null when the crons parse but never fire. Shared by
+// both cadence functions below so they can never disagree about when a cron fires.
+function cronFireMinutes(crons, windowMinutes) {
   const list = Array.isArray(crons) ? crons : [crons];
   const parsed = list.map(parseCronExpr).filter(Boolean);
   if (parsed.length === 0) return null;
 
-  const windowMinutes = windowDays * 24 * 60;
-  const fires = new Set();
+  const fires = [];
   for (let m = 0; m < windowMinutes; m++) {
-    if (parsed.some((fields) => cronMatchesMinute(fields, m))) fires.add(m);
+    if (parsed.some((fields) => cronMatchesMinute(fields, m))) fires.push(m);
   }
-  if (fires.size === 0) return null; // syntactically parsed but never actually fires
-  return (windowMinutes / fires.size) / 60;
+  return fires.length === 0 ? null : fires; // syntactically parsed but never actually fires
+}
+
+// Both cadence numbers from ONE scan of the window. `scheduledLiveness` needs the pair, and the
+// scan is the expensive part (40,320 minutes, each building a Date); computing them separately
+// would double the cost of every workflow the flightdeck page classifies, for numbers that come
+// from the same set. The two exported functions below are thin views on this, so they can never
+// disagree, and callers that want only one still pay for only one scan.
+export function cronCadence(crons, { windowDays = WINDOW_DAYS_DEFAULT } = {}) {
+  const windowMinutes = windowDays * 24 * 60;
+  const fires = cronFireMinutes(crons, windowMinutes);
+  if (fires === null) return null;
+
+  let maxGapMinutes = (fires[0] + windowMinutes) - fires[fires.length - 1]; // tail joined to head
+  for (let i = 1; i < fires.length; i++) {
+    const gap = fires[i] - fires[i - 1];
+    if (gap > maxGapMinutes) maxGapMinutes = gap;
+  }
+  return { intervalHours: (windowMinutes / fires.length) / 60, maxGapHours: maxGapMinutes / 60 };
+}
+
+// The average interval (in hours) between firings: the window divided by the number of firings.
+// Retained as the published shape it has always had — it is still the right number for the `warn`
+// band's slack and for describing a cadence in prose — but it is no longer what decides `crit`.
+export function cronIntervalHours(crons, opts) {
+  return cronCadence(crons, opts)?.intervalHours ?? null;
+}
+
+// The LONGEST gap (in hours) between two consecutive firings — the number a liveness threshold
+// actually needs, because a workflow is only late once it has passed the longest quiet stretch its
+// own schedule builds in.
+//
+// THE WRAP IS NOT AN EDGE CASE, IT IS THE POINT. The window is a slice of an infinite schedule, so
+// the stretch from the last firing inside it to the first firing of the next window is a real gap
+// that no pair of in-window neighbours represents. Measuring only in-window pairs would miss it
+// entirely and, worse, the slice boundary would look like a firing that never happens. Joining the
+// tail to the head — `(first + windowMinutes) - last` — measures that stretch once and exactly,
+// and because the window is a whole number of weeks it is the same gap the schedule really leaves.
+export function cronMaxGapHours(crons, opts) {
+  return cronCadence(crons, opts)?.maxGapHours ?? null;
 }
 
 // ── liveness states ─────────────────────────────────────────────────────────────────────────
 // Every rule below returns `{ state, reason?, ...detail }`. `state` is always one of
 // "good" | "warn" | "crit" | "off" — never a blank cell, per the task's acceptance criteria.
 
+// THE THRESHOLD, AND WHY IT IS THE LONGEST GAP RATHER THAN TWICE THE AVERAGE.
+//
+// A scheduled workflow is not late because time has passed; it is late because a firing it was
+// supposed to make did not happen. So the bound has to be the longest quiet stretch the cron
+// itself builds in — `cronMaxGapHours` — plus slack for the firing that would end that stretch.
+// The slack is the average interval, which keeps the rule deriving entirely from the cron text
+// with no tuning knob and no allowlist (a knob would let a genuinely dead workflow be silenced by
+// configuration, which is the one thing a watchdog must not permit).
+//
+// THIS IS A STRICT GENERALISATION, NOT A NEW RULE. For an evenly spaced cron the longest gap IS
+// the average interval, so `maxGap + interval` is `interval * 2` — exactly the bound this function
+// has always used, to the digit. `0 */6 * * *`, `*/5 * * * *` and `0 8 * * *` therefore classify
+// identically before and after this change, and tests pin that. Only a CLUSTERED cron, where the
+// two numbers diverge, moves at all — which is the defect and nothing else.
+//
+// WHAT IT COSTS. A clustered cron alarms later in absolute terms: `0 9-18 * * 1-5` goes crit at
+// ~66h rather than ~6.7h. That is the honest price of not crying wolf every night, and it is not
+// unbounded — a workflow that has genuinely stopped still alarms, roughly one weekend late at the
+// worst, because the bound tracks the schedule's own shape instead of a constant.
 export function scheduledLiveness({ crons, lastSuccessAt, now, disabled }) {
   if (disabled) return { state: "off", reason: "workflow disabled" };
 
-  const intervalHours = cronIntervalHours(crons);
-  if (intervalHours == null) {
+  const cadence = cronCadence(crons); // one scan, both numbers
+  if (cadence == null) {
     return { state: "crit", reason: "cron does not parse to any firing — treated as never scheduled" };
   }
+  const { intervalHours, maxGapHours } = cadence;
   if (!lastSuccessAt) {
-    return { state: "crit", intervalHours, reason: "no successful run recorded" };
+    return { state: "crit", intervalHours, maxGapHours, reason: "no successful run recorded" };
   }
   const lastSuccessMs = new Date(lastSuccessAt).getTime();
   if (!Number.isFinite(lastSuccessMs)) {
-    return { state: "crit", intervalHours, reason: `unparseable lastSuccessAt: ${lastSuccessAt}` };
+    return { state: "crit", intervalHours, maxGapHours, reason: `unparseable lastSuccessAt: ${lastSuccessAt}` };
   }
   const ageHours = (now - lastSuccessMs) / 3600000;
-  if (ageHours > intervalHours * 2) {
-    return { state: "crit", intervalHours, ageHours, reason: `last success ${ageHours.toFixed(1)}h ago, cron interval ~${intervalHours.toFixed(1)}h` };
+  const critAfterHours = maxGapHours + intervalHours;
+  // The reason names the age AND the gap it is being judged against, because "14.1h ago" alone
+  // sent a reader looking for an outage that the schedule fully explains (see flow-0057's notes).
+  // The `last success Xh ago, cron interval ~Yh` prefix is KEPT VERBATIM: watchdog.test.mjs
+  // matches it when asserting the issue body carries the maths, and that file is outside this
+  // task's `touches`. The gap is added to the reason, never substituted for the interval.
+  if (ageHours > critAfterHours) {
+    return {
+      state: "crit", intervalHours, maxGapHours, ageHours,
+      reason: `last success ${ageHours.toFixed(1)}h ago, cron interval ~${intervalHours.toFixed(1)}h, longest scheduled gap ~${maxGapHours.toFixed(1)}h — past that gap plus one interval of slack`,
+    };
   }
-  if (ageHours > intervalHours) {
-    return { state: "warn", intervalHours, ageHours, reason: `last success ${ageHours.toFixed(1)}h ago, cron interval ~${intervalHours.toFixed(1)}h` };
+  if (ageHours > maxGapHours) {
+    return {
+      state: "warn", intervalHours, maxGapHours, ageHours,
+      reason: `last success ${ageHours.toFixed(1)}h ago, cron interval ~${intervalHours.toFixed(1)}h, longest scheduled gap ~${maxGapHours.toFixed(1)}h — just past that gap`,
+    };
   }
-  return { state: "good", intervalHours, ageHours };
+  return { state: "good", intervalHours, maxGapHours, ageHours };
 }
 
 export function eventLiveness({ disabled, latestRun }) {
