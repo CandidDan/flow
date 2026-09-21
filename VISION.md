@@ -57,9 +57,12 @@ one repo — runs Flow without special-casing, and the gate can stand up whateve
 needs to be verified (Postgres today, Docker next) rather than passing because it could not check.
 
 ### G9 — Not materially expensive to run
-Running Flow on a project does not burn tokens badly enough to say something has gone wrong.
-**Progress looks like:** you look at what a task cost and do not wince. No threshold is set
-deliberately; if one is ever set, it belongs here.
+Running Flow on a project does not cost badly enough to say something has gone wrong. Two
+distinct spends count, and a repo can be cheap in one while ruinous in the other: the **tokens**
+a task burns, and the **CI minutes** the automation spends — including the scheduled sweeps that
+run whether or not there is anything for them to do.
+**Progress looks like:** you look at what a task cost — tokens *and* minutes — and do not wince.
+No threshold is set deliberately; if one is ever set, it belongs here.
 
 ### G10 — The gate tells the truth
 When CI says green, the work is actually right: correct scope, real tests, coverage that means
@@ -132,6 +135,7 @@ pointing at them surface as warnings, which is the intended signal.
 
 | Date | Change | Why |
 |---|---|---|
+| 2026-09-21 | G9 widened from tokens alone to tokens **and** CI minutes, naming scheduled sweeps explicitly. | The account's GitHub Actions allowance was exhausted on 2026-09-21, stopping every scheduled workflow in every private repo for hours. The cause was two adopting repos running `flow-recover` on a 30-minute cron: ~12 seconds of real work per run, but GitHub bills per job rounded UP to a whole minute, so the pair spent ~2,920 of the 3,000 monthly private-repo minutes finding nothing. G9 as written could not name that failure — it spoke only of tokens — so the fleet's largest running cost sat outside the vision while a goal titled "not materially expensive to run" was on the page. Widening the goal is what lets a cost guard be written as serving it rather than as `maintenance`. |
 | 2026-09-07 | Audience amended: one operator, plus readers who are not the operator, in adopting repos only. Two Open items recorded — whether readers stay readers, and where their feedback lands. | Intents in project repos will be read and commented on by clients and contracted teams. That makes "nothing is built to serve a second user" false as written, since a projection is built to serve exactly that. The narrow fix separates operator from reader: the solo-operator position is untouched, and the trajectory beyond reading is recorded as undecided rather than designed for. |
 | 2026-09-07 | G11 declared; the Purpose paragraph's touchpoint 1 changes from approve-the-task to approve-the-intent. The recorded Open item about touchpoint 1 not firing on the direct-authoring path is closed by this change. | The human approves the artefact that needs judgement — what we want and why — rather than a scoped task spec they skim. Intents live in the repo so the record of who asked for what is visible where the work is, and issues stay what their name says: things that are wrong. |
 | 2026-09-01 | Vision rewritten from a `vision-writer` interview. G1–G5 and NG1–NG5 retired; G6–G10 and NG6–NG7 declared. | The previous vision was model-written from the repo's own documents, never extracted from the human, and merged inside a docs PR. It stated that "the audience is a decision, not an assumption" while being exactly the assumption it warned against. Goals here are the human's words; NG4, NG2 and NG3 are reversed on his instruction. |
