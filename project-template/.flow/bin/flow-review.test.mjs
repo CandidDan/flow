@@ -362,6 +362,31 @@ test("an unsupplied caller gets its OWN sentinel — \"no task\" is never claime
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// The two sentinels ask the reviewer for OPPOSITE things. A shared closing paragraph had the
+// artefact contradicting itself — "do not report a missing task as a finding" three lines above
+// "this is a finding, say so in your verdict" — which is worse than either instruction alone.
+test("each sentinel's closing instruction matches its own sentinel, and never the other's", () => {
+  const dir = tmp("ctx-closing");
+  try {
+    const tasksDir = storeFixture(dir, ["flow-0068-a-slug.md"]);
+
+    const checked = taskContext({ headRef: "claude/x", prTitle: "Random title", tasksDir });
+    assert.ok(checked.text.startsWith(NO_TASK_SENTINEL));
+    assert.match(checked.text, /This is a finding/,
+      "the sources WERE checked and carry no task — reporting that is the point");
+
+    const unavailable = taskContext({ headRef: "claude/x", prTitle: "", callerSupplied: false, tasksDir });
+    assert.ok(unavailable.text.startsWith(NO_SOURCES_SENTINEL));
+    assert.doesNotMatch(unavailable.text, /This is a finding/,
+      "nothing was checked, so calling it a finding contradicts the paragraph above telling the " +
+      "reviewer NOT to report a missing task");
+    assert.match(unavailable.text, /not to conclude is that this PR has no task/,
+      "and it says plainly what must not be concluded");
+    assert.match(unavailable.text, /flow-sync/,
+      "…plus the remedy, since the fact is about the workflow rather than the PR");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("the CLI falls back to GitHub's own GITHUB_HEAD_REF when a caller passes no HEAD_REF", () => {
   const dir = tmp("cli-ghref");
   try {

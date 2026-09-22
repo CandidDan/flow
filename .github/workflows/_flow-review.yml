@@ -197,10 +197,16 @@ jobs:
             outcome rather than merely that the code runs without throwing. A test that calls a
             function and asserts nothing meaningful does not prove anything.
 
-            If .flow-review/task.md begins "NO TASK FILE RESOLVED", say so plainly in your
-            verdict: the file states which sources were tried and why neither yielded a task.
-            There are no criteria to map in that case, so do not report a criterion→test table
-            you were not in a position to build.
+            .flow-review/task.md begins with one of two sentinels when it carries no task, and
+            they ask you for OPPOSITE things — read which one it is before reacting:
+              · "NO TASK FILE RESOLVED" — the sources were checked and carry no task. Say so
+                plainly; there are no criteria to map, so do not report a criterion→test table
+                you were not in a position to build.
+              · "TASK CONTEXT UNAVAILABLE" — the sources were never supplied to the gate, so
+                nothing has been checked. Do NOT report a missing task. Locate it yourself from
+                the branch or the PR title; if you cannot, say the task CONTEXT was unavailable
+                and name that sentinel, which is what tells a human to run flow-sync.
+            The file itself states which case applies and why.
 
             THEN DO BOTH OF THESE:
             1. Post ONE pull-request comment: the verdict, the criterion→test table, and for a
@@ -258,7 +264,9 @@ jobs:
             .flow-review/task.md (the task itself, resolved for you in code from the branch
             (flow/<id>-…) or the PR title prefix ([<id>] …)), and the specific files the diff
             touches. Do NOT read the repository at large. If task.md begins "NO TASK FILE
-            RESOLVED" there is no declared scope to judge creep against — say so.
+            RESOLVED" there is no declared scope to judge creep against — say so. If it begins
+            "TASK CONTEXT UNAVAILABLE" the scope was never handed to you rather than being
+            absent: say that instead, and do not report a missing task.
 
             Review for:
             1. Correctness — does it satisfy each acceptance criterion? Logic errors, off-by-one,
@@ -353,8 +361,9 @@ jobs:
             YOUR CONTEXT IS BOUNDED — review the DIFF and its immediate blast radius, not the
             whole repo. Read .flow-review/diff.patch, .flow-review/files.txt, .flow-review/task.md
             (the task, resolved in code from the branch or the PR title — it tells you what the
-            change was meant to do; if it begins "NO TASK FILE RESOLVED" you simply have less
-            intent context, and reporting that is the qa gate's job, not yours), the `security`
+            change was meant to do; if it begins "NO TASK FILE RESOLVED" or "TASK CONTEXT
+            UNAVAILABLE" you simply have less intent context, and reporting either is the qa
+            gate's job, not yours), the `security`
             block of .flow/config.yml (`secrets_scan`,
             `dependency_audit`, `focus[]`), and the specific files the diff touches. Do NOT read
             the repository at large.

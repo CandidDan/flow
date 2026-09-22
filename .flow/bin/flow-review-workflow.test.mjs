@@ -249,6 +249,10 @@ test("every reviewer reads the MATERIALISED task, not a prose instruction to go 
     assert.match(p, /NO TASK FILE RESOLVED/,
       "and the no-task case is named by its exact sentinel, so a reviewer cannot mistake an " +
       "unresolved task for a task with nothing to check");
+    assert.match(p, /TASK CONTEXT UNAVAILABLE/,
+      "…as is the version-skew case, which asks the reviewer for the OPPOSITE thing — not to " +
+      "report a missing task. A prompt naming only one sentinel leaves the reviewer to infer " +
+      "the difference from prose it may not read closely");
     // CAN-52's point is that the id has TWO sources, and the reading list has to say so. Pinning
     // only `task.md` would let a future edit quietly drop the PR title back out of the reading
     // list — leaving the prose describing a branch-only world the code no longer lives in, which

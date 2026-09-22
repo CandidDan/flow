@@ -317,13 +317,27 @@ export function taskContext({
   const id = parseTaskId(headRef, prTitle);
   // `reason` carries no attacker-chosen text: it is interpolated into the run summary, and it is
   // the short line a person reads. `sources` is the fenced block, and only `text` gets it.
+  // THE CLOSING INSTRUCTION BELONGS TO THE SENTINEL, NOT TO "a miss". The two cases ask the
+  // reviewer for OPPOSITE things — one to report a missing task, one explicitly not to — and a
+  // shared trailer had the artefact contradicting itself inside three paragraphs: "do not report
+  // a missing task as a finding" followed by "this is a finding, say so in your verdict". Found
+  // while checking a reviewer's note about the prompts on PR #92.
+  const CLOSING = {
+    [NO_TASK_SENTINEL]:
+      "This is a finding, not a formality: with no task there are no acceptance criteria to map " +
+      "tests against. Say so in your verdict instead of reporting a criterion-to-test mapping " +
+      "you were not in a position to make.",
+    [NO_SOURCES_SENTINEL]:
+      "So the one thing not to conclude is that this PR has no task. If you find the task " +
+      "yourself, review against it as normal. If you cannot, say in your verdict that the task " +
+      "CONTEXT was unavailable and name this sentinel — that is a fact about the workflow, and " +
+      "it is what tells a human to run flow-sync rather than to go looking at the PR.",
+  };
   const miss = (reason, { sources = false, sentinel = NO_TASK_SENTINEL } = {}) => ({
     id: null, source: null, path: null, matches: [], found: false, reason,
     text: `${sentinel}\n\n${reason}\n\n` +
       (sources ? `The two sources that were tried, verbatim:\n\n${untrustedBlock(headRef, prTitle)}\n\n` : "") +
-      `This is a finding, not a formality: with no task there are no acceptance criteria to map ` +
-      `tests against. Say so in your verdict instead of reporting a criterion-to-test mapping ` +
-      `you were not in a position to make.\n`,
+      `${CLOSING[sentinel]}\n`,
   });
 
   // ORDER MATTERS. The id is resolved FIRST, so an ambient branch that happens to carry one still
