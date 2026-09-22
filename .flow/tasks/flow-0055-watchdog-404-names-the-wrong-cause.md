@@ -1,7 +1,7 @@
 ---
 id: "flow-0055"
 title: "Stop the watchdog reporting an unadopted repo as unreadable — name the real cause"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "session_0185hZqhiYudC9jdC5vmi96p"
