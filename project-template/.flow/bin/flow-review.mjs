@@ -29,11 +29,12 @@
 //   node .flow/bin/flow-review.mjs verdict .flow-review/qa.json --check qa
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { realpathSync as __realpathSync } from "node:fs";
 import { fileURLToPath as __fileURLToPath } from "node:url";
 import { globToRegExp } from "./touches-guard.mjs";
+import { idFromBranch, parseTaskId } from "./parse-task-id.mjs";
 
 // --- main-module detection (do not simplify back to a string compare) -------------------
 // `import.meta.url` is the RESOLVED realpath; `process.argv[1]` is the path AS INVOKED. Reached
@@ -57,6 +58,15 @@ export const DEFAULT_MODEL = "sonnet";
 // and its blast radius, never the whole repo. A truncated diff is reported, not hidden — a
 // reviewer that silently saw half a change would approve on half the evidence.
 export const DEFAULT_MAX_DIFF_BYTES = 300_000;
+
+// Where the task store lives, relative to the repo the review is planned against. An adapter
+// pins it (see canonical's `.flow/bin/flow-review.mjs`); the CLI default is cwd-relative for
+// the same reason `configPath` is — in CI the workflow runs at the workspace root.
+export const DEFAULT_TASKS_DIR = ".flow/tasks";
+
+// The exact sentinel `task.md` carries when nothing resolved. The reviewer prompts name this
+// string, and `flow-review.test.mjs` pins it, so it is a contract rather than prose.
+export const NO_TASK_SENTINEL = "NO TASK FILE RESOLVED";
 
 export const CHECKS = ["qa", "code-review", "security"];
 
@@ -194,6 +204,92 @@ export function securityDecision({ changedFiles = [], securityPaths = [] } = {})
   };
 }
 
+// ── the task under review ─────────────────────────────────────────────────────────────────
+// CAN-52: a task id has TWO sources. A `flow/<id>-…` branch is canonical, but a cloud session is
+// handed a `claude/…` branch it is told not to rename, so the PR title (`[<id>] …`) is the second
+// and equally load-bearing one. `_flow-status.yml`, `_flow-done.yml` and the touches guard all
+// resolve it in CODE. The review gate used to leave it to a sentence in each reviewer's prompt —
+// the one place it must not be left, because the qa verdict IS the criterion-to-test mapping, and
+// a reviewer that never located the task still writes a perfectly well-formed
+// `{"verdict":"PASS","unproven":[]}`. `verdict` is fail-closed against a MISSING verdict, not
+// against one reached on missing evidence. Resolving it here turns "no task" into a materialised
+// fact the reviewer is handed and can be held to.
+//
+// NOT A GIT CALL, DELIBERATELY. `runPlan`'s git calls are the two diffs and a test pins that list
+// exactly; the store is already on disk, so it is read from the working tree.
+
+// The task file for an id: `<id>-<slug>.md`, or a bare `<id>.md`. Case-insensitive because the id
+// arrives from a branch or a title, which humans and harnesses case as they please. Returns every
+// match, so a caller can say something about a store that holds two files for one id (flow-0052)
+// rather than silently picking one.
+export function findTaskFile(id, { tasksDir = DEFAULT_TASKS_DIR, ls = readdirSync } = {}) {
+  if (!id) return { path: null, matches: [] };
+  let names;
+  try { names = ls(tasksDir); } catch { return { path: null, matches: [] }; }
+  const lower = String(id).toLowerCase();
+  const matches = [...names].map(String)
+    .filter((n) => {
+      const l = n.toLowerCase();
+      return l.endsWith(".md") && (l === `${lower}.md` || l.startsWith(`${lower}-`));
+    })
+    .sort();
+  return { path: matches.length ? join(tasksDir, matches[0]) : null, matches };
+}
+
+// The `task.md` handed to every reviewer. It is written in BOTH outcomes: a reviewer must never
+// have to infer, from the absence of a file, whether the gate resolved no task or simply broke.
+export function taskContext({
+  headRef = "",
+  prTitle = "",
+  tasksDir = DEFAULT_TASKS_DIR,
+  ls = readdirSync,
+  read = (p) => readFileSync(p, "utf8"),
+} = {}) {
+  // `parseTaskId` stays the single decision — branch first, title second. `idFromBranch` is used
+  // only to LABEL which source won, never to re-derive the answer: a second copy of that
+  // precedence rule is the flow-0008 hazard (the same fix needed twice, green when one lands).
+  const id = parseTaskId(headRef, prTitle);
+  const miss = (reason) => ({
+    id: null, source: null, path: null, matches: [], found: false, reason,
+    text: `${NO_TASK_SENTINEL}\n\n${reason}\n\n` +
+      `This is a finding, not a formality: with no task there are no acceptance criteria to map ` +
+      `tests against. Say so in your verdict instead of reporting a criterion-to-test mapping ` +
+      `you were not in a position to make.\n`,
+  });
+
+  if (!id) {
+    return miss(
+      `No task id in the branch (${JSON.stringify(headRef || "")}) or the PR title ` +
+      `(${JSON.stringify(prTitle || "")}). Flow resolves it from a \`flow/<id>-<slug>\` branch or ` +
+      `a leading \`[<id>]\` in the PR title; this PR carries neither.`);
+  }
+
+  const source = idFromBranch(headRef) === id ? "the branch" : "the PR title";
+  const { path, matches } = findTaskFile(id, { tasksDir, ls });
+  if (!path) {
+    return {
+      ...miss(`Task id \`${id}\` resolved from ${source}, but no file matching it exists in ` +
+        `\`${tasksDir}\`. The id is wrong, or the task was never committed to the store on main.`),
+      id, source,
+    };
+  }
+
+  let body;
+  try { body = read(path); } catch (e) {
+    return { ...miss(`Task id \`${id}\` resolved from ${source} to \`${path}\`, which could not be ` +
+      `read (${e.message}).`), id, source, path, matches };
+  }
+
+  const dupe = matches.length > 1
+    ? ` NOTE: ${matches.length} files in the store match this id (${matches.join(", ")}); the first is used.`
+    : "";
+  return {
+    id, source, path, matches, found: true,
+    reason: `resolved from ${source}`,
+    text: `<!-- flow-review: task ${id}, resolved from ${source}. Source: ${path}.${dupe} -->\n${body}`,
+  };
+}
+
 // ── the bounded context ───────────────────────────────────────────────────────────────────
 // Truncation is reported in the returned object AND written into the text, so a reviewer reading
 // a clipped diff is told it is clipped instead of reasoning confidently about half a change.
@@ -285,6 +381,7 @@ export function runReviewCli(argv, {
   env = process.env,
   configPath = ".flow/config.yml",
   outDir = ".flow-review",
+  tasksDir = DEFAULT_TASKS_DIR,
   git,
 } = {}) {
   const [cmd, ...rest] = argv;
@@ -295,9 +392,12 @@ export function runReviewCli(argv, {
         outDir: env.REVIEW_OUT_DIR || outDir,
         baseRef: env.BASE_REF || "origin/main",
         maxBytes: Number(env.REVIEW_DIFF_MAX_BYTES || DEFAULT_MAX_DIFF_BYTES),
+        headRef: env.HEAD_REF || "",
+        prTitle: env.PR_TITLE || "",
+        tasksDir: env.REVIEW_TASKS_DIR || tasksDir,
         ...(git ? { git } : {}),
       });
-      const { cfg, changedFiles, security, diff } = plan;
+      const { cfg, changedFiles, security, diff, task } = plan;
       emit(env.GITHUB_OUTPUT, [
         `model=${cfg.model}`,
         `security_model=${cfg.securityModel}`,
@@ -305,6 +405,8 @@ export function runReviewCli(argv, {
         `security_reason=${security.reason.replace(/\r?\n/g, " ")}`,
         `changed_count=${changedFiles.length}`,
         `diff_truncated=${diff.truncated}`,
+        `task_id=${task.id ?? ""}`,
+        `task_found=${task.found}`,
       ].join("\n"));
       const summary = planSummary(plan);
       emit(env.GITHUB_STEP_SUMMARY, summary);
@@ -345,8 +447,12 @@ export function runPlan({
   outDir = ".flow-review",
   baseRef = process.env.BASE_REF || "origin/main",
   maxBytes = Number(process.env.REVIEW_DIFF_MAX_BYTES || DEFAULT_MAX_DIFF_BYTES),
+  headRef = process.env.HEAD_REF || "",
+  prTitle = process.env.PR_TITLE || "",
+  tasksDir = DEFAULT_TASKS_DIR,
   git = (args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 1024 * 1024 * 64 }),
   read = (p) => readFileSync(p, "utf8"),
+  ls = readdirSync,
 } = {}) {
   if (!existsSync(configPath)) {
     throw new ReviewError(`${configPath} not found — the review gate reads its model and its ` +
@@ -357,15 +463,17 @@ export function runPlan({
     .split("\n").map((s) => s.trim()).filter(Boolean);
   const security = securityDecision({ changedFiles, securityPaths: cfg.securityPaths });
   const diff = boundDiff(git(["diff", `${baseRef}...HEAD`]), { maxBytes });
+  const task = taskContext({ headRef, prTitle, tasksDir, ls, read });
 
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "files.txt"), changedFiles.join("\n") + (changedFiles.length ? "\n" : ""));
   writeFileSync(join(outDir, "diff.patch"), diff.text);
+  writeFileSync(join(outDir, "task.md"), task.text);
 
-  return { cfg, changedFiles, security, diff, outDir };
+  return { cfg, changedFiles, security, diff, task, outDir };
 }
 
-function planSummary({ cfg, changedFiles, security, diff }) {
+function planSummary({ cfg, changedFiles, security, diff, task }) {
   const out = [
     "### Flow review gate — plan",
     "",
@@ -374,6 +482,9 @@ function planSummary({ cfg, changedFiles, security, diff }) {
     `- changed files: ${changedFiles.length}`,
     `- diff handed to the reviewers: ${diff.bytes} bytes${diff.truncated ? ` **(truncated from ${diff.fullBytes})**` : ""}`,
     `- security review: **${security.run ? "RUNNING" : "SKIPPED"}** — ${security.reason}`,
+    task.found
+      ? `- task under review: \`${task.id}\` (${task.reason}) — \`${task.path}\``
+      : `- task under review: **none resolved** — ${task.reason}`,
   ];
   for (const w of cfg.warnings) out.push(`- :warning: ${w}`);
   return out.join("\n");

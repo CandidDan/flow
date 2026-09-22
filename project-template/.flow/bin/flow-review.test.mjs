@@ -14,7 +14,7 @@
 // in Node itself.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,14 +25,17 @@ import {
   CHECKS,
   DEFAULT_MAX_DIFF_BYTES,
   DEFAULT_MODEL,
+  NO_TASK_SENTINEL,
   ReviewError,
   boundDiff,
+  findTaskFile,
   parseReviewConfig,
   parseVerdict,
   reviewBlock,
   runPlan,
   runReviewCli,
   securityDecision,
+  taskContext,
   verdictOutcome,
 } from "./flow-review.mjs";
 
@@ -176,7 +179,7 @@ test("an oversized diff is truncated AND told the reviewer it was truncated", ()
   assert.ok(DEFAULT_MAX_DIFF_BYTES > 0);
 });
 
-test("runPlan writes ONLY the changed files and the bounded diff — the reviewer's whole context", () => {
+test("runPlan writes the changed files, the bounded diff and the task — the whole context", () => {
   const dir = tmp("plan");
   try {
     writeFileSync(join(dir, "config.yml"), CONFIG);
@@ -202,12 +205,189 @@ test("runPlan writes ONLY the changed files and the bounded diff — the reviewe
     assert.match(readFileSync(join(dir, "out", "diff.patch"), "utf8"), /\+token/);
     assert.equal(plan.security.run, true, "src/auth/** is a configured trigger");
     assert.equal(plan.cfg.model, "haiku");
+
+    // The bounded context is exactly three files. Nothing else is materialised, and the third
+    // one exists in BOTH task outcomes — see the task tests below.
+    assert.deepEqual(readdirSync(join(dir, "out")).sort(), ["diff.patch", "files.txt", "task.md"],
+      "the reviewers' whole context, and nothing beyond it");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("runPlan refuses to invent a config it cannot find", () => {
   assert.throws(() => runPlan({ configPath: join(tmpdir(), "definitely-absent-flow-config.yml") }),
     (e) => e instanceof ReviewError && /not found/.test(e.message));
+});
+
+// ── the task under review (flow-0068) ─────────────────────────────────────────────────────
+// The review gate was the last workflow resolving a task id by PROSE instruction to the model
+// rather than in code. These prove the code path, in both directions: a resolved task reaches the
+// reviewer, and a task that did NOT resolve is a materialised fact rather than an absent file.
+
+// A store to resolve against. Two files for one id in the `dupe` case, which the store-level
+// duplicate check (flow-0052) owns — here it only has to not silently pick one and say nothing.
+function storeFixture(dir, names) {
+  const tasksDir = join(dir, "tasks");
+  mkdirSync(tasksDir, { recursive: true });
+  for (const n of names) writeFileSync(join(tasksDir, n), `---\nid: "${n.split("-").slice(0, 2).join("-")}"\n---\n\nbody of ${n}\n`);
+  return tasksDir;
+}
+
+test("findTaskFile matches <id>-<slug>.md and a bare <id>.md, and never a longer id", () => {
+  const dir = tmp("find");
+  try {
+    const tasksDir = storeFixture(dir, ["flow-0068-a-slug.md", "flow-0006.md", "flow-00681-other.md", "notes.txt"]);
+    assert.equal(findTaskFile("flow-0068", { tasksDir }).path, join(tasksDir, "flow-0068-a-slug.md"));
+    assert.equal(findTaskFile("flow-0006", { tasksDir }).path, join(tasksDir, "flow-0006.md"),
+      "a bare <id>.md is a legal store filename");
+    assert.equal(findTaskFile("flow-006", { tasksDir }).path, null,
+      "flow-006 must NOT match flow-0068-… — a prefix is not an id");
+    assert.equal(findTaskFile("FLOW-0068", { tasksDir }).path, join(tasksDir, "flow-0068-a-slug.md"),
+      "the id arrives from a branch or a title, cased however a human or a harness cased it");
+    assert.equal(findTaskFile("flow-0068", { tasksDir: join(dir, "absent") }).path, null,
+      "a missing store is a miss, never a throw — the plan still has to complete");
+    assert.equal(findTaskFile(null, { tasksDir }).path, null);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("taskContext resolves from the PR TITLE when the branch is a platform-imposed one (CAN-52)", () => {
+  const dir = tmp("ctx-title");
+  try {
+    const tasksDir = storeFixture(dir, ["flow-0068-a-slug.md"]);
+    const t = taskContext({
+      headRef: "claude/quiet-edison-9f2k",
+      prTitle: "[flow-0068] fence the fork boundary",
+      tasksDir,
+    });
+    assert.equal(t.found, true, "the branch carries no id; the title does, and that is the point of CAN-52");
+    assert.equal(t.id, "flow-0068");
+    assert.equal(t.source, "the PR title");
+    assert.match(t.text, /body of flow-0068-a-slug\.md/, "the reviewer is handed the task's own body");
+    assert.match(t.text, /resolved from the PR title/, "and told where the id came from");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("taskContext prefers the branch when it carries an id — branch is canonical", () => {
+  const dir = tmp("ctx-branch");
+  try {
+    const tasksDir = storeFixture(dir, ["flow-0068-a-slug.md", "flow-0006.md"]);
+    const t = taskContext({ headRef: "flow/flow-0068-a-slug", prTitle: "[flow-0006] something else", tasksDir });
+    assert.equal(t.id, "flow-0068");
+    assert.equal(t.source, "the branch");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("taskContext MATERIALISES the no-task case — the reviewer is told, not left to infer", () => {
+  const dir = tmp("ctx-none");
+  try {
+    const tasksDir = storeFixture(dir, ["flow-0068-a-slug.md"]);
+
+    const none = taskContext({ headRef: "claude/quiet-edison-9f2k", prTitle: "Random PR title", tasksDir });
+    assert.equal(none.found, false);
+    assert.equal(none.id, null);
+    assert.ok(none.text.startsWith(NO_TASK_SENTINEL),
+      "the prompts name this exact sentinel, so it is a contract and not prose");
+    assert.match(none.text, /claude\/quiet-edison-9f2k/, "the reason names the sources that were tried");
+    assert.match(none.text, /Random PR title/);
+
+    const missing = taskContext({ headRef: "flow/flow-9999-nope", prTitle: "", tasksDir });
+    assert.equal(missing.found, false, "an id that resolves to no file is still a miss");
+    assert.equal(missing.id, "flow-9999", "…but the id it resolved is reported, so the reason can name it");
+    assert.ok(missing.text.startsWith(NO_TASK_SENTINEL));
+    assert.match(missing.text, /never committed to the store/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("taskContext reports a store holding two files for one id rather than quietly picking one", () => {
+  const dir = tmp("ctx-dupe");
+  try {
+    const tasksDir = storeFixture(dir, ["flow-0068-a-slug.md", "flow-0068-duplicate.md"]);
+    const t = taskContext({ headRef: "flow/flow-0068-a-slug", prTitle: "", tasksDir });
+    assert.equal(t.found, true);
+    assert.equal(t.matches.length, 2);
+    assert.match(t.text, /2 files in the store match this id/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("runPlan materialises task.md and publishes the id — from the title, on a non-flow/ branch", () => {
+  const dir = tmp("plan-task");
+  try {
+    writeFileSync(join(dir, "config.yml"), CONFIG);
+    const tasksDir = storeFixture(dir, ["flow-0068-a-slug.md"]);
+    const calls = [];
+    const git = (args) => { calls.push(args.join(" ")); return ""; };
+
+    const plan = runPlan({
+      configPath: join(dir, "config.yml"),
+      outDir: join(dir, "out"),
+      headRef: "claude/quiet-edison-9f2k",
+      prTitle: "[flow-0068] fence the fork boundary",
+      tasksDir,
+      git,
+    });
+
+    assert.equal(plan.task.id, "flow-0068");
+    assert.equal(plan.task.found, true);
+    assert.match(readFileSync(join(dir, "out", "task.md"), "utf8"), /body of flow-0068-a-slug\.md/);
+    assert.deepEqual(calls, ["diff --name-only origin/main...HEAD", "diff origin/main...HEAD"],
+      "resolving the task must not add a git call — the store is already on disk");
+
+    // And the no-task direction writes the file too, so a reviewer never reads an absent file as
+    // "the gate broke" (or worse, as "there was nothing to check").
+    const nonePlan = runPlan({
+      configPath: join(dir, "config.yml"),
+      outDir: join(dir, "out2"),
+      headRef: "claude/quiet-edison-9f2k",
+      prTitle: "Random PR title",
+      tasksDir,
+      git,
+    });
+    assert.equal(nonePlan.task.found, false);
+    assert.ok(readFileSync(join(dir, "out2", "task.md"), "utf8").startsWith(NO_TASK_SENTINEL));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("the CLI publishes task_id / task_found, and REVIEW_TASKS_DIR overrides the pinned default", () => {
+  const dir = tmp("cli-task");
+  try {
+    writeFileSync(join(dir, "config.yml"), CONFIG);
+    const tasksDir = storeFixture(dir, ["flow-0068-a-slug.md"]);
+    const pinned = { configPath: join(dir, "config.yml"), outDir: join(dir, "out"), git: () => "" };
+
+    assert.equal(runReviewCli(["plan"], {
+      env: {
+        GITHUB_OUTPUT: join(dir, "gh"),
+        GITHUB_STEP_SUMMARY: join(dir, "summary"),
+        HEAD_REF: "claude/quiet-edison-9f2k",
+        PR_TITLE: "[flow-0068] fence the fork boundary",
+        REVIEW_TASKS_DIR: tasksDir,
+      },
+      ...pinned,
+    }), 0);
+    const out = readFileSync(join(dir, "gh"), "utf8");
+    assert.match(out, /^task_id=flow-0068$/m, "_flow-review.yml publishes this as a job output");
+    assert.match(out, /^task_found=true$/m);
+    // The human reading the run must see WHICH task was graded and where the id came from. An
+    // output variable is for the workflow; the summary is the only part a person actually reads.
+    const summary = readFileSync(join(dir, "summary"), "utf8");
+    assert.match(summary, /task under review: `flow-0068` \(resolved from the PR title\)/,
+      "the run summary states the task and its id source, the way it already states the " +
+      "security decision — a gate whose subject is invisible cannot be audited");
+
+    // No id anywhere: still exit 0 (a task-less PR is not a gate failure) and still reported.
+    assert.equal(runReviewCli(["plan"], {
+      env: {
+        GITHUB_OUTPUT: join(dir, "gh2"),
+        GITHUB_STEP_SUMMARY: join(dir, "summary2"),
+        REVIEW_TASKS_DIR: tasksDir,
+      },
+      ...pinned,
+    }), 0, "a PR with no task must not crash the plan — the reviewers decide what it means");
+    assert.match(readFileSync(join(dir, "summary2"), "utf8"), /task under review: \*\*none resolved\*\*/,
+      "and the summary says so out loud — a silent absence is the shape this task exists to remove");
+    const out2 = readFileSync(join(dir, "gh2"), "utf8");
+    assert.match(out2, /^task_id=$/m);
+    assert.match(out2, /^task_found=false$/m);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ── verdicts (criterion 2, and the fail-closed rule) ──────────────────────────────────────
