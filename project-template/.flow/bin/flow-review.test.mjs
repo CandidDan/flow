@@ -333,6 +333,32 @@ test("an unsupplied caller gets its OWN sentinel — \"no task\" is never claime
       assert.ok(t.text.startsWith(NO_TASK_SENTINEL),
         `one source is enough to make the no-task claim evidenced (${JSON.stringify(supplied)})`);
     }
+
+    // THE CASE THAT ACTUALLY HAPPENS IN CI, and the one the first version of this got wrong.
+    // `runReviewCli` falls back to GITHUB_HEAD_REF, so in the skew window `headRef` is non-empty
+    // even though the caller supplied nothing — deciding "was anything supplied?" from `headRef`
+    // answered YES and produced "this PR carries neither" about a title nobody had looked at.
+    const skew = taskContext({
+      headRef: "claude/quiet-edison-9f2k",   // recovered from the ambient env, not from the caller
+      prTitle: "",
+      callerSupplied: false,
+      tasksDir,
+    });
+    assert.ok(skew.text.startsWith(NO_SOURCES_SENTINEL),
+      "an ambient branch does not make the title checked — the caller supplied neither");
+    assert.match(skew.text, /has NOT been checked/,
+      "and the message must say which source went unexamined, not claim the PR carries neither");
+
+    // …while the ambient branch STILL resolves a real task when it carries an id. The fallback
+    // keeps its value; it just stops masquerading as the caller having supplied something.
+    const recovered = taskContext({
+      headRef: "flow/flow-0068-a-slug",
+      prTitle: "",
+      callerSupplied: false,
+      tasksDir,
+    });
+    assert.equal(recovered.found, true, "id resolution happens first, whoever supplied the branch");
+    assert.equal(recovered.id, "flow-0068");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -532,6 +558,24 @@ test("the CLI publishes task_id / task_found, and REVIEW_TASKS_DIR overrides the
     const out2 = readFileSync(join(dir, "gh2"), "utf8");
     assert.match(out2, /^task_id=$/m);
     assert.match(out2, /^task_found=false$/m);
+
+    // Sources SUPPLIED by the caller and neither carrying an id — criterion 2's own case, at the
+    // CLI layer. Raised by the qa gate on PR #92: adding the second sentinel silently moved the
+    // assertion above onto the unsupplied branch, so this case lost its CLI-level cover without
+    // anything failing.
+    assert.equal(runReviewCli(["plan"], {
+      env: {
+        GITHUB_OUTPUT: join(dir, "gh3"),
+        GITHUB_STEP_SUMMARY: join(dir, "summary3"),
+        HEAD_REF: "claude/quiet-edison-9f2k",
+        PR_TITLE: "Random PR title",
+        REVIEW_TASKS_DIR: tasksDir,
+      },
+      ...pinned,
+    }), 0, "a task-less PR is still not a gate failure");
+    assert.match(readFileSync(join(dir, "gh3"), "utf8"), /^task_found=false$/m);
+    assert.ok(readFileSync(join(dir, "out", "task.md"), "utf8").startsWith(NO_TASK_SENTINEL),
+      "both sources supplied and neither carries an id — the evidenced claim, not the skew one");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
