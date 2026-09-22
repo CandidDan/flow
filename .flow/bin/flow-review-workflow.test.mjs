@@ -249,6 +249,15 @@ test("every reviewer reads the MATERIALISED task, not a prose instruction to go 
     assert.match(p, /NO TASK FILE RESOLVED/,
       "and the no-task case is named by its exact sentinel, so a reviewer cannot mistake an " +
       "unresolved task for a task with nothing to check");
+    // CAN-52's point is that the id has TWO sources, and the reading list has to say so. Pinning
+    // only `task.md` would let a future edit quietly drop the PR title back out of the reading
+    // list — leaving the prose describing a branch-only world the code no longer lives in, which
+    // is how a reviewer starts hunting in .flow/tasks/ again.
+    assert.match(p, /the branch/,
+      "the branch is the canonical source and the prompt must still name it");
+    assert.match(p, /the PR title/,
+      "and the PR title alongside it — the source a platform-imposed claude/… branch falls back " +
+      "to, which is the path canonical's own worker PRs take");
   }
   const qa = reviewerSteps("qa")[0].with.prompt.replace(/\s+/g, " ");
   assert.match(qa, /do not report a criterion.{0,3}test table you were not in a position to build/,

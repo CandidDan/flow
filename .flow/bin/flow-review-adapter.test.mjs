@@ -11,9 +11,9 @@
 // `flow-review-workflow.test.mjs` proves the workflow's wiring. What is left to prove here is
 // the adapter's own two properties — the ones that fail silently:
 //
-//   · it resolves CANONICAL's config and history, from this file's location, not from whatever
-//     cwd it happens to be invoked in — the property a copy of the template's cwd-relative CLI
-//     would lose;
+//   · it resolves CANONICAL's config, history AND TASK STORE, from this file's location, not from
+//     whatever cwd it happens to be invoked in — the property a copy of the template's
+//     cwd-relative CLI would lose;
 //   · its CLI block actually runs (the symlink failure mode), and the shell it runs is the
 //     template's own exported `runReviewCli`, never a second copy of it.
 //
@@ -21,7 +21,7 @@
 // `node --test .flow/bin/*.test.mjs` with no install step in front of it.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -79,6 +79,52 @@ test("`plan` reads canonical's config and history from ANY cwd — what a cwd-re
       "_flow-review.yml reads the reviewer model from this output");
     assert.ok(existsSync(join(dir, "out", "files.txt")) && existsSync(join(dir, "out", "diff.patch")),
       "the bounded context the reviewers read must be materialised where REVIEW_OUT_DIR says");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("`plan` resolves a task from CANONICAL's store from ANY cwd — the `tasksDir` pin (flow-0068)", () => {
+  const dir = tmp("plan-task");
+  try {
+    // A real task out of canonical's own store, discovered rather than hardcoded, so this does
+    // not rot as the store grows. The filename convention IS the resolution rule: `<id>-<slug>.md`.
+    const file = readdirSync(join(FLOW, "tasks")).filter((n) => /^flow-\d+-.+\.md$/.test(n)).sort()[0];
+    assert.ok(file, "canonical's store must hold at least one flow-NNNN task to resolve against");
+    const id = file.match(/^(flow-\d+)-/)[1];
+
+    const out = join(dir, "gh-output");
+    // REVIEW_TASKS_DIR is deliberately NOT set — the whole point is to exercise the ADAPTER's pin
+    // rather than an override. cwd is a bare temp directory, so a pin that was dropped or reverted
+    // to the template's cwd-relative `.flow/tasks` finds no store, resolves no task, and STILL
+    // EXITS 0 with a well-formed `task.md` saying there is no task. That is the silent shape this
+    // file exists to catch, and the reason the review gate cannot tell it from a task-less PR.
+    //
+    // The branch is a platform-imposed `claude/…` one and the id travels in the title, so this
+    // also exercises CAN-52's fallback through the adapter — the path canonical's own worker PRs
+    // actually take.
+    const r = run(["plan"], {
+      cwd: dir,
+      env: {
+        ...process.env,
+        BASE_REF: "HEAD",
+        REVIEW_OUT_DIR: join(dir, "out"),
+        GITHUB_OUTPUT: out,
+        GITHUB_STEP_SUMMARY: "",
+        HEAD_REF: "claude/deliberately-not-a-flow-branch",
+        PR_TITLE: `[${id}] resolved from the title, not the branch`,
+      },
+    });
+
+    assert.equal(r.status, 0, r.stderr);
+    const outputs = readFileSync(out, "utf8");
+    assert.match(outputs, new RegExp(`^task_id=${id}$`, "m"),
+      "the adapter must resolve against canonical's store, not against the cwd it was invoked in");
+    assert.match(outputs, /^task_found=true$/m);
+
+    const task = readFileSync(join(dir, "out", "task.md"), "utf8");
+    assert.ok(!task.startsWith("NO TASK FILE RESOLVED"),
+      "a resolved task that materialises as the no-task sentinel is the pin having been lost");
+    assert.match(task, new RegExp(`id: "${id}"`),
+      "the reviewers must be handed the real task body — its criteria are what qa grades against");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
