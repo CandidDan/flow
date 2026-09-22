@@ -41,6 +41,18 @@ after a canary passes). Note any **caller action** required (a caller change is 
   one, so the fence holds whatever a caller does, and it sits on `plan` alone because the other
   three jobs already declare `needs: plan`.
 
+  **A caller that supplies neither source gets its own sentinel.** The reusable workflow and
+  `.flow/bin/` are versioned separately, so a repo that has run `flow-sync` but not yet bumped the
+  workflow tag drives the new helper from an old caller that passes no `HEAD_REF` and no
+  `PR_TITLE`. `_flow-review.yml`'s header already documents the opposite skew — new workflow, old
+  helper — and fails loudly on it. This is the mirror, and it is reported honestly instead:
+  `task.md` says `TASK CONTEXT UNAVAILABLE`, not `NO TASK FILE RESOLVED`, because "nobody told me
+  what to look for" is not "this PR has no task", and the old prompts still tell the reviewer to
+  locate the task itself. Where GitHub can fill the gap it does — the CLI falls back to the
+  natively-set `GITHUB_HEAD_REF` for the branch; there is no equivalent for the PR title. Observed
+  on this change's own PR, where the reviewers ran the pre-merge reusable from `main` against this
+  helper from the PR head, and one of them reviewed without acceptance criteria as a result.
+
   **Not an author fence, and the tests hold that line.** `allowed_bots: "*"` stays, nothing
   inspects who triggered the run or what the branch is called, and `flow-review-workflow.test.mjs`
   still forbids the two authorship expressions *anywhere in the file* — including inside a

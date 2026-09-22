@@ -25,7 +25,8 @@
 //   node .flow/bin/flow-review.mjs verdict .flow-review/qa.json --check qa
 //
 // The environment overrides the template's CLI honours (FLOW_CONFIG, REVIEW_OUT_DIR, BASE_REF,
-// REVIEW_DIFF_MAX_BYTES) still win over the pinned defaults — same contract as in CI.
+// REVIEW_DIFF_MAX_BYTES, REVIEW_TASKS_DIR) still win over the pinned defaults — same contract as
+// in CI.
 
 import { execFileSync } from "node:child_process";
 import { realpathSync as __realpathSync } from "node:fs";
@@ -51,6 +52,7 @@ export {
   DEFAULT_MAX_DIFF_BYTES,
   DEFAULT_MODEL,
   DEFAULT_TASKS_DIR,
+  NO_SOURCES_SENTINEL,
   NO_TASK_SENTINEL,
   ReviewError,
   UNTRUSTED_BEGIN,

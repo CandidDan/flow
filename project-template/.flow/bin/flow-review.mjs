@@ -68,6 +68,21 @@ export const DEFAULT_TASKS_DIR = ".flow/tasks";
 // string, and `flow-review.test.mjs` pins it, so it is a contract rather than prose.
 export const NO_TASK_SENTINEL = "NO TASK FILE RESOLVED";
 
+// A SECOND sentinel, for the case that is not the same fact. "No task resolved" is a claim about
+// the PR; it must never be made when the truth is that nobody told this plan what to look for.
+//
+// That happens for real, and not only in theory. The reusable workflow and `.flow/bin/` are
+// versioned separately: a repo runs flow-sync (new helper) before bumping the workflow tag (old
+// caller), and in that window the caller passes no HEAD_REF and no PR_TITLE. The header of
+// `_flow-review.yml` already documents the OPPOSITE skew — new workflow, old helper — and fails
+// loudly on it. This is the mirror, and it must be honest rather than loud: the old prompts still
+// tell the reviewer to locate the task itself, so degrading to that is correct, while a `task.md`
+// asserting "no task" would have a reviewer report a missing task on a PR that has one.
+//
+// Observed on this task's own PR (#92), where the reviewers ran the pre-merge reusable from `main`
+// against this helper from the PR head.
+export const NO_SOURCES_SENTINEL = "TASK CONTEXT UNAVAILABLE";
+
 // Fences the only attacker-chosen text `task.md` carries. A branch name and a PR title are
 // picked by whoever opened the PR, and `task.md` is read by three reviewers whose written verdict
 // IS the gate — so a title shaped like reviewer instructions is a prompt-injection surface, and
@@ -273,14 +288,28 @@ export function taskContext({
   const id = parseTaskId(headRef, prTitle);
   // `reason` carries no attacker-chosen text: it is interpolated into the run summary, and it is
   // the short line a person reads. `sources` is the fenced block, and only `text` gets it.
-  const miss = (reason, { sources = false } = {}) => ({
+  const miss = (reason, { sources = false, sentinel = NO_TASK_SENTINEL } = {}) => ({
     id: null, source: null, path: null, matches: [], found: false, reason,
-    text: `${NO_TASK_SENTINEL}\n\n${reason}\n\n` +
+    text: `${sentinel}\n\n${reason}\n\n` +
       (sources ? `The two sources that were tried, verbatim:\n\n${untrustedBlock(headRef, prTitle)}\n\n` : "") +
       `This is a finding, not a formality: with no task there are no acceptance criteria to map ` +
       `tests against. Say so in your verdict instead of reporting a criterion-to-test mapping ` +
       `you were not in a position to make.\n`,
   });
+
+  // Was this plan given anything to look at? Neither source present is a CALLER that did not
+  // supply them, not a PR without a task, and the two must not share a sentinel.
+  if (!String(headRef ?? "") && !String(prTitle ?? "")) {
+    return miss(
+      "Neither the branch nor the PR title was supplied to this review plan, so no task could " +
+      "be looked for. THIS IS NOT A STATEMENT THAT THE PR HAS NO TASK. The most likely cause is " +
+      "version skew: the workflow driving this run predates task resolution and passes no " +
+      "HEAD_REF / PR_TITLE, while this helper is newer — run flow-sync and bump the reusable " +
+      "workflow tag so they match. Until then, locate the task yourself from the branch " +
+      "(`flow/<id>-<slug>`) or a leading `[<id>]` in the PR title, and do not report a missing " +
+      "task as a finding on that basis.",
+      { sentinel: NO_SOURCES_SENTINEL });
+  }
 
   if (!id) {
     return miss(
@@ -418,7 +447,11 @@ export function runReviewCli(argv, {
         outDir: env.REVIEW_OUT_DIR || outDir,
         baseRef: env.BASE_REF || "origin/main",
         maxBytes: Number(env.REVIEW_DIFF_MAX_BYTES || DEFAULT_MAX_DIFF_BYTES),
-        headRef: env.HEAD_REF || "",
+        // GITHUB_HEAD_REF is set natively by GitHub on every pull_request event, so an older
+        // caller that passes no HEAD_REF still gets the branch. It cannot recover the PR title
+        // (GitHub exposes no env for it), which is why the skew case above still has to be
+        // reported honestly rather than papered over here.
+        headRef: env.HEAD_REF || env.GITHUB_HEAD_REF || "",
         prTitle: env.PR_TITLE || "",
         tasksDir: env.REVIEW_TASKS_DIR || tasksDir,
         ...(git ? { git } : {}),

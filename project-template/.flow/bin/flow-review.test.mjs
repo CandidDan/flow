@@ -25,6 +25,7 @@ import {
   CHECKS,
   DEFAULT_MAX_DIFF_BYTES,
   DEFAULT_MODEL,
+  NO_SOURCES_SENTINEL,
   NO_TASK_SENTINEL,
   ReviewError,
   UNTRUSTED_BEGIN,
@@ -300,6 +301,69 @@ test("taskContext MATERIALISES the no-task case — the reviewer is told, not le
     assert.equal(missing.id, "flow-9999", "…but the id it resolved is reported, so the reason can name it");
     assert.ok(missing.text.startsWith(NO_TASK_SENTINEL));
     assert.match(missing.text, /never committed to the store/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Reported by the code-review gate on this task's own PR (#92): it received a `task.md` saying
+// NO TASK FILE RESOLVED with branch "" and title "", and reviewed without acceptance criteria as a
+// result. The cause is version skew — the reusable workflow came from `main` (old, passes neither
+// source) while this helper came from the PR head (new). The artefact was therefore asserting
+// something it had no basis for.
+test("an unsupplied caller gets its OWN sentinel — \"no task\" is never claimed on no evidence", () => {
+  const dir = tmp("ctx-unsupplied");
+  try {
+    const tasksDir = storeFixture(dir, ["flow-0068-a-slug.md"]);
+
+    const unsupplied = taskContext({ tasksDir });
+    assert.equal(unsupplied.found, false);
+    assert.ok(unsupplied.text.startsWith(NO_SOURCES_SENTINEL),
+      "neither source present means the CALLER told this plan nothing — a different fact from " +
+      "a PR that carries no task, and it must not borrow that sentinel");
+    assert.doesNotMatch(unsupplied.text, new RegExp(NO_TASK_SENTINEL),
+      "a reviewer must not read this as 'no task' and report a missing task as a finding");
+    assert.match(unsupplied.text, /NOT A STATEMENT THAT THE PR HAS NO TASK/);
+    assert.match(unsupplied.text, /flow-sync/, "…and it names the remedy: the two are out of step");
+
+    // A source that WAS supplied and genuinely carries no id keeps the original sentinel — that
+    // claim is about the PR and is properly evidenced.
+    for (const supplied of [{ headRef: "claude/quiet-edison-9f2k" }, { prTitle: "Random PR title" }]) {
+      const t = taskContext({ ...supplied, tasksDir });
+      assert.ok(t.text.startsWith(NO_TASK_SENTINEL),
+        `one source is enough to make the no-task claim evidenced (${JSON.stringify(supplied)})`);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("the CLI falls back to GitHub's own GITHUB_HEAD_REF when a caller passes no HEAD_REF", () => {
+  const dir = tmp("cli-ghref");
+  try {
+    writeFileSync(join(dir, "config.yml"), CONFIG);
+    const tasksDir = storeFixture(dir, ["flow-0068-a-slug.md"]);
+    const pinned = { configPath: join(dir, "config.yml"), outDir: join(dir, "out"), git: () => "" };
+
+    assert.equal(runReviewCli(["plan"], {
+      env: {
+        GITHUB_OUTPUT: join(dir, "gh"),
+        GITHUB_HEAD_REF: "flow/flow-0068-a-slug",   // set by GitHub on every pull_request event
+        REVIEW_TASKS_DIR: tasksDir,
+      },
+      ...pinned,
+    }), 0);
+    assert.match(readFileSync(join(dir, "gh"), "utf8"), /^task_id=flow-0068$/m,
+      "an older caller that passes no HEAD_REF still resolves a flow/ branch — the one half of " +
+      "the skew that can be recovered without the caller's help");
+
+    // HEAD_REF still wins when both are present: the caller is more specific than the ambient.
+    assert.equal(runReviewCli(["plan"], {
+      env: {
+        GITHUB_OUTPUT: join(dir, "gh2"),
+        HEAD_REF: "flow/flow-0068-a-slug",
+        GITHUB_HEAD_REF: "flow/flow-9999-wrong",
+        REVIEW_TASKS_DIR: tasksDir,
+      },
+      ...pinned,
+    }), 0);
+    assert.match(readFileSync(join(dir, "gh2"), "utf8"), /^task_id=flow-0068$/m);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
