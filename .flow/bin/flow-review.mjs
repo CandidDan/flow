@@ -53,6 +53,8 @@ export {
   DEFAULT_TASKS_DIR,
   NO_TASK_SENTINEL,
   ReviewError,
+  UNTRUSTED_BEGIN,
+  UNTRUSTED_END,
   boundDiff,
   findTaskFile,
   parseReviewConfig,
@@ -62,6 +64,7 @@ export {
   runReviewCli,
   securityDecision,
   taskContext,
+  untrustedBlock,
   verdictOutcome,
 } from "../../project-template/.flow/bin/flow-review.mjs";
 
