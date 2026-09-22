@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0068"
 title: "_flow-review.yml never resolves the task id in code and never fences the fork boundary — the one workflow CAN-52 did not reach, running three bypassPermissions jobs on whatever its caller points at"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "flow"
 owner: "session_017pnHXAiMPgKPH9J8eyhyHw"
 created: "2026-09-22"
 started: "2026-09-22T02:07:30Z"
-branch: ""
-pr: ""
+branch: "claude/flow-review-can-52-updates-sggq84"
+pr: "https://github.com/CandidDan/flow/pull/92"
 issue: ""
 blocked_reason: ""
 blocked_by: []
