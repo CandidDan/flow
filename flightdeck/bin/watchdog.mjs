@@ -254,8 +254,44 @@ export function planRepoActions({ fullName, machinery, openIssues, now }) {
 
 // ── IO: assemble one repo's entries ──────────────────────────────────────────────────────────
 
+// Raised when a repo the token CAN read simply has no `.github/workflows` directory: it is
+// enrolled (carries the `flow` topic, so discovery found it) but has not adopted Flow. This is
+// NOT the same failure as `unavailable`, and conflating them is the exact misdirection flow-0055
+// exists to end — see the `.notAdopted` branch in `watchRepo`.
+export class RepoNotAdopted extends Error {
+  constructor(fullName) {
+    super(`${fullName} carries the \`flow\` topic but has no .github/workflows — enrolled, not adopted`);
+    this.name = "RepoNotAdopted";
+    this.notAdopted = true;
+  }
+}
+
+// Prove the token can read `fullName` with a bare `GET /repos/{owner}/{repo}`. A 200 returns
+// quietly; ANY failure re-throws, carrying the original status. This is the discriminator a
+// contents 404 needs: search visibility does not establish readability, because
+// `/search/repositories` returns PUBLIC repos regardless of a fine-grained token's access list.
+async function assertRepoReadable(io, fullName) {
+  await io.rest(`/repos/${fullName}`);
+}
+
 async function listWorkflowFiles(io, fullName) {
-  const dir = await io.rest(`/repos/${fullName}/contents/.github/workflows`);
+  let dir;
+  try {
+    dir = await io.rest(`/repos/${fullName}/contents/.github/workflows`);
+  } catch (err) {
+    // A fine-grained PAT returns 404 — never 403 — for a repo outside its access list, so a 404
+    // here is genuinely ambiguous read alone: "no such directory" or "no access". Disambiguate
+    // with a repo GET. A 200 proves the token reads the repo, so the contents 404 is unambiguously
+    // a missing directory (not adopted). If the repo GET fails — a 404 (truly unreadable) or a
+    // rate limit / 5xx — that error propagates and `watchRepo` reports the repo `unavailable`,
+    // status surfaced, never silently folded into the not-adopted case. A non-404 on contents
+    // (a 5xx on the directory read itself) is not this ambiguity and propagates unchanged.
+    if (err?.status === 404) {
+      await assertRepoReadable(io, fullName);
+      throw new RepoNotAdopted(fullName);
+    }
+    throw err;
+  }
   const files = (Array.isArray(dir) ? dir : []).filter((f) => f.type === "file" && /\.ya?ml$/.test(f.name));
   const out = [];
   for (const f of files) {
@@ -380,6 +416,12 @@ export async function watchRepo({ io, fullName, now, dryRun }) {
   try {
     entries = await collectRepoEntries({ io, fullName });
   } catch (err) {
+    // A repo the token CAN read but that has never adopted Flow is not unreadable — it is
+    // enrolled-but-not-adopted, a distinct status with its own message. Naming it `unavailable`
+    // is the wrong-cause report this task removes. Everything else is a genuine read failure.
+    if (err?.notAdopted) {
+      return { repo: fullName, status: "not_adopted", reason: `${err?.message || err}` };
+    }
     // Never silently omitted — the same rule the aggregator and mission control both hold. A repo
     // this watchdog could not read is a repo it is NOT watching, and saying so is the point.
     return { repo: fullName, status: "unavailable", reason: `${err?.message || err}` };
@@ -455,6 +497,46 @@ export function createGitHubIO(token) {
   };
 }
 
+// ── operator-facing report ─────────────────────────────────────────────────────────────────
+//
+// Turn a run summary into the stderr lines and the process exit code. Extracted from the CLI so
+// both the wording and the exit decision are table-testable without spawning a subprocess or
+// touching the network — the CLI below is a thin shell over this. Ordering matches the old inline
+// block exactly: `discoveredNothing` is terminal and returns before the per-repo tally.
+export function reportRun(summary) {
+  const lines = [];
+
+  // An empty fleet is its own terminal failure, unchanged from before: report and exit non-zero
+  // without falling through to the per-repo tally (there are no repos to tally).
+  if (summary.discoveredNothing) {
+    lines.push(`flow-watchdog: discovery matched ZERO repositories for \`${summary.query}\` — nothing is being watched.`);
+    lines.push("Enrolment is the GitHub topic `flow`: add it to each repo (repo home -> About -> Topics).");
+    lines.push("If the account is an organization rather than a user, set FLOW_WATCHDOG_OWNER_TYPE=org.");
+    return { exitCode: 1, lines };
+  }
+
+  const unavailable = summary.results.filter((r) => r.status === "unavailable");
+  const notAdopted = summary.results.filter((r) => r.status === "not_adopted");
+  const incomplete = summary.results.filter((r) => r.status === "incomplete");
+
+  for (const r of unavailable) lines.push(`flow-watchdog: ${r.repo} unreadable — NOT watched: ${r.reason}`);
+  // Enrolled-but-not-adopted is loud but NOT called unreadable: the repo reads fine, it just has
+  // nothing to watch. The message names the two human resolutions, the same shape the empty-fleet
+  // message above uses.
+  for (const r of notAdopted) lines.push(`flow-watchdog: ${r.repo} enrolled but not adopted — carries the \`flow\` topic but has no .github/workflows. Drop the topic (repo home -> About -> Topics) or complete adoption.`);
+  for (const r of incomplete) {
+    for (const f of r.failures) lines.push(`flow-watchdog: ${r.repo} ${f.type} failed${f.path ? ` for ${f.path}` : ""}: ${f.reason}`);
+  }
+
+  if (unavailable.length + notAdopted.length + incomplete.length > 0) {
+    // The tally counts each class separately: a not-adopted repo must never be tallied as
+    // unreadable — that miscount was itself part of the original misdirection.
+    lines.push(`flow-watchdog: ${unavailable.length} repo(s) unreadable, ${notAdopted.length} enrolled but not adopted, ${incomplete.length} with failed writes.`);
+    return { exitCode: 1, lines };
+  }
+  return { exitCode: 0, lines };
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────────────────────
 if (__isMain) {
   const argv = process.argv.slice(2);
@@ -480,24 +562,9 @@ if (__isMain) {
   // An unreachable repo is REPORTED, not fatal — one repo the token cannot see must not stop the
   // watchdog watching the rest. But it is not silent either: the run fails so the operator sees a
   // red tick, because "the watchdog is only watching some of the fleet" is exactly the kind of
-  // partial death this file exists to make loud.
-  if (summary.discoveredNothing) {
-    console.error(`flow-watchdog: discovery matched ZERO repositories for \`${summary.query}\` — nothing is being watched.`);
-    console.error("Enrolment is the GitHub topic `flow`: add it to each repo (repo home -> About -> Topics).");
-    console.error("If the account is an organization rather than a user, set FLOW_WATCHDOG_OWNER_TYPE=org.");
-    process.exit(1);
-  }
-
-  const unavailable = summary.results.filter((r) => r.status === "unavailable");
-  const incomplete = summary.results.filter((r) => r.status === "incomplete");
-
-  for (const r of unavailable) console.error(`flow-watchdog: ${r.repo} unreadable — NOT watched: ${r.reason}`);
-  for (const r of incomplete) {
-    for (const f of r.failures) console.error(`flow-watchdog: ${r.repo} ${f.type} failed${f.path ? ` for ${f.path}` : ""}: ${f.reason}`);
-  }
-  if (unavailable.length + incomplete.length > 0) {
-    console.error(`flow-watchdog: ${unavailable.length} repo(s) unreadable, ${incomplete.length} with failed writes.`);
-    process.exit(1);
-  }
-  process.exit(0);
+  // partial death this file exists to make loud. `reportRun` owns that decision; the CLI only
+  // prints its lines and adopts its exit code.
+  const { exitCode, lines } = reportRun(summary);
+  for (const line of lines) console.error(line);
+  process.exit(exitCode);
 }
