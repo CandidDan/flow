@@ -26,6 +26,7 @@ import {
   markedIssues,
   planRepoActions,
   renderIssueBody,
+  reportRun,
   runWatchdog,
   watchRepo,
   workflowMarker,
@@ -550,4 +551,162 @@ test("applyActions files, comments and closes through the injected writer only",
     ["POST", `/repos/${REPO}/issues/3/comments`],
     ["PATCH", `/repos/${REPO}/issues/3`],
   ]);
+});
+
+// ── flow-0055: an unadopted repo is named for what it is, not called unreadable ───────────────
+//
+// Each criterion in `.flow/tasks/flow-0055-...md` is proved by name below. The pivot is the
+// preceding `GET /repos/{owner}/{repo}`: a 200 turns an otherwise-ambiguous contents 404 into an
+// unambiguous "no workflows directory". These stubs set `.status` on thrown errors exactly as the
+// real `createGitHubIO` does, because the disambiguation keys on `err.status === 404`.
+
+// A repo the token CAN read (repo GET 200) whose `.github/workflows` does not exist (contents 404).
+function ioReadableNoWorkflows(fullName) {
+  return {
+    rest: async (path) => {
+      if (path === `/repos/${fullName}`) return { full_name: fullName };
+      if (/\/contents\/\.github\/workflows$/.test(path)) { const e = new Error(`404 Not Found — GET ${path}`); e.status = 404; throw e; }
+      throw new Error(`unrouted GET ${path}`);
+    },
+    write: async () => {},
+  };
+}
+
+test("flow-0055 criterion 1: a readable repo with no .github/workflows is classified not_adopted, with a message naming the topic, the missing directory, and both resolutions", async () => {
+  const r = await watchRepo({ io: ioReadableNoWorkflows("CandidDan/inflight"), fullName: "CandidDan/inflight", now: NOW });
+
+  assert.equal(r.status, "not_adopted");
+  assert.notEqual(r.status, "unavailable");
+  assert.notEqual(r.status, "ok");
+  assert.match(r.reason, /flow/);
+  assert.match(r.reason, /\.github\/workflows/);
+
+  // "The message" the criterion names is the operator-facing line, which also names both resolutions.
+  const line = reportRun({ discoveredNothing: false, results: [r] }).lines.join("\n");
+  assert.match(line, /`flow` topic/);
+  assert.match(line, /\.github\/workflows/);
+  assert.match(line, /Drop the topic/);
+  assert.match(line, /complete adoption/);
+});
+
+test("flow-0055 criterion 1 (contrast): a repo whose workflows directory exists but is empty stays a healthy ok/0, never not_adopted", async () => {
+  const io = {
+    rest: async (path) => {
+      if (/\/contents\/\.github\/workflows$/.test(path)) return [];
+      if (/\/actions\/workflows\?/.test(path)) return { workflows: [] };
+      if (/\/issues\?labels=/.test(path)) return [];
+      throw new Error(`unrouted GET ${path}`);
+    },
+    write: async () => {},
+  };
+  const r = await watchRepo({ io, fullName: REPO, now: NOW });
+  assert.equal(r.status, "ok");
+  assert.equal(r.watched, 0);
+});
+
+test("flow-0055 criterion 2: a not_adopted repo makes the run exit non-zero — the inconsistency stays loud, asserted on the exit path", () => {
+  const { exitCode } = reportRun({ discoveredNothing: false, results: [{ repo: "CandidDan/inflight", status: "not_adopted", reason: "enrolled, not adopted" }] });
+  assert.equal(exitCode, 1);
+});
+
+test("flow-0055 criterion 3: a repo the token genuinely cannot read stays unavailable and still says unreadable, separable from the not_adopted wording", async () => {
+  const io = {
+    rest: async (path) => {
+      if (path === "/repos/CandidDan/secret") { const e = new Error(`404 Not Found — GET ${path}`); e.status = 404; throw e; }
+      if (/\/contents\/\.github\/workflows$/.test(path)) { const e = new Error(`404 Not Found — GET ${path}`); e.status = 404; throw e; }
+      throw new Error(`unrouted GET ${path}`);
+    },
+    write: async () => {},
+  };
+  const r = await watchRepo({ io, fullName: "CandidDan/secret", now: NOW });
+  assert.equal(r.status, "unavailable");
+
+  // Separable in the OUTPUT, not just internally: the old "unreadable — NOT watched" wording is
+  // intact for a genuine failure and absent from the not_adopted line. A message test that passed
+  // against the old behaviour would fail here.
+  const unavailableLine = reportRun({ discoveredNothing: false, results: [{ repo: "x", status: "unavailable", reason: "404" }] }).lines[0];
+  const notAdoptedLine = reportRun({ discoveredNothing: false, results: [{ repo: "x", status: "not_adopted", reason: "no workflows" }] }).lines[0];
+  assert.match(unavailableLine, /unreadable — NOT watched/);
+  assert.doesNotMatch(notAdoptedLine, /unreadable/, "the per-repo not_adopted line never borrows the unreadable wording");
+});
+
+test("flow-0055 criterion 4: readability is established by GET /repos/{owner}/{repo}, not inferred from the discovery search — a search hit whose repo GET 404s is unavailable", async () => {
+  const reads = [];
+  const io = {
+    rest: async (path) => {
+      reads.push(path);
+      if (/^\/search\/repositories/.test(path)) return { items: [{ full_name: "CandidDan/inflight" }] };
+      if (path === "/repos/CandidDan/inflight") { const e = new Error(`404 Not Found — GET ${path}`); e.status = 404; throw e; }
+      if (/\/contents\/\.github\/workflows$/.test(path)) { const e = new Error(`404 Not Found — GET ${path}`); e.status = 404; throw e; }
+      throw new Error(`unrouted GET ${path}`);
+    },
+    write: async () => {},
+  };
+  const summary = await runWatchdog({ io, owner: "CandidDan", now: NOW });
+  const r = summary.results[0];
+  assert.equal(r.status, "unavailable", "search visibility alone did not make it readable");
+  assert.notEqual(r.status, "not_adopted", "a public search hit must not be read as adopted-but-empty");
+  assert.ok(reads.includes("/repos/CandidDan/inflight"), "the disambiguating repo GET was actually made");
+});
+
+test("flow-0055 criterion 5: when the repo GET itself fails for a non-404 reason (rate limit / 5xx), the repo is unavailable with the status surfaced, never folded into not_adopted", async () => {
+  const io = {
+    rest: async (path) => {
+      if (path === "/repos/CandidDan/inflight") { const e = new Error(`429 Too Many Requests — GET ${path}`); e.status = 429; throw e; }
+      if (/\/contents\/\.github\/workflows$/.test(path)) { const e = new Error(`404 Not Found — GET ${path}`); e.status = 404; throw e; }
+      throw new Error(`unrouted GET ${path}`);
+    },
+    write: async () => {},
+  };
+  const r = await watchRepo({ io, fullName: "CandidDan/inflight", now: NOW });
+  assert.equal(r.status, "unavailable");
+  assert.notEqual(r.status, "not_adopted");
+  assert.match(r.reason, /429/, "the real status is surfaced, not silently folded into not-adopted");
+});
+
+test("flow-0055 criterion 6: the stderr tally counts not_adopted in its own bucket and never as unreadable", () => {
+  const { exitCode, lines } = reportRun({
+    discoveredNothing: false,
+    results: [
+      { repo: "CandidDan/inflight", status: "not_adopted", reason: "no workflows" },
+      { repo: "CandidDan/borders", status: "not_adopted", reason: "no workflows" },
+    ],
+  });
+  assert.equal(exitCode, 1);
+  const tally = lines.find((l) => /repo\(s\) unreadable/.test(l));
+  assert.ok(tally, "a tally line is printed");
+  assert.match(tally, /0 repo\(s\) unreadable/, "not-adopted repos are NOT counted as unreadable");
+  assert.match(tally, /2 enrolled but not adopted/, "they are counted in their own bucket");
+});
+
+test("flow-0055: reportRun on an empty fleet is terminal — exits non-zero with enrolment guidance and no per-repo tally", () => {
+  const { exitCode, lines } = reportRun({ discoveredNothing: true, query: "user:CandidDan topic:flow", results: [] });
+  assert.equal(exitCode, 1);
+  const joined = lines.join("\n");
+  assert.match(joined, /ZERO repositories/);
+  assert.match(joined, /topic `flow`/);
+  assert.doesNotMatch(joined, /repo\(s\) unreadable/, "the empty-fleet path returns before the tally");
+});
+
+test("flow-0055: reportRun on an all-ok fleet exits zero and prints nothing", () => {
+  const { exitCode, lines } = reportRun({ discoveredNothing: false, results: [{ repo: "o/a", status: "ok" }] });
+  assert.equal(exitCode, 0);
+  assert.deepEqual(lines, []);
+});
+
+test("flow-0055: reportRun prints all three failure buckets and tallies them independently", () => {
+  const { exitCode, lines } = reportRun({
+    discoveredNothing: false,
+    results: [
+      { repo: "o/unreadable", status: "unavailable", reason: "404" },
+      { repo: "o/empty", status: "not_adopted", reason: "no workflows" },
+      { repo: "o/broke", status: "incomplete", failures: [{ type: "file", path: "x.yml", reason: "500" }] },
+    ],
+  });
+  assert.equal(exitCode, 1);
+  const joined = lines.join("\n");
+  assert.match(joined, /o\/unreadable unreadable — NOT watched/);
+  assert.match(joined, /o\/empty enrolled but not adopted/);
+  assert.match(joined, /o\/broke file failed for x\.yml: 500/);
+  assert.match(joined, /1 repo\(s\) unreadable, 1 enrolled but not adopted, 1 with failed writes/);
 });
