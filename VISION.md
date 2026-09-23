@@ -81,6 +81,14 @@ from and who approved it; and an approved intent survives contact with the tasks
 rather than being rewritten once the work starts. *Failing today* — planned work enters as
 `status: ready` with no record of who asked for it or why.
 
+### G12 — Anything Flow needs from me is one decision
+Anything Flow needs from me is one decision with a recommendation, answerable in under a minute
+from my phone.
+**Progress looks like:** every `blocked` task carries one decision card, no session ends with an
+options list, and I answer cards from GitHub mobile. *Failing today* — sessions end with about a
+dozen questions and options, get left open as bookmarks, and `blocked_reason` fields run to
+paragraphs.
+
 ## Non-goals
 
 ### NG6 — Flow becomes a tool
@@ -135,6 +143,7 @@ pointing at them surface as warnings, which is the intended signal.
 
 | Date | Change | Why |
 |---|---|---|
+| 2026-09-23 | G12 declared: anything Flow needs from the operator is one decision with a recommendation, answerable in under a minute from a phone. | Sessions end with about a dozen questions and options the operator cannot process, so they get left open as bookmarks and the two-touchpoint model quietly becomes many touchpoints. No live goal named that failure. Declaring it gives the clean-exit work (the decide-or-ask rule, decision cards, length budgets, a session-exit check) a goal to serve instead of `maintenance` (decision D2 in the operating-model spec). |
 | 2026-09-21 | G9 widened from tokens alone to tokens **and** CI minutes, naming scheduled sweeps explicitly. | The account's GitHub Actions allowance was exhausted on 2026-09-21, stopping every scheduled workflow in every private repo for hours. The cause was two adopting repos running `flow-recover` on a 30-minute cron: ~12 seconds of real work per run, but GitHub bills per job rounded UP to a whole minute, so the pair spent ~2,920 of the 3,000 monthly private-repo minutes finding nothing. G9 as written could not name that failure — it spoke only of tokens — so the fleet's largest running cost sat outside the vision while a goal titled "not materially expensive to run" was on the page. Widening the goal is what lets a cost guard be written as serving it rather than as `maintenance`. |
 | 2026-09-07 | Audience amended: one operator, plus readers who are not the operator, in adopting repos only. Two Open items recorded — whether readers stay readers, and where their feedback lands. | Intents in project repos will be read and commented on by clients and contracted teams. That makes "nothing is built to serve a second user" false as written, since a projection is built to serve exactly that. The narrow fix separates operator from reader: the solo-operator position is untouched, and the trajectory beyond reading is recorded as undecided rather than designed for. |
 | 2026-09-07 | G11 declared; the Purpose paragraph's touchpoint 1 changes from approve-the-task to approve-the-intent. The recorded Open item about touchpoint 1 not firing on the direct-authoring path is closed by this change. | The human approves the artefact that needs judgement — what we want and why — rather than a scoped task spec they skim. Intents live in the repo so the record of who asked for what is visible where the work is, and issues stay what their name says: things that are wrong. |
