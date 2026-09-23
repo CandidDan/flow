@@ -12,10 +12,11 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: ""
-serves: ["G4"]            # drift surfaced by a check rather than by a surprise
+serves: ["maintenance"]   # re-anchored 2026-09-23 from retired G4 (decision D1)
 touches: ["project-template/README.md", "project-template/.flow/bin/flow-sync.mjs", "project-template/.flow/bin/pick-task.mjs", "project-template/.flow/PROTOCOL.md", ".flow/bin/protocol-portability.test.mjs"]
 labels: [docs, infra]
 notes:
+  - "2026-09-23 (orchestrator): serves re-anchored from G4 to `maintenance`, on the human's decision D1 in _private/flow-operating-model-spec.md: every open task on retired G4/G5 moves to `maintenance` in one orchestrator commit on main. This is a deliberate, human-directed exception to task-writer's no-retrofit rule for non-ready tasks, and nothing else about the task changed. G4 was retired on 2026-09-01 and no live goal names this work."
   - "2026-08-19: created at the human's request after flow-0006 (PR #15, merged). All three sites were found while building flow-0006 and deliberately NOT fixed there — each is outside that task's touches and would have failed touches-guard. This task exists because the human asked for one, not because anything is broken: nothing here changes behaviour, and criterion 5 is the part with lasting value."
   - "2026-08-19: sequencing — depends on flow-0006, which is merged, so project-template/.flow/PROTOCOL.md exists on main and this is genuinely ready. touches verified disjoint against every other ready task on 2026-08-19: flow-0005 owns flow-init.mjs/.test.mjs + INIT.md, flow-0008 owns touches-guard.mjs + main-module.test.mjs, neither of which appears here; flow-0002/0003/0007/0012/0013/0014 share no path at all. Renumbered from 0015 to 0016 — flow-0015 (canonical runs its own automation) landed on main while this was being written, caught by flow-doctor's duplicate-id check rather than by a collision later; its touches are disjoint from these (it owns .flow/bin/flow-state.mjs and .flow/bin/adapters.test.mjs, this owns .flow/bin/protocol-portability.test.mjs)."
 ---

@@ -12,10 +12,11 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: "Depends on flow-0022, which deletes the machinery this task stops describing — documenting the absence before the absence exists inverts the drift. Flow has no dependency field (a gap ADR-0002 recorded), so `blocked` is how the sequence is expressed. ALSO blocked on two file claims: project-template/INIT.md is flow-0005's and project-template/README.md + project-template/.flow/PROTOCOL.md are flow-0016's, both `ready`. UNBLOCK: flip to ready once flow-0022 has merged AND flow-0005 and flow-0016 are `done`; if either is still live then, split its files out rather than claiming them here."
-serves: ["G4"]            # what canonical says is what the fleet runs — a runbook describing gone infra is drift
+serves: ["maintenance"]   # re-anchored 2026-09-23 from retired G4 (decision D1)
 touches: ["CLAUDE.md", "project-template/INIT.md", "project-template/RETROFIT.md", "project-template/README.md", "project-template/.flow/PROTOCOL.md", "project-template/FLOW-handoff.html", "docs/flow-map.html", "docs/flow-infra-propagation-plan.md"]
 labels: [docs, cleanup]
 notes:
+  - "2026-09-23 (orchestrator): serves re-anchored from G4 to `maintenance`, on the human's decision D1 in _private/flow-operating-model-spec.md: every open task on retired G4/G5 moves to `maintenance` in one orchestrator commit on main. This is a deliberate, human-directed exception to task-writer's no-retrofit rule for non-ready tasks, and nothing else about the task changed. G4 was retired on 2026-09-01 and no live goal names this work."
   - "2026-08-19: the prose half of the board retirement decided this day. flow-0022 is the machinery half. Split here because the machinery must land atomically and is testable, while this half is text across eight files with essentially no test surface — and because every file-claim collision in the retirement lives on this side of the seam."
   - "2026-08-19: the reference counts at the time of writing — INIT.md 3, RETROFIT.md 2, project-template/README.md 4, PROTOCOL.md 2, FLOW-handoff.html 4, docs/flow-map.html 2, docs/flow-infra-propagation-plan.md 1, root CLAUDE.md 2. Re-derive them before starting; flow-0022 and the tasks ahead of this one will have moved the ground."
 ---

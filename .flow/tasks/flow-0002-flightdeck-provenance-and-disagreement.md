@@ -1,7 +1,7 @@
 ---
 id: "flow-0002"
 title: "Show the flightdeck's freshness and its disagreements instead of hiding them"
-status: "blocked"
+status: "done"
 priority: 3
 project: "flow"
 owner: ""
@@ -10,11 +10,12 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Superseded by ADR-0002 Amendment 1 (2026-08-18): the primary cross-repo view is a computed static page, not a rendered artifact, so render-flightdeck.mjs has no target. Its disclosure principle is inherited by the mission-control task, not lost. Held rather than deleted because whether to rescope it into that task or retire it is the human's call."
+blocked_reason: ""
 serves: ["G5"]            # provenance and disagreement — knowing how much to trust it
 touches: ["flightdeck/bin/render-flightdeck.mjs", "flightdeck/bin/render-flightdeck.test.mjs", "flightdeck/.claude/agents/portfolio-manager.md"]
-labels: [flightdeck, ux]
+labels: [flightdeck, ux, wont-do]
 notes:
+  - "2026-09-23 (orchestrator): CLOSED AS WON'T-DO, not delivered. On the human's decision D4 in _private/flow-operating-model-spec.md. Superseded by ADR-0002 Amendment 1 (docs/adr/0002-flightdeck-projection-github-projects.md). Nothing was built and no PR exists. The status set has no won't-do value (ready | in_progress | in_review | done | blocked), so this is recorded as `done` plus the `wont-do` label. Read the label before counting this as shipped. The previous blocked_reason is kept in git history and summarised by the notes below. `serves` is left as written, per task-writer's no-retrofit rule."
   - "2026-09-14: the human's call, recorded. This will be TOTALLY SUPERSEDED by new work not yet written -- so the open question its blocked_reason held (rescope into the mission-control task, or retire) is closed: neither. Do not rescope it, and do not spend a session re-deriving what ADR-0002 Amendment 1 already settled. It stays `blocked` because the superseding work does not exist yet; retire it when that work lands, not before."
   - "2026-08-18: blocked, not cancelled. flow-0001's PR (#13) closed with 'unblocking flow-0002, which consumes this JSON shape as a contract' — written before Amendment 1 merged, and the next session to read the queue would have built the superseded renderer on the strength of it. The JSON contract flow-0001 produces is still good; what changed is that nothing renders it to HTML any more. Two live options for the human: rescope this task to the mission-control page's render shell, or retire it and let the page task carry its provenance-disclosure criteria."
 ---

@@ -13,10 +13,11 @@ pr: ""
 issue: ""
 blocked_reason: ""
 blocked_by: []
-serves: ["G4"]   # retired; see the note on why it is kept rather than re-anchored
+serves: ["maintenance"]   # re-anchored 2026-09-23 from retired G4 (decision D1)
 touches: [".github/workflows/_flow-sync.yml", ".flow/bin/sync-surface.test.mjs", "CHANGELOG.md"]
 labels: [infra, fleet, sync]
 notes:
+  - "2026-09-23 (orchestrator): serves re-anchored from G4 to `maintenance`, on the human's decision D1 in _private/flow-operating-model-spec.md: every open task on retired G4/G5 moves to `maintenance` in one orchestrator commit on main. This is a deliberate, human-directed exception to task-writer's no-retrofit rule for non-ready tasks, and nothing else about the task changed. G4 was retired on 2026-09-01 and no live goal names this work."
   - "2026-09-15: found while delivering 1.3.1 to an adopting repo. The protocol fix shipped in canonical, passed all three reviewers, and then could not reach CandidDan/later by any sanctioned route. Both of later's reviewers blocked the hand-patch and told the worker to use flow-sync instead; flow-sync cannot carry the file. Verified, not inferred: grepping PROTOCOL across _flow-sync.yml and flow-sync.mjs returns ZERO matches at CandidDan/flow-protocol@main (1.3.0) and at @v1.2.0. The hand-patch merged as CandidDan/later#14 — a knowing exception, and the only mechanism that exists today."
   - "2026-09-15: `serves` is G4 (`What canonical says is what the fleet runs`), knowingly a RETIRED goal since the 2026-09-01 VISION rewrite. Kept rather than re-anchored to a live id for the same reason flow-0046 keeps it: this is the fleet-currency concern itself, and re-anchoring would invent a history where a live anchor existed. flow-doctor will warn, correctly. The honest fix is a human decision about whether fleet currency returns to VISION.md, not a nicer-looking id here."
   - "2026-09-15: DO NOT widen this into flow-0030/flow-0046 territory. Those change WHICH REPO the fleet resolves (`CandidDan/flow` -> `CandidDan/flow-protocol`) and the prose describing it. This task changes WHICH FILES a sync copies, and is orthogonal: it is correct against either reference and does not touch a `uses:` line. Both are blocked; this is not, and must not become so."

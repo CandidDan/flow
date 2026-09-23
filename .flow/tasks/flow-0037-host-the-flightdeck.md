@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0037"
 title: "Publish the flightdeck to a URL, so opening mission control is a bookmark rather than an errand"
-status: "blocked"
+status: "done"
 priority: 2
 project: "flow"
 owner: ""
@@ -11,11 +11,12 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Superseded by ADR-0006 (2026-09-03): mission control moves to its own public repo, CandidDan/inflight, private, served by Vercel. This task's publisher, workflow, publish-set computation and boundary assertions all exist to move three static files out of a private repo into a public one so they can be served -- which is the split, done by workflow on every push instead of once. Its own notes predicted this ('do not build a second publisher permanently'). Held rather than deleted on the flow-0002 precedent: whether to retire it or rescope its one surviving criterion -- that the page works from a subpath -- is the human's call."
+blocked_reason: ""
 serves: ["G5"]            # PROVISIONAL — see notes; the vision is being re-authored
 touches: [".github/workflows/publish-flightdeck.yml", ".flow/bin/publish-flightdeck.mjs", ".flow/bin/publish-flightdeck.test.mjs"]
-labels: [flightdeck, infra, ux]
+labels: [flightdeck, infra, ux, wont-do]
 notes:
+  - "2026-09-23 (orchestrator): CLOSED AS WON'T-DO, not delivered. On the human's decision D4 in _private/flow-operating-model-spec.md. Superseded by ADR-0006 (mission control moves to its own repo, CandidDan/inflight). Nothing was built and no PR exists. The status set has no won't-do value (ready | in_progress | in_review | done | blocked), so this is recorded as `done` plus the `wont-do` label. Read the label before counting this as shipped. The previous blocked_reason is kept in git history and summarised by the notes below. `serves` is left as written, per task-writer's no-retrofit rule."
   - "2026-09-14: the human's call, recorded. This will be TOTALLY SUPERSEDED by new work not yet written, on top of ADR-0006 having already moved mission control to CandidDan/inflight. The open question in its blocked_reason (keep or retire) is closed: retire it when the superseding work lands. Do not rescope its publisher or workflow in the meantime -- they exist to solve a problem ADR-0006 removed."
   - "2026-09-03: ADR-0006 revised after two findings. (1) The page is serialised end to end -- no Promise.all anywhere, repositories loaded one after another -- so ~284 requests take the better part of a minute; the human: 'not actually usable with its current process'. (2) The read-only REST-GET-only rule was path of least resistance, not a decision. With accessibility as a default position, mobile and notification become requirements no client-only page can meet, so inflight gets a backend: Vercel for the app and cron, Supabase for snapshots and auth, a GitHub App instead of a pasted PAT. The repo is now PRIVATE -- Vercel deploys from private repos, so the Pages constraint that forced it public is gone, and with it this task's subpath criterion. Nothing survives here; retire or fold into the move task."
   - "2026-09-03: blocked by ADR-0006, not by a dependency. The friction this task identified is real and unchanged -- a mission control you need five minutes to launch is not mission control -- but the fix is placement, not publishing. The repo name is settled as CandidDan/inflight; creating it and enabling Pages are human-only steps named in the ADR. If the subpath criterion is worth keeping it belongs on the move task, not here."
