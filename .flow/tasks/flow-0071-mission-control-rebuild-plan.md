@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0071"
 title: "Decompose the mission control rebuild against ADR-0006, and keep the decomposition out of the public artefact"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "cf40449c-6558-4504-a62d-d0708b948240"
