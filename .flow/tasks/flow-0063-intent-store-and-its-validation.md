@@ -30,6 +30,7 @@ notes:
   - "2026-09-17 (orchestrator): THE OPEN QUESTION IS CONVERTED TO DATA RATHER THAN ANSWERED. VISION.md's `## Open` section records 'Where a reader's feedback lands' as undecided, and says it 'decides whose words an intent's Problem section holds, which the intent template currently assumes is one person's.' That sentence describes a template that does not exist — the `vision/intent-layer` branch touched VISION.md and nothing else, which is worth knowing before anyone goes looking for the file it refers to. Rather than forcing the decision, the template gets a `source:` field naming whose words each intent holds (the operator, a named reader, a transcription). The global question stays open in VISION.md; each intent answers it locally. Amending that Open item is a vision PR and is NOT in this task's scope."
   - "2026-09-17 (orchestrator): PROPOSED ANSWERS THE HUMAN MAY REJECT AT APPROVAL, recorded here so the rejection is cheap. (a) GRANDFATHERING: forward-only. G11's test says 'pick any merged PR and read the intent it came from', which fails for all 40 done tasks and all 21 open ones today; retro-fitting would mean inventing the human's past reasons, which is the failure named two notes up. The ADR should state the test applies to work scoped after the layer lands, and say so rather than letting it look like an oversight. (b) TEETH: none in this slice. ADR-0004's 'teeth budget' section is the governing argument and its void condition is 'the check starts failing on judgment rather than fact'. A hard `intent:` requirement would redden all 11 ready tasks the day it merged. Warn-only here; slice (2) decides. (c) TRIAGE COLLISION: out of scope, named as follow-up. `_flow-triage.yml` turns issues into proposed tasks today, which is a path into the queue that bypasses intents entirely. If intents become the only door, triage either produces an intent or is explicitly exempt. Deciding that here would widen this task into the triage subsystem."
   - "2026-09-17 (orchestrator): ADJACENT SIGNAL, NOT THIS TASK'S WORK. flow-doctor currently reports nine tasks serving RETIRED goals (flow-0002, 0003, 0034, 0037 on G5; flow-0016, 0022, 0023, 0030, 0046, 0048 on G4). The vision was rewritten on 2026-09-01 and the queue never followed. It is warnings only, and it is most of the blocked chain. Mentioned because a worker touching the `serves` region of flow-doctor will see it and may reasonably think it is theirs to fix. It is not — it is a store-content problem, not a validator problem, and it wants its own task."
+  - "2026-09-23 (orchestrator): AMENDED BEFORE CLAIM, from a Codex review of the Later project relayed by Dan. Two fixes that are cheap in the template now and expensive once intents exist: (a) an outcome written as a delivered artefact ('a dashboard exists') makes intents solution-shaped, so the template's success section becomes **Outcome**, defined as an external observable change; (b) results must never overwrite the approved intent, so the template gains an append-only `evidence: []` list of paths to separate evidence records. A fuller 'validation contract' section was also proposed and is DEFERRED — piloted in the Later repo first, promoted to canonical only if it earns it. The ADR records that; this task does not build it."
 ---
 
 ## Context
@@ -61,12 +62,20 @@ check that can see it. See the notes for why the other three slices are delibera
 - Adds `docs/adr/0007-intent-layer.md` recording the decision, the alternatives rejected, and
   the four-slice sequence — including the three proposed answers (forward-only grandfathering,
   no teeth in slice 1, triage collision deferred) so a reader can see what was decided versus
-  what was postponed.
+  what was postponed. It also states, each as a decision with its reason: that evidence lives in
+  separate records linked through `evidence`, and an approved intent's body is never revised
+  after the fact; and that a validation-contract section is deferred to a pilot in the Later
+  repo, with promotion to canonical only if it earns it.
 - Adds `.flow/intents/_TEMPLATE.md` (canonical's own store) and
   `project-template/.flow/intents/_TEMPLATE.md` (what an adopting repo receives), carrying at
   minimum: `id`, `title`, `status`, `created`, `source` (whose words the Problem section holds),
-  `approved_by` and `approved_at` (both empty and unvalidated in this slice), plus prose sections
-  for the problem and what "we would know this worked" looks like.
+  `approved_by` and `approved_at` (both empty and unvalidated in this slice), and
+  `evidence: []` — an append-only list of repo paths to evidence records gathered after the work
+  ships. It starts empty, and is only ever appended to; it is never used to rewrite the intent
+  body. Prose sections: the problem, and an **Outcome** section whose guidance in the template
+  itself defines outcome as "the observable change in the user's situation, behaviour, or
+  operating environment that makes this intent worth pursuing — not a delivered artefact", with
+  "a dashboard exists" given as a non-example.
 - Extends `flow-doctor` to read `.flow/intents/*.md`, excluding `_TEMPLATE.md`, and report:
   malformed frontmatter, missing required fields, and duplicate ids.
 - Emits exactly one warning and stops when `.flow/intents/` is absent, so every adopting repo
@@ -82,6 +91,7 @@ check that can see it. See the notes for why the other three slices are delibera
 - `_flow-triage.yml` and the triage lane generally.
 - The task template, `pick-task.mjs`, or anything that would introduce `intent:` on a task.
 - Any actual intent file other than the template.
+- A validation-contract section in the template — deferred to the Later pilot (see notes).
 
 ## Acceptance criteria
 
@@ -104,6 +114,17 @@ check that can see it. See the notes for why the other three slices are delibera
 - [ ] Given `docs/adr/0007-intent-layer.md`, then it states the grandfathering decision, the
       teeth decision and the deferred triage collision explicitly, each as a decision with its
       reason, not as an omission.
+- [ ] Given the shipped intent `_TEMPLATE.md`, when its frontmatter is parsed, then it contains
+      `evidence` as an empty list.
+- [ ] Given an intent whose `evidence` is absent or an empty list, when `flow-doctor` runs, then
+      it reports nothing for that field.
+- [ ] Given an intent whose `evidence` is present but not a list of strings, when `flow-doctor`
+      runs, then it emits a WARNING (not a problem) naming the file — this slice's no-teeth
+      budget holds for `evidence` too.
+- [ ] Given the shipped intent `_TEMPLATE.md`, then its Outcome guidance defines outcome as an
+      external observable change and includes the "a dashboard exists" non-example.
+- [ ] Given `docs/adr/0007-intent-layer.md`, then it states the evidence-linkage decision and the
+      validation-contract deferral, each with its reason.
 
 ## Definition of done (inherited — do not edit)
 
