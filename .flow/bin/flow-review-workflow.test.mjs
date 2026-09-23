@@ -181,12 +181,92 @@ test("no reviewer is fenced on the branch name or the PR author", { skip }, () =
         `${job} must accept a bot-initiated run — Flow's own worker PRs are opened by one`);
     }
   }
-  // The remaining gates are the repo's own opt-in and the PR's draft state. Both are about cost
-  // and readiness; neither is about authorship, which is what this criterion protects. Pinned as
-  // an exact string rather than a substring match so a future `head.ref`/`actor` clause smuggled
-  // into the same expression fails here instead of silently re-fencing the reviewers.
+  // The remaining gates are the repo's own opt-in, the PR's draft state, and the fork boundary
+  // (flow-0068). NONE of the three is about authorship, which is what this criterion protects:
+  // opt-in and draft state are cost and readiness, and the head-repo comparison is about whose
+  // CODE this runner executes, not who opened the PR. A fork PR still gets identical treatment
+  // from a human, a bot or a non-Claude agent — it gets none of them, because GitHub withholds
+  // the token there anyway and three `bypassPermissions` jobs must not start on a head this repo
+  // does not own. See the header of _flow-review.yml for why the reusable asserts that itself
+  // instead of inheriting it from a caller-owned trigger.
+  //
+  // Pinned as an exact string rather than a substring match so a future `head.ref`/`actor` clause
+  // smuggled into the same expression fails here instead of silently re-fencing the reviewers.
+  // Changing this line is a deliberate act; widening it to a substring match is not a fix.
   assert.equal(wf.jobs.plan.if.trim(),
-    "${{ vars.FLOW_AI == 'true' && github.event.pull_request.draft != true }}");
+    "${{ vars.FLOW_AI == 'true' && github.event.pull_request.draft != true" +
+    " && github.event.pull_request.head.repo.full_name == github.repository }}");
+});
+
+// ── flow-0068: the fork boundary, and the task the reviewers are handed ───────────────────
+
+test("the fork fence sits on `plan` and nowhere else — so it suppresses all four jobs at once", { skip }, () => {
+  const FENCE = "github.event.pull_request.head.repo.full_name == github.repository";
+  assert.ok(wf.jobs.plan.if.includes(FENCE),
+    "three jobs run claude-code-action with --permission-mode bypassPermissions; the head they " +
+    "check out must be one this repo owns, and `plan` is the single gate the other three need");
+  for (const job of REVIEW_JOBS) {
+    assert.equal(wf.jobs[job].if, undefined,
+      `${job} must not carry its own copy of the fence — \`needs: plan\` already suppresses it, ` +
+      `and a second copy is the one that gets forgotten when the rule changes`);
+  }
+  // Stated as a test rather than a comment: the fence is worthless if the trigger it assumes is
+  // ever widened HERE. The caller owns `pull_request`; this reusable takes workflow_call only.
+  assert.deepEqual(Object.keys(wf.on ?? wf.true ?? {}), ["workflow_call"],
+    "the reusable must stay workflow_call-only — a pull_request_target trigger added here would " +
+    "hand fork-authored code to the reviewers in every adopting repo at once");
+});
+
+test("every `plan` invocation is handed BOTH id sources, as env, never as shell text", { skip }, () => {
+  const planSteps = Object.values(wf.jobs ?? {})
+    .flatMap((j) => j.steps ?? [])
+    .filter((s) => String(s.run ?? "").includes("flow-review.mjs plan"));
+  assert.equal(planSteps.length, 4,
+    "the plan job plus one bounded-context step per reviewer — each materialises its own context");
+  for (const s of planSteps) {
+    assert.equal(s.env?.HEAD_REF, "${{ github.head_ref }}",
+      "`github.head_ref`, not `github.event.pull_request.head.ref`: the branch is an ID SOURCE " +
+      "here, and the `head.ref` form is forbidden outright above so a real branch fence cannot " +
+      "hide behind this one");
+    assert.equal(s.env?.PR_TITLE, "${{ github.event.pull_request.title }}",
+      "CAN-52's second source — without it a cloud session's claude/… branch resolves no task");
+  }
+  // The PR title is attacker-controlled. Same rule as security_reason: env is data, `${{ }}` in a
+  // run block is script.
+  for (const block of Object.values(wf.jobs ?? {}).flatMap((j) => j.steps ?? []).map((s) => String(s.run ?? ""))) {
+    assert.doesNotMatch(block, /\$\{\{[^}]*pull_request\.title[^}]*\}\}/,
+      "a PR title spliced into a shell script is the injection class .flow/config.yml lists");
+  }
+  assert.equal(wf.jobs.plan.outputs?.task_id, "${{ steps.plan.outputs.task_id }}",
+    "the resolved id is published, so the run page says which task was graded");
+});
+
+test("every reviewer reads the MATERIALISED task, not a prose instruction to go and find it", { skip }, () => {
+  for (const p of prompts()) {
+    assert.match(p, /\.flow-review\/task\.md/,
+      "the task reaches the reviewer through the bounded context, resolved in code from the " +
+      "branch OR the PR title — the review gate was the last workflow leaving that to the model");
+    assert.match(p, /NO TASK FILE RESOLVED/,
+      "and the no-task case is named by its exact sentinel, so a reviewer cannot mistake an " +
+      "unresolved task for a task with nothing to check");
+    assert.match(p, /TASK CONTEXT UNAVAILABLE/,
+      "…as is the version-skew case, which asks the reviewer for the OPPOSITE thing — not to " +
+      "report a missing task. A prompt naming only one sentinel leaves the reviewer to infer " +
+      "the difference from prose it may not read closely");
+    // CAN-52's point is that the id has TWO sources, and the reading list has to say so. Pinning
+    // only `task.md` would let a future edit quietly drop the PR title back out of the reading
+    // list — leaving the prose describing a branch-only world the code no longer lives in, which
+    // is how a reviewer starts hunting in .flow/tasks/ again.
+    assert.match(p, /the branch/,
+      "the branch is the canonical source and the prompt must still name it");
+    assert.match(p, /the PR title/,
+      "and the PR title alongside it — the source a platform-imposed claude/… branch falls back " +
+      "to, which is the path canonical's own worker PRs take");
+  }
+  const qa = reviewerSteps("qa")[0].with.prompt.replace(/\s+/g, " ");
+  assert.match(qa, /do not report a criterion.{0,3}test table you were not in a position to build/,
+    "a well-formed PASS with an empty `unproven` is exactly what a reviewer that never found " +
+    "the task writes, and `verdict` cannot tell that from a real pass");
 });
 
 // ── criterion 7: the reviewers read the diff and its blast radius, not the whole repo ──────

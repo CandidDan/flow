@@ -13,9 +13,9 @@
 // flow-doctor.mjs for why the store location has to be supplied here.
 //
 // The one thing this file supplies that the template's CLI cannot is WHICH repo the review is
-// planned against. The template's CLI resolves `.flow/config.yml`, `.flow-review/` and its git
-// diffs from the process cwd — correct in CI, where the workflow runs at the workspace root,
-// and wrong anywhere else. This adapter pins all three to canonical's own tree, resolved from
+// planned against. The template's CLI resolves `.flow/config.yml`, `.flow/tasks/`, `.flow-review/`
+// and its git diffs from the process cwd — correct in CI, where the workflow runs at the workspace
+// root, and wrong anywhere else. This adapter pins all four to canonical's own tree, resolved from
 // this file's realpath, so the gate reads canonical's config and diffs canonical's history no
 // matter where it is invoked from. Everything that decides anything is imported: `runReviewCli`
 // is the template's own shell, returned exit code and all — a second copy of that shell is the
@@ -25,7 +25,8 @@
 //   node .flow/bin/flow-review.mjs verdict .flow-review/qa.json --check qa
 //
 // The environment overrides the template's CLI honours (FLOW_CONFIG, REVIEW_OUT_DIR, BASE_REF,
-// REVIEW_DIFF_MAX_BYTES) still win over the pinned defaults — same contract as in CI.
+// REVIEW_DIFF_MAX_BYTES, REVIEW_TASKS_DIR) still win over the pinned defaults — same contract as
+// in CI.
 
 import { execFileSync } from "node:child_process";
 import { realpathSync as __realpathSync } from "node:fs";
@@ -50,14 +51,24 @@ export {
   CHECKS,
   DEFAULT_MAX_DIFF_BYTES,
   DEFAULT_MODEL,
+  DEFAULT_TASKS_DIR,
+  NO_SOURCES_SENTINEL,
+  NO_TASK_SENTINEL,
+  LINE_BREAKS,
   ReviewError,
+  UNTRUSTED_BEGIN,
+  UNTRUSTED_END,
   boundDiff,
+  findTaskFile,
   parseReviewConfig,
   parseVerdict,
   reviewBlock,
   runPlan,
   runReviewCli,
+  oneLine,
   securityDecision,
+  taskContext,
+  untrustedBlock,
   verdictOutcome,
 } from "../../project-template/.flow/bin/flow-review.mjs";
 
@@ -72,6 +83,10 @@ if (__isMain) {
   process.exit(runReviewCli(process.argv.slice(2), {
     configPath: join(canonicalFlowDir(), "config.yml"),
     outDir: join(root, ".flow-review"),
+    // Canonical's own store. Pinned for the same reason `configPath` is: the template's CLI
+    // resolves `.flow/tasks` from the process cwd, which is right in CI and wrong anywhere else,
+    // and a task the gate cannot find reads to a reviewer as "this PR has no task".
+    tasksDir: join(canonicalFlowDir(), "tasks"),
     git: (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 1024 * 1024 * 64 }),
   }));
 }

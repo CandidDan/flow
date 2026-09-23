@@ -6,6 +6,59 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+- **The review gate resolves the task id in code, and fences the fork boundary itself**
+  (`_flow-review.yml`, `project-template/.flow/bin/flow-review.mjs`, `.flow/bin/flow-review.mjs`,
+  flow-0068). **No caller action** — the reusable's `workflow_call` inputs and its one declared
+  secret are unchanged, so a pinned `@v2` caller needs no edit.
+
+  Two gaps in the same file, both inherited rather than authored.
+
+  **The id.** CAN-52 established that a task id has two sources: a `flow/<id>-…` branch, and the
+  `[<id>] …` PR title a cloud session falls back to when its harness hands it a `claude/…` branch
+  it is told not to rename. `_flow-status.yml`, `_flow-done.yml` and `_flow-gates.yml`'s touches
+  job all resolve it through `.flow/bin/parse-task-id.mjs`. `_flow-review.yml` invoked that helper
+  nowhere: each reviewer was told, in prose, to go and find its own task file — a search performed
+  by the thing being graded on the result, inside a prompt that also forbids reading the
+  repository at large. The qa verdict *is* the criterion-to-test mapping, and a reviewer that
+  never located the task still writes a well-formed `{"verdict":"PASS","unproven":[]}`. `verdict`
+  is fail-closed against a **missing** verdict, not against one reached on missing evidence, so
+  that read as a pass. `plan` now resolves the id from both sources and materialises the task as
+  `.flow-review/task.md`, written in **both** outcomes — an unresolved task is the sentinel
+  `NO TASK FILE RESOLVED` plus the sources that were tried, never an absent file a reviewer has
+  to interpret. The resolved id is published as the `task_id` job output, so the run page states
+  which task was graded. Resolving it adds no git call: the store is already on disk.
+
+  **The fork.** Three jobs run `claude-code-action` with `--permission-mode bypassPermissions`,
+  and the file's own header justified the absence of a fence by citing GitHub's behaviour — a fork
+  PR gets no secrets, "so the reviewers cannot run there". They cannot *authenticate* there; they
+  still started, checked out the PR head, and ran `.flow/bin/flow-review.mjs` **from that head**.
+  Under `pull_request` the platform contains that, but the containment is a property of a file
+  this workflow does not own: **the thin caller owns the trigger**, in the adopting repo, at a tag
+  it has already pinned. A caller edited to `pull_request_target` — which looks like a fix for
+  "our fork PRs get no review" — would hand fork-authored code to three `bypassPermissions` jobs
+  holding `pull-requests: write`, `id-token: write` and a real `CLAUDE_CODE_OAUTH_TOKEN`, and
+  canonical could not patch it downstream. `plan` now compares the head repo against the running
+  one, so the fence holds whatever a caller does, and it sits on `plan` alone because the other
+  three jobs already declare `needs: plan`.
+
+  **A caller that supplies neither source gets its own sentinel.** The reusable workflow and
+  `.flow/bin/` are versioned separately, so a repo that has run `flow-sync` but not yet bumped the
+  workflow tag drives the new helper from an old caller that passes no `HEAD_REF` and no
+  `PR_TITLE`. `_flow-review.yml`'s header already documents the opposite skew — new workflow, old
+  helper — and fails loudly on it. This is the mirror, and it is reported honestly instead:
+  `task.md` says `TASK CONTEXT UNAVAILABLE`, not `NO TASK FILE RESOLVED`, because "nobody told me
+  what to look for" is not "this PR has no task", and the old prompts still tell the reviewer to
+  locate the task itself. Where GitHub can fill the gap it does — the CLI falls back to the
+  natively-set `GITHUB_HEAD_REF` for the branch; there is no equivalent for the PR title. Observed
+  on this change's own PR, where the reviewers ran the pre-merge reusable from `main` against this
+  helper from the PR head, and one of them reviewed without acceptance criteria as a result.
+
+  **Not an author fence, and the tests hold that line.** `allowed_bots: "*"` stays, nothing
+  inspects who triggered the run or what the branch is called, and `flow-review-workflow.test.mjs`
+  still forbids the two authorship expressions *anywhere in the file* — including inside a
+  comment, which is how this change first failed its own gate twice. The assertion was not
+  loosened; the comments were reworded to describe those expressions instead of quoting them.
+
 - **`flow-sync` no longer commits its own canonical checkout as a dangling submodule**
   (`_flow-sync.yml`, `.flow/bin/sync-checkout-isolation.test.mjs`, flow-0064). Canonical was
   fetched by a second `actions/checkout` at `path: .flow-canonical`. The repo being synced is

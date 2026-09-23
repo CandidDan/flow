@@ -32,9 +32,27 @@ name: _flow-review (reusable)
 #
 # DISABLED BY DEFAULT. Enable with repo variable FLOW_AI=true + the CLAUDE_CODE_OAUTH_TOKEN
 # secret (from `claude setup-token` — uses your Max plan quota, not API credits). The thin
-# caller passes it by name, not `secrets: inherit`. Note GitHub's own boundary: a PR from a FORK gets
-# no secrets, so the reviewers cannot run there. That is GitHub's rule, not Flow's — review
-# fork contributions on a branch in the repo.
+# caller passes it by name, not `secrets: inherit`.
+#
+# THE FORK BOUNDARY IS FENCED HERE, NOT INHERITED. GitHub withholds secrets from a `pull_request`
+# run on a fork PR, so the reviewers could never authenticate there — but they still STARTED:
+# three jobs checked out the PR head and ran `node .flow/bin/flow-review.mjs` FROM THAT HEAD
+# before claude-code-action was reached. Under `pull_request` the platform contains that. The
+# problem is that the containment is a property of a file this workflow does not own: THE THIN
+# CALLER OWNS THE TRIGGER, in the adopting repo, at a tag it has already pinned. A caller edited
+# to `pull_request_target` — which looks like a fix for "our fork PRs get no review" — would hand
+# fork-authored code and a fork-authored diff to three jobs running `--permission-mode
+# bypassPermissions` with this workflow's `pull-requests: write`, `id-token: write` and a real
+# CLAUDE_CODE_OAUTH_TOKEN. Canonical cannot patch that downstream, so `plan` compares the head
+# repo against this one and the fence holds whatever the caller does. Review fork contributions
+# on a branch in the repo.
+#
+# This is NOT an author fence, and the distinction is criterion 6 of flow-0007. `allowed_bots: "*"`
+# stays, nothing inspects who triggered the run or what the branch is called, and a PR from a
+# human or a non-Claude agent gets the identical checks. What is fenced is whose CODE the runner
+# executes. (The two expressions that would re-fence authorship are named in
+# flow-review-workflow.test.mjs, which forbids them anywhere in this file — including in a comment
+# like this one, which is why it describes them instead of quoting them.)
 
 on:
   workflow_call:
@@ -67,13 +85,19 @@ jobs:
     # `ready_for_review` in its `types:`, so the reviewers fire once, when the worker hands off.
     # `github.event.pull_request.draft` is present on every `pull_request` event; on any other event
     # it is empty, which is why this compares against 'true' rather than testing for false.
-    if: ${{ vars.FLOW_AI == 'true' && github.event.pull_request.draft != true }}
+    #
+    # The third clause is the fork fence (see the header). `plan` is the only place it belongs:
+    # the other three jobs declare `needs: plan`, so suppressing this suppresses all of them,
+    # and `security` keeps no job-level `if` of its own — one that vanished from the PR on a skip
+    # is indistinguishable from a gate that broke.
+    if: ${{ vars.FLOW_AI == 'true' && github.event.pull_request.draft != true && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     outputs:
       model: ${{ steps.plan.outputs.model }}
       security_model: ${{ steps.plan.outputs.security_model }}
       security_run: ${{ steps.plan.outputs.security_run }}
       security_reason: ${{ steps.plan.outputs.security_reason }}
+      task_id: ${{ steps.plan.outputs.task_id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
@@ -84,6 +108,16 @@ jobs:
         id: plan
         env:
           BASE_REF: origin/${{ github.base_ref }}
+          # CAN-52: the task id has two sources and the helper resolves both in code. The branch
+          # arrives as `github.head_ref` — the underscore form, deliberately. The dotted
+          # `pull_request` spelling of the same value is forbidden ANYWHERE in this file by
+          # `flow-review-workflow.test.mjs`, so that a real branch fence cannot be smuggled in
+          # behind an id lookup; that test refuses prose too, which is why this comment does not
+          # spell it either. A branch NAME here is an id source, never a gate. The PR title is
+          # attacker-controlled text: it travels through `env`, where it is data, and is never
+          # interpolated into the shell.
+          HEAD_REF: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           # An adopting repo that bumped the workflow tag but has not run flow-sync yet has the
           # new workflow and the old .flow/bin/. Say so, instead of failing on "node: not found".
@@ -117,6 +151,16 @@ jobs:
       - name: Bounded context — the diff and the files it changes
         env:
           BASE_REF: origin/${{ github.base_ref }}
+          # CAN-52: the task id has two sources and the helper resolves both in code. The branch
+          # arrives as `github.head_ref` — the underscore form, deliberately. The dotted
+          # `pull_request` spelling of the same value is forbidden ANYWHERE in this file by
+          # `flow-review-workflow.test.mjs`, so that a real branch fence cannot be smuggled in
+          # behind an id lookup; that test refuses prose too, which is why this comment does not
+          # spell it either. A branch NAME here is an id source, never a gate. The PR title is
+          # attacker-controlled text: it travels through `env`, where it is data, and is never
+          # interpolated into the shell.
+          HEAD_REF: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           git fetch -q origin "${{ github.base_ref }}"
           node .flow/bin/flow-review.mjs plan
@@ -137,8 +181,10 @@ jobs:
             YOUR CONTEXT IS BOUNDED — this is a cost control, not a suggestion. Read:
               · .flow-review/diff.patch  — the full PR diff
               · .flow-review/files.txt   — the files it changes
-              · the task file in .flow/tasks/ whose id is in the branch name (flow/<id>-…) or
-                the PR title prefix ([<id>] …), for its acceptance criteria
+              · .flow-review/task.md     — THE TASK, and its acceptance criteria. The gate has
+                already resolved it in code from the branch (flow/<id>-…) or, when the platform
+                forced a non-flow/ branch, the PR title prefix ([<id>] …). Read the criteria from
+                here; do not go hunting for the file in .flow/tasks/ yourself.
               · .flow/config.yml for this project's commands
               · the specific test files the diff adds or changes
             Do NOT read the repository at large. If the diff says it was truncated, say so in
@@ -151,7 +197,16 @@ jobs:
             outcome rather than merely that the code runs without throwing. A test that calls a
             function and asserts nothing meaningful does not prove anything.
 
-            If the branch has no matching task file, say so — that itself is a finding.
+            .flow-review/task.md begins with one of two sentinels when it carries no task, and
+            they ask you for OPPOSITE things — read which one it is before reacting:
+              · "NO TASK FILE RESOLVED" — the sources were checked and carry no task. Say so
+                plainly; there are no criteria to map, so do not report a criterion→test table
+                you were not in a position to build.
+              · "TASK CONTEXT UNAVAILABLE" — the sources were never supplied to the gate, so
+                nothing has been checked. Do NOT report a missing task. Locate it yourself from
+                the branch or the PR title; if you cannot, say the task CONTEXT was unavailable
+                and name that sentinel, which is what tells a human to run flow-sync.
+            The file itself states which case applies and why.
 
             THEN DO BOTH OF THESE:
             1. Post ONE pull-request comment: the verdict, the criterion→test table, and for a
@@ -181,6 +236,16 @@ jobs:
       - name: Bounded context — the diff and the files it changes
         env:
           BASE_REF: origin/${{ github.base_ref }}
+          # CAN-52: the task id has two sources and the helper resolves both in code. The branch
+          # arrives as `github.head_ref` — the underscore form, deliberately. The dotted
+          # `pull_request` spelling of the same value is forbidden ANYWHERE in this file by
+          # `flow-review-workflow.test.mjs`, so that a real branch fence cannot be smuggled in
+          # behind an id lookup; that test refuses prose too, which is why this comment does not
+          # spell it either. A branch NAME here is an id source, never a gate. The PR title is
+          # attacker-controlled text: it travels through `env`, where it is data, and is never
+          # interpolated into the shell.
+          HEAD_REF: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           git fetch -q origin "${{ github.base_ref }}"
           node .flow/bin/flow-review.mjs plan
@@ -195,10 +260,13 @@ jobs:
             You are the code-quality gate for this pull request. You did not write this code and
             owe it nothing. Separate findings into blocking (must fix) and non-blocking.
 
-            YOUR CONTEXT IS BOUNDED — read .flow-review/diff.patch, .flow-review/files.txt, the
-            task file in .flow/tasks/ resolved from the branch name (flow/<id>-…) or the PR title
-            prefix ([<id>] …), and the specific files the diff touches. Do NOT read the
-            repository at large.
+            YOUR CONTEXT IS BOUNDED — read .flow-review/diff.patch, .flow-review/files.txt,
+            .flow-review/task.md (the task itself, resolved for you in code from the branch
+            (flow/<id>-…) or the PR title prefix ([<id>] …)), and the specific files the diff
+            touches. Do NOT read the repository at large. If task.md begins "NO TASK FILE
+            RESOLVED" there is no declared scope to judge creep against — say so. If it begins
+            "TASK CONTEXT UNAVAILABLE" the scope was never handed to you rather than being
+            absent: say that instead, and do not report a missing task.
 
             Review for:
             1. Correctness — does it satisfy each acceptance criterion? Logic errors, off-by-one,
@@ -263,6 +331,16 @@ jobs:
         if: ${{ needs.plan.outputs.security_run == 'true' }}
         env:
           BASE_REF: origin/${{ github.base_ref }}
+          # CAN-52: the task id has two sources and the helper resolves both in code. The branch
+          # arrives as `github.head_ref` — the underscore form, deliberately. The dotted
+          # `pull_request` spelling of the same value is forbidden ANYWHERE in this file by
+          # `flow-review-workflow.test.mjs`, so that a real branch fence cannot be smuggled in
+          # behind an id lookup; that test refuses prose too, which is why this comment does not
+          # spell it either. A branch NAME here is an id source, never a gate. The PR title is
+          # attacker-controlled text: it travels through `env`, where it is data, and is never
+          # interpolated into the shell.
+          HEAD_REF: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           git fetch -q origin "${{ github.base_ref }}"
           node .flow/bin/flow-review.mjs plan
@@ -281,9 +359,14 @@ jobs:
             binary on High/Critical.
 
             YOUR CONTEXT IS BOUNDED — review the DIFF and its immediate blast radius, not the
-            whole repo. Read .flow-review/diff.patch, .flow-review/files.txt, the `security`
-            block of .flow/config.yml (`secrets_scan`, `dependency_audit`, `focus[]`), and the
-            specific files the diff touches. Do NOT read the repository at large.
+            whole repo. Read .flow-review/diff.patch, .flow-review/files.txt, .flow-review/task.md
+            (the task, resolved in code from the branch or the PR title — it tells you what the
+            change was meant to do; if it begins "NO TASK FILE RESOLVED" or "TASK CONTEXT
+            UNAVAILABLE" you simply have less intent context, and reporting either is the qa
+            gate's job, not yours), the `security`
+            block of .flow/config.yml (`secrets_scan`,
+            `dependency_audit`, `focus[]`), and the specific files the diff touches. Do NOT read
+            the repository at large.
 
             Always check:
             1. Secrets — no keys, tokens, passwords, connection strings or private certs in the
