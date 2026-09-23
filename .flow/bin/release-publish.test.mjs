@@ -217,6 +217,13 @@ test("criterion 2 — the never-publish list covers every category ADR-0005 name
     assert.ok(neverPublishes(p), `"${p}" must be on the never-publish list`);
   }
   assert.ok(NEVER_PUBLISH.includes(".flow/"), "the store, the adapters and the gate config in one prefix");
+  // Planning documents live in `docs/`, which the manifest admits file by file — so a new plan is
+  // private by the allow list alone. These entries are the independent second opinion: they catch a
+  // MANIFEST widened by hand, which is the failure the allow list cannot catch by itself.
+  for (const plan of ["docs/flow-infra-propagation-plan.md", "docs/mission-control-rebuild-plan.md"]) {
+    assert.ok(NEVER_PUBLISH.includes(plan), `${plan} is planning material and must never cross`);
+    assert.ok(!manifestAdmits(plan), `${plan} is not admitted by the manifest either`);
+  }
 });
 
 test("criterion 2 — canonical's root host file is kept out by the allow-list, not by name", () => {

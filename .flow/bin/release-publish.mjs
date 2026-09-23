@@ -138,6 +138,7 @@ export const NEVER_PUBLISH = Object.freeze([
   "docs/adr/",                       // the decisions, including the rejected alternatives
   "docs/handoff-",                   // handoff notes — planning, and a prefix so new ones inherit it
   "docs/flow-infra-propagation-plan.md",
+  "docs/mission-control-rebuild-plan.md",   // the rebuild decomposition — operating material, names a standing credential risk
   "VISION.md",
   "package.json",                    // canonical's own gate manifest; `private: true` and not shipped
   "package-lock.json",
