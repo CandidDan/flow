@@ -58,25 +58,12 @@ test("no `done` task is warned about for serving a retired goal, in canonical's 
     `these done tasks are still warned about for a retired goal: ${offenders.join(", ")}`);
 });
 
-test("the exemption did not silence the check altogether", () => {
-  // The guard against a fix that "passes" by warning about nothing at all. Canonical's store
-  // genuinely contains live tasks anchored to goals retired in the 2026-09-01 vision rewrite, so
-  // the retired-goal check must still be speaking. If this ever fails legitimately — every such
-  // task re-anchored or dropped — delete this test with the note that the drift is gone, rather
-  // than weakening the one above to match.
-  const r = runDoctor({ flowDir: join(REPO, ".flow") });
-  const statuses = statusById();
-  const live = retiredWarnings(r)
-    .map((w) => w.match(/^\s*([A-Za-z][\w-]*-\d+):/)?.[1])
-    .filter(Boolean);
-
-  assert.ok(live.length > 0,
-    "no retired-goal warnings at all — the check has gone quiet rather than got quieter");
-  for (const id of live) {
-    assert.notEqual(statuses.get(id), "done",
-      `${id} is done and should have been exempt`);
-  }
-});
+// "the exemption did not silence the check altogether" was deleted on 2026-09-23, as its own
+// comment instructed: it asserted that canonical's live store still held at least one task
+// anchored to a retired goal. On that date every open G4/G5 task was re-anchored to `maintenance`
+// on the human's decision D1, and flow-0002 and flow-0037 were closed, so the drift it relied on
+// is gone. The retired-goal check is still proved to speak by the template's fixture tests in
+// project-template/.flow/bin/flow-doctor.test.mjs, and the test above was left unweakened.
 
 test("warnings still do not fail the run", () => {
   // The exemption must not have changed the severity contract: a retired-goal anchor reports and
