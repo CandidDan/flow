@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0068"
 title: "_flow-review.yml never resolves the task id in code and never fences the fork boundary — the one workflow CAN-52 did not reach, running three bypassPermissions jobs on whatever its caller points at"
-status: "in_review"
+status: "done"
 priority: 3
 project: "flow"
 owner: "session_017pnHXAiMPgKPH9J8eyhyHw"
