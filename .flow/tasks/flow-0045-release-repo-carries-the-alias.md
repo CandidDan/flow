@@ -245,6 +245,32 @@ notes:
     floating `v1` alias the fleet actually pins, moved by the same deliberate act that moves
     canonical's", link this file, paste the six criteria with their proving tests. If this
     session died before that, the branch is pushed and green — re-run the gate and open it.
+  - |
+    2026-09-24 (worker, session_01PcXqFlow0045Worker): PR #101 is OPEN and READY FOR REVIEW. The
+    build is complete; nothing is left for a worker. Branch `flow/flow-0045-release-repo-alias`
+    at 7ed20ed, rebased onto `main`, four commits.
+
+    GATE, re-run after the rebase: build 34 workflows parsed · lint 87 .mjs parsed · test 1129,
+    1128 pass / 0 fail / 1 skipped · coverage lines 95.39% vs floor 83.5 ·
+    `touches-guard --id flow-0045` outside=0 over 3 feature files against 5 globs.
+
+    All six acceptance criteria have named proving tests, listed against each criterion in the
+    PR body. The criterion-5 assertion that hardcoded `/step 6/` now resolves the step number the
+    doc cites and checks that step IS the alias advance, so flow-0069's renumbering cannot break
+    it again in either direction (mutation-checked).
+
+    The credential block from 2026-09-15 is DISCHARGED, confirmed by action rather than by
+    report: the workflow-file change pushed without incident, so FLOW_PAT carries Contents write.
+    The pending base64 patch in the earlier note was applied verbatim, sha256 verified, and is
+    now spent — a future session should not re-apply it.
+
+    STILL OPEN, and it is the orchestrator's, not this task's: six tasks declare `CHANGELOG.md` in
+    `touches` nine days after flow-0069 replaced that with `changes/<id>.md` — flow-0045 (this
+    one), flow-0050, flow-0052, flow-0053, flow-0063, flow-0065. flow-doctor already reports the
+    overlap warnings that causes. This PR put its entry at the declared path for that reason,
+    explained in full in the PR body.
+
+    NEXT ACTION: human review and merge of PR #101. `flow-done` sets this task to `done` on merge.
 ---
 
 ## Context
