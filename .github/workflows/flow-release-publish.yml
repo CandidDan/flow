@@ -32,10 +32,10 @@ name: flow-release-publish
 #   release: published   -> `publish`      — the snapshot and its immutable `vX.Y.Z` tag.
 #   push: tags: v<major> -> `mirror-alias` — the floating `vX` every adopting repo pins.
 #
-# The second is triggered by CANONICAL'S OWN `v1` MOVING, which is step 6 of the release
-# procedure in docs/flow-versioning-policy.md — `git tag -f v1 v1.3.0 && git push -f origin v1`
-# fires a `push` event on `refs/tags/v1`, force-updates included. That makes one deliberate
-# human act move both aliases, instead of two acts a human has to remember in two
+# The second is triggered by CANONICAL'S OWN `v1` MOVING — the "Advance the stable alias" step
+# of the release procedure in docs/flow-versioning-policy.md. `git tag -f v1 v1.3.0 && git push
+# -f origin v1` fires a `push` event on `refs/tags/v1`, force-updates included. That makes one
+# deliberate human act move both aliases, instead of two acts a human has to remember in two
 # repositories. This repo is the evidence that the second one gets forgotten: canonical's `v1`
 # sat 305 commits behind `main` for three and a half weeks while release-guard measured the gap
 # as a warning nobody read.
@@ -218,8 +218,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ── the floating alias the fleet actually pins ──────────────────────────────────────────
-  # Runs when canonical's own `vX` moves (step 6 of the release procedure), never when a
-  # release is published. See the header for why those must not be the same act.
+  # Runs when canonical's own `vX` moves (the release procedure's "Advance the stable alias"
+  # step), never when a release is published. See the header for why those must not be the
+  # same act.
   mirror-alias:
     if: vars.FLOW_RELEASE_PUBLISH == 'true' && (github.event_name == 'push' || inputs.mirror_alias)
     runs-on: ubuntu-latest
