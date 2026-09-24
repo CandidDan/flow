@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0063"
 title: "Give G11 somewhere to live: an intent store, a template that records whose words it holds, and a flow-doctor check with no teeth yet"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0063"
