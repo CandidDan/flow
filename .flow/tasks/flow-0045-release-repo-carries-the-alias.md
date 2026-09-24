@@ -9,7 +9,7 @@ owner: "session_01PcXqFlow0045Worker"
 created: "2026-09-15"
 started: "2026-09-24T06:34:28Z"
 branch: "flow/flow-0045-release-repo-alias"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/101"
 issue: ""
 blocked_reason: ""
 blocked_by: []
