@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0075"
 title: "flow-sync: a leftover sync branch with no open PR is rebuilt, not a silent green no-op"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0075"
 created: "2026-09-24"
-started: ""
+started: "2026-09-24T09:20:54Z"
 branch: ""
 pr: ""
 issue: "https://github.com/CandidDan/flow/issues/104"
