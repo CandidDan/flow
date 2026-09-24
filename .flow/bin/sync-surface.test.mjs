@@ -307,9 +307,13 @@ test("a sync into a repo with a stale protocol commits canonical's, byte for byt
     "the copied protocol must be canonical's, byte for byte — this is a copy, not a patch",
   );
 
-  // The other half of the criterion: the PR body is generated from that same `git diff --name-only`
-  // list (`$SYNC pr-body --files "$CHANGED"`), so the file the diff carries is the file the body
-  // lists. Asserted through the real generator, not a copy of its format.
+  // The other half of the criterion: the PR body is generated from the same changed-file list the
+  // commit carries (`$SYNC pr-body --files "$CHANGED"`), so the file the diff carries is the file
+  // the body lists. Asserted through the real generator, not a copy of its format. The list is
+  // computed here rather than lifted from the workflow on purpose — flow-0054 is reshaping that
+  // variable (to `git diff --cached --no-renames --name-status`, because the old form reported no
+  // ADDED files) in a PR open at the same time as this one. What must hold either way is that a
+  // protocol appearing in the diff appears in the body, and that is what is asserted.
   const { body } = prContent({ local: "1.3.0", canonical: "2.0.0", files: changed });
   const synced = body.split("### Synced from canonical")[1] ?? "";
   assert.match(synced, /- `\.flow\/PROTOCOL\.md`/,
