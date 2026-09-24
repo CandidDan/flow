@@ -27,15 +27,50 @@ name: flow-release-publish
 # fleet resolves. flow-0031 makes this a checked rule across the directory; it is done here at
 # authoring time so that task finds nothing to fix. Comments name the version the SHA is.
 
+# TWO ENTRY POINTS, TWO JOBS, AND THEY ARE NOT THE SAME EVENT.
+#
+#   release: published   -> `publish`      — the snapshot and its immutable `vX.Y.Z` tag.
+#   push: tags: v<major> -> `mirror-alias` — the floating `vX` every adopting repo pins.
+#
+# The second is triggered by CANONICAL'S OWN `v1` MOVING — the "Advance the stable alias" step
+# of the release procedure in docs/flow-versioning-policy.md. `git tag -f v1 v1.3.0 && git push
+# -f origin v1` fires a `push` event on `refs/tags/v1`, force-updates included. That makes one
+# deliberate human act move both aliases, instead of two acts a human has to remember in two
+# repositories. This repo is the evidence that the second one gets forgotten: canonical's `v1`
+# sat 305 commits behind `main` for three and a half weeks while release-guard measured the gap
+# as a warning nobody read.
+#
+# WHY NOT JUST MOVE THE ALIAS AT THE END OF THE PUBLISH. Because that deletes the canary. The
+# policy makes `vMAJOR` a deliberate act taken only after the edge has proven itself, precisely
+# because auto-advancing a single alias means a bad reusable reaches the whole fleet before
+# anyone has run it once in anger. An alias that advanced on publish would reintroduce exactly
+# that, one repository removed from where anyone would look for it. `release-publish.mjs` keeps
+# the two runs apart and its tests pin the asymmetry (immutable tag refused, alias moved).
+#
+# The tag filter admits ONLY the bare alias: `v[0-9]*` with `!v*.*` excluding every exact
+# version and `!v*-edge` excluding the canary channel, which is not published to the release
+# repo at all (nothing pins it there yet — see flow-0045's Scope). The job re-derives the alias
+# from VERSION and refuses a ref the stamp does not name, so the filter is a narrowing, not the
+# check.
+
 on:
   release:
     types: [published]
+  push:
+    tags:
+      - "v[0-9]*"
+      - "!v*.*"
+      - "!v*-edge"
   workflow_dispatch:
     inputs:
       dry_run:
         description: "Report the file list and the tag, write nothing, push nothing"
         type: boolean
         default: true
+      mirror_alias:
+        description: "Mirror the floating vMAJOR alias instead of publishing (recovery path for a missed tag-push event)"
+        type: boolean
+        default: false
 
 # LEAST PRIVILEGE, and this block is the declared blast radius rather than a log of which token
 # happened to be used. It governs GITHUB_TOKEN, which reaches CANONICAL only — and canonical is
@@ -54,7 +89,10 @@ concurrency:
 
 jobs:
   publish:
-    if: vars.FLOW_RELEASE_PUBLISH == 'true'
+    # Never on a tag push: that event is the alias mirror's, and a publish fired by it would be
+    # a second snapshot of an already-released version — refused by the immutable-tag rule, but
+    # refused loudly, in a red job, every time a human moved `v1`.
+    if: vars.FLOW_RELEASE_PUBLISH == 'true' && github.event_name != 'push' && !inputs.mirror_alias
     runs-on: ubuntu-latest
 
     env:
@@ -176,5 +214,80 @@ jobs:
             if [ "$DRY_RUN" = "true" ]; then echo "**Dry run** — nothing was written or pushed."; echo ""; fi
             echo '```'
             cat "$RUNNER_TEMP/publish.log" 2>/dev/null || echo "(no publisher output — an earlier step failed)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── the floating alias the fleet actually pins ──────────────────────────────────────────
+  # Runs when canonical's own `vX` moves (the release procedure's "Advance the stable alias"
+  # step), never when a release is published. See the header for why those must not be the
+  # same act.
+  mirror-alias:
+    if: vars.FLOW_RELEASE_PUBLISH == 'true' && (github.event_name == 'push' || inputs.mirror_alias)
+    runs-on: ubuntu-latest
+
+    env:
+      FLOW_RELEASE_REPO: ${{ vars.FLOW_RELEASE_REPO || 'CandidDan/flow-protocol' }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+      # Only a tag push carries a moved ref. A manual dispatch runs from `main`, whose ref name
+      # is not an alias, so passing it would trip the module's own "a ref this release does not
+      # name" refusal — the recovery path deliberately supplies nothing and lets the stamp decide.
+      PUSHED_REF: ${{ github.event_name == 'push' && github.ref_name || '' }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The commit the alias was just moved TO — that is the tree whose VERSION decides both
+          # the alias name and the release tag it points at. Depth 1: nothing here needs history,
+          # and this job runs `git push` to another remote.
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # Invocation only, same division as the publish step. Every decision — which alias the
+      # stamp derives, whether the release it would point at is even on the target, and what
+      # "the release tag landed but the alias did not" is called — lives in release-publish.mjs
+      # and is proved by tests over `ls-remote` output rather than by a live push.
+      #
+      # The credential is handled exactly as the publish step handles it, and for the same three
+      # reasons spelled out there: not in the remote URL, not in argv, not in the runner's
+      # global git config. GIT_CONFIG_COUNT scopes it to this command's process tree, which the
+      # git children the module spawns inherit.
+      - name: Mirror the alias to the release repo
+        env:
+          FLOW_RELEASE_PAT: ${{ secrets.FLOW_RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          AUTH="$(printf 'x-access-token:%s' "$FLOW_RELEASE_PAT" | base64 -w0)"
+          echo "::add-mask::$AUTH"
+
+          ARGS=(--mirror-alias
+                --remote "https://github.com/$FLOW_RELEASE_REPO.git"
+                --work-dir "$RUNNER_TEMP/flow-release-alias")
+          if [ -n "$PUSHED_REF" ]; then ARGS+=(--pushed-ref "$PUSHED_REF"); fi
+          if [ "$DRY_RUN" = "true" ]; then ARGS+=(--dry-run); fi
+
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0="http.https://github.com/.extraheader" \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $AUTH" \
+            node .flow/bin/release-publish.mjs "${ARGS[@]}" | tee "$RUNNER_TEMP/alias.log"
+
+      # `if: always()`, because the run this summary matters most for is the FAILED one: a
+      # release whose tag landed and whose alias did not is the state that looks fine from the
+      # release repo's tag list and resolves to the previous release from every caller. The
+      # module's last line carries `decision=published-without-its-alias`, so the distinction
+      # survives into the summary rather than living only in the exit code.
+      - name: Summarise the alias move
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### flow-release-publish / alias -> \`$FLOW_RELEASE_REPO\`"
+            echo ""
+            if [ "$DRY_RUN" = "true" ]; then echo "**Dry run** — nothing was pushed."; echo ""; fi
+            echo '```'
+            cat "$RUNNER_TEMP/alias.log" 2>/dev/null || echo "(no output — an earlier step failed)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -6,6 +6,33 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+- **The release repo now carries the floating `vMAJOR` alias the fleet actually pins**
+  (`flow-release-publish.yml`, `.flow/bin/release-publish.mjs`, flow-0045). **No caller action** —
+  adopting repos still pin canonical; flow-0030 is the task that repoints them at the release repo,
+  and this change is its prerequisite.
+
+  `CandidDan/flow-protocol` held `main` and the exact version tags only — three refs, no alias —
+  because the publisher pushes exactly one ref per release and `tagIsFree` refuses to move a
+  `vX.Y.Z` that already exists. That is right for an immutable release tag, and it left the ref
+  every adopting repo actually pins with no implementation on the release-repo side. Repointing a
+  consuming repo's `uses:` lines at `.../_flow-gates.yml@vMAJOR` on the release repo would have
+  resolved to nothing, in that repo's CI, with no local change to explain it.
+
+  The alias is **mirrored from canonical's own `vMAJOR`**, on the `push` event that force-updates
+  it (step 7 of the release procedure), and deliberately **not** advanced by publishing. An alias
+  that followed every publish would delete the canary the two-alias split exists to preserve — the
+  whole reason `vMAJOR` is a deliberate human act — one repository removed from where anyone would
+  look for it. One human act now moves both aliases, instead of two acts in two repositories; this
+  repo is the evidence that the second one gets forgotten, its own `v1` having sat 305 commits
+  behind `main` for three and a half weeks.
+
+  The immutable-tag rule is unchanged, and both rules are now pinned by tests against the same
+  `ls-remote` output, so a later tidy-up cannot collapse them into one. The alias name is derived
+  from `VERSION` rather than hardcoded, so a `2.0.0` stamp mirrors `v2` and leaves `v1` frozen. A
+  release whose tag lands but whose alias does not now fails, with
+  `decision=published-without-its-alias` in the verdict and in the job summary, rather than
+  reporting success while every pinned caller resolves the previous release.
+
 - **The review gate resolves the task id in code, and fences the fork boundary itself**
   (`_flow-review.yml`, `project-template/.flow/bin/flow-review.mjs`, `.flow/bin/flow-review.mjs`,
   flow-0068). **No caller action** — the reusable's `workflow_call` inputs and its one declared

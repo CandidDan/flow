@@ -85,12 +85,49 @@ exactly what a repo pinned to `@v1` should get from a major bump: nothing moves 
 6. **Canary.** The canary repo is already running `@v1-edge`. Confirm its gate has gone green
    end-to-end on at least one real PR since the merge. This is observation, not work.
 7. **Advance the stable alias:** `git tag -f v1 v1.3.0 && git push -f origin v1`. The fleet is now on
-   it.
+   it. **This one act moves the release repo's `v1` too** — see below; there is no second tag move
+   to remember.
 8. **Rollback if it breaks:** `git tag -f v1 <previous-version> && git push -f origin v1`. Instant,
-   because the immutable tags still exist. That is what they are for.
+   because the immutable tags still exist. That is what they are for. The mirror follows the
+   rollback for the same reason it follows the advance: it is the same act.
 
 Steps 4–7 are the only manual ones, and none of them is on the critical path of a fix reaching the
 canary.
+
+## What the release repo carries
+
+The fleet does not resolve canonical directly. ADR-0005 splits authoring from release, and
+`flow-release-publish.yml` pushes a history-free snapshot to the public release repo
+(`CandidDan/flow-protocol`). So the refs above exist in two places, and the release repo carries a
+deliberately **smaller** set than canonical:
+
+| Ref on the release repo | Who moves it | When |
+|---|---|---|
+| `main` | `flow-release-publish.yml` | Force-pushed on every publish. Consecutive snapshots share no ancestry, so it is not a history — do not pin it. |
+| `vMAJOR.MINOR.PATCH` | `flow-release-publish.yml` | Created once, on the `release: published` event. **Never moved** — a publish that finds the tag already there is refused, not overwritten. |
+| `vMAJOR` (e.g. `v1`) | `flow-release-publish.yml`'s `mirror-alias` job | **Mirrors canonical's `vMAJOR`.** Fires on the `push` event for that tag — which is step 7 above — and force-updates the release repo's alias to the `vX.Y.Z` the stamp at that commit names. |
+| `vMAJOR-edge` | nobody | **Not published there.** Nothing pins `@v1-edge` on the release repo, and an unused moving ref on a public repo is a liability. Restoring the canary channel there is a separate decision about which repo holds the pin. |
+
+Three properties of that third row are worth stating, because each is a rule a later
+simplification would break:
+
+- **The alias moves when canonical's alias moves, never when a release is published.** Having the
+  publisher advance `v1` to whatever it just pushed is one line, and it would quietly delete the
+  canary: the whole reason `vMAJOR` is a deliberate human act is that auto-advancing a single alias
+  lets a bad reusable reach the fleet before anyone has run it once in anger. An alias advancing on
+  publish reintroduces that one repository removed from where anyone would look for it.
+- **The alias name is derived from `VERSION`, never hardcoded** — the same property
+  `release-tag.yml` holds. Bumping `VERSION` to `2.0.0` starts mirroring `v2` and leaves `v1`
+  frozen at the last 1.x release, which is what a repo pinned `@v1` should get from a major bump.
+- **A release published without its alias is a failure, not a success.** If `v1.3.0` lands on the
+  release repo and `v1` cannot be moved to it, the run exits non-zero and its verdict and job
+  summary say `published-without-its-alias`. The tag list would look healthy; every caller pinned
+  `@v1` would still be resolving the previous release.
+
+The mirror refuses to point `vX` at a release the target does not carry, so the order is fixed:
+publish first (step 5's tag drives it), move the alias second. If the tag-push event is ever
+missed — the tag was moved before this workflow existed, say — re-run `flow-release-publish` from
+the Actions tab with **mirror_alias** ticked; it re-derives everything from the stamp.
 
 ## Two layers (why some changes propagate free and some don't)
 
@@ -121,6 +158,10 @@ changing a repo's infra under it. `flow-sync` is the matching *fix*.
   that no longer existed.
 - **2026-08-11** — split into `v1-edge` (automatic) and `v1` (deliberate). Both properties held at
   once; this document and the workflow agree again.
+- **2026-09-15** — the release repo gained the `vMAJOR` alias the fleet actually pins. Until then
+  it carried `main` and the exact version tags only, so repinning a consuming repo at
+  `@v1` there would have resolved to nothing. Mirrored from canonical's `vMAJOR` rather than
+  advanced on publish, so the canary survives the split (flow-0045).
 - **2026-09-24** — the changelog entry became a per-task fragment (`changes/<task-id>.md`) with an
   assembly step before the tag, because the single `CHANGELOG.md` was in 12 of 23 open tasks'
   `touches` and was the main throttle on the queue (flow-0069).

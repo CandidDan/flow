@@ -32,6 +32,11 @@
 //
 //   node .flow/bin/release-publish.mjs --dry-run
 //   node .flow/bin/release-publish.mjs --remote <url> --target-meta <file.json>
+//   node .flow/bin/release-publish.mjs --mirror-alias --remote <url> --work-dir <dir>
+//
+// The third form is a DIFFERENT RUN, not a step of the second: it moves the floating `vX` the
+// fleet pins, and it is triggered by canonical's own `vX` moving rather than by a publish. See
+// the alias section below for why collapsing the two would delete the canary.
 //
 // Exits 1 on any problem, 0 otherwise. Zero dependencies.
 
@@ -300,17 +305,121 @@ export function releaseTag(version) {
   return SEMVER.test(String(version ?? "")) ? `v${version}` : null;
 }
 
+// `git ls-remote <url>` output -> a Map of ref name to the commit it resolves to. ONE parser,
+// deliberately, because the two callers below disagree about what an existing ref MEANS and
+// that disagreement is the whole of this task: for `vX.Y.Z` a ref that exists is a refusal,
+// for the floating `vX` alias a ref that exists is the thing being moved. Two parsers would
+// drift, and the direction they drift in is "the alias stopped being found".
+//
+// A peeled line (`refs/tags/v1.3.0^{}`) WINS over the annotated tag object's own sha. The
+// alias has to land on the COMMIT — "points at the same commit as vX.Y.Z" is the criterion —
+// and for an annotated tag the unpeeled sha is the tag object, not the commit. The publisher
+// only ever creates lightweight tags, so today the two are the same; this holds the property
+// for a target whose tags someone later creates by hand.
+export function parseRefs(lsRemoteOutput) {
+  const refs = new Map();
+  const peeledNames = new Set();
+  for (const line of String(lsRemoteOutput ?? "").split("\n")) {
+    const [sha, raw] = line.split("\t");
+    if (!sha || !raw) continue;
+    const peeled = raw.endsWith("^{}");
+    const name = peeled ? raw.slice(0, -3) : raw;
+    if (peeled) { refs.set(name, sha); peeledNames.add(name); }
+    else if (!peeledNames.has(name)) refs.set(name, sha);
+  }
+  return refs;
+}
+
 // `git ls-remote --tags <url>` output -> is this tag absent? Parsed rather than shelled out to
 // twice, so the decision is testable without a network or a fixture repo.
 export function tagIsFree(lsRemoteOutput, tag) {
-  const refs = new Set(
-    String(lsRemoteOutput ?? "")
-      .split("\n")
-      .map((line) => line.split("\t")[1] ?? "")
-      .map((ref) => ref.replace(/\^\{\}$/, ""))
-      .filter(Boolean),
-  );
-  return !refs.has(`refs/tags/${tag}`);
+  return !parseRefs(lsRemoteOutput).has(`refs/tags/${tag}`);
+}
+
+// ── pure: the floating alias ───────────────────────────────────────────────────────────
+// `vX` is the ref every adopting repo actually pins (docs/flow-versioning-policy.md: "The
+// stable alias — vMAJOR. Moved only by a human, and only once the edge has proven itself").
+// Before this, the release repo carried `main` and the exact version tags and nothing else,
+// so repinning the fleet at `@v1` there would have resolved to nothing.
+//
+// WHY THE ALIAS IS NOT MOVED BY PUBLISHING, and do not "simplify" it to be. Having the
+// publisher advance `vX` to whatever it just pushed is one line and it would destroy the
+// canary: the policy makes `vMAJOR` a deliberate human act taken AFTER the edge has survived
+// real traffic, precisely because "auto-advancing a single alias removes the canary" and a bad
+// reusable would then reach the whole fleet before anyone had run it once in anger. An alias
+// that advanced on every publish would reintroduce exactly that, one repository removed from
+// where anyone would look for it. So the release repo's `vX` mirrors CANONICAL's `vX` — same
+// deliberate act, same moment — and `runAliasMirror` below is a separate run from `runPublish`.
+
+// 1.3.0 -> v1. DERIVED from the stamp, never hardcoded — the same property release-tag.yml
+// already holds, so bumping VERSION to 2.0.0 starts mirroring `v2` and leaves `v1` frozen.
+export function aliasTag(version) {
+  return SEMVER.test(String(version ?? "")) ? `v${String(version).split(".")[0]}` : null;
+}
+
+// The outcomes a mirror run can reach. `orphaned` exists because "published" and "published
+// without the ref the fleet pins" are different facts and a run that cannot tell them apart
+// reports success while every pinned repo still resolves the previous release.
+export const ALIAS_OUTCOME = Object.freeze({
+  moved: "alias-moved",
+  current: "alias-already-current",
+  dryRun: "dry-run",
+  refused: "refused",
+  orphaned: "published-without-its-alias",
+});
+
+// The whole decision, as a pure function over `ls-remote` output and the stamp — same shape as
+// `tagIsFree`, and for the same reason: it is provable without a network, a fixture repo or a
+// live push, which is what makes the criteria testable at all.
+//
+// `pushedRef` is the ref whose movement triggered the run (canonical's `vX`). It is checked
+// against the alias the stamp derives rather than trusted: a `v1` pushed onto a tree stamped
+// 2.0.0 is a mistake, and mirroring it would point the fleet's 1.x alias at a 2.x release.
+export function decideAliasMove({ lsRemoteOutput = "", version = null, pushedRef = null } = {}) {
+  const problems = [];
+  const alias = aliasTag(version);
+  const tag = releaseTag(version);
+
+  if (alias === null) {
+    problems.push(`${ROOT_VERSION_PATH} is "${version}", expected MAJOR.MINOR.PATCH — cannot derive the alias`);
+    return { alias: null, tag: null, target: null, current: null, move: false, refsTouched: [], problems };
+  }
+
+  if (typeof pushedRef === "string" && pushedRef !== "" && pushedRef !== alias) {
+    problems.push(
+      `the ref that moved is "${pushedRef}" but ${ROOT_VERSION_PATH} ${version} derives the alias ` +
+      `"${alias}" — refusing to mirror a ref this release does not name`,
+    );
+  }
+
+  const refs = parseRefs(lsRemoteOutput);
+  const target = refs.get(`refs/tags/${tag}`) ?? null;
+  const current = refs.get(`refs/tags/${alias}`) ?? null;
+
+  if (target === null) {
+    problems.push(
+      `the target does not carry ${tag} — refusing to point ${alias} at a release that was never ` +
+      "published there. Publish the release first, then move the alias.",
+    );
+  }
+
+  // The asymmetry this task exists to create, stated in one place: the release tag is refused
+  // when it already exists, the alias is moved BECAUSE it already exists. A later tidy-up that
+  // collapses the two rules into one is a regression in whichever direction it picks, and the
+  // tests assert both against the same ls-remote output so it cannot pass.
+  const move = problems.length === 0 && current !== target;
+
+  return {
+    alias,
+    tag,
+    target,
+    current,
+    move,
+    // Every ref this run could write. Asserted on directly, so "nothing named v1 is touched"
+    // when the stamp says 2.0.0 is a property of the decision rather than of the git commands.
+    refsTouched: move ? [`refs/tags/${alias}`] : [],
+    problems,
+  };
 }
 
 // The two properties of the target repository that would each silently defeat the split, and
@@ -449,7 +558,11 @@ export function runPublish({
     problems.push("no --remote given — nothing to publish to");
   }
 
-  const verdict = { version, tag, branch, files: entries.map((e) => e.path), problems, notes, published: false };
+  // `alias` rides on the verdict even though publishing never moves it: a reader of the job
+  // summary has to be able to tell "published" from "published, and the ref the fleet pins is
+  // still on the previous release" — which after a publish is the CORRECT state, not a fault.
+  const alias = aliasTag(version);
+  const verdict = { version, tag, alias, branch, files: entries.map((e) => e.path), problems, notes, published: false };
   if (problems.length) return verdict;
   if (dryRun) { notes.push("dry run — nothing was written and nothing was pushed"); return verdict; }
 
@@ -473,6 +586,100 @@ export function runPublish({
   git(["push", remote, `refs/tags/${tag}`], { cwd: workDir });
 
   verdict.published = true;
+  notes.push(
+    `${tag} is published; the floating ${alias} alias was deliberately NOT moved. It mirrors ` +
+    `canonical's ${alias}, which a human moves only once the canary is green — see ` +
+    "docs/flow-versioning-policy.md. Until then every repo pinned @" + alias + " resolves the previous release.",
+  );
+  return verdict;
+}
+
+// ── the alias mirror ───────────────────────────────────────────────────────────────────
+// A SEPARATE RUN from `runPublish`, and separate is the point rather than an implementation
+// detail — see the alias section above for why an alias that advanced on publish would delete
+// the canary. This run is triggered by canonical's own `vX` moving, so the two aliases move by
+// one deliberate human act instead of two a human has to remember. Canonical's `v1` sat 305
+// commits behind `main` for three and a half weeks because a manual step got forgotten once;
+// asking for that step twice, in two repositories, is a design with a known failure mode.
+export function runAliasMirror({
+  sourceRoot,
+  remote = null,
+  git = null,
+  workDir = null,
+  pushedRef = null,
+  dryRun = false,
+} = {}) {
+  const problems = [];
+  const notes = [];
+  const version = readVersion(sourceRoot);
+  const verdict = {
+    version, alias: null, tag: null, target: null, current: null,
+    outcome: ALIAS_OUTCOME.refused, moved: false, refsTouched: [], problems, notes,
+  };
+
+  if (version === null) problems.push(`no readable ${ROOT_VERSION_PATH} at ${sourceRoot}`);
+  if (!remote) problems.push("no --remote given — nothing to mirror to");
+  if (!git) problems.push("no git runner supplied — the alias is read from and written to a remote");
+  if (problems.length) return verdict;
+
+  // A network READ, and a dry run does it too: a dry run that skipped it could not report
+  // the one condition that actually stops the real run (the release not being published yet).
+  let ls = null;
+  try { ls = git(["ls-remote", "--tags", remote], { cwd: sourceRoot }); }
+  catch (err) {
+    problems.push(`could not read tags from ${remote}: ${err?.message ?? err}`);
+    return verdict;
+  }
+
+  const decision = decideAliasMove({ lsRemoteOutput: ls, version, pushedRef });
+  Object.assign(verdict, {
+    alias: decision.alias, tag: decision.tag, target: decision.target,
+    current: decision.current, refsTouched: decision.refsTouched,
+  });
+  problems.push(...decision.problems);
+  if (problems.length) return verdict;
+
+  if (!decision.move) {
+    verdict.outcome = ALIAS_OUTCOME.current;
+    notes.push(`${decision.alias} already points at ${decision.tag} on the target — nothing to move`);
+    return verdict;
+  }
+
+  if (dryRun) {
+    verdict.outcome = ALIAS_OUTCOME.dryRun;
+    notes.push(
+      `dry run — would move ${decision.alias} from ${decision.current ?? "<none>"} to ` +
+      `${decision.target} (${decision.tag}); nothing was pushed`,
+    );
+    return verdict;
+  }
+
+  // Fetch the release tag's commit before pushing it under the alias name: `git push` needs the
+  // object locally even though the target already has it. Scratch repo, so nothing of
+  // canonical's history is anywhere near this.
+  try {
+    mkdirSync(workDir, { recursive: true });
+    git(["init", "--quiet", "--initial-branch", RELEASE_BRANCH], { cwd: workDir });
+    git(["fetch", "--quiet", "--depth", "1", remote, `+refs/tags/${decision.tag}:refs/tags/${decision.tag}`], { cwd: workDir });
+    // Forced, unlike the release tag's push. That asymmetry is the task: `vX.Y.Z` is immutable
+    // and refused when it exists, `vX` is a floating alias whose whole job is to move.
+    git(["push", "--force", remote, `refs/tags/${decision.tag}:refs/tags/${decision.alias}`], { cwd: workDir });
+    verdict.moved = true;
+    verdict.outcome = ALIAS_OUTCOME.moved;
+    notes.push(`${decision.alias} -> ${decision.tag} (${decision.target}); the fleet resolves this release now`);
+  } catch (err) {
+    // THE PARTIAL STATE, NAMED. The release is on the target and the ref every adopting repo
+    // pins is not — which looks like a successful release from the release repo's tag list and
+    // resolves to the PREVIOUS release from every caller. A run that exited 0 here would make
+    // that invisible until a consuming repo noticed it was running old infra.
+    verdict.outcome = ALIAS_OUTCOME.orphaned;
+    problems.push(
+      `${decision.tag} is published on the target but ${decision.alias} could not be moved to it: ` +
+      `${err?.message ?? err} — the release is PUBLISHED WITHOUT ITS ALIAS. Every repo pinned ` +
+      `@${decision.alias} still resolves ${decision.current ?? "nothing"}, not this release.`,
+    );
+  }
+
   return verdict;
 }
 
@@ -496,9 +703,29 @@ export function formatReport(v) {
   return lines;
 }
 
-export function reportAndExit(verdict, { json = false, log = console.log, exit = process.exit } = {}) {
+// The mirror's own report. A third small formatter rather than a mode flag on the first, for
+// the reason the note above `formatReport` gives: the two verdicts carry different fields, and
+// the machine-readable last line is the thing an operator greps for. `decision=` is where
+// "published-without-its-alias" surfaces, so it reads differently from a success in the job
+// summary as well as exiting non-zero.
+export function formatAliasReport(v) {
+  const lines = [];
+  lines.push(`release-alias: version=${v.version ?? "?"} alias=${v.alias ?? "?"} release-tag=${v.tag ?? "?"}`);
+  if (v.tag && v.target) lines.push(`  ${v.tag} -> ${v.target}`);
+  lines.push(`  ${v.alias ?? "alias"} was ${v.current ?? "<none>"}`);
+  for (const r of v.refsTouched) lines.push(`  ~ ${r}`);
+  for (const n of v.notes) lines.push(`note: ${n}`);
+  for (const p of v.problems) lines.push(`PROBLEM: ${p}`);
+  lines.push(`release-alias: decision=${v.outcome} alias=${v.alias ?? "?"}`);
+  return lines;
+}
+
+// `format` is a parameter, not a mode flag: the exit rule (problems -> 1) is the one thing the
+// two paths genuinely share, and duplicating it is how one of them ends up exiting 0 on a
+// refusal.
+export function reportAndExit(verdict, { json = false, log = console.log, exit = process.exit, format = formatReport } = {}) {
   if (json) log(JSON.stringify(verdict, null, 2));
-  else for (const line of formatReport(verdict)) log(line);
+  else for (const line of format(verdict)) log(line);
   exit(verdict.problems.length ? 1 : 0);
 }
 
@@ -535,6 +762,22 @@ export function canonicalRepoRoot(here = __fileURLToPath(import.meta.url)) {
 // ── CLI ──
 if (__isMain) {
   const f = parseFlags(process.argv.slice(2));
+
+  // `--mirror-alias` is a DIFFERENT RUN, not a variation on publishing, and the flag is what
+  // keeps the two apart in the one place a future edit might merge them. It never publishes and
+  // it never needs target metadata: it moves one ref on a repository whose contents this
+  // invocation did not decide.
+  if (f["mirror-alias"] === true) {
+    reportAndExit(runAliasMirror({
+      sourceRoot: typeof f.source === "string" ? f.source : canonicalRepoRoot(),
+      remote: typeof f.remote === "string" ? f.remote : null,
+      workDir: typeof f["work-dir"] === "string" ? f["work-dir"] : null,
+      pushedRef: typeof f["pushed-ref"] === "string" ? f["pushed-ref"] : null,
+      git: makeGitRunner(),
+      dryRun: f["dry-run"] === true,
+    }), { json: f.json === true, format: formatAliasReport });
+  }
+
   const { meta, problem } = readTargetMeta(f["target-meta"]);
   reportAndExit(runPublish({
     sourceRoot: typeof f.source === "string" ? f.source : canonicalRepoRoot(),
