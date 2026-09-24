@@ -1,7 +1,7 @@
 ---
 id: "flow-0058"
 title: "flow-init still adopts from v1 — a repo onboarded today is born on the previous major"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "session-flow-0058-worker"
