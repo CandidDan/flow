@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0075"
 title: "flow-sync: a leftover sync branch with no open PR is rebuilt, not a silent green no-op"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0075"
