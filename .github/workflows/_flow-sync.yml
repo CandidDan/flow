@@ -257,15 +257,37 @@ jobs:
           done
           printf '%s\n' "$CANON_VER" > .flow/VERSION
 
+          # A MESSAGE, NOT A GUARD — it does not exit, and nothing below is conditional on it, so
+          # a sync whose whole payload is new files still commits, pushes and opens its PR. Read
+          # it as commentary. It is also narrower than it looks: `git diff` sees TRACKED files
+          # only, and the `.flow/VERSION` write above is the one change guaranteed to be present,
+          # so this fires only in a repo that had no stamp at all (untracked, therefore invisible
+          # here). Changing its control flow is deliberately out of scope for flow-0054.
           if git diff --quiet; then
             echo "Versions differ but no file content changed — bumping the stamp only."
           fi
 
-          CHANGED="$(git diff --name-only)"
           git config user.name  "flow-bot"
           git config user.email "flow-bot@users.noreply.github.com"
           git checkout -b "$BRANCH"
           git add -A
+          # COMPUTED AFTER `git add -A`, AND `--cached`. DO NOT MOVE IT BACK (flow-0054). This was
+          # `CHANGED="$(git diff --name-only)"` on the line BEFORE the `git add`, which reports the
+          # unstaged worktree diff: tracked files only. Every newly created file was still
+          # untracked at that moment, so none of them appeared. The commit was always right — the
+          # `git add -A` above stages everything — only the list handed to `pr-body` was wrong, and
+          # `pr-body` renders an empty list as "version stamp only — no infra files differed". A
+          # sync delivering nothing but new files therefore opened a PR whose body denied its own
+          # diff. Observed live at TanPlan#26: 37 files, 22 modified and 15 added, and the body
+          # listed exactly the 22 — including the omission of `.github/workflows/flow-compass.yml`,
+          # a file that executes in the adopting repo's CI.
+          #
+          # `--name-status` so the body can distinguish added and removed from modified; an added
+          # workflow is a different review question from a modified one. `--no-renames` so a
+          # rename is reported as the add and the delete it is — both paths matter to a reviewer
+          # deciding whether to accept new CI-executing files — and so the parser never has to
+          # unpick `R100\told\tnew`.
+          CHANGED="$(git diff --cached --no-renames --name-status)"
           git commit -m "flow: adopt canonical Flow infra $CANON_VER"
           # THE HALF THAT CANNOT BE PREFLIGHTED (flow-0062). Workflows: Write is not introspectable:
           # a fine-grained PAT exposes no endpoint that reports its own permissions, so the ONLY

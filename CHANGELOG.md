@@ -208,6 +208,41 @@ after a canary passes). Note any **caller action** required (a caller change is 
   merge commit. The human step this cannot do for itself is moving that tag — and it must happen
   after this merges and before any repo adopts.]
 
+- **A sync PR body lists the files the sync added, and can no longer deny its own diff**
+  (`_flow-sync.yml`, `project-template/.flow/bin/flow-sync.mjs`, flow-0054). Sync PR bodies
+  previously omitted every newly added file, and a sync whose whole payload was additions rendered
+  as `version stamp only — no infra files differed` — an affirmative statement that nothing
+  changed, printed beside a diff that added workflow files. **A repo that merged such a PR received
+  more than its body listed.** **No caller action** — the reusable's inputs and its one declared
+  secret are unchanged, so a caller pinned at `@v2` picks this up with no edit; the thin caller
+  never carried the computation.
+
+  `_flow-sync.yml` computed `CHANGED="$(git diff --name-only)"` on the line *before* `git add -A`.
+  Without `--cached` that is the unstaged worktree diff, which covers tracked files only, so every
+  file the sync had just created was still untracked and invisible to it. The commit and the push
+  were always right — `git add -A` stages everything — and only the list handed to `pr-body` was
+  wrong. The asymmetry is what kept it hidden: `rsync -a --delete` removes *tracked* files, so
+  deletions were always reported correctly, and any fixture built from modifications and deletions
+  passes against the broken code.
+
+  The observed failure was the milder-looking and more dangerous of its two shapes. TanPlan#26, the
+  first successful sync that repo ever had, carried 37 files — 22 modified, 15 added — and its body
+  listed exactly the 22. Among the omitted fifteen: `.github/workflows/flow-compass.yml`, plus
+  seven new `.flow/bin/` helpers. `version stamp only` against 6489 added lines is self-evidently
+  absurd and a reviewer stops; a plausible 22-item list against a 37-file diff reads as complete and
+  invites the skim. The body ends *"Review the diff, let the gate run, then merge"*, and this was
+  the one touchpoint where a human decides whether to accept files that will execute in their CI.
+
+  The list is now read from the staged tree after the add, as
+  `git diff --cached --no-renames --name-status`, and the body groups **Added**, **Modified** and
+  **Removed** with a count on each rather than flattening them — an added workflow is a different
+  review question from a changed one, and a count makes a short list visible as a number rather
+  than as an absence the reader has to notice. `version stamp only — no infra files differed`
+  survives for the one case where it is true: the stamp is excluded from that decision, because
+  `.flow/VERSION` is rewritten on every sync and an emptiness test alone could never fire. The
+  proving tests lift the shipped shell out of `_flow-sync.yml` and run it against real git fixtures
+  — a test that reimplemented the ordering could not detect the ordering being wrong.
+
 - **`flow-sync` can push the workflow files it exists to deliver** (`_flow-sync.yml`,
   `project-template/.github/workflows/flow-sync.yml`, flow-0051). GitHub refuses any push that
   creates or modifies a file under `.github/workflows/` unless the pushing token carries the
