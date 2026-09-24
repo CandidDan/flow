@@ -2,13 +2,13 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0063"
 title: "Give G11 somewhere to live: an intent store, a template that records whose words it holds, and a flow-doctor check with no teeth yet"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0063"
 created: "2026-09-17"
-started: ""
-branch: ""
+started: "2026-09-24T06:43:20Z"
+branch: "flow/flow-0063-intent-store-and-its-validation"
 pr: ""
 issue: ""
 blocked_reason: ""
@@ -20,7 +20,7 @@ touches:
   - "project-template/.flow/intents/_TEMPLATE.md"
   - "project-template/.flow/bin/flow-doctor.mjs"
   - "project-template/.flow/bin/flow-doctor.test.mjs"
-  - "CHANGELOG.md"
+  - "changes/flow-0063.md"
 labels: [protocol, vision, intents]
 notes:
   - "2026-09-17 (orchestrator): WHY THIS IS SLICE 1 OF 4, NOT THE WHOLE LAYER. G11 is declared in VISION.md and marked *Failing today*, and the same 2026-09-07 amendment rewrote the Purpose paragraph so Flow's headline description now reads `two touchpoints — approve the intent, approve the merge`. One of those two does not exist: there is no `.flow/intents/`, no template, no `intent:` field, no skill, and nothing in flow-doctor that could check one. The whole layer is too large for one task, so it is four: (1) THIS ONE — the store, the template and a warn-only validator; (2) `intent:` on tasks resolving against the store, warn-first exactly as `serves` was rolled out; (3) an `intent-writer` interview skill; (4) CI stamping the approval record on merge. Only (1) is written, deliberately — (2) and (4) depend on decisions this task's ADR settles, and writing them now would be speculation dressed as a queue."
@@ -31,6 +31,7 @@ notes:
   - "2026-09-17 (orchestrator): PROPOSED ANSWERS THE HUMAN MAY REJECT AT APPROVAL, recorded here so the rejection is cheap. (a) GRANDFATHERING: forward-only. G11's test says 'pick any merged PR and read the intent it came from', which fails for all 40 done tasks and all 21 open ones today; retro-fitting would mean inventing the human's past reasons, which is the failure named two notes up. The ADR should state the test applies to work scoped after the layer lands, and say so rather than letting it look like an oversight. (b) TEETH: none in this slice. ADR-0004's 'teeth budget' section is the governing argument and its void condition is 'the check starts failing on judgment rather than fact'. A hard `intent:` requirement would redden all 11 ready tasks the day it merged. Warn-only here; slice (2) decides. (c) TRIAGE COLLISION: out of scope, named as follow-up. `_flow-triage.yml` turns issues into proposed tasks today, which is a path into the queue that bypasses intents entirely. If intents become the only door, triage either produces an intent or is explicitly exempt. Deciding that here would widen this task into the triage subsystem."
   - "2026-09-17 (orchestrator): ADJACENT SIGNAL, NOT THIS TASK'S WORK. flow-doctor currently reports nine tasks serving RETIRED goals (flow-0002, 0003, 0034, 0037 on G5; flow-0016, 0022, 0023, 0030, 0046, 0048 on G4). The vision was rewritten on 2026-09-01 and the queue never followed. It is warnings only, and it is most of the blocked chain. Mentioned because a worker touching the `serves` region of flow-doctor will see it and may reasonably think it is theirs to fix. It is not — it is a store-content problem, not a validator problem, and it wants its own task."
   - "2026-09-23 (orchestrator): AMENDED BEFORE CLAIM, from a Codex review of the Later project relayed by Dan. Two fixes that are cheap in the template now and expensive once intents exist: (a) an outcome written as a delivered artefact ('a dashboard exists') makes intents solution-shaped, so the template's success section becomes **Outcome**, defined as an external observable change; (b) results must never overwrite the approved intent, so the template gains an append-only `evidence: []` list of paths to separate evidence records. A fuller 'validation contract' section was also proposed and is DEFERRED — piloted in the Later repo first, promoted to canonical only if it earns it. The ADR records that; this task does not build it."
+  - "2026-09-24 (worker): CLAIMED. `touches` corrected, NARROWED not widened — `CHANGELOG.md` replaced by `changes/flow-0063.md`. This task was written 2026-09-17; the `changes/` directory landed 2026-09-23 (flow-0069) and `.flow/PROTOCOL.md` now states the rule outright: a task's changelog entry goes in `changes/<task-id>.md`, a task never edits `CHANGELOG.md` directly, and `changes/<task-id>.md` is what goes in `touches` — never `CHANGELOG.md`. Same reasoning as flow-0048 recorded on 2026-09-24: the protocol and `changes/README.md` leave nothing to choose, the new path is strictly narrower (no other task can collide on a file named after this one), and `touches-guard` judges the diff against this list, so leaving the stale declaration would fail the gate on a correctly-placed fragment. The Scope bullet still reads `CHANGELOG.md`; it is satisfied by the fragment, which is what lands under `## Unreleased` at release time."
 ---
 
 ## Context
