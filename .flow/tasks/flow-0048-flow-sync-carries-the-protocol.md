@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0048"
 title: "Make `flow-sync` carry `.flow/PROTOCOL.md`, so a protocol fix can reach the fleet at all"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0048"
