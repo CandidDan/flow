@@ -1,12 +1,12 @@
 ---
 id: "flow-0054"
 title: "A sync PR that adds files must not claim 'version stamp only — no infra files differed'"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0054"
 created: "2026-09-16"
-started: ""
+started: "2026-09-24T02:55:08Z"
 branch: ""
 pr: ""
 issue: ""
