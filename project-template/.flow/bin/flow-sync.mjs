@@ -11,6 +11,10 @@
 //   node .flow/bin/flow-sync.mjs pr-title --local 1.0.0 --canonical 1.2.0
 //   node .flow/bin/flow-sync.mjs pr-body  --local 1.0.0 --canonical 1.2.0 --files "$CHANGED"
 //
+// `--files` is `git diff --cached --no-renames --name-status` output — `<STATUS>\t<path>` per
+// line, computed AFTER `git add -A`. It was the pre-`add` worktree diff until flow-0054, which
+// omitted every newly created file and could render a PR body asserting that none differed.
+//
 // Why a PR and not a direct push: the governance rule (CLAUDE.md "Hard rules") is *repos adopt
 // canonical; they don't patch infra locally* — but adoption must still clear the same
 // Definition-of-Done gate as any other change, so a bad sync is caught before it reaches main.
@@ -63,12 +67,65 @@ export function syncBranch(canonical) {
   return `flow-sync/${canonical}`;
 }
 
-// PR title + body for an adoption. `files` is the list of infra paths the sync changed.
+// The version stamp is reported on its own line above the file list, so it is deliberately NOT
+// counted as an "infra file" when deciding whether anything differed. Without that exclusion the
+// one true stamp-only case is unreachable: `_flow-sync.yml` rewrites this file on every sync, so
+// the staged tree it now reads is never empty (flow-0054).
+const VERSION_STAMP = ".flow/VERSION";
+
+// One entry per line of `git diff --cached --no-renames --name-status`: `<STATUS>\t<path>`.
+// A line with no tab is a bare path — the shape `--name-only` produced before flow-0054, and the
+// shape a hand-run `pr-body` still takes. Its class is unknown, so it is reported as unknown
+// rather than guessed at: mislabelling an added file "modified" is the same lie in a smaller font.
+export function parseChanges(files = []) {
+  const lines = Array.isArray(files) ? files : String(files).split("\n");
+  return lines
+    .map((line) => String(line).trim())
+    .filter(Boolean)
+    .map((line) => {
+      const fields = line.split("\t");
+      // Last field, not fields[1]: a rename arrives as `R100\told\tnew` and the new path is what
+      // the repo ends up with. The workflow passes `--no-renames` so it never sends one, but the
+      // CLI is callable by hand and must not render `old\tnew` as a single path.
+      return fields.length > 1
+        ? { status: fields[0], path: fields[fields.length - 1] }
+        : { status: null, path: line };
+    });
+}
+
+// Which heading an entry is listed under. `A`/`M`/`D` are the only statuses `--no-renames` can
+// produce; anything else (a typechange, a rename from a hand-run, a bare path) is grouped as
+// "Changed", which claims nothing beyond the fact that the file is in the diff.
+function groupOf(status) {
+  const key = status ? status[0] : "";
+  if (key === "A") return "Added";
+  if (key === "M") return "Modified";
+  if (key === "D") return "Removed";
+  return "Changed";
+}
+
+const GROUP_ORDER = ["Added", "Modified", "Removed", "Changed"];
+
+// PR title + body for an adoption. `files` is the sync's changed-file list, as `--name-status`
+// lines (see parseChanges).
 export function prContent({ local, canonical, files = [] }) {
   const title = `flow: adopt canonical Flow infra ${canonical}`;
-  const list = files.filter(Boolean);
-  const fileLines = list.length
-    ? list.map((f) => `- \`${f}\``).join("\n")
+  const changes = parseChanges(files);
+  // Added and removed files are listed apart from modified ones because a sync's whole payload
+  // can be additions — new thin callers, new `.flow/bin/` helpers — and those are the files that
+  // will execute in this repo's CI. Flattening them into one undifferentiated list is what let a
+  // 37-file sync read as a 22-file one (flow-0054, note 6).
+  const sections = GROUP_ORDER
+    .map((name) => [name, changes.filter((c) => groupOf(c.status) === name)])
+    .filter(([, entries]) => entries.length > 0)
+    .flatMap(([name, entries]) => [
+      `**${name}** (${entries.length})`,
+      ``,
+      ...entries.map((c) => `- \`${c.path}\``),
+      ``,
+    ]);
+  const fileLines = changes.some((c) => c.path !== VERSION_STAMP)
+    ? sections.slice(0, -1).join("\n")   // drop the trailing blank; the body supplies its own
     : "- _(version stamp only — no infra files differed)_";
   const body = [
     `Adopts Flow infra **${canonical}** from canonical (\`CandidDan/flow\`).`,
@@ -76,6 +133,7 @@ export function prContent({ local, canonical, files = [] }) {
     `- repo \`.flow/VERSION\`: \`${local || "(none)"}\` → \`${canonical}\``,
     ``,
     `### Synced from canonical`,
+    ``,
     fileLines,
     ``,
     `Opened by **flow-sync** (Phase 4 adopt mechanism). Flow infra is authored in canonical and`,
@@ -106,8 +164,9 @@ if (__isMain) {
       process.stdout.write(prContent({ local, canonical }).title + "\n");
       break;
     case "pr-body": {
-      const files = (arg(rest, "files") || "").split("\n").map((s) => s.trim()).filter(Boolean);
-      process.stdout.write(prContent({ local, canonical, files }).body + "\n");
+      // Handed straight to parseChanges, which owns the line splitting: the shell passes
+      // `--name-status` output, and the status column must survive the trip.
+      process.stdout.write(prContent({ local, canonical, files: arg(rest, "files") || "" }).body + "\n");
       break;
     }
     default:
