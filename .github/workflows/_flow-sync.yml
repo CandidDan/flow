@@ -300,10 +300,11 @@ jobs:
           HEAD_CANON_SHA=""
           if [ "$BRANCH_EXISTS" = "yes" ]; then
             # Fact 2 — is there an OPEN PR from that branch? The question the old code answered
-            # without asking. `--jq '.[0].number // ""'` yields the number, or an empty string for
-            # none; `flow-sync.mjs existing` refuses anything else, so gh error text cannot be
-            # read as "no PR".
-            if ! OPEN_PR="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // ""')"; then
+            # without asking. `--jq '.[].number'` emits the number and NOTHING AT ALL for an empty
+            # result — deliberately never a string literal or a `null`, so the output does not
+            # depend on whether gh renders jq strings raw. `flow-sync.mjs existing` refuses
+            # anything that is not a number or empty, so gh error text cannot be read as "no PR".
+            if ! OPEN_PR="$(gh pr list --head "$BRANCH" --state open --limit 1 --json number --jq '.[].number')"; then
               echo "::error title=Open-PR lookup failed::gh pr list --head '${BRANCH}' --state open failed, so whether a sync PR is open is UNKNOWN. This is the fact the old idempotency check asserted without ever looking it up. The run stops here rather than assuming either answer."
               exit 1
             fi
@@ -312,7 +313,7 @@ jobs:
             # head carries no `Canonical-SHA:` trailer — every branch built before flow-0075 —
             # and `existing` treats empty as stale, not as current.
             if ! git fetch --quiet origin "refs/heads/$BRANCH"; then
-              echo "::error title=Sync branch head unreadable::git fetch of 'refs/heads/${BRANCH}' failed, so the canonical SHA recorded on its head is UNKNOWN. Without it there is no way to tell a current sync branch from a stale one, and flow-sync will not guess."
+              echo "::error title=Sync branch head unreadable::git fetch of 'refs/heads/${BRANCH}' failed, so the Canonical-SHA trailer recorded on its head is UNKNOWN. Without it there is no way to tell a current sync branch from a stale one, and flow-sync will not guess."
               exit 1
             fi
             if ! HEAD_TRAILER="$(git log -1 --format='%(trailers:key=Canonical-SHA,valueonly)' FETCH_HEAD)"; then
@@ -401,11 +402,19 @@ jobs:
 
           git config user.name  "flow-bot"
           git config user.email "flow-bot@users.noreply.github.com"
-          # `-B`, not `-b` (flow-0075). On `rebuild` and `refresh` the whole point is to REPLACE
-          # the leftover branch with one built from current canonical on current `main`, so the
-          # local ref is reset rather than created. On `create` it is identical to `-b`. The
-          # uncommitted copy above travels onto the branch either way.
-          git checkout -B "$BRANCH"
+          # STILL `-b`, on every verdict including `rebuild` and `refresh` (flow-0075). Those two
+          # replace a branch that exists ON ORIGIN, but no LOCAL ref of that name is ever created
+          # here: `actions/checkout` made only `main`, and the fact-gathering fetch above writes
+          # FETCH_HEAD and nothing else. So the branch is genuinely new locally, and it is built
+          # from current `main` with the copy above carried onto it — which is what "rebuilt from
+          # current canonical on current main" means. The replacement happens at the push, under a
+          # lease.
+          #
+          # `-B` was tried and reverted: given local modifications to carry over, `git checkout -B`
+          # prints an `M<TAB><path>` line per file TO STDOUT where `-b` is silent, which lands in
+          # the middle of this step's log for no reason and would corrupt any variable that
+          # captured it.
+          git checkout -b "$BRANCH"
           git add -A
           # COMPUTED AFTER `git add -A`, AND `--cached`. DO NOT MOVE IT BACK (flow-0054). This was
           # `CHANGED="$(git diff --name-only)"` on the line BEFORE the `git add`, which reports the
