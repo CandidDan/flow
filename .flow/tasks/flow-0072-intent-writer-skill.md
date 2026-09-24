@@ -22,8 +22,8 @@ touches:
   - "changes/flow-0072.md"
 labels: [skills, intent-layer]
 notes:
-  - "2026-09-24 (orchestrator): DEPENDS ON flow-0063 (intent store + template). This is slice (3) of the four-slice intent layer that flow-0063's notes lay out. The skill writes files into `.flow/intents/` using the template flow-0063 ships, and must match its frontmatter (`id`, `title`, `status`, `created`, `source`, `approved_by`, `approved_at`, `evidence`). If flow-0063 is not `done` when you pick this up, set this task `blocked` with `blocked_by: [\"flow-0063\"]` rather than guessing the template's shape. Same pattern as flow-0070's dependency on flow-0069."
-  - "2026-09-24 (orchestrator): DECIDED: THE ASSUMPTION MARKER IS DEFINED HERE, NOT IN flow-0063. The source draft (`_private/intent-layer-drafts/intent-writer-skill.md`) said the intent-store task defines an assumption-marker convention. It does not: flow-0063's scope has no such marker. So this skill defines it: every detail the human did not state goes in a section headed `## Assumptions` (strike what is wrong), one bullet per assumption, each bullet starting with `ASSUMED:`. Only that section may contain unasked detail. Adding the section to the intent `_TEMPLATE.md` is NOT in scope (flow-0063 owns that file); a follow-up can promote it if it earns its place."
+  - "2026-09-24 (orchestrator): DEPENDS ON flow-0063 (intent store + template). This is slice (3) of the four-slice intent layer that flow-0063's notes lay out. The skill writes files into `.flow/intents/` using the template flow-0063 ships, and must match its frontmatter (`id`, `title`, `status`, `created`, `source`, `approved_by`, `approved_at`, `evidence`). It ALSO DEPENDS ON flow-0073, which adds `serves`, `supersedes`, the Cost of inaction / Constraints / Open questions sections and the `[assumption]` marker to that template. If either is not `done` when you pick this up, set this task `blocked` with `blocked_by` listing whichever are outstanding (for example `[\"flow-0063\", \"flow-0073\"]`) rather than guessing the template's shape. Same pattern as flow-0070's dependency on flow-0069."
+  - "2026-09-24 (orchestrator): DECIDED (revised the same day): THE ASSUMPTION MARKER IS THE TEMPLATE'S `[assumption]`. This note first defined an `ASSUMED:` convention local to this skill, because flow-0063 has no marker. flow-0073 now puts `[assumption]` at the start of a line into the intent template, so a hand-written intent and a skill-written one look the same. The skill obeys the template's marker and does not define its own."
   - "2026-09-24 (orchestrator): DECIDED: THE REJECTION TEST IS NOT vision-writer's TEST. The draft said to 'port vision-writer's wording down'. But vision-writer step 6 checks whether the *document* rejects a plausible-but-wrong *feature idea*. Here the *human* rejects plausible-but-wrong *readings of their own answers*. They are related but different tests. Borrow vision-writer's tone and its 'try one out loud' move, but state intent-writer's test in its own words. Do not copy step 6 verbatim."
   - "2026-09-24 (orchestrator): DECIDED: FILE NAMING AND id. Follow whatever flow-0063's template and `docs/adr/0007-intent-layer.md` specify. If they specify neither, the skill writes `.flow/intents/<slug>.md` with `id` equal to the slug, `status` as the template's initial status, and `source` naming the human interviewed. Intents are on the code plane (`plane-guard` STORE_PREFIX is `.flow/tasks/` only; see flow-0063 notes), so a branch + PR is correct and passes the store-guard."
   - "2026-09-24 (orchestrator): the changelog entry is a fragment, `changes/flow-0072.md` (flow-0069's convention). Do not edit CHANGELOG.md. The source draft predates flow-0069 and listed CHANGELOG.md in touches."
@@ -75,8 +75,8 @@ but not to reject a specific reading.
      wrong reading forces the human to think about the right one, and skimming cannot fake that.
      It is a required step, not an aside (see notes for how it differs from vision-writer's test).
 - **Everything not asked is a marked assumption, never a silent fill.** Affected systems, likely
-  approach, and unstated constraints go in a `## Assumptions` section, one bullet each, prefixed
-  `ASSUMED:` (see notes). The human strikes what is wrong instead of having to notice what is
+  approach, and unstated constraints are written as lines beginning `[assumption]`, the marker
+  the intent template defines (flow-0073; see notes). The human strikes what is wrong instead of having to notice what is
   missing. An unmarked guess is the fluency failure in miniature.
 - **The skill may surface open questions. It may never resolve one.** A question the model
   resolves looks exactly like one the human decided, so the drift is invisible in the output. An
@@ -114,7 +114,7 @@ but not to reject a specific reading.
 - [ ] Given the skill file, when a session reads it, then the rejection test (two or three
       plausible-but-wrong readings for the human to reject) is a numbered step, not an aside.
 - [ ] Given the skill file, when a session reads it, then detail the human did not state must go
-      in a `## Assumptions` section as bullets prefixed `ASSUMED:`, and silently filling it in is
+      as lines beginning with the template's `[assumption]` marker, and silently filling it in is
       explicitly forbidden.
 - [ ] Given the skill file, when a session reads it, then it says the skill may surface an open
       question but may never resolve one.
