@@ -1,12 +1,12 @@
 ---
 id: "flow-0058"
 title: "flow-init still adopts from v1 — a repo onboarded today is born on the previous major"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "session-flow-0058-worker"
 created: "2026-09-16"
-started: ""
+started: "2026-09-24T04:42:31Z"
 branch: ""
 pr: ""
 issue: ""
@@ -16,9 +16,10 @@ serves: ["maintenance"]
 touches:
   - "project-template/.flow/bin/flow-init.mjs"
   - "project-template/.flow/bin/flow-init.test.mjs"
-  - "CHANGELOG.md"
+  - "changes/flow-0058.md"
 labels: [infra, init, fleet, release, v2]
 notes:
+  - "2026-09-24 (worker): claimed. `touches` corrected, NARROWED not widened — `CHANGELOG.md` replaced by `changes/flow-0058.md`. This task was written 2026-09-16; the `changes/` directory landed 2026-09-23 (flow-0069) and the protocol now states the rule outright: a task's changelog entry goes in `changes/<task-id>.md`, a task never edits `CHANGELOG.md` directly, and `changes/<task-id>.md` is what goes in `touches` — never `CHANGELOG.md`. Same correction the flow-0048 worker made for the same reason (see that task's first worker note). Acceptance criterion 6 asks the changelog state the `@v1` caveat and name the fix; it will be stated in `changes/flow-0058.md`, which is what assembly folds under `## Unreleased`. Flagged rather than assumed silently."
   - "2026-09-16 (orchestrator): found by the flow-0056 worker while fixing the other two refs, surfaced rather than silently widened — `flow-init.mjs` was outside that task's declared `touches`, so editing it would have failed `touches-guard`. Verified independently on `main` at ec1bdc6: `project-template/.flow/bin/flow-init.mjs:67` reads `export const DEFAULT_CANONICAL_REF = \"v1\";`, consumed at `:188` as `ref: pick(flags.canonicalRef, file.canonical?.ref) ?? DEFAULT_CANONICAL_REF` and echoed at `:504` in the `--help` text. That is the third v1 ref in the tree; flow-0056 moves the other two."
   - "2026-09-16 (orchestrator): this is the same defect as flow-0056 arriving by a different door, and the distinction matters when scoping. flow-0056 fixes the callers a repo receives by SYNC — `flow-sync` copies the template's `flow-*.yml` verbatim and never calls `repin`, so existing repos get `@v2` the moment that lands. This one governs the callers a repo receives at BIRTH. A repo onboarded with no `--canonical-ref` is written with `@v1` pins against a canonical whose `VERSION` says 2.0.0, which is precisely the split-brain `flow-init.mjs` itself already warns about for the `v1-edge` case."
   - "2026-09-16 (orchestrator): priority 1 rather than housekeeping because two adoptions are imminent. `CandidDan/inflight` and `CandidDan/borders` already carry the GitHub `flow` topic and the owner has said he intends to adopt Flow in both (that is why flow-0055 exists — the watchdog reports them as unreadable in the meantime). If either is onboarded through `flow-init` before this lands, it is BORN on the previous major: v1 callers, 2.0.0 tooling, and nothing in the repo says so, because a pin at a tag that still resolves is indistinguishable from a correct one. Catching it after the fact means editing ten files per repo by hand."
