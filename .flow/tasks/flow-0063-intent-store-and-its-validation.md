@@ -9,7 +9,7 @@ owner: "claude-worker-flow-0063"
 created: "2026-09-17"
 started: "2026-09-24T06:43:20Z"
 branch: "flow/flow-0063-intent-store-and-its-validation"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/105"
 issue: ""
 blocked_reason: ""
 blocked_by: []
