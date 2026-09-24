@@ -1,7 +1,7 @@
 // Tests for flow-sync — the adopt mechanism's pure brain (version decision + PR text).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decide, syncBranch, prContent } from "./flow-sync.mjs";
+import { decide, syncBranch, decideExisting, CANONICAL_SHA_TRAILER, prContent } from "./flow-sync.mjs";
 
 // ── decide ──
 
@@ -41,6 +41,99 @@ test("decide throws when canonical version is absent", () => {
 test("syncBranch is stable per target version (idempotent reuse)", () => {
   assert.equal(syncBranch("1.2.0"), "flow-sync/1.2.0");
   assert.equal(syncBranch("1.2.0"), syncBranch("1.2.0"));
+});
+
+// ── decideExisting (flow-0075) ──
+//
+// The four verdicts are the four rows of the task's table. Each test is named for the acceptance
+// criterion it proves, and the Nudge case — a branch that outlived a closed-unmerged PR — is
+// called out by name because it is the one the old code answered `noop` to.
+
+const SHA_NOW = "f1e2d3c4b5a6978877665544332211aabbccddee";
+const SHA_OLD = "0011223344556677889900aabbccddeeff001122";
+
+test("decideExisting: no sync branch → create (today's path, unchanged)", () => {
+  assert.equal(decideExisting({
+    branchExists: "no", openPr: "", headCanonicalSha: "", canonicalSha: SHA_NOW,
+  }), "create");
+  // The other facts are irrelevant when the branch is absent, and must not change the answer.
+  assert.equal(decideExisting({
+    branchExists: false, openPr: "286", headCanonicalSha: SHA_NOW, canonicalSha: SHA_NOW,
+  }), "create");
+});
+
+test("decideExisting: branch exists, no open PR → rebuild (the Nudge#286 case)", () => {
+  // `flow-sync/2.0.0` survived a PR closed without merging. Before flow-0075 every later run
+  // logged "a sync PR for 2.0.0 is already open" and exited 0, so that version could never be
+  // offered again. The recorded SHA is deliberately EQUAL here: with no open PR there is nothing
+  // to carry the branch to review, so the branch must be rebuilt and a PR opened regardless.
+  assert.equal(decideExisting({
+    branchExists: "yes", openPr: "", headCanonicalSha: SHA_NOW, canonicalSha: SHA_NOW,
+  }), "rebuild");
+  assert.equal(decideExisting({
+    branchExists: "yes", openPr: "", headCanonicalSha: SHA_OLD, canonicalSha: SHA_NOW,
+  }), "rebuild");
+  assert.equal(decideExisting({
+    branchExists: "yes", openPr: null, headCanonicalSha: "", canonicalSha: SHA_NOW,
+  }), "rebuild");
+});
+
+test("decideExisting: open PR whose head records a DIFFERENT canonical SHA → refresh", () => {
+  // Nudge's branch was also built from an older `v2` on an older `main`, so reopening it would
+  // have regressed the repo. A stale head under an open PR is rebuilt in place; the PR picks the
+  // new head up by itself, so no second PR is opened.
+  assert.equal(decideExisting({
+    branchExists: "yes", openPr: "286", headCanonicalSha: SHA_OLD, canonicalSha: SHA_NOW,
+  }), "refresh");
+});
+
+test("decideExisting: open PR whose head has NO Canonical-SHA trailer → refresh, not noop", () => {
+  // Every branch built before flow-0075 is in this state. Absent counts as stale — the safe
+  // direction, because the worst case is one unnecessary rebuild, while the other direction is
+  // exactly the silent green this task removes.
+  for (const missing of ["", null, undefined, "   "]) {
+    assert.equal(decideExisting({
+      branchExists: "yes", openPr: "286", headCanonicalSha: missing, canonicalSha: SHA_NOW,
+    }), "refresh", `a head with ${JSON.stringify(missing)} recorded must not read as current`);
+  }
+});
+
+test("decideExisting: open PR whose head records the SAME canonical SHA → noop", () => {
+  assert.equal(decideExisting({
+    branchExists: "yes", openPr: "286", headCanonicalSha: SHA_NOW, canonicalSha: SHA_NOW,
+  }), "noop");
+  // Trailer values arrive off a commit message, so whitespace and case must not manufacture a
+  // needless rebuild on every single run.
+  assert.equal(decideExisting({
+    branchExists: "yes", openPr: 286, headCanonicalSha: ` ${SHA_NOW.toUpperCase()}\n`, canonicalSha: SHA_NOW,
+  }), "noop");
+});
+
+test("decideExisting: an ungathered fact throws — it never falls back to noop", () => {
+  // The whole point of the subcommand. A fact the workflow could not gather must stop the run,
+  // because `noop` is indistinguishable from success in a log.
+  assert.throws(() => decideExisting({
+    branchExists: "maybe", openPr: "", headCanonicalSha: "", canonicalSha: SHA_NOW,
+  }), /--branch-exists must be yes or no/);
+  assert.throws(() => decideExisting({
+    branchExists: "yes", openPr: "gh: could not find any commits", canonicalSha: SHA_NOW,
+  }), /--open-pr must be a PR number or empty/);
+  assert.throws(() => decideExisting({
+    branchExists: "yes", openPr: "286", headCanonicalSha: SHA_NOW, canonicalSha: "",
+  }), /canonical SHA is required/);
+  assert.throws(() => decideExisting(), /canonical SHA is required/);
+});
+
+test("decideExisting: an empty canonical SHA cannot compare equal to an empty trailer", () => {
+  // The specific way a missing SHA would have produced a false `noop` had it been allowed
+  // through: "" === "" is true, and both sides are empty exactly when nothing was gathered.
+  assert.throws(() => decideExisting({
+    branchExists: "yes", openPr: "286", headCanonicalSha: "", canonicalSha: "",
+  }), /canonical SHA is required/);
+});
+
+test("the Canonical-SHA trailer key has one definition, shared with the workflow's assertions", () => {
+  assert.equal(CANONICAL_SHA_TRAILER, "Canonical-SHA");
 });
 
 // ── prContent ──

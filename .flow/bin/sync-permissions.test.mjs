@@ -130,7 +130,13 @@ const extractCopyLoop = (reusable) => {
 // loop is: a paraphrase would only prove the paraphrase. If either stops matching, the step was
 // reshaped — re-read it and update the extractor, never relax the behaviour asserted below.
 const PROBE_CASE = /^\s*case "\$CODE" in$[\s\S]*?^\s*esac$/m;
-const PUSH_GUARD = /^\s*if ! git push origin "\$BRANCH"; then$[\s\S]*?^\s*fi$/m;
+// flow-0075 reshaped the push: it is now leased (`--force-with-lease="$BRANCH:$REMOTE_SHA"`),
+// because `rebuild` and `refresh` replace a branch that already exists. Only this EXTRACTOR moved
+// — per the note above, the behaviour asserted below is unchanged, and the mutation it feeds
+// still restores flow-0060's bare line. There is still exactly one `git push` in the file, which
+// is what keeps the mutation's "only the push translation is gone" assertion exact.
+const PUSH_GUARD =
+  /^\s*if ! git push --force-with-lease="\$BRANCH:\$REMOTE_SHA" origin "\$BRANCH"; then$[\s\S]*?^\s*fi$/m;
 
 const extractBlock = (reusable, pattern, what) => {
   const match = runScripts(yamlMod.parse(reusable)).match(pattern);
@@ -510,7 +516,10 @@ test("a refused push is translated — FLOW_PAT and Workflows: Write, alongside 
   const res = spawnSync(
     "bash",
     ["-uo", "pipefail", "-c", extractBlock(readFileSync(REUSABLE, "utf8"), PUSH_GUARD, "the push-failure translation")],
-    { encoding: "utf8", env: { ...process.env, BRANCH: "flow-sync/2.1.0", PATH: `${bin}:${process.env.PATH}` } },
+    // REMOTE_SHA joined BRANCH here when flow-0075 leased the push: the extracted block now reads
+    // both, and under `-u` an unset one would abort bash before the shim `git` ever ran — the
+    // translation would then go untested while the test still saw exit 1.
+    { encoding: "utf8", env: { ...process.env, BRANCH: "flow-sync/2.1.0", REMOTE_SHA: "", PATH: `${bin}:${process.env.PATH}` } },
   );
 
   assert.equal(res.status, 1,
