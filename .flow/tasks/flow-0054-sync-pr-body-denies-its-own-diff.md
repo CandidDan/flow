@@ -1,7 +1,7 @@
 ---
 id: "flow-0054"
 title: "A sync PR that adds files must not claim 'version stamp only — no infra files differed'"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-worker-flow-0054"
