@@ -895,7 +895,19 @@ test("criterion 5 — the policy says which refs the release repo carries, who m
   }
   // Who moves the alias, and at what point in the procedure. Both named, not implied.
   assert.match(body, /mirror-alias/, "the job that moves it must be named, so the doc is checkable against the code");
-  assert.match(body, /step 6/, "the alias move must be tied to a numbered step of the release procedure");
+  // Tied to a numbered step, and to the RIGHT one. Asserting the literal number is what broke
+  // when flow-0069 inserted a fragment-assembly step and renumbered the procedure under it: the
+  // doc was correct and the test was not. So resolve the number the section cites, then read
+  // that step out of the procedure and check it is the alias advance — a later renumbering moves
+  // both, and a citation that drifts onto the wrong step still fails.
+  const cited = body.match(/step (\d+) above/);
+  assert.ok(cited, "the alias move must be tied to a numbered step of the release procedure");
+  const procedure = POLICY.split("## Release procedure")[1].split("\n## ")[0];
+  const step = procedure.match(new RegExp(`^${cited[1]}\\. (.*)$`, "m"));
+  assert.ok(step, `the section cites step ${cited[1]}, which the release procedure does not have`);
+  assert.match(step[1], /Advance the stable alias/,
+    `step ${cited[1]} is "${step[1]}" — the mirror fires on the act that advances canonical's alias, ` +
+    `so citing any other step describes a resolution path nobody has`);
   assert.match(body, /published-without-its-alias/, "the failure mode the code emits must be the one the doc names");
   // And the canary reason, which is the rule a later simplification would break.
   assert.match(body, /never when a release is published/i);
