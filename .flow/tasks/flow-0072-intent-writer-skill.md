@@ -135,7 +135,7 @@ but not to reject a specific reading.
 
 Every criterion has a proving test (qa check passes) · security check no high/critical, or
 visibly skipped as out of its trigger paths · code-review check blocking items resolved ·
-build + lint + test pass · coverage >= `coverage_min` (a floor, not the gate) · PR open, task
+build + lint + test pass · coverage ≥ `coverage_min` (a floor, not the gate) · PR open, task
 linked, criteria checklist ticked with the proving test named.
 
 The first three are **checks on the PR**, not subagents the worker runs — it does not certify
