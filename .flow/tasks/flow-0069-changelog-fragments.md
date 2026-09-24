@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0069"
 title: "Changelog fragments: each task writes changes/<task-id>.md, and the release assembles them"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-worker"
 created: "2026-09-23"
-started: ""
+started: "2026-09-24T00:17:25Z"
 branch: ""
 pr: ""
 issue: ""
