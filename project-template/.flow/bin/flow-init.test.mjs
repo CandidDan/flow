@@ -32,7 +32,8 @@ import { join, resolve } from "node:path";
 
 import {
   DEFAULT_CANONICAL_REPO, buildPlan, classify, loadInputs, mergeGitignore, parseArgs,
-  parseSourceRootFlag, prepareBoard, renderConfig, repin, resolveCanonical, runInit, validateInputs,
+  parseSourceRootFlag, prepareBoard, refFromVersion, renderConfig, renderUsage, repin,
+  resolveCanonical, resolveDefaultRef, runInit, validateInputs, versionStamps,
 } from "./flow-init.mjs";
 
 const BIN = import.meta.dirname;
@@ -122,6 +123,13 @@ function snapshot(dir, base = dir, acc = new Map()) {
 }
 const sameTree = (a, b) =>
   a.size === b.size && [...a].every(([k, v]) => b.get(k) === v);
+
+// The ref a no-`--canonical-ref` run must resolve to, computed from the fixture canonical's own
+// stamp. NEVER a literal: `v2` written here would pass today and stop meaning anything the moment
+// 3.0.0 is cut, which is precisely how `DEFAULT_CANONICAL_REF = "v1"` survived the 2.0.0 re-cut
+// and put flow-0058 in the backlog. Same derivation as `.flow/bin/caller-pins.test.mjs`.
+const refOfFixture = (canonicalRoot) =>
+  `v${readFileSync(join(canonicalRoot, "VERSION"), "utf8").trim().split(".")[0]}`;
 
 const callerFiles = (target) =>
   readdirSync(join(target, ".github", "workflows")).filter((n) => /^flow-.+\.ya?ml$/.test(n)).sort();
@@ -226,10 +234,13 @@ test("a non-default canonical repo is named by every uses: line, and the default
   const r = init(target, canonical, ["--canonical-repo", "acme-co/flow"]);
   assert.equal(r.code, 0, r.err);
 
+  // No --canonical-ref here, so the ref is the DERIVED default (flow-0058): a non-default repo
+  // must not quietly drag the ref back to a literal either.
+  const ref = refOfFixture(canonical);
   const lines = usesLines(target);
   assert.ok(lines.length > 0);
   for (const l of lines) {
-    assert.match(l, /uses: acme-co\/flow\/\.github\/workflows\/_flow-[a-z-]+\.yml@v1$/, l);
+    assert.match(l, new RegExp(`uses: acme-co/flow/\\.github/workflows/_flow-[a-z-]+\\.yml@${ref}$`), l);
     assert.doesNotMatch(l, new RegExp(DEFAULT_CANONICAL_REPO.replace("/", "\\/")),
       "a caller left pointing at the default resolves to 'workflow not found' across owners — " +
       "the confusing failure INIT.md warns about");
@@ -568,8 +579,218 @@ test("prepareBoard sets the repo and empties the snapshot", () => {
   assert.doesNotMatch(out, /PROJ-0001/);
 });
 
-test("--help prints usage and exits 0 without touching the filesystem", () => {
+test("--help prints usage, exits 0 and writes nothing", () => {
   const lines = [];
   assert.equal(runInit(["--help"], { log: (l) => lines.push(l), logErr: (l) => lines.push(l) }), 0);
   assert.match(lines.join("\n"), /flow-init — the mechanical half of Flow adoption/);
+});
+
+// ── flow-0058: the default canonical ref is DERIVED, not typed ─────────────────────────
+//
+// THE DEFECT. `DEFAULT_CANONICAL_REF = "v1"` survived the 2.0.0 re-cut. flow-0056 moved the ten
+// published callers and `_flow-sync.yml`'s checkout to `@v2`; this third reference stayed, so a
+// repo onboarded through `flow-init` with no `--canonical-ref` was BORN with `@v1` pins while its
+// own `.flow/VERSION` said 2.0.0. Nothing reported it: a pin at a tag that still resolves is
+// indistinguishable from a correct one.
+//
+// WHAT THESE PIN, AND WHY IT IS A DERIVATION. Every expectation below is computed from a VERSION
+// stamp — the fixture's, or the tree this file lives in. A literal `v2` would pass today and stop
+// meaning anything the moment 3.0.0 is cut, which is exactly how the tree arrived in the state
+// flow-0058 fixes. The 3.0.0 case is the one that proves derivation rather than a relabelled
+// constant: the same code, two canonicals, two different answers.
+
+// ── criterion 1 ────────────────────────────────────────────────────────────────────────
+test("with no --canonical-ref and no config, the ref is the major of canonical's root VERSION", () => {
+  const canonical = canonicalFixture(), target = targetFixture();
+  const expected = refOfFixture(canonical);
+
+  const r = init(target, canonical);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, new RegExp(`canonical\\s+${DEFAULT_CANONICAL_REPO}@${expected}\\b`),
+    `the run must resolve the ref from the stamp it is about to copy, not from a literal:\n${r.out}`);
+  assert.match(r.out, /--canonical-ref not supplied — derived @/,
+    "a default that arrives silently is indistinguishable from a value someone chose");
+  assert.match(r.out, new RegExp(`derived @${expected} from .*VERSION`),
+    "the run has to name the stamp it derived from, or nobody can check it");
+
+  // The stamp the pins were derived from is the stamp the repo receives. That agreement is the
+  // whole point: the two halves of a release cannot disagree if one is computed from the other.
+  assert.equal(readFileSync(join(target, ".flow", "VERSION"), "utf8").trim().split(".")[0],
+    expected.slice(1), "pins and .flow/VERSION must name the same major");
+  rmSync(canonical, { recursive: true, force: true }); rmSync(target, { recursive: true, force: true });
+});
+
+test("with no --from, the default comes from the stamp of the tree this flow-init lives in", () => {
+  const canonicalRoot = resolve(BIN, "..", "..", "..");
+  const { ref, stamp } = resolveDefaultRef();
+
+  // Two contexts, and this file runs in both. In canonical it is
+  // project-template/.flow/bin/flow-init.mjs, so root VERSION is the authority; in an adopted repo
+  // it is .flow/bin/flow-init.mjs and .flow/VERSION records the canonical that repo adopted.
+  const expectedStamp = existsSync(join(canonicalRoot, "project-template"))
+    ? join(canonicalRoot, "VERSION")
+    : join(FLOW, "VERSION");
+  assert.equal(stamp, expectedStamp);
+  assert.equal(ref, refFromVersion(readFileSync(expectedStamp, "utf8")));
+  assert.match(ref, /^v\d+$/,
+    "an unresolvable default must surface as a named failure, never as a silent v1");
+});
+
+// ── criterion 2 ────────────────────────────────────────────────────────────────────────
+test("a canonical stamped 3.0.0 adopts @v3 — the case a relabelled constant cannot pass", () => {
+  const three = canonicalFixture(), nine = canonicalFixture();
+  writeFileSync(join(three, "VERSION"), "3.0.0\n");
+  assert.notEqual(refOfFixture(three), refOfFixture(nine),
+    "this case is only evidence if the two fixtures disagree");
+
+  for (const [canonical, expected] of [[three, "v3"], [nine, refOfFixture(nine)]]) {
+    const target = targetFixture();
+    const r = init(target, canonical);
+    assert.equal(r.code, 0, r.err);
+    const lines = usesLines(target);
+    assert.ok(lines.length > 0, "an empty check is a failure, not a pass");
+    for (const l of lines)
+      assert.match(l, new RegExp(`@${expected}$`),
+        `the same code must answer ${expected} for this canonical — one constant cannot: ${l}`);
+    rmSync(target, { recursive: true, force: true });
+  }
+  rmSync(three, { recursive: true, force: true }); rmSync(nine, { recursive: true, force: true });
+});
+
+test("refFromVersion reads the major, and refuses anything that is not one", () => {
+  assert.equal(refFromVersion("2.0.0\n"), "v2");
+  assert.equal(refFromVersion("  3.1.4 "), "v3");
+  assert.equal(refFromVersion("10.0.0"), "v10", "a two-digit major is not a two-ref answer");
+  assert.equal(refFromVersion("7"), "v7");
+  for (const bad of ["v2.0.0", "2x.0.0", "", "   ", null, undefined, "next"])
+    assert.equal(refFromVersion(bad), null, `${JSON.stringify(bad)} must not become a ref`);
+});
+
+// ── criterion 3 — precedence: flag → config → derived default, one run per level ────────
+test("--canonical-ref wins over the config file, which wins over the derived default", () => {
+  const canonical = canonicalFixture();
+  const cfgDir = temp("cfg");
+  const cfgPath = join(cfgDir, "init.json");
+  writeFileSync(cfgPath, JSON.stringify({ canonical: { ref: "v1-edge" } }));
+
+  const cases = [
+    { name: "flag", extra: ["--config", cfgPath, "--canonical-ref", "v2-edge"], expect: "v2-edge" },
+    { name: "config", extra: ["--config", cfgPath], expect: "v1-edge" },
+    { name: "default", extra: [], expect: refOfFixture(canonical) },
+  ];
+
+  for (const c of cases) {
+    const target = targetFixture();
+    const r = init(target, canonical, c.extra);
+    assert.equal(r.code, 0, `${c.name}: ${r.err}`);
+
+    const lines = usesLines(target);
+    assert.ok(lines.length > 0, "an empty check is a failure, not a pass");
+    for (const l of lines)
+      assert.match(l, new RegExp(`@${c.expect}$`), `${c.name} level did not win: ${l}`);
+
+    // An explicit ref travels UNCHANGED — it is not re-derived, normalised or majored.
+    const sync = readFileSync(join(target, ".github", "workflows", "flow-sync.yml"), "utf8");
+    assert.match(sync, new RegExp(`canonical_ref: \\$\\{\\{ inputs\\.canonical_ref \\|\\| '${c.expect}' \\}\\}`),
+      `${c.name}: the flow-sync caller's own fallback must carry the same ref, or the repo runs ` +
+      `one release's workflows while syncing another's content`);
+
+    // The derivation is skipped entirely when the caller named a ref, and the run says which.
+    const derived = /--canonical-ref not supplied — derived @/.test(r.out);
+    assert.equal(derived, c.name === "default", `${c.name}: wrong provenance reported`);
+    rmSync(target, { recursive: true, force: true });
+  }
+  rmSync(canonical, { recursive: true, force: true }); rmSync(cfgDir, { recursive: true, force: true });
+});
+
+// ── criterion 4 ────────────────────────────────────────────────────────────────────────
+test("--help advertises exactly the ref a real run resolves — neither can move without the other", () => {
+  const lines = [];
+  assert.equal(runInit(["--help"], { log: (l) => lines.push(l), logErr: (l) => lines.push(l) }), 0);
+  const help = lines.join("\n");
+
+  // The same resolution a real no-flag run performs, taken from the tool rather than retyped.
+  const { inputs } = loadInputs([]);
+  assert.match(inputs.canonical.ref, /^v\d+$/);
+
+  assert.match(help, new RegExp(`default: ${DEFAULT_CANONICAL_REPO}@${inputs.canonical.ref}\\b`),
+    `--help must advertise the resolved default:\n${help}`);
+  assert.match(help, new RegExp(`"ref": "${inputs.canonical.ref}"`),
+    "the copy-pasteable JSON example is where a stale ref gets re-introduced by hand");
+  assert.doesNotMatch(help, /@v1\b/,
+    "a --help still naming the previous major is how the pin this task removed came back");
+
+  // The coupling, proved rather than asserted: renderUsage is a function OF the resolved ref, so
+  // a different ref produces different text. A hard-coded default here could not do that.
+  const other = renderUsage({ ref: "v99", stamp: "/fixture/VERSION" });
+  assert.match(other, /default: CandidDan\/flow@v99, derived from \/fixture\/VERSION/);
+  assert.match(other, /"ref": "v99"/);
+  assert.doesNotMatch(other, new RegExp(`@${inputs.canonical.ref}\\b`));
+});
+
+// ── criterion 5 ────────────────────────────────────────────────────────────────────────
+test("every generated flow-*.yml pins the ref flow-init resolved, end to end from the default", () => {
+  const canonical = canonicalFixture(), target = targetFixture();
+  const expected = refOfFixture(canonical);
+
+  const r = init(target, canonical);
+  assert.equal(r.code, 0, r.err);
+
+  const callers = callerFiles(target);
+  assert.ok(callers.length >= 9, `expected canonical's full caller set, saw ${callers.length}`);
+  const lines = usesLines(target);
+  assert.ok(lines.length >= callers.length, "an empty check is a failure, not a pass");
+  for (const l of lines)
+    assert.match(l, new RegExp(`^uses: ${DEFAULT_CANONICAL_REPO}/\\.github/workflows/_flow-[a-z-]+\\.yml@${expected}$`),
+      `a caller left on another ref is a repo born on the wrong major: ${l}`);
+
+  // Swept the other way round: NO reusable pin anywhere in the generated surface names a ref
+  // other than the resolved one. The loop above proves the pins that exist are right; this proves
+  // there is no survivor of a different major hiding in a file it did not visit.
+  const strays = callers.flatMap((name) =>
+    [...readFileSync(join(target, ".github", "workflows", name), "utf8")
+      .matchAll(/_flow-[a-z-]+\.yml@(\S+)/g)]
+      .filter((m) => m[1] !== expected)
+      .map((m) => `${name}: @${m[1]}`));
+  assert.deepEqual(strays, [], `a pin on another ref is a repo born on the wrong major: ${strays}`);
+  assert.match(readFileSync(join(target, ".flow", "config.yml"), "utf8"),
+    new RegExp(`Written by flow-init from ${DEFAULT_CANONICAL_REPO}@${expected}\\.`),
+    "the config's own provenance line must name the ref the callers were pinned to");
+  rmSync(canonical, { recursive: true, force: true }); rmSync(target, { recursive: true, force: true });
+});
+
+// ── the promise the derivation must not break: flow-init invents nothing ───────────────
+test("a ref that cannot be derived is a named failure, never an invented default", () => {
+  const { inputs } = loadInputs([], undefined, { exists: () => false, read: () => "" });
+  assert.equal(inputs.canonical.ref, "", "no stamp answered, so there is no ref to use");
+  assert.equal(inputs.canonical.derivedFrom, "");
+
+  const errors = validateInputs({
+    project: { name: "a", language: "b", description: "c" }, repo: "o/r",
+    commands: Object.fromEntries(["install", "build", "lint", "test", "coverage"].map((k) => [k, "x"])),
+    coverage_min: 80, source_roots: [{ path: "src/", check: "x" }], security: { focus: [] },
+    canonical: { repo: "o/r", ref: "" },
+  }, { targetDir: "", exists: () => true });
+
+  assert.ok(errors.some((e) => e.startsWith("canonical.ref is required") && e.includes("--canonical-ref")),
+    `an underivable ref must name the field and the remedy, not fall back to a literal: ` +
+    JSON.stringify(errors));
+});
+
+test("the stamp lookup prefers --from, then canonical's root, then the adopted repo's .flow", () => {
+  const moduleDir = "/x/project-template/.flow/bin";
+
+  assert.deepEqual(versionStamps({ from: "/from", moduleDir }, () => true),
+    [join("/from", "VERSION"), join("/x", "VERSION"), join("/x/project-template/.flow", "VERSION")],
+    "--from's stamp leads: it is the very file buildPlan copies to the target's .flow/VERSION");
+
+  // The three-levels-up candidate has to PROVE it is a canonical checkout — the same
+  // project-template/ test buildPlan uses — or any directory that happens to sit there answers.
+  assert.deepEqual(versionStamps({ moduleDir }, () => false),
+    [join("/x/project-template/.flow", "VERSION")]);
+
+  // First stamp that parses wins; an unreadable or non-numeric one is skipped, not fatal.
+  const read = (p) => (p === join("/from", "VERSION") ? "not-a-version" : "5.2.1\n");
+  assert.deepEqual(resolveDefaultRef({ from: "/from", moduleDir }, { exists: () => true, read }),
+    { ref: "v5", stamp: join("/x", "VERSION") });
 });
