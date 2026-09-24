@@ -90,6 +90,11 @@ them mechanically rather than trusting a plausible-sounding narrative:
 1. **`touches` is complete.** List every file the *scope* says this task will change, and confirm
    each is matched by a `touches` glob. A file named in the scope but absent from `touches` trips
    `touches-guard` and blocks the PR — it is the single most common cause of a bounced/blocked task.
+   **Where the repo keeps a `changes/` directory, list `changes/<id>.md` for the task's changelog
+   entry and never `CHANGELOG.md`.** A shared changelog lands in every task's `touches`, and
+   `touches` overlap is what makes a `ready` task ineligible while another is `in_progress` — so
+   declaring it serialises the queue behind a file no two tasks ever actually conflict over. One
+   fragment per task, and two tasks stop overlapping.
 2. **"Parallel-safe" is proven, not asserted.** Before calling two tasks parallel, actually
    intersect their `touches` lists. If they share *any* path — a classic one is two tasks both
    editing the same page/router to mount into it — they are NOT parallel: sequence them, or

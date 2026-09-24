@@ -60,18 +60,36 @@ exactly what a repo pinned to `@v1` should get from a major bump: nothing moves 
 ## Release procedure
 
 1. Fix in canonical on `main`, gate green.
-2. Add a **`CHANGELOG.md`** entry: what changed, why, and any *caller action* required.
+2. Write the changelog entry as a **fragment**: `changes/<task-id>.md` — what changed, why, and any
+   *caller action* required. One file per task, never a direct edit to `CHANGELOG.md`, and it is
+   `changes/<task-id>.md` that the task declares in `touches`. The shared changelog used to sit in
+   almost every task's `touches`, and `touches` overlap is what makes a `ready` task ineligible
+   while another is in progress — so one append-only file serialised the whole queue. Format:
+   `changes/README.md`.
 3. Merge to `main`. **`v1-edge` moves automatically.** Nothing else to remember, and nobody needs
    tag-push rights locally — the workflow's `GITHUB_TOKEN` has `contents: write`.
-4. Cut the immutable tag: `git tag -a v1.3.0 && git push origin v1.3.0`.
-5. **Canary.** The canary repo is already running `@v1-edge`. Confirm its gate has gone green
+4. **Assemble the fragments, before the tag is cut.** On a release branch:
+
+   ```sh
+   node .flow/bin/changelog-fragments.mjs --check      # list what is pending; writes nothing
+   node .flow/bin/changelog-fragments.mjs --assemble   # fold into CHANGELOG.md, delete the fragments
+   ```
+
+   `--assemble` inserts every fragment under the existing `## Unreleased` heading, in ascending
+   task-id order, and deletes the files. It edits a doc, so it goes through a **PR** like any other
+   change and never straight to `main`. Fold `## Unreleased` into the numbered section for this
+   release in the same PR, leaving `## Unreleased` behind, empty — that fold is still yours.
+   `release-guard` fails the release if a tag points at a tree that still holds fragments, so
+   forgetting this step is caught rather than silently shipping a release with no notes.
+5. Cut the immutable tag: `git tag -a v1.3.0 && git push origin v1.3.0`.
+6. **Canary.** The canary repo is already running `@v1-edge`. Confirm its gate has gone green
    end-to-end on at least one real PR since the merge. This is observation, not work.
-6. **Advance the stable alias:** `git tag -f v1 v1.3.0 && git push -f origin v1`. The fleet is now on
+7. **Advance the stable alias:** `git tag -f v1 v1.3.0 && git push -f origin v1`. The fleet is now on
    it.
-7. **Rollback if it breaks:** `git tag -f v1 <previous-version> && git push -f origin v1`. Instant,
+8. **Rollback if it breaks:** `git tag -f v1 <previous-version> && git push -f origin v1`. Instant,
    because the immutable tags still exist. That is what they are for.
 
-Steps 4–6 are the only manual ones, and none of them is on the critical path of a fix reaching the
+Steps 4–7 are the only manual ones, and none of them is on the critical path of a fix reaching the
 canary.
 
 ## Two layers (why some changes propagate free and some don't)
@@ -103,3 +121,6 @@ changing a repo's infra under it. `flow-sync` is the matching *fix*.
   that no longer existed.
 - **2026-08-11** — split into `v1-edge` (automatic) and `v1` (deliberate). Both properties held at
   once; this document and the workflow agree again.
+- **2026-09-24** — the changelog entry became a per-task fragment (`changes/<task-id>.md`) with an
+  assembly step before the tag, because the single `CHANGELOG.md` was in 12 of 23 open tasks'
+  `touches` and was the main throttle on the queue (flow-0069).
