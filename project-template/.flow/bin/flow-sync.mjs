@@ -8,6 +8,8 @@
 //
 //   node .flow/bin/flow-sync.mjs decide   --local 1.0.0 --canonical 1.2.0   # -> "behind"
 //   node .flow/bin/flow-sync.mjs branch    --canonical 1.2.0                # -> "flow-sync/1.2.0"
+//   node .flow/bin/flow-sync.mjs existing --branch-exists yes --open-pr 286 \
+//        --head-canonical-sha abc123 --canonical-sha def456                 # -> "refresh"
 //   node .flow/bin/flow-sync.mjs pr-title --local 1.0.0 --canonical 1.2.0
 //   node .flow/bin/flow-sync.mjs pr-body  --local 1.0.0 --canonical 1.2.0 --files "$CHANGED"
 //
@@ -65,6 +67,88 @@ export function decide(local, canonical) {
 // reuses (not duplicates) an open sync PR for the same canonical version.
 export function syncBranch(canonical) {
   return `flow-sync/${canonical}`;
+}
+
+// ── the leftover-branch decision (flow-0075) ────────────────────────────────────────────
+//
+// `syncBranch` is stable per target version, and for four releases `_flow-sync.yml` read *the
+// branch exists* as *a sync PR is open*: it logged that claim without checking it and exited 0.
+// A sync PR closed without merging leaves its branch behind, so that version could never be
+// offered again — every later run went green saying a PR was open when none was. Observed in
+// CandidDan/Nudge: `flow-sync/2.0.0` outlived a closed-unmerged PR (Nudge#286), and the only way
+// out was deleting the branch by hand (Nudge#297).
+//
+// The rule is a pure function so it is testable with no network. The workflow gathers the facts
+// (`git ls-remote`, `gh pr list --head <branch> --state open`, the head commit's trailer) and
+// acts on the verdict:
+//
+//   branch exists | open PR | head's Canonical-SHA vs now | verdict
+//   --------------|---------|-----------------------------|--------
+//   no            |    —    |             —               | create   fresh branch, push, open a PR
+//   yes           |   no    |            any              | rebuild  force-with-lease, open a PR
+//   yes           |  yes    |   differs, or no trailer    | refresh  force-with-lease, no new PR
+//   yes           |  yes    |            equal            | noop     the open PR is already current
+//
+// `refresh` opens nothing because the open PR picks up the new head by itself.
+export const CANONICAL_SHA_TRAILER = "Canonical-SHA";
+
+// The sync commit records the canonical commit it was built from as a `Canonical-SHA:` trailer,
+// and `refresh` compares against it. A branch whose head carries NO trailer — every branch built
+// before flow-0075 — counts as stale rather than current. That is the safe direction: the worst
+// case is one unnecessary rebuild, whereas guessing "current" is the bug being fixed.
+function sameCanonicalSha(recorded, now) {
+  const a = String(recorded ?? "").trim().toLowerCase();
+  const b = String(now ?? "").trim().toLowerCase();
+  return a !== "" && a === b;
+}
+
+// A fact that could not be gathered must never become a verdict — least of all `noop`, which is
+// the silent-green failure this whole subcommand exists to remove. So every input is parsed
+// strictly and an unrecognised one throws, which the CLI turns into a non-zero exit and the
+// workflow into an `::error`. "Absent" and "unreadable" are different answers.
+function parseBranchExists(value) {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (["yes", "true", "1"].includes(v)) return true;
+  if (["no", "false", "0"].includes(v)) return false;
+  throw new Error(
+    `flow-sync: --branch-exists must be yes or no, got ${JSON.stringify(String(value ?? ""))}. ` +
+    `An ungathered fact is not a verdict.`);
+}
+
+// The open-PR fact, as `gh pr list --head <branch> --state open` reports it: a PR number, or an
+// empty string for "none". Anything else is a lookup that did not answer the question — gh's
+// error text, a jq null — and is refused rather than read as "no PR".
+function parseOpenPr(value) {
+  const v = String(value ?? "").trim();
+  if (v === "") return null;
+  if (!/^#?\d+$/.test(v)) {
+    throw new Error(
+      `flow-sync: --open-pr must be a PR number or empty, got ${JSON.stringify(v)}. ` +
+      `A failed lookup must fail the run, not choose a verdict.`);
+  }
+  return Number(v.replace("#", ""));
+}
+
+/**
+ * Decide what to do about a sync branch that may already exist.
+ *
+ * @param {object} facts
+ * @param {boolean|string} facts.branchExists      does `flow-sync/<version>` exist on origin?
+ * @param {string|number|null} facts.openPr        the open PR's number from that branch, or "" / null
+ * @param {string} facts.headCanonicalSha          the branch head's `Canonical-SHA` trailer ("" if none)
+ * @param {string} facts.canonicalSha              the canonical commit being synced now
+ * @returns {"create"|"rebuild"|"refresh"|"noop"}
+ */
+export function decideExisting({ branchExists, openPr, headCanonicalSha, canonicalSha } = {}) {
+  // Required for the same reason `decide` requires a canonical version: without it every
+  // comparison below is against nothing, and "nothing" would compare equal to a branch with no
+  // trailer and answer `noop`.
+  if (!String(canonicalSha ?? "").trim()) {
+    throw new Error("flow-sync: canonical SHA is required to decide about an existing sync branch");
+  }
+  if (!parseBranchExists(branchExists)) return "create";
+  if (parseOpenPr(openPr) === null) return "rebuild";
+  return sameCanonicalSha(headCanonicalSha, canonicalSha) ? "noop" : "refresh";
 }
 
 // The version stamp is reported on its own line above the file list, so it is deliberately NOT
@@ -160,6 +244,20 @@ if (__isMain) {
     case "branch":
       process.stdout.write(syncBranch(canonical) + "\n");
       break;
+    case "existing": {
+      // The three gathered facts plus the SHA being synced now. Every one of them is passed
+      // explicitly: this subcommand reads no files and makes no network call, which is what lets
+      // the rule be unit-tested. A malformed fact throws, and the throw is left to propagate —
+      // node exits non-zero, `set -e` stops the workflow, and no verdict is printed. Catching it
+      // here to print a default would recreate the silent green this exists to remove.
+      process.stdout.write(decideExisting({
+        branchExists: arg(rest, "branch-exists"),
+        openPr: arg(rest, "open-pr"),
+        headCanonicalSha: arg(rest, "head-canonical-sha"),
+        canonicalSha: arg(rest, "canonical-sha"),
+      }) + "\n");
+      break;
+    }
     case "pr-title":
       process.stdout.write(prContent({ local, canonical }).title + "\n");
       break;
@@ -170,7 +268,8 @@ if (__isMain) {
       break;
     }
     default:
-      console.error("usage: flow-sync.mjs <decide|branch|pr-title|pr-body> --local X --canonical Y [--files ...]");
+      console.error("usage: flow-sync.mjs <decide|branch|existing|pr-title|pr-body> --local X --canonical Y [--files ...]\n" +
+        "       flow-sync.mjs existing --branch-exists <yes|no> --open-pr <number|''> --head-canonical-sha <sha|''> --canonical-sha <sha>");
       process.exit(2);
   }
   process.exit(0);
