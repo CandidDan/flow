@@ -206,6 +206,45 @@ notes:
       aWFzLmxvZyIgMj4vZGV2L251bGwgfHwgZWNobyAiKG5vIG91dHB1dCDigJQgYW4gZWFybGllciBzdGVwIGZhaWxlZCkiCisg
       ICAgICAgICAgICBlY2hvICdgYGAnCisgICAgICAgICAgfSA+PiAiJEdJVEhVQl9TVEVQX1NVTU1BUlkiCg==
 
+  - |
+    2026-09-24 (worker, session_01PcXqFlow0045Worker): the branch is complete and the gate is
+    GREEN. Branch `flow/flow-0045-release-repo-alias`, pushed, four commits (the previous
+    session's two, rebased onto today's `main`, plus two of mine). No PR yet.
+
+    WHAT I DID ON TOP OF THE PREVIOUS SESSION'S WORK:
+      * Rebased the branch onto `main` (it was 9 days behind). Two conflicts, both in prose:
+        `CHANGELOG.md` (took `main`'s wholesale, re-inserted flow-0045's entry at the top of
+        `## Unreleased`, rewritten for a 2.0.0 stamp) and `docs/flow-versioning-policy.md`
+        (kept `main`'s renumbered steps 7/8, folded in the branch's two added sentences, kept
+        both history entries in date order).
+      * APPLIED THE PENDING PATCH from the note above, verbatim, sha256 verified
+        (`9c0e2a39…`). `.github/workflows/flow-release-publish.yml` now carries the
+        `mirror-alias` job. THE CREDENTIAL BLOCK IS GONE — the push of a workflow-file change
+        succeeded, so FLOW_PAT's rotation did deliver both scopes as the orchestrator recorded.
+      * Fixed one stale assertion of the previous session's own making: criterion 5's test
+        hardcoded `/step 6/`, and flow-0069 inserted a fragment-assembly step that renumbered
+        the alias advance to 7. It now resolves the number the doc cites and checks that step
+        IS the alias advance, so a renumbering moves both and a miscitation still fails
+        (mutation-checked against `step 3`).
+
+    GATE, run on the branch at a13cb00: build 34 workflows parsed · lint 87 .mjs parsed ·
+    test 1129, 1128 pass / 0 fail / 1 skipped · coverage lines 95.39% vs floor 83.5.
+
+    ONE SCOPE POINT FOR THE ORCHESTRATOR, decided rather than blocked on, and it is not
+    unique to this task. `touches` names `CHANGELOG.md`, because this task was written on
+    2026-09-15 and flow-0069 moved changelog entries to `changes/<task-id>.md` on 2026-09-24.
+    I kept the entry in `CHANGELOG.md`, the declared path: writing `changes/flow-0045.md`
+    instead is protocol-correct but falls OUTSIDE `touches`, and `touches-guard` has no
+    exemption for `changes/`, so it would fail an enforced check — while widening `touches` is
+    the orchestrator's act on `main`, not a worker's. Five other `ready` tasks carry the same
+    stale declaration: flow-0050, flow-0052, flow-0053, flow-0063, flow-0065. Worth one sweep
+    that repoints all six at `changes/<id>.md`; if that lands before this PR merges, say so on
+    the PR and the entry moves in one commit.
+
+    EXACT NEXT ACTION: none blocking. Open the PR titled "[flow-0045] Give the release repo the
+    floating `v1` alias the fleet actually pins, moved by the same deliberate act that moves
+    canonical's", link this file, paste the six criteria with their proving tests. If this
+    session died before that, the branch is pushed and green — re-run the gate and open it.
 ---
 
 ## Context
