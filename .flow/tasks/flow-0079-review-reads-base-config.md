@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0079"
 title: "The review gate reads its config and helper from the base branch, so a PR cannot narrow its own security review"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0079"
 created: "2026-09-24"
-started: ""
+started: "2026-09-25T22:03:03Z"
 branch: ""
 pr: ""
 issue: ""
