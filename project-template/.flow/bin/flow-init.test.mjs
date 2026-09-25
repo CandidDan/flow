@@ -7,14 +7,30 @@
 // THE FIXTURE IS THE REAL TREE, NOT A MOCK. `<this dir>/..` is `.flow/`, and its parent is the
 // template root in BOTH contexts this file runs in — `project-template/` in canonical, the repo
 // root in a repo that adopted Flow. So the fixture canonical checkout is assembled from the real
-// `.flow/bin`, the real `.claude/`, the real `flow-*.yml` callers and the real `board.html`. That
-// matters for two criteria in particular: the caller COUNT is whatever canonical actually ships
-// (a hardcoded number is how INIT.md came to claim six when there were nine), and the re-pin runs
-// against real caller text rather than a stub that happens to match the regex.
+// `.flow/bin`, the real `.claude/` and the real `flow-*.yml` callers. That matters for two
+// criteria in particular: the caller COUNT is whatever canonical actually ships (a hardcoded
+// number is how INIT.md came to claim six when there were nine), and the re-pin runs against real
+// caller text rather than a stub that happens to match the regex.
 //
-// The one part deliberately synthesised is `.flow/tasks/`: the fixture ships only `_TEMPLATE.md`,
-// so `flow-doctor`'s verdict on an initialised repo is a fact about flow-init and not about
-// whichever tasks this repo happens to hold today.
+// THE FIXTURE OWNS WHAT IT ASSERTS ON (flow-0078). The corollary of that second context is the
+// rule this file has to obey: it may only assert things that are true in EVERY repo it is copied
+// into. Anything the assertions pin down by content, the fixture therefore writes itself rather
+// than sourcing from the tree around it:
+//
+//   * `.flow/tasks/` — only `_TEMPLATE.md` and one sample, so `flow-doctor`'s verdict on an
+//     initialised repo is a fact about flow-init and not about whichever tasks this repo holds.
+//   * `.flow/board.html` — the template's shape reduced to the two lines flow-init rewrites.
+//     Downstream, `<.flow>/board.html` is the ADOPTING repo's live board: already pointed at its
+//     own repo, holding its own tasks, and — if it predates the `const REPO` placeholder — with
+//     nothing for `prepareBoard` to rewrite at all. Asserting on that board tested the adopter.
+//     Writing it here also keeps this file out of flow-0022's blast radius.
+//   * `CLAUDE.md` / `AGENTS.md` — downstream these are the adopter's own host files, and a repo
+//     part-way through a 1.x→2.x sync has no `AGENTS.md` yet, so "both host files ship" was a
+//     claim about the adopter rather than about flow-init. That the REAL template ships both is
+//     asserted in canonical by `.flow/bin/protocol-portability.test.mjs`, where it belongs.
+//
+// That rule is enforced rather than remembered: canonical's `.flow/bin/flow-init-downstream.test.mjs`
+// runs this file from a synthetic adopter layout and fails if it goes red there.
 //
 // NO DEPENDENCIES. flow-gates' `flow-tooling` job runs `node --test .flow/bin/*.test.mjs` with no
 // `npm ci` in front of it, so an import of `yaml` or `c8` here would die before a single test ran.
@@ -56,9 +72,7 @@ function canonicalFixture() {
   writeFileSync(join(tpl, ".flow", "VERSION"), "0.0.0\n");
   writeFileSync(join(tpl, ".flow", "tasks", "_TEMPLATE.md"), TEMPLATE_TASK);
   writeFileSync(join(tpl, ".flow", "tasks", "0001-sample.md"), SAMPLE_TASK);
-  // Guarded, not assumed: the board is on its way out (flow-0022), and a fixture that hard-requires
-  // it would make this file collateral damage of that deletion.
-  if (existsSync(join(FLOW, "board.html"))) cpSync(join(FLOW, "board.html"), join(tpl, ".flow", "board.html"));
+  writeFileSync(join(tpl, ".flow", "board.html"), SAMPLE_BOARD);
   cpSync(join(FLOW, "PROTOCOL.md"), join(tpl, ".flow", "PROTOCOL.md"));
 
   cpSync(join(TEMPLATE_ROOT, ".claude"), join(tpl, ".claude"), { recursive: true });
@@ -68,7 +82,11 @@ function canonicalFixture() {
   for (const name of readdirSync(wfSrc).filter((n) => /^flow-.+\.ya?ml$/.test(n)))
     cpSync(join(wfSrc, name), join(tpl, ".github", "workflows", name));
 
-  for (const name of ["CLAUDE.md", "AGENTS.md", ".gitattributes", ".gitignore"])
+  // The two host files are the fixture's own, not the surrounding tree's — see the header note.
+  writeFileSync(join(tpl, "CLAUDE.md"), HOST_FILE("Claude Code"));
+  writeFileSync(join(tpl, "AGENTS.md"), HOST_FILE("agents following the AGENTS.md convention"));
+
+  for (const name of [".gitattributes", ".gitignore"])
     if (existsSync(join(TEMPLATE_ROOT, name))) cpSync(join(TEMPLATE_ROOT, name), join(tpl, name));
 
   // Canonical's own adoption documentation, plus a file it has not invented yet. Which root files
@@ -86,6 +104,25 @@ const SAMPLE_TASK = [
   'priority: 2', 'touches: ["src/**"]', '---', '', '## Context', 'x', '', '## Scope', 'x', '',
   '## Acceptance criteria', '', '- [ ] Given x, when y, then z.', '',
 ].join("\n");
+
+// The template's board, reduced to exactly the two declarations `prepareBoard` rewrites: the
+// unset `REPO` placeholder it points at the adopting repo, and a `TASKS` snapshot holding the
+// sample task it has to empty. Both are written at line start because both of prepareBoard's
+// patterns are anchored — a board whose placeholder is indented, quoted differently or simply
+// absent is silently left alone, which is the downstream failure flow-0078 fixed.
+const SAMPLE_BOARD = [
+  "<!doctype html>", "<title>Flow board</title>", "<script>",
+  'const REPO = "";',
+  "const TASKS = [",
+  '  { id: "PROJ-0001", title: "Sample task shipped with the template", status: "ready" },',
+  "];",
+  "</script>", "",
+].join("\n");
+
+// A host file's content is not what any assertion here checks — only that flow-init copied it —
+// so the fixture's copy says what it is and points at the one protocol, like the real ones do.
+const HOST_FILE = (who) =>
+  `# Flow — host file for ${who}\n\nThe protocol lives in one place:\n\n@.flow/PROTOCOL.md\n`;
 
 // An empty-ish target repo holding the one source tree the inputs will declare.
 function targetFixture() {
@@ -383,12 +420,12 @@ test("the template's sample task does not travel, and the board snapshot is empt
   assert.deepEqual(readdirSync(join(target, ".flow", "tasks")), ["_TEMPLATE.md"],
     "the sample task is a reference for reading the template, not content: copied in it becomes a " +
     "genuinely dispatchable `ready` task pointing at files that do not exist");
-  const boardPath = join(target, ".flow", "board.html");
-  if (existsSync(boardPath)) {
-    const board = readFileSync(boardPath, "utf8");
-    assert.doesNotMatch(board, /PROJ-0001/, "the board would otherwise disagree with the store on commit one");
-    assert.match(board, /const REPO = "acme-co\/storefront";/);
-  }
+  // Unconditional: the board under test is the one `canonicalFixture` wrote, so "no board here"
+  // can no longer quietly turn these two assertions into a pass.
+  const board = readFileSync(join(target, ".flow", "board.html"), "utf8");
+  assert.doesNotMatch(board, /PROJ-0001/, "the board would otherwise disagree with the store on commit one");
+  assert.match(board, /const REPO = "acme-co\/storefront";/,
+    "the board must be re-pointed at the repo being initialised, not left on whatever it named before");
   assert.ok(!existsSync(join(target, "VISION.md")),
     "VISION.md ships as a shape with placeholder goals — a placeholder vision is worse than none");
   rmSync(canonical, { recursive: true, force: true }); rmSync(target, { recursive: true, force: true });
