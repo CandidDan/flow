@@ -378,7 +378,13 @@ jobs:
             [ -e "$f" ] || continue
             DEST=".github/workflows/$(basename "$f")"
             if [ -f "$DEST" ]; then
-              EXTRA="$($SYNC extra-jobs --local "$DEST" --incoming "$f")"
+              # `node "$CANON_TPL/…"` and not `$SYNC`, which is the same command defined 100 lines
+              # up. $SYNC is deliberately not used HERE because two other test files extract this
+              # loop and run it on its own, with only $CANON_TPL supplied — a region that reaches
+              # for a variable defined outside it fails under `set -u` in every one of them. The
+              # loop being self-contained on $CANON_TPL is what keeps it executable in isolation,
+              # which is the only way its behaviour is provable at all.
+              EXTRA="$(node "$CANON_TPL/.flow/bin/flow-sync.mjs" extra-jobs --local "$DEST" --incoming "$f")"
               if [ -n "$EXTRA" ]; then
                 EXTRA_JOBS="$(printf '%s' "$EXTRA" | tr '\n' ' ' | sed 's/ *$//')"
                 echo "::warning title=Customised caller kept::${DEST} declares job(s) ${EXTRA_JOBS} that canonical's template does not, so copying canonical's version over it would DELETE them. The file is left exactly as it is, and therefore does NOT receive this version's changes to it — reconcile it by hand, or move those checks into .flow/config.yml's source_roots so a thin caller can express them."

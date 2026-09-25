@@ -446,13 +446,18 @@ test("prContent: the stamp alone is stamp-only; the stamp alongside anything els
 // (indentation, comments, block scalars) is the thing under test and a synthetic object would prove
 // nothing about it.
 
+// FIXTURE OWNER. The `uses:` owner is the placeholder `OWNER/flow` rather than canonical's real
+// owner/repo, and deliberately so: `docs/adr/` carries a rename-cutover amendment whose count of
+// files naming that reference is pinned to the working tree by `adr-split-authoring.test.mjs`, so a
+// new file spelling it out fails that test — and the ADR is not this task's to edit. Nothing here
+// parses the value anyway; only the job KEYS are under test.
 const CANON_GATES = `name: flow-gates
 on:
   pull_request:
 
 jobs:
   gate:
-    uses: CandidDan/flow/.github/workflows/_flow-gates.yml@v2
+    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v2
     with:
       node_version: "22"
     secrets:
@@ -467,7 +472,7 @@ on:
 
 jobs:
   gate:
-    uses: CandidDan/flow/.github/workflows/_flow-gates.yml@v2
+    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v2
     with:
       node_version: "20"
 
@@ -508,7 +513,7 @@ jobs:
 
   # canonical's thin job — do not edit, it is replaced on every sync
   gate:
-    uses: CandidDan/flow/.github/workflows/_flow-gates.yml@v2
+    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v2
     with:
       node_version: "22"
     # a comment at a job's own depth
