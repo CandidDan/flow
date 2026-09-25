@@ -1,7 +1,10 @@
 // Tests for flow-sync — the adopt mechanism's pure brain (version decision + PR text).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decide, syncBranch, decideExisting, CANONICAL_SHA_TRAILER, prContent } from "./flow-sync.mjs";
+import {
+  decide, syncBranch, decideExisting, CANONICAL_SHA_TRAILER, prContent,
+  topLevelJobKeys, extraJobs, parseKept,
+} from "./flow-sync.mjs";
 
 // ── decide ──
 
@@ -432,4 +435,181 @@ test("prContent: the stamp alone is stamp-only; the stamp alongside anything els
   assert.doesNotMatch(mixed, /version stamp only/);
   assert.ok(mixed.includes("- `.flow/VERSION`"),
     "the stamp is excluded from the DECISION, not from the list");
+});
+
+// ── the customised-caller guard (flow-0076) ──
+//
+// The sync's caller-copy loop was a bare `cp` over the local file, so a repo that had added jobs to
+// its own caller lost them on every sync with nothing said. These are the proving tests for the rule
+// that stops it: a caller is kept when it declares a top-level job key the incoming template does
+// not. Fixtures are written as real workflow text — the scan is a line scan, so its input shape
+// (indentation, comments, block scalars) is the thing under test and a synthetic object would prove
+// nothing about it.
+
+// FIXTURE OWNER. The `uses:` owner is the placeholder `OWNER/flow` rather than canonical's real
+// owner/repo, and deliberately so: `docs/adr/` carries a rename-cutover amendment whose count of
+// files naming that reference is pinned to the working tree by `adr-split-authoring.test.mjs`, so a
+// new file spelling it out fails that test — and the ADR is not this task's to edit. Nothing here
+// parses the value anyway; only the job KEYS are under test.
+const CANON_GATES = `name: flow-gates
+on:
+  pull_request:
+
+jobs:
+  gate:
+    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v2
+    with:
+      node_version: "22"
+    secrets:
+      FLOW_PAT: \${{ secrets.FLOW_PAT }}
+`;
+
+// Nudge's real shape: the thin job canonical ships, plus three per-tree checks the reusable cannot
+// express. `edge-parse` is the CAN-32 guard whose absence surfaced as a production BOOT_ERROR.
+const NUDGE_GATES = `name: flow-gates
+on:
+  pull_request:
+
+jobs:
+  gate:
+    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v2
+    with:
+      node_version: "20"
+
+  edge-parse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: deno check supabase/functions/**/*.ts
+
+  mcp-build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: npm --prefix mcp run build
+`;
+
+test("extraJobs names the jobs a copy would delete (criterion 1)", () => {
+  assert.deepEqual(extraJobs(NUDGE_GATES, CANON_GATES), ["edge-parse", "mcp-build"]);
+});
+
+test("extraJobs reports nothing when only the pin or a job's contents differ (criterion 2)", () => {
+  // The same job set, a different `uses:` pin and a different `with:` input. This is the common
+  // case — most callers canonical changes look like this — and it must still be overwritten,
+  // or the guard would freeze the whole fleet's callers at whatever version they adopted.
+  const localPinned = CANON_GATES
+    .replace("_flow-gates.yml@v2", "_flow-gates.yml@v1.4.0")
+    .replace('node_version: "22"', 'node_version: "20"');
+  assert.notEqual(localPinned, CANON_GATES, "the fixture must actually differ in text");
+  assert.deepEqual(extraJobs(localPinned, CANON_GATES), []);
+  assert.deepEqual(extraJobs(CANON_GATES, CANON_GATES), []);
+});
+
+test("only top-level job keys count: comments, blank lines and nested keys (criterion 3)", () => {
+  const local = `name: flow-gates
+on:
+  pull_request:
+
+jobs:
+
+  # canonical's thin job — do not edit, it is replaced on every sync
+  gate:
+    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v2
+    with:
+      node_version: "22"
+    # a comment at a job's own depth
+
+  # ── this repo's own checks ──────────────────────────────────────────
+  edge-parse:
+    runs-on: ubuntu-latest
+    env:
+      gate: "a nested key that reuses a job name"
+    steps:
+      - name: parse
+        run: |
+          jobs:
+            gate:
+          deno check supabase/functions/**/*.ts
+
+concurrency:
+  group: flow-gates-\${{ github.ref }}
+`;
+  // `steps:`, `with:`, `env:` and the `jobs:`/`gate:` lines inside the block scalar are all deeper
+  // than a job key and are not compared; `concurrency:` is back in column 0 and ends the block.
+  assert.deepEqual(topLevelJobKeys(local), ["gate", "edge-parse"]);
+  assert.deepEqual(extraJobs(local, CANON_GATES), ["edge-parse"]);
+});
+
+test("a CRLF-encoded caller still reports its extra jobs", () => {
+  // A caller hand-edited on Windows. Reading `jobs:\r` as not-`jobs:` returns [], which the copy
+  // loop takes as "safe to overwrite" — the silent deletion this guard exists to stop.
+  const crlf = NUDGE_GATES.replace(/\n/g, "\r\n");
+  assert.ok(crlf.includes("jobs:\r\n"), "the fixture must actually be CRLF");
+  assert.deepEqual(topLevelJobKeys(crlf), ["gate", "edge-parse", "mcp-build"]);
+  assert.deepEqual(extraJobs(crlf, CANON_GATES), ["edge-parse", "mcp-build"]);
+  // Either side may be the CRLF one; a CRLF incoming template must not hide its own `gate`.
+  assert.deepEqual(extraJobs(NUDGE_GATES, CANON_GATES.replace(/\n/g, "\r\n")), ["edge-parse", "mcp-build"]);
+});
+
+test("topLevelJobKeys reads the job indent off the file rather than assuming two spaces", () => {
+  // A scan that fails must fail towards reporting MORE jobs, never fewer — "no extra jobs" is the
+  // answer that lets the copy proceed and delete them.
+  const fourSpace = "name: x\njobs:\n    gate:\n        uses: a\n    edge-parse:\n        runs-on: ubuntu-latest\n";
+  assert.deepEqual(topLevelJobKeys(fourSpace), ["gate", "edge-parse"]);
+});
+
+test("topLevelJobKeys ignores a `jobs:` that is not a top-level key, and a file with none", () => {
+  assert.deepEqual(topLevelJobKeys("name: x\non:\n  push:\n"), []);
+  assert.deepEqual(topLevelJobKeys(""), []);
+  assert.deepEqual(topLevelJobKeys(undefined), []);
+  // A `jobs:` nested under something else is not the workflow's job map.
+  assert.deepEqual(topLevelJobKeys("on:\n  workflow_call:\njobs2:\n  gate:\n"), []);
+});
+
+test("topLevelJobKeys does not mistake a key that has a value for a job id", () => {
+  // Job ids are mapping keys, so nothing but a comment may follow the colon. Without that anchor a
+  // one-line `gate: {}` — or any scalar at job depth — would be counted, and the guard would keep
+  // callers it should overwrite.
+  assert.deepEqual(topLevelJobKeys("jobs:\n  gate:   # canonical's\n    uses: a\n"), ["gate"]);
+  assert.deepEqual(topLevelJobKeys("jobs:\n  gate: not-a-job\n"), []);
+});
+
+// ── parseKept + the PR-body section ──
+
+test("parseKept reads `<path>\\t<jobs>` lines and drops blanks", () => {
+  assert.deepEqual(
+    parseKept(".github/workflows/flow-gates.yml\tedge-parse mcp-build\n\n.github/workflows/flow-compass.yml\tnightly"),
+    [
+      { path: ".github/workflows/flow-gates.yml", jobs: ["edge-parse", "mcp-build"] },
+      { path: ".github/workflows/flow-compass.yml", jobs: ["nightly"] },
+    ]);
+  assert.deepEqual(parseKept(""), []);
+  assert.deepEqual(parseKept(), []);
+});
+
+test("prContent renders a 'Kept: customised callers' section naming the jobs (criterion 5)", () => {
+  const { body } = prContent({
+    local: "1.3.0", canonical: "2.0.0",
+    files: "M\t.flow/VERSION\nM\t.flow/bin/flow-doctor.mjs",
+    kept: ".github/workflows/flow-gates.yml\tedge-parse mcp-build",
+  });
+  const kept = body.split("### Kept: customised callers")[1];
+  assert.ok(kept, "the section must be present when a caller was kept");
+  assert.match(kept, /- `\.github\/workflows\/flow-gates\.yml` — extra jobs: `edge-parse`, `mcp-build`/);
+  assert.match(kept, /would have \*\*deleted\*\*/,
+    "the section must say what the alternative was, or it reads as a routine omission");
+  assert.match(kept, /does \*\*not\*\*\n?\s*receive this version's changes/,
+    "…and that the kept file is now behind, which is the cost the reviewer is accepting");
+  // The kept caller is NOT in the synced list — it was not copied — so the two sections cannot
+  // contradict each other.
+  assert.ok(!body.split("### Kept")[0].includes("flow-gates.yml"));
+});
+
+test("prContent omits the kept section entirely when nothing was kept", () => {
+  const { body } = prContent({ local: "1.3.0", canonical: "2.0.0", files: "M\t.flow/VERSION" });
+  assert.doesNotMatch(body, /Kept: customised callers/,
+    "a 'Kept: none' line on every sync PR is boilerplate, and this section has to be read the one " +
+    "time it appears");
+  assert.doesNotMatch(prContent({
+    local: "1.3.0", canonical: "2.0.0", files: "M\t.flow/VERSION", kept: "",
+  }).body, /Kept: customised callers/);
 });

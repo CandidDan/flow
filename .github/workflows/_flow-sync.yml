@@ -10,7 +10,9 @@ name: _flow-sync (reusable)
 #
 # What it syncs (the *copied* surface — everything else is referenced and can't drift):
 #   - .flow/bin/*            the tooling (flow-doctor, touches-guard, pick-task, … and this logic)
-#   - .github/workflows/flow-*.yml   the thin callers (in case canonical added/changed one)
+#   - .github/workflows/flow-*.yml   the thin callers (in case canonical added/changed one), EXCEPT
+#                            one that declares a job canonical's template does not: that caller is
+#                            kept whole and reported, never overwritten (flow-0076)
 #   - .flow/PROTOCOL.md      the protocol itself (flow-0048) — identical in every Flow repo, so a
 #                            protocol fix reaches the fleet by sync instead of by hand-patch
 #   - .flow/VERSION          bumped to canonical's stamp
@@ -352,9 +354,47 @@ jobs:
           # canonical deleted go away here too. Thin callers: refresh in case one changed/was added.
           mkdir -p .flow/bin .github/workflows
           rsync -a --delete "$CANON_TPL/.flow/bin/" .flow/bin/
+          # THE CUSTOMISED-CALLER GUARD (flow-0076). This loop was `[ -e "$f" ] && cp "$f" …`, an
+          # unconditional overwrite of the local caller. A caller is meant to be thin, but a repo
+          # that needs something the reusable cannot express adds jobs to its own — CandidDan/Nudge
+          # carried `edge-parse`, `mcp-build` and `mobile-check`, one per tree — and every sync
+          # deleted them while listing the file as "Modified" and saying nothing else. `edge-parse`
+          # is the guard against a Deno parse error reaching production as a BOOT_ERROR; its absence
+          # last cost about seven days of dropped WhatsApp inbounds. A gate that stops checking and
+          # stays green is the failure this whole repo exists to prevent, and a sync was shipping it.
+          #
+          # So: for a caller that ALREADY EXISTS here, ask `flow-sync.mjs extra-jobs` which job keys
+          # the local file declares that canonical's does not. Any answer at all means copying would
+          # destroy work, so the file is left untouched and the run says so. Everything else copies
+          # exactly as before — including a caller NEW to this repo, which has no local file to lose
+          # and is how canonical ships a workflow to a repo that has never heard of it.
+          #
+          # Kept callers are accumulated in a file OUTSIDE the worktree (`git add -A` below would
+          # otherwise commit it) because the list is multi-line and a shell variable cannot gain a
+          # newline inside a YAML block scalar without the closing quote's indentation joining the
+          # string. `pr-body` renders it so a reviewer sees what did not sync, and why.
+          KEPT_FILE="$(mktemp)"
           for f in "$CANON_TPL"/.github/workflows/flow-*.yml; do
-            [ -e "$f" ] && cp "$f" .github/workflows/
+            [ -e "$f" ] || continue
+            DEST=".github/workflows/$(basename "$f")"
+            if [ -f "$DEST" ]; then
+              # `node "$CANON_TPL/…"` and not `$SYNC`, which is the same command defined 100 lines
+              # up. $SYNC is deliberately not used HERE because two other test files extract this
+              # loop and run it on its own, with only $CANON_TPL supplied — a region that reaches
+              # for a variable defined outside it fails under `set -u` in every one of them. The
+              # loop being self-contained on $CANON_TPL is what keeps it executable in isolation,
+              # which is the only way its behaviour is provable at all.
+              EXTRA="$(node "$CANON_TPL/.flow/bin/flow-sync.mjs" extra-jobs --local "$DEST" --incoming "$f")"
+              if [ -n "$EXTRA" ]; then
+                EXTRA_JOBS="$(printf '%s' "$EXTRA" | tr '\n' ' ' | sed 's/ *$//')"
+                echo "::warning title=Customised caller kept::${DEST} declares job(s) ${EXTRA_JOBS} that canonical's template does not, so copying canonical's version over it would DELETE them. The file is left exactly as it is, and therefore does NOT receive this version's changes to it — reconcile it by hand, or move those checks into .flow/config.yml's source_roots so a thin caller can express them."
+                printf '%s\t%s\n' "$DEST" "$EXTRA_JOBS" >> "$KEPT_FILE"
+                continue
+              fi
+            fi
+            cp "$f" .github/workflows/
           done
+          KEPT="$(cat "$KEPT_FILE")"
           # THE PROTOCOL (flow-0048). For four releases this surface was bin + callers + the stamp,
           # and `.flow/PROTOCOL.md` was copied ONCE, by flow-init, at adoption — then frozen for
           # the life of the repo through any number of syncs. The protocol is not documentation: it
@@ -473,7 +513,7 @@ jobs:
           case "$VERDICT" in
             create|rebuild)
               TITLE="$($SYNC pr-title --local "$LOCAL_VER" --canonical "$CANON_VER")"
-              BODY="$($SYNC pr-body --local "$LOCAL_VER" --canonical "$CANON_VER" --files "$CHANGED")"
+              BODY="$($SYNC pr-body --local "$LOCAL_VER" --canonical "$CANON_VER" --files "$CHANGED" --kept "$KEPT")"
               gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$BODY" \
                 || echo "gh pr create failed — branch is pushed; will retry next run."
               ;;
