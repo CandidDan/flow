@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0077"
 title: "_flow-gates runs every declared source_root's check as a matrix, so extra trees need no hand-written job"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker"
 created: "2026-09-24"
-started: ""
+started: "2026-09-25T07:43:23Z"
 branch: ""
 pr: ""
 issue: "https://github.com/CandidDan/flow/issues/34"
