@@ -131,7 +131,7 @@ jobs:
       - name: Materialise the review gate from the BASE branch
         # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
         # comes from the PR. The four env vars written below are what keeps those two apart —
-        # `FLOW_REVIEW_BIN` + `FLOW_CONFIG` point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` /
+        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` /
         # `REVIEW_TASKS_DIR` point back at the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
         # a repo whose `.flow/bin/flow-review.mjs` is an ADAPTER (canonical's is): an adapter pins
         # its git to its own realpath, which inside the base worktree would diff base against
@@ -152,14 +152,14 @@ jobs:
              && git cat-file -e "origin/$BASE_BRANCH:.flow/config.yml" 2>/dev/null; then
             git worktree add -q --detach "$base_dir" "origin/$BASE_BRANCH"
             {
-              echo "FLOW_REVIEW_BIN=$base_dir/.flow/bin/flow-review.mjs"
+              echo "FLOW_REVIEW_DIR=$base_dir/.flow/bin"
               echo "FLOW_CONFIG=$base_dir/.flow/config.yml"
             } >> "$GITHUB_ENV"
           elif [ -f .flow/bin/flow-review.mjs ]; then
             # BOOTSTRAP — this PR is the one adopting the gate. The helper below forces the
             # security review on (REVIEW_BOOTSTRAP) and repeats this warning in the plan summary.
             {
-              echo "FLOW_REVIEW_BIN=$GITHUB_WORKSPACE/.flow/bin/flow-review.mjs"
+              echo "FLOW_REVIEW_DIR=$GITHUB_WORKSPACE/.flow/bin"
               echo "REVIEW_BOOTSTRAP=1"
             } >> "$GITHUB_ENV"
             echo "::warning::BOOTSTRAP: the base branch carries no review gate, so this PR's own" \
@@ -194,7 +194,7 @@ jobs:
           # interpolated into the shell.
           HEAD_REF: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: node "$FLOW_REVIEW_BIN" plan
+        run: node "$FLOW_REVIEW_DIR"/flow-review.mjs plan
 
   # Each reviewer below re-runs `plan` to materialise its own .flow-review/ rather than taking
   # an artifact from the plan job. Two git diffs are cheaper than an upload/download round trip,
@@ -217,7 +217,7 @@ jobs:
       - name: Materialise the review gate from the BASE branch
         # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
         # comes from the PR. The four env vars written below are what keeps those two apart —
-        # `FLOW_REVIEW_BIN` + `FLOW_CONFIG` point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` /
+        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` /
         # `REVIEW_TASKS_DIR` point back at the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
         # a repo whose `.flow/bin/flow-review.mjs` is an ADAPTER (canonical's is): an adapter pins
         # its git to its own realpath, which inside the base worktree would diff base against
@@ -238,14 +238,14 @@ jobs:
              && git cat-file -e "origin/$BASE_BRANCH:.flow/config.yml" 2>/dev/null; then
             git worktree add -q --detach "$base_dir" "origin/$BASE_BRANCH"
             {
-              echo "FLOW_REVIEW_BIN=$base_dir/.flow/bin/flow-review.mjs"
+              echo "FLOW_REVIEW_DIR=$base_dir/.flow/bin"
               echo "FLOW_CONFIG=$base_dir/.flow/config.yml"
             } >> "$GITHUB_ENV"
           elif [ -f .flow/bin/flow-review.mjs ]; then
             # BOOTSTRAP — this PR is the one adopting the gate. The helper below forces the
             # security review on (REVIEW_BOOTSTRAP) and repeats this warning in the plan summary.
             {
-              echo "FLOW_REVIEW_BIN=$GITHUB_WORKSPACE/.flow/bin/flow-review.mjs"
+              echo "FLOW_REVIEW_DIR=$GITHUB_WORKSPACE/.flow/bin"
               echo "REVIEW_BOOTSTRAP=1"
             } >> "$GITHUB_ENV"
             echo "::warning::BOOTSTRAP: the base branch carries no review gate, so this PR's own" \
@@ -279,7 +279,7 @@ jobs:
           # interpolated into the shell.
           HEAD_REF: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: node "$FLOW_REVIEW_BIN" plan
+        run: node "$FLOW_REVIEW_DIR"/flow-review.mjs plan
       - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
         continue-on-error: true          # the verdict step below decides; never this action's exit
         with:
@@ -337,7 +337,7 @@ jobs:
             task state. The only file you write is .flow-review/qa.json.
       - name: Enforce the qa verdict
         if: always()
-        run: node "$FLOW_REVIEW_BIN" verdict .flow-review/qa.json --check qa
+        run: node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/qa.json --check qa
 
   # ── code-review ────────────────────────────────────────────────────────────────────────
   code-review:
@@ -352,7 +352,7 @@ jobs:
       - name: Materialise the review gate from the BASE branch
         # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
         # comes from the PR. The four env vars written below are what keeps those two apart —
-        # `FLOW_REVIEW_BIN` + `FLOW_CONFIG` point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` /
+        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` /
         # `REVIEW_TASKS_DIR` point back at the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
         # a repo whose `.flow/bin/flow-review.mjs` is an ADAPTER (canonical's is): an adapter pins
         # its git to its own realpath, which inside the base worktree would diff base against
@@ -373,14 +373,14 @@ jobs:
              && git cat-file -e "origin/$BASE_BRANCH:.flow/config.yml" 2>/dev/null; then
             git worktree add -q --detach "$base_dir" "origin/$BASE_BRANCH"
             {
-              echo "FLOW_REVIEW_BIN=$base_dir/.flow/bin/flow-review.mjs"
+              echo "FLOW_REVIEW_DIR=$base_dir/.flow/bin"
               echo "FLOW_CONFIG=$base_dir/.flow/config.yml"
             } >> "$GITHUB_ENV"
           elif [ -f .flow/bin/flow-review.mjs ]; then
             # BOOTSTRAP — this PR is the one adopting the gate. The helper below forces the
             # security review on (REVIEW_BOOTSTRAP) and repeats this warning in the plan summary.
             {
-              echo "FLOW_REVIEW_BIN=$GITHUB_WORKSPACE/.flow/bin/flow-review.mjs"
+              echo "FLOW_REVIEW_DIR=$GITHUB_WORKSPACE/.flow/bin"
               echo "REVIEW_BOOTSTRAP=1"
             } >> "$GITHUB_ENV"
             echo "::warning::BOOTSTRAP: the base branch carries no review gate, so this PR's own" \
@@ -414,7 +414,7 @@ jobs:
           # interpolated into the shell.
           HEAD_REF: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: node "$FLOW_REVIEW_BIN" plan
+        run: node "$FLOW_REVIEW_DIR"/flow-review.mjs plan
       - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
         continue-on-error: true
         with:
@@ -460,7 +460,7 @@ jobs:
             task state. The only file you write is .flow-review/code-review.json.
       - name: Enforce the code-review verdict
         if: always()
-        run: node "$FLOW_REVIEW_BIN" verdict .flow-review/code-review.json --check code-review
+        run: node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/code-review.json --check code-review
 
   # ── security ───────────────────────────────────────────────────────────────────────────
   # CONDITIONAL, and the condition comes from the repo's `review.security_paths`. This job
@@ -497,7 +497,7 @@ jobs:
         if: ${{ needs.plan.outputs.security_run == 'true' }}
         # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
         # comes from the PR. The four env vars written below are what keeps those two apart —
-        # `FLOW_REVIEW_BIN` + `FLOW_CONFIG` point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` /
+        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` /
         # `REVIEW_TASKS_DIR` point back at the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
         # a repo whose `.flow/bin/flow-review.mjs` is an ADAPTER (canonical's is): an adapter pins
         # its git to its own realpath, which inside the base worktree would diff base against
@@ -518,14 +518,14 @@ jobs:
              && git cat-file -e "origin/$BASE_BRANCH:.flow/config.yml" 2>/dev/null; then
             git worktree add -q --detach "$base_dir" "origin/$BASE_BRANCH"
             {
-              echo "FLOW_REVIEW_BIN=$base_dir/.flow/bin/flow-review.mjs"
+              echo "FLOW_REVIEW_DIR=$base_dir/.flow/bin"
               echo "FLOW_CONFIG=$base_dir/.flow/config.yml"
             } >> "$GITHUB_ENV"
           elif [ -f .flow/bin/flow-review.mjs ]; then
             # BOOTSTRAP — this PR is the one adopting the gate. The helper below forces the
             # security review on (REVIEW_BOOTSTRAP) and repeats this warning in the plan summary.
             {
-              echo "FLOW_REVIEW_BIN=$GITHUB_WORKSPACE/.flow/bin/flow-review.mjs"
+              echo "FLOW_REVIEW_DIR=$GITHUB_WORKSPACE/.flow/bin"
               echo "REVIEW_BOOTSTRAP=1"
             } >> "$GITHUB_ENV"
             echo "::warning::BOOTSTRAP: the base branch carries no review gate, so this PR's own" \
@@ -560,7 +560,7 @@ jobs:
           # interpolated into the shell.
           HEAD_REF: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: node "$FLOW_REVIEW_BIN" plan
+        run: node "$FLOW_REVIEW_DIR"/flow-review.mjs plan
       - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
         if: ${{ needs.plan.outputs.security_run == 'true' }}
         continue-on-error: true
@@ -615,4 +615,4 @@ jobs:
             task state. The only file you write is .flow-review/security.json.
       - name: Enforce the security verdict
         if: ${{ always() && needs.plan.outputs.security_run == 'true' }}
-        run: node "$FLOW_REVIEW_BIN" verdict .flow-review/security.json --check security
+        run: node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/security.json --check security

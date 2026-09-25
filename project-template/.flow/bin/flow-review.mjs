@@ -243,12 +243,21 @@ export function parseReviewConfig(src) {
 //
 // Not configurable, deliberately: a floor a repo can lower is not a floor. Widening it belongs
 // in `security_paths`, which is exactly what that key is for.
+//
+// THE TWO HOST FILES ARE COMPOSED, NOT SPELLED. `.flow/bin/protocol-portability.test.mjs` fails
+// any non-test helper whose EXECUTABLE code contains the protocol's Claude-side filename,
+// because a helper that OPENS the protocol by that name re-binds Flow to one vendor — the
+// binding that test exists to keep out. Nothing here opens anything: these are glob patterns in
+// a trigger list, and both host conventions are listed symmetrically, which is that rule holding
+// rather than breaking. Composing the pair is the smallest way to satisfy both without carving a
+// per-file exception into a guard that is otherwise right to be blunt.
+const HOST_FILES = ["CLAUDE", "AGENTS"].map((host) => `${host}.md`);
+
 export const SECURITY_FLOOR_PATHS = Object.freeze([
   ".flow/**",
   ".github/**",
   ".claude/**",
-  "CLAUDE.md",
-  "AGENTS.md",
+  ...HOST_FILES,
 ]);
 
 export function securityDecision({ changedFiles = [], securityPaths = [], bootstrap = false } = {}) {

@@ -38,6 +38,7 @@ import {
   reviewBlock,
   runPlan,
   runReviewCli,
+  SECURITY_FLOOR_PATHS,
   securityDecision,
   oneLine,
   taskContext,
@@ -165,6 +166,79 @@ test("a model name that would splice extra flags into the reviewer is rejected a
 test("securityDecision survives an empty diff and a `**` trigger", () => {
   assert.equal(securityDecision({ changedFiles: [], securityPaths: ["src/**"] }).run, false);
   assert.equal(securityDecision({ changedFiles: ["x"], securityPaths: ["**"] }).run, true);
+});
+
+// ── the security floor, and reading the trigger list from base (flow-0079) ────────────────
+// The floor is the half of flow-0079 that lives in this file. The other half — that the trigger
+// list is read from the BASE branch's config rather than the PR's — is a property of how the
+// gate is INVOKED, so it is proved end-to-end against a real repo further down, and structurally
+// in .flow/bin/flow-review-workflow.test.mjs.
+
+test("the security floor runs the review on gate paths a tight security_paths list excludes", () => {
+  // The exact shape of criterion 3: a configured list that matches NOTHING in this diff, and a
+  // diff that nonetheless must be security-reviewed because of what it touches.
+  const securityPaths = ["src/auth/**", "package.json"];
+  for (const file of [
+    ".flow/config.yml",
+    ".flow/bin/flow-review.mjs",
+    ".github/workflows/_flow-review.yml",
+    ".claude/settings.json",
+    "CLAUDE.md",
+    "AGENTS.md",
+  ]) {
+    const d = securityDecision({ changedFiles: ["README.md", file], securityPaths });
+    assert.equal(d.run, true, `${file} must trigger the security review whatever security_paths says`);
+    assert.deepEqual(d.matched, [], "…and it is NOT a configured-path match — the floor is why");
+    assert.deepEqual(d.floor, [file]);
+    assert.match(d.reason, /SECURITY FLOOR/,
+      "the reason must name the floor, so the run summary says WHICH rule fired");
+    assert.match(d.reason, new RegExp(file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      "and name the file that tripped it");
+    assert.match(d.reason, /not configurable/, "a floor a repo can lower is not a floor");
+  }
+});
+
+test("the floor is exactly the gate surface, and a diff outside it still skips", () => {
+  assert.deepEqual([...SECURITY_FLOOR_PATHS],
+    [".flow/**", ".github/**", ".claude/**", "CLAUDE.md", "AGENTS.md"],
+    "widening this set is a deliberate act — it makes every adopting repo review more diffs");
+  const d = securityDecision({
+    changedFiles: ["docs/copy.md", "src/ui/Button.tsx", "CLAUDE.mdx", "flow/config.yml"],
+    securityPaths: ["src/auth/**"],
+  });
+  assert.equal(d.run, false,
+    "the floor must not swallow near-misses — `CLAUDE.mdx` and `flow/config.yml` are not it");
+  assert.deepEqual(d.floor, []);
+  assert.match(d.reason, /SKIPPED/);
+  assert.match(d.reason, /security floor/, "a skip must name BOTH lists it was measured against");
+});
+
+test("a diff matching the floor AND a configured path reports the floor, and says so", () => {
+  const d = securityDecision({
+    changedFiles: [".github/workflows/deploy.yml", "src/auth/login.ts"],
+    securityPaths: ["src/auth/**"],
+  });
+  assert.equal(d.run, true);
+  assert.deepEqual(d.floor, [".github/workflows/deploy.yml"]);
+  assert.deepEqual(d.matched, ["src/auth/login.ts"]);
+  assert.match(d.reason, /SECURITY FLOOR/);
+  assert.match(d.reason, /also matches 1 configured security path\(s\): src\/auth\/login\.ts/,
+    "the configured match is still reported — the floor adds a reason, it does not hide one");
+});
+
+test("BOOTSTRAP forces the security review on and never reads as a configured decision", () => {
+  // Criterion 4's decision half. The workflow sets this only when the BASE branch carries no
+  // gate to plan from, so the helper deciding is the PR's own — which must not be allowed to
+  // scope itself out.
+  const d = securityDecision({
+    changedFiles: ["docs/copy.md"],
+    securityPaths: ["src/auth/**"],          // would SKIP on this diff, were it trusted
+    bootstrap: true,
+  });
+  assert.equal(d.run, true, "a gate a PR both supplies and scopes must not scope itself out");
+  assert.equal(d.bootstrap, true);
+  assert.match(d.reason, /BOOTSTRAP/);
+  assert.match(d.reason, /base branch carries no/);
 });
 
 // ── the bounded context (criterion 7) ─────────────────────────────────────────────────────
@@ -787,5 +861,176 @@ test("CLI `plan` publishes the model and the security decision as workflow outpu
 
     assert.match(readFileSync(join(dir, ".flow-review", "files.txt"), "utf8"), /^README\.md$/m);
     assert.match(readFileSync(join(dir, ".flow-review", "diff.patch"), "utf8"), /\+changed/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── flow-0079: the gate is planned from the BASE branch, not from the PR ──────────────────
+// The workflow half (which file is invoked, and from where) is structural and lives in
+// .flow/bin/flow-review-workflow.test.mjs. What belongs here is the CONSEQUENCE: given the same
+// diff, reading the trigger list from base and reading it from the PR give different answers,
+// and the base one is the one the gate must act on.
+
+const BASE_CONFIG = `project:
+  name: "demo"
+
+review:
+  model: "haiku"
+  security_paths:
+    - "src/auth/**"
+`;
+
+// The same file, as a PR that wants its own auth change unreviewed would leave it.
+const NARROWED_CONFIG = `project:
+  name: "demo"
+
+review:
+  model: "haiku"
+  security_paths:
+    - "docs/**"
+`;
+
+test("the trigger list decides from BASE: the same diff flips on which config was read", () => {
+  // Isolated from the floor on purpose — the only changed file is `src/auth/login.ts`, which no
+  // floor path covers, so the ONLY thing that can move `run` here is which config was read.
+  const dir = tmp("base-trigger");
+  try {
+    writeFileSync(join(dir, "base.yml"), BASE_CONFIG);
+    writeFileSync(join(dir, "pr.yml"), NARROWED_CONFIG);
+    const git = (args) => (args.includes("--name-only") ? "src/auth/login.ts\n" : "diff\n");
+
+    const fromBase = runPlan({ configPath: join(dir, "base.yml"), outDir: join(dir, "a"), git });
+    assert.equal(fromBase.security.run, true, "base still lists src/auth/** — the review runs");
+    assert.deepEqual(fromBase.security.matched, ["src/auth/login.ts"]);
+    assert.deepEqual(fromBase.security.floor, [], "and it is the CONFIG that ran it, not the floor");
+
+    const fromPr = runPlan({ configPath: join(dir, "pr.yml"), outDir: join(dir, "b"), git });
+    assert.equal(fromPr.security.run, false,
+      "this is the hole flow-0079 closes: read the PR's own config and the review is skipped, " +
+      "with a reason that reads as a legitimate scoping decision");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("end to end: a PR that deletes its own trigger glob is reviewed against BASE's list", () => {
+  const dir = tmp("base-e2e");
+  const g = (...args) => spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+  try {
+    g("init", "-q", "-b", "main");
+    g("config", "user.email", "t@example.com");
+    g("config", "user.name", "t");
+    mkdirSync(join(dir, ".flow"), { recursive: true });
+    mkdirSync(join(dir, "src", "auth"), { recursive: true });
+    writeFileSync(join(dir, ".flow", "config.yml"), BASE_CONFIG);
+    writeFileSync(join(dir, "src", "auth", "login.ts"), "export const login = 1;\n");
+    g("add", "-A");
+    g("commit", "-qm", "base");
+
+    g("checkout", "-qb", "feature");
+    // The attack, in ONE diff: remove the glob that covers the file you are about to change.
+    writeFileSync(join(dir, ".flow", "config.yml"), NARROWED_CONFIG);
+    writeFileSync(join(dir, "src", "auth", "login.ts"), "export const login = 2; // and a backdoor\n");
+    g("commit", "-aqm", "narrow the security triggers and change auth, together");
+
+    // What `_flow-review.yml` does before invoking the helper: materialise base's copy of the
+    // config OUTSIDE the working tree, and point FLOW_CONFIG at it.
+    const baseCfg = join(dir, "base-config.yml");
+    writeFileSync(baseCfg, g("show", "main:.flow/config.yml").stdout);
+
+    const plan = (extraEnv) => {
+      const out = join(dir, `gh-${Math.random().toString(36).slice(2)}`);
+      writeFileSync(out, "");
+      const r = run(["plan"], {
+        cwd: dir,
+        env: { ...process.env, BASE_REF: "main", GITHUB_OUTPUT: out, ...extraEnv },
+      });
+      assert.equal(r.status, 0, r.stderr);
+      return readFileSync(out, "utf8");
+    };
+
+    const fromBase = plan({ FLOW_CONFIG: baseCfg });
+    assert.match(fromBase, /^security_run=true$/m,
+      "the trigger list came from base, where src/auth/** is still listed");
+    assert.match(fromBase, /^security_reason=.*src\/auth\/login\.ts/m,
+      "…and the reason names the auth file as a configured match, which only base's list yields");
+
+    const fromPr = plan({});
+    assert.doesNotMatch(fromPr, /^security_reason=.*src\/auth\/login\.ts/m,
+      "read from the PR, the auth change matches nothing — that difference IS the vulnerability");
+    // It still runs, because editing `.flow/config.yml` is itself a floor path. The floor is the
+    // second line of defence, and this is what it looks like holding when the first is bypassed.
+    assert.match(fromPr, /^security_run=true$/m);
+    assert.match(fromPr, /^security_reason=SECURITY FLOOR/m);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("REVIEW_REPO_DIR beats an adapter's pinned git — the base copy still diffs the PR", () => {
+  // The override flow-0079 needed. Canonical's `.flow/bin/flow-review.mjs` pins `git` to its own
+  // realpath's repo root; run out of the base worktree that root is BASE, so the helper would
+  // diff base against itself and hand three reviewers an empty patch — a gate that passes having
+  // read nothing. This is the one override that beats an explicit `opts.git`.
+  const dir = tmp("repo-dir");
+  const g = (...args) => spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+  try {
+    g("init", "-q", "-b", "main");
+    g("config", "user.email", "t@example.com");
+    g("config", "user.name", "t");
+    writeFileSync(join(dir, "README.md"), "base\n");
+    g("add", "-A");
+    g("commit", "-qm", "base");
+    g("checkout", "-qb", "feature");
+    writeFileSync(join(dir, "README.md"), "changed\n");
+    g("commit", "-aqm", "change");
+
+    writeFileSync(join(dir, "config.yml"), CONFIG);
+    const pinned = {
+      configPath: join(dir, "config.yml"),
+      outDir: join(dir, "out"),
+      git: () => "",                        // the empty diff an adapter would produce from base
+    };
+
+    const without = join(dir, "gh-without");
+    assert.equal(runReviewCli(["plan"], { env: { GITHUB_OUTPUT: without, BASE_REF: "main" }, ...pinned }), 0);
+    assert.match(readFileSync(without, "utf8"), /^changed_count=0$/m,
+      "without the override the pinned git wins, and the reviewers get nothing to read");
+
+    const with_ = join(dir, "gh-with");
+    assert.equal(runReviewCli(["plan"], {
+      env: { GITHUB_OUTPUT: with_, BASE_REF: "main", REVIEW_REPO_DIR: dir }, ...pinned,
+    }), 0);
+    assert.match(readFileSync(with_, "utf8"), /^changed_count=1$/m,
+      "REVIEW_REPO_DIR points the diff back at the PR checkout");
+    assert.match(readFileSync(join(dir, "out", "diff.patch"), "utf8"), /\+changed/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("REVIEW_BOOTSTRAP forces the security review on and warns in the step summary", () => {
+  // Criterion 4. The workflow sets REVIEW_BOOTSTRAP only when the base branch carries no gate;
+  // the helper's job is to make that case loud and fail-closed rather than quietly normal.
+  const dir = tmp("bootstrap");
+  try {
+    writeFileSync(join(dir, "config.yml"), NARROWED_CONFIG);   // would SKIP a docs-only diff
+    const git = (args) => (args.includes("--name-only") ? "src/auth/login.ts\n" : "diff\n");
+    const pinned = { configPath: join(dir, "config.yml"), outDir: join(dir, "out"), git };
+
+    const out = join(dir, "gh-out");
+    const summary = join(dir, "gh-summary");
+    assert.equal(runReviewCli(["plan"], {
+      env: { GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: summary, REVIEW_BOOTSTRAP: "1" }, ...pinned,
+    }), 0);
+
+    const outputs = readFileSync(out, "utf8");
+    assert.match(outputs, /^security_run=true$/m,
+      "a gate the PR both supplies and scopes must not be allowed to scope itself out");
+    assert.match(outputs, /^bootstrap=true$/m, "and the case is published, not inferred");
+    assert.match(outputs, /^security_reason=BOOTSTRAP/m);
+
+    const md = readFileSync(summary, "utf8");
+    assert.match(md, /BOOTSTRAP/, "the human has to be told before reading the verdicts below it");
+    assert.match(md, /planned from THIS PR, not from the base branch/);
+    assert.match(md, /:warning:/, "…as a warning, not as a line of ordinary plan output");
+
+    // And the ordinary case does not say it.
+    const clean = join(dir, "gh-clean");
+    assert.equal(runReviewCli(["plan"], { env: { GITHUB_OUTPUT: clean }, ...pinned }), 0);
+    assert.match(readFileSync(clean, "utf8"), /^bootstrap=false$/m);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
