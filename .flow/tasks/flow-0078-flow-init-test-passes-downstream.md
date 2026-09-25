@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0078"
 title: "flow-init.test.mjs passes in an adopting repo, proved by running it from an adopter layout"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker"
 created: "2026-09-24"
-started: ""
+started: "2026-09-25T07:57:49Z"
 branch: ""
 pr: ""
 issue: "https://github.com/CandidDan/flow/issues/103"
