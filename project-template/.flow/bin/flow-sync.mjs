@@ -201,7 +201,9 @@ export function topLevelJobKeys(text) {
   const keys = [];
   let inJobs = false;
   let indent = null;
-  for (const line of String(text ?? "").split("\n")) {
+  // CRLF too: a caller hand-edited on Windows would otherwise keep a `\r` on every line, `jobs:\r`
+  // would never match, and the scan would report zero jobs — the unsafe direction.
+  for (const line of String(text ?? "").split(/\r?\n/)) {
     if (!inJobs) {
       if (/^jobs:[ \t]*(?:#.*)?$/.test(line)) inJobs = true;
       continue;

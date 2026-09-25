@@ -539,6 +539,17 @@ concurrency:
   assert.deepEqual(extraJobs(local, CANON_GATES), ["edge-parse"]);
 });
 
+test("a CRLF-encoded caller still reports its extra jobs", () => {
+  // A caller hand-edited on Windows. Reading `jobs:\r` as not-`jobs:` returns [], which the copy
+  // loop takes as "safe to overwrite" — the silent deletion this guard exists to stop.
+  const crlf = NUDGE_GATES.replace(/\n/g, "\r\n");
+  assert.ok(crlf.includes("jobs:\r\n"), "the fixture must actually be CRLF");
+  assert.deepEqual(topLevelJobKeys(crlf), ["gate", "edge-parse", "mcp-build"]);
+  assert.deepEqual(extraJobs(crlf, CANON_GATES), ["edge-parse", "mcp-build"]);
+  // Either side may be the CRLF one; a CRLF incoming template must not hide its own `gate`.
+  assert.deepEqual(extraJobs(NUDGE_GATES, CANON_GATES.replace(/\n/g, "\r\n")), ["edge-parse", "mcp-build"]);
+});
+
 test("topLevelJobKeys reads the job indent off the file rather than assuming two spaces", () => {
   // A scan that fails must fail towards reporting MORE jobs, never fewer — "no extra jobs" is the
   // answer that lets the copy proceed and delete them.
