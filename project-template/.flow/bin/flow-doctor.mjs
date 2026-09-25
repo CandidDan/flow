@@ -130,39 +130,20 @@ const SOURCE_EXT = new Set([
   ".cs", ".php", ".ex", ".exs", ".swift", ".scala", ".dart",
 ]);
 
-// The sentinel `project-template/.flow/config.yml` ships in `source_roots[].path` / `.check` —
-// documented, load-bearing behaviour (`INIT.md` rule 1: never invent a config value) that marks
-// a repo as not-yet-calibrated rather than drifted. Trailing slashes on `path` are stripped
-// before comparing, so `"REPLACE-ME/"` and `"REPLACE-ME"` both match.
-const PLACEHOLDER = "REPLACE-ME";
-function isPlaceholder(v) {
-  return String(v ?? "").replace(/\/+$/, "") === PLACEHOLDER;
-}
-
-// Parse the `source_roots:` block from config.yml without a YAML dep. Tolerant line scan of:
-//   source_roots:
-//     - path: "app/"
-//       check: "npm run lint"
-function parseSourceRoots(configPath) {
-  if (!existsSync(configPath)) return { exists: false, declared: false, roots: [] };
-  const lines = readFileSync(configPath, "utf8").split("\n");
-  const start = lines.findIndex((l) => /^source_roots:/.test(l));
-  if (start === -1) return { exists: true, declared: false, roots: [] };
-  const roots = [];
-  let cur = null;
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^\S/.test(line)) break;                     // dedent to a new top-level key → block done
-    const trimmed = line.trim();
-    if (trimmed === "" || trimmed.startsWith("#")) continue;
-    const unq = (v) => v.split("#")[0].trim().replace(/^["'](.*)["']$/, "$1");
-    let m;
-    if ((m = trimmed.match(/^-\s*path:\s*(.+)$/))) { cur = { path: unq(m[1]), check: "" }; roots.push(cur); }
-    else if ((m = trimmed.match(/^path:\s*(.+)$/)))  { cur = { path: unq(m[1]), check: "" }; roots.push(cur); }
-    else if ((m = trimmed.match(/^check:\s*(.+)$/)) && cur) { cur.check = unq(m[1]); }
-  }
-  return { declared: true, roots };
-}
+// The `source_roots:` parser and the REPLACE-ME sentinel used to live here, privately. They now
+// live in `source-roots.mjs` (flow-0077), because the gate matrix reads the same block and two
+// parsers of one block drift — with the drifted copy being whichever one nobody is testing. The
+// rules this file applies to what the parser returns are unaltered.
+//
+// WHY THE IMPORT IS OPTIONAL rather than a plain static `import`. `.flow/bin` is copied into a
+// consuming repo by `flow-sync`, and the partial-sync state — flow-doctor.mjs present,
+// source-roots.mjs not yet — is real enough that `_flow-gates.yml` has a step whose whole job is
+// to name it. A static import turns that state into `ERR_MODULE_NOT_FOUND` before flow-doctor
+// checks anything, so a repo mid-sync would lose the store validation too, with a stack trace in
+// place of a diagnosis. Loaded this way it is one NOTE and every other check still runs — the
+// same posture flow-doctor already takes for a check whose precondition is not met. There is
+// still exactly one parser: absent the module there is no fallback scan, only a skip.
+const sourceRootsMod = await import("./source-roots.mjs").then((m) => m, () => null);
 
 // Does any directory at or beneath `dir` (bounded depth, ignoring junk) hold a source file?
 function containsSource(dir, depth = 0) {
@@ -714,16 +695,21 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
   // undeclared top-level source tree may exist. Graceful adoption: a repo that hasn't declared
   // source_roots yet only gets a warning (so dropping this check into an existing project
   // doesn't fail its gate before it's calibrated).
-  const { exists: configExists, declared, roots } = parseSourceRoots(join(flowDir, "config.yml"));
-  if (configExists && !declared) {
+  const { exists: configExists, declared, roots } = sourceRootsMod
+    ? sourceRootsMod.parseSourceRoots(join(flowDir, "config.yml"))
+    : { exists: false, declared: false, roots: [] };
+  if (!sourceRootsMod) {
+    notes.push("gate-coverage floor skipped — source-roots.mjs is not present beside flow-doctor.mjs; " +
+      "run flow-sync to pick up the rest of .flow/bin/");
+  } else if (configExists && !declared) {
     warnings.push("no source_roots declared in config.yml — gate coverage is unverified; " +
       "declare each source tree + the check that parses it (see config.yml note).");
   } else if (declared) {
     for (const r of roots) {
       if (!r.path) { problems.push("source_root with no path in config.yml"); continue; }
-      if (isPlaceholder(r.path) || isPlaceholder(r.check)) {
+      if (sourceRootsMod.isPlaceholder(r.path) || sourceRootsMod.isPlaceholder(r.check)) {
         warnings.push(`source_root "${r.path}" is uncalibrated — it still holds the shipped ` +
-          `"${PLACEHOLDER}" placeholder; calibrate it (INIT.md step 2, or \`flow-init\`) before ` +
+          `"${sourceRootsMod.PLACEHOLDER}" placeholder; calibrate it (INIT.md step 2, or \`flow-init\`) before ` +
           "relying on the gate-coverage floor.");
         continue;
       }
@@ -731,7 +717,7 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
       if (!existsSync(join(repoRoot, r.path))) problems.push(`source_root "${r.path}" does not exist on disk — stale declaration`);
     }
     for (const dir of topLevelSourceDirs(repoRoot)) {
-      if (!roots.some((r) => r.path && !isPlaceholder(r.path) && rootCovers(r.path, dir))) {
+      if (!roots.some((r) => r.path && !sourceRootsMod.isPlaceholder(r.path) && rootCovers(r.path, dir))) {
         problems.push(`source tree "${dir}/" is not covered by any source_root — declare it (with a check) ` +
           `or it's never parsed before production. If it shouldn't be gated, add it to ROOT_IGNORE.`);
       }

@@ -495,6 +495,7 @@ test("checkWorkflows parses every workflow in canonical, including the five new 
 const WORKFLOW_INVOKED_ADAPTERS = [
   "flow-doctor.mjs", "apply-board-edits.mjs", "touches-guard.mjs", "parse-task-id.mjs",
   "flow-review.mjs", "pick-task.mjs", "flow-recover.mjs", "flow-open-pr.mjs",
+  "source-roots.mjs",
 ];
 
 test("every .flow/bin/<helper>.mjs a workflow canonical CALLS invokes by path exists here", () => {
@@ -659,4 +660,94 @@ test("the classify CLI honours --pr-state-known end to end", () => {
     "reset-to-ready");
   assert.equal(run("flow-recover.mjs", [...args, "--pr-state-known", "0"]).stdout.trim(), "ok",
     "an unknown PR state must never reach the destructive branch");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// source-roots (flow-0077) — the sixth adapter, and the one whose correct answer is silence
+// ─────────────────────────────────────────────────────────────────────────────────────────
+//
+// `_flow-gates.yml` invokes `.flow/bin/source-roots.mjs plan` in the consuming repo, canonical
+// included. Canonical's plan is EMPTY by design: all four of its source_roots declare
+// `npm run lint` or `npm run build`, which the `gate` job already runs, so every entry is
+// excluded as already covered.
+//
+// That makes this adapter the sharpest case of the hazard the whole file is about. `count=0` is
+// the correct output here — and it is also exactly what a broken adapter produces. A copy or a
+// symlink resolves `project-template/` as the root, reads the template's REPLACE-ME config,
+// excludes its one uncalibrated entry and prints `count=0`, exit 0. Identical output, wrong repo.
+// So nothing below asserts on the count alone: every test asserts on WHICH entries were
+// excluded and WHY, which is the only thing that differs between the two.
+
+import { lstatSync } from "node:fs";
+import {
+  canonicalConfigPath as srConfigPath, canonicalRepoRoot as srRepoRoot, planSourceRoots as srPlan,
+} from "./source-roots.mjs";
+
+test("the source-roots adapter resolves CANONICAL's root and config, not the template's", () => {
+  assert.equal(srRepoRoot(), REPO, "the adapter must plan canonical's tree");
+  assert.equal(srConfigPath(), join(FLOW, "config.yml"));
+  assert.notEqual(srConfigPath(), join(TEMPLATE_FLOW, "config.yml"),
+    "the template's config is the uncalibrated REPLACE-ME one; planning it would exit 0 having " +
+    "read the wrong repo");
+});
+
+test("source-roots.mjs is an ADAPTER — not a symlink, and not a copy of the template's logic", () => {
+  const file = join(BIN, "source-roots.mjs");
+  assert.ok(!lstatSync(file).isSymbolicLink(),
+    "a symlink resolves its realpath into project-template/, so `plan` would read the fixture " +
+    "config and still exit 0 — the exact failure this repo's CLAUDE.md names");
+  const src = readFileSync(file, "utf8");
+  assert.match(src, /from "\.\.\/\.\.\/project-template\/\.flow\/bin\/source-roots\.mjs"/,
+    "the adapter must import the template's logic — one implementation, not two");
+  assert.ok(!/function parseSourceRoots\s*\(/.test(src),
+    "a re-implemented parser here is the drift this task exists to remove");
+  assert.ok(!/function planSourceRoots\s*\(/.test(src) && !/function runCheck\s*\(/.test(src),
+    "only the CLI shell and the store location belong in an adapter");
+});
+
+test("source-roots plan against canonical: count 0 because all four entries are ALREADY GATED", () => {
+  const { matrix, count, excluded, errors } = srPlan({ configPath: srConfigPath(), repoRoot: srRepoRoot() });
+  assert.deepEqual(errors, [], "canonical's own config must satisfy the schema it publishes");
+  assert.deepEqual(matrix, []);
+  assert.equal(count, 0);
+  // The assertion that tells the two zeroes apart.
+  assert.deepEqual(excluded.map((x) => x.path).sort(),
+    [".flow/bin/", ".github/workflows/", "flightdeck/", "project-template/.flow/bin/"],
+    "these are canonical's four declared trees; seeing REPLACE-ME here means the template's " +
+    "config was read instead");
+  for (const x of excluded) {
+    assert.equal(x.reason, "covered by the primary gate",
+      `${x.path} was excluded as "${x.reason}" — canonical's entries are all primary commands, ` +
+      "so anything else means the commands block was not read");
+  }
+});
+
+test("the source-roots CLI block actually runs — silence here is the symlink failure mode", () => {
+  const r = run("source-roots.mjs", ["plan"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^count=0$/m, "the CLI must emit the count, not merely exit 0");
+  assert.match(r.stdout, /^matrix=\{"include":\[\]\}$/m);
+  assert.match(r.stderr, /skipping "\.github\/workflows\/" — covered by the primary gate/,
+    "the exclusions must name canonical's own trees; a copy or symlink would name REPLACE-ME");
+  assert.doesNotMatch(r.stderr, /REPLACE-ME/, "reading the template's fixture config is the bug");
+});
+
+test("the source-roots CLI's `run` subcommand runs a check and honours its retry", () => {
+  const ok = run("source-roots.mjs", ["run"], { FLOW_SOURCE_ROOT_CHECK: "exit 0" });
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /attempt 1\/1 succeeded/);
+
+  const bad = run("source-roots.mjs", ["run"],
+    { FLOW_SOURCE_ROOT_CHECK: "exit 3", FLOW_SOURCE_ROOT_RETRY: "1" });
+  assert.equal(bad.status, 3, "the process must exit with the check's own status, not a flattened 1");
+  assert.match(bad.stdout, /attempt 2\/2 failed \(exit 3\)/,
+    "both attempts must be visible — a retry that hides the flake is the flake with the evidence removed");
+});
+
+test("_flow-gates.yml invokes the adapter by the path it is published at", () => {
+  const src = readFileSync(join(WORKFLOWS, "_flow-gates.yml"), "utf8");
+  assert.match(src, /node \.flow\/bin\/source-roots\.mjs plan/);
+  assert.match(src, /node \.flow\/bin\/source-roots\.mjs run/);
+  assert.ok(WORKFLOW_INVOKED_ADAPTERS.includes("source-roots.mjs"),
+    "the hand-kept list must name it too, so its absence would be caught twice");
 });
