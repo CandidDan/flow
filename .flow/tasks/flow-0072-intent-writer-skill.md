@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0072"
 title: "intent-writer skill: interview a human into an intent, open the PR, stop"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0072"
 created: "2026-09-24"
-started: ""
+started: "2026-09-25T12:30:03Z"
 branch: ""
 pr: ""
 issue: ""
