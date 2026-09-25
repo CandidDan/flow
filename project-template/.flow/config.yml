@@ -47,12 +47,34 @@ coverage_min: 80
 # it ratchets like coverage_min — widen it as the repo grows, the drift check keeps it honest.
 # Single-stack repos just declare one root. If a tree genuinely shouldn't be gated, add it to
 # flow-doctor's ROOT_IGNORE rather than leaving it silently uncovered.
+#
+# Since Flow 2.x the gate also RUNS these checks. `_flow-gates.yml` plans a job per entry whose
+# `check` is not already one of the four `commands.*` above — those the `gate` job runs anyway, so
+# re-running them would only burn CI minutes. A single-stack repo whose one root is `npm run lint`
+# therefore plans nothing and sees a skipped job, which is correct. Adding a gated tree is now an
+# edit to THIS FILE, which a worker can push; it no longer means editing `.github/workflows/`,
+# which needs a Workflows: Write credential most workers do not have.
+#
+# Three OPTIONAL per-entry fields, each with a default, all ignored by flow-doctor:
+#   runtime:  node (default) | deno | none.  `none` runs no setup step — use it when the check
+#             provisions its own toolchain (a `uv sync`, a container, a `bundle install`).
+#   version:  the runtime version to install. Defaults to "22" for node and "v2.x" for deno;
+#             ignored entirely for `none`.
+#   retry:    0 (default) to 3. The check is attempted `1 + retry` times and the log names the
+#             attempt that succeeded. It is for a genuinely flaky EXTERNAL dependency (a remote
+#             module loader, a package registry) — the cap is deliberate, so a check that is
+#             simply broken cannot pass as merely flaky.
+# Any other field is a hard error naming the entry and the field, rather than a silent no-op.
+# The check runs from the repo root exactly as written, the same convention `commands.*` uses, so
+# install steps belong inside it: `check: "cd mcp && npm ci && npm run build"`.
 source_roots:
   - path: "REPLACE-ME/"         # e.g. "app/"                 → the primary app
     check: "REPLACE-ME"         #      "npm run lint"         → a command that PARSES this tree
   # Add one block per additional runtime/source root, e.g. for a polyglot repo:
   # - path: "supabase/functions/"
   #   check: "deno check supabase/functions/**/*.ts"
+  #   runtime: "deno"           # installs Deno instead of Node before running the check
+  #   retry: 1                  # one retry, for a flaky remote-module fetch
 
 # Security expectations the security review check enforces on top of its general review.
 # List anything stack- or project-specific that has bitten you before.
