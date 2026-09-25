@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0076"
 title: "flow-sync keeps a customised caller instead of silently deleting its extra jobs"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-code-worker"
 created: "2026-09-24"
-started: ""
+started: "2026-09-25T00:48:41Z"
 branch: ""
 pr: ""
 issue: "https://github.com/CandidDan/flow/issues/34"
