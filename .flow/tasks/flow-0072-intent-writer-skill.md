@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0072"
 title: "intent-writer skill: interview a human into an intent, open the PR, stop"
-status: "in_progress"
+status: "blocked"
 priority: 3
 project: "flow"
 owner: "claude-worker-flow-0072"
@@ -11,8 +11,8 @@ started: "2026-09-25T12:30:03Z"
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
-blocked_by: []
+blocked_reason: "Blocked on flow-0073, which is still `ready`. This task builds the intent-writer skill against the intent `_TEMPLATE.md`, and its acceptance criteria name template features flow-0073 has not shipped yet: the `[assumption]` marker, `serves`, `supersedes`, and the Cost of inaction / Constraints / Open questions sections. The template on `main` today (from flow-0063) has none of them, so writing the skill now means guessing the shape it must obey. The task notes settle this in advance: if flow-0063 or flow-0073 is not `done`, block with `blocked_by` naming whichever is outstanding rather than guessing. flow-0063 is `done`; flow-0073 is not. Unblocks mechanically when flow-0073 merges."
+blocked_by: ["flow-0073"]
 serves: ["G11"]
 touches:
   - "project-template/.claude/skills/intent-writer/**"
@@ -28,6 +28,7 @@ notes:
   - "2026-09-24 (orchestrator): DECIDED: FILE NAMING AND id. Follow whatever flow-0063's template and `docs/adr/0007-intent-layer.md` specify. If they specify neither, the skill writes `.flow/intents/<slug>.md` with `id` equal to the slug, `status` as the template's initial status, and `source` naming the human interviewed. Intents are on the code plane (`plane-guard` STORE_PREFIX is `.flow/tasks/` only; see flow-0063 notes), so a branch + PR is correct and passes the store-guard."
   - "2026-09-24 (orchestrator): the changelog entry is a fragment, `changes/flow-0072.md` (flow-0069's convention). Do not edit CHANGELOG.md. The source draft predates flow-0069 and listed CHANGELOG.md in touches."
   - "2026-09-24 (orchestrator): noticed, not in scope: `project-template/README.md` lists only task-writer and board-builder under skills. vision-writer and flow-compass are missing too. Add intent-writer only. Fixing the others is a separate task."
+  - "2026-09-25 (claude-worker-flow-0072): CLAIMED THEN BLOCKED, no branch, no code, nothing pushed beyond this task file. Verified against `main` at 709caf5: flow-0063 is `done`, flow-0073 is `ready`. Read `project-template/.flow/intents/_TEMPLATE.md` to confirm rather than trusting the status field -- it ships `id`, `title`, `status`, `created`, `source`, `approved_by`, `approved_at`, `evidence`, plus Problem and Outcome only. No `serves`, no `supersedes`, no `[assumption]` marker, no Cost of inaction / Constraints / Open questions sections. Four of this task's acceptance criteria depend on those. NEXT ACTION: do nothing here until flow-0073 merges; then a fresh worker re-reads the merged template, clears `blocked_by`, re-claims, and builds the skill against what shipped, not against the shape described in these notes, which is a prediction, not a record."
 ---
 
 ## Context
