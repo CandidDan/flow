@@ -539,10 +539,33 @@ test("the block ends at the next top-level key — a later `security:` is not re
   cleanup(root);
 });
 
-test("the dash-on-its-own-line list form still parses — a `path:` key starts an entry", () => {
+test("the dash-on-its-own-line list form still parses — the bare dash starts the entry", () => {
   const root = repo('source_roots:\n  -\n    path: "app/"\n    check: "x"\n  -\n    path: "mcp/"\n    check: "y"\n');
   const parsed = parseSourceRoots(configOf(root));
   assert.deepEqual(parsed.roots.map((r) => r.path), ["app/", "mcp/"]);
+  cleanup(root);
+});
+
+test("an entry's keys may come in any order — `path:` after another field does not split the entry", () => {
+  // Reviewer's repro on PR #109: `path:` used to start a SECOND entry, so this read as one entry
+  // with no path (a misleading "path is empty") plus one whose runtime fell back to node.
+  const root = repo([
+    'source_roots:',
+    '  - runtime: "deno"',
+    '    path: "supabase/"',
+    '    check: "deno check"',
+    '  -',
+    '    check: "cd mcp && npm run build"',
+    '    path: "mcp/"',
+  ].join("\n"), { dirs: ["supabase", "mcp"] });
+  const parsed = parseSourceRoots(configOf(root));
+  assert.deepEqual(parsed.roots.map((r) => ({ path: r.path, check: r.check, runtime: r.fields.runtime })), [
+    { path: "supabase/", check: "deno check", runtime: "deno" },
+    { path: "mcp/", check: "cd mcp && npm run build", runtime: undefined },
+  ]);
+  const { matrix, errors } = planOf(root);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(matrix.map((e) => [e.path, e.runtime]), [["supabase/", "deno"], ["mcp/", "node"]]);
   cleanup(root);
 });
 

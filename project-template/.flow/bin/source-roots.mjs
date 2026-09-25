@@ -90,9 +90,9 @@ const KEY_RE = /^([A-Za-z_][A-Za-z0-9_-]*):\s*(.+)$/;
  *       runtime: "deno"      # optional
  *
  * Each root carries `path` and `check` (always present, `""` when absent) plus `fields`: the
- * raw key→value map exactly as written, which is what lets `plan` report an unknown key. A
- * leading `-`, or a `path:` key, starts a new entry — the second rule is what makes the
- * dash-on-its-own-line form parse, and it predates this file.
+ * raw key→value map exactly as written, which is what lets `plan` report an unknown key. Only a
+ * leading `-` starts a new entry (a bare `-` on its own line included), so an entry's keys may
+ * come in any order — `path` does not have to be first.
  */
 export function parseSourceRoots(configPath) {
   if (!existsSync(configPath)) return { exists: false, declared: false, roots: [] };
@@ -107,11 +107,13 @@ export function parseSourceRoots(configPath) {
     const trimmed = line.trim();
     if (trimmed === "" || trimmed.startsWith("#")) continue;
     const dash = trimmed.match(/^-\s*(.*)$/);
+    // The dash alone starts an entry — including a bare `-` on its own line, whose keys follow.
+    // A key never does: `- runtime: …` then `path: …` is one entry, whatever order it is written in.
+    if (dash) { cur = { path: "", check: "", fields: {} }; roots.push(cur); }
     const kv = KEY_RE.exec(dash ? dash[1] : trimmed);
     if (!kv) continue;                               // a bare `-`, or something we don't model
     const [, key, rawValue] = kv;
-    if (dash || key === "path") { cur = { path: "", check: "", fields: {} }; roots.push(cur); }
-    else if (!cur) continue;                         // a key before any entry started
+    if (!cur) continue;                              // a key before any entry started
     const value = unquote(rawValue);
     cur.fields[key] = value;
     if (key === "path" || key === "check") cur[key] = value;
