@@ -186,3 +186,85 @@ jobs:
             exit 1
           fi
           grep -E "^${DECISION_PREFIX}" "$DECISION_LOG"
+
+  # ── The declared source_roots that the primary gate does NOT already cover (flow-0077) ──
+  #
+  # `source_roots:` in the caller's .flow/config.yml has always named every tree that holds source
+  # and the command that parses it, but until flow-0077 nothing RAN those checks — flow-doctor only
+  # proved each entry existed. A repo with a second runtime therefore dropped out of the thin-caller
+  # model and hand-wrote a job per tree, which (a) duplicated this file, (b) could not be pushed by
+  # a worker credential, since `.github/workflows/` needs Workflows: Write, and (c) was overwritten
+  # by the next flow-sync. Now it is a .flow/config.yml edit, which any worker can push.
+  #
+  # TWO JOBS, not one: a matrix cannot be computed by the job that uses it. `plan` reads the config
+  # and emits the entries that need their own job; `source-root` fans out over them.
+  source-roots-plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      # A caller that bumped its workflow refs without syncing `.flow/bin/` has flow-gates asking
+      # for a helper it does not have. Node would say ERR_MODULE_NOT_FOUND from a path nobody
+      # recognises; this says which file and what to run. flow-0008's rule applies — an absent
+      # helper is a failure, never a quiet skip, because a skipped plan is an ungated tree.
+      - name: Plan — which declared source_roots need a job of their own
+        id: plan
+        run: |
+          set -euo pipefail
+          if [ ! -f .flow/bin/source-roots.mjs ]; then
+            echo "::error::.flow/bin/source-roots.mjs is missing. This reusable needs it to read"
+            echo "::error::source_roots from .flow/config.yml. Run the flow-sync workflow to pick up"
+            echo "::error::the rest of .flow/bin/, then re-run this check."
+            exit 1
+          fi
+          node .flow/bin/source-roots.mjs plan
+
+  # `if` on the count, so a repo with nothing extra to gate gets a SKIPPED job rather than a red
+  # one — an empty matrix is the correct answer for a single-tree repo, and for canonical itself
+  # (all four of its entries are `npm run lint`/`npm run build`, which the gate job above runs).
+  # fail-fast is off: one broken tree must not cancel the others' verdicts.
+  source-root:
+    needs: source-roots-plan
+    if: needs.source-roots-plan.outputs.count != '0'
+    name: source-root (${{ matrix.path }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.source-roots-plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Runtime setup, chosen by the entry's `runtime`. `none` gets neither step — the check
+      # provisions its own toolchain, which is how a stack Flow does not model still gets gated.
+      - name: Set up Node
+        if: matrix.runtime == 'node'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.version }}
+          cache: ${{ matrix.cache }}
+          cache-dependency-path: ${{ matrix.cache_dependency_path }}
+
+      - name: Set up Deno
+        if: matrix.runtime == 'deno'
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: ${{ matrix.version }}
+
+      # `path` and `check` come from .flow/config.yml, which a PR can edit. Running a
+      # config-supplied command is not new — the gate job above already runs `commands.*`. What
+      # would be new is `${{ matrix.check }}` inside this `run:`, where Actions pastes the value
+      # into the script BEFORE bash sees it, so a crafted check could break out of the quoting and
+      # run something the config never said. Through `env:` the value is data to the shell, and
+      # the helper hands it to one `spawnSync` with the shell it is supposed to have.
+      - name: Run the declared check
+        env:
+          FLOW_SOURCE_ROOT_PATH: ${{ matrix.path }}
+          FLOW_SOURCE_ROOT_CHECK: ${{ matrix.check }}
+          FLOW_SOURCE_ROOT_RETRY: ${{ matrix.retry }}
+        run: node .flow/bin/source-roots.mjs run

@@ -176,6 +176,7 @@ export function planSourceRoots({ configPath, repoRoot = dirname(dirname(configP
 
   roots.forEach((root, i) => {
     const who = label(root, i);
+    const errorsBefore = errors.length;
 
     // Schema first, and for EVERY entry — including ones that are about to be excluded. An
     // unknown key in a placeholder entry is still a typo the author wants to hear about, and
@@ -208,6 +209,11 @@ export function planSourceRoots({ configPath, repoRoot = dirname(dirname(configP
         }
       }
     }
+
+    // An entry whose schema did not validate contributes no matrix row. `plan` is about to exit
+    // non-zero anyway, but a half-built matrix in the return value is a trap for any caller that
+    // reads `matrix` without checking `errors` first.
+    if (errors.length > errorsBefore) return;
 
     if (isPlaceholder(root.path) || isPlaceholder(root.check)) {
       excluded.push({ path: root.path, reason: "uncalibrated" });
