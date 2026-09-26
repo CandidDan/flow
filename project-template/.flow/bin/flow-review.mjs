@@ -230,12 +230,64 @@ export function parseReviewConfig(src) {
 // carried out to the job summary — on diffs that do not. An unconfigured repo runs it every
 // time: the fail-closed direction, because "nobody scoped it yet" must not read as "nothing to
 // review here".
-export function securityDecision({ changedFiles = [], securityPaths = [] } = {}) {
+
+// THE FLOOR (flow-0079). `review.security_paths` is repo-owned config, and this decision is
+// planned from the BASE branch's copy of it precisely so a PR cannot delete the glob that covers
+// its own diff. The floor is the second half of that: a set of paths that warrant a security
+// review whatever `security_paths` says, because they are the paths that decide what the gates
+// do at all — the task store and its tooling, every workflow, the agent config, and the two
+// protocol host files. A repo that scopes `security_paths` tightly to `src/auth/**` is making a
+// reasonable statement about its product code; it is not thereby asking for its CI to be
+// unreviewable. The reason names the floor as the trigger, distinct from a `security_paths`
+// match, so the run summary says WHICH rule fired.
+//
+// Not configurable, deliberately: a floor a repo can lower is not a floor. Widening it belongs
+// in `security_paths`, which is exactly what that key is for.
+//
+// THE TWO HOST FILES ARE COMPOSED, NOT SPELLED. `.flow/bin/protocol-portability.test.mjs` fails
+// any non-test helper whose EXECUTABLE code contains the protocol's Claude-side filename,
+// because a helper that OPENS the protocol by that name re-binds Flow to one vendor — the
+// binding that test exists to keep out. Nothing here opens anything: these are glob patterns in
+// a trigger list, and both host conventions are listed symmetrically, which is that rule holding
+// rather than breaking. Composing the pair is the smallest way to satisfy both without carving a
+// per-file exception into a guard that is otherwise right to be blunt.
+const HOST_FILES = ["CLAUDE", "AGENTS"].map((host) => `${host}.md`);
+
+export const SECURITY_FLOOR_PATHS = Object.freeze([
+  ".flow/**",
+  ".github/**",
+  ".claude/**",
+  ...HOST_FILES,
+]);
+
+export function securityDecision({ changedFiles = [], securityPaths = [], bootstrap = false } = {}) {
   const files = changedFiles.filter(Boolean);
+  const floorRes = SECURITY_FLOOR_PATHS.map(globToRegExp);
+  const floor = files.filter((f) => floorRes.some((r) => r.test(f)));
+
+  // BOOTSTRAP — the base branch carries no review gate to plan from, so this diff is the one
+  // adopting it and the helper deciding is the PR's own. Fail-closed: never skip, and say why.
+  if (bootstrap) {
+    return {
+      run: true,
+      matched: [],
+      floor,
+      bootstrap: true,
+      reason:
+        "BOOTSTRAP — the base branch carries no `.flow/bin/flow-review.mjs` and/or no " +
+        "`.flow/config.yml`, so the review gate was planned from THIS PR's own copy rather than " +
+        "from base. The security review is forced on: a gate that a PR both supplies and scopes " +
+        "must not be allowed to scope itself out. This is expected exactly once, on the PR that " +
+        "adopts the review gate; if you see it on any later PR, the base branch lost its gate.",
+    };
+  }
+
   if (!securityPaths.length) {
     return {
       run: true,
       matched: [],
+      floor,
+      bootstrap: false,
       reason:
         "no `review.security_paths` configured — running the security review on every PR. " +
         "Scope it by listing the paths that warrant one (auth, external input, data access, " +
@@ -244,20 +296,46 @@ export function securityDecision({ changedFiles = [], securityPaths = [] } = {})
   }
   const res = securityPaths.map(globToRegExp);
   const matched = files.filter((f) => res.some((r) => r.test(f)));
+  const list = (fs) => fs.slice(0, 10).join(", ") + (fs.length > 10 ? ` (+${fs.length - 10} more)` : "");
+
+  // The floor is checked BEFORE the configured triggers, and its reason wins, because the two
+  // answers differ in what a human should do about them. "Matched a configured path" invites
+  // tuning `security_paths`; "matched the floor" says there is nothing here to tune.
+  if (floor.length) {
+    return {
+      run: true,
+      matched,
+      floor,
+      bootstrap: false,
+      reason:
+        `SECURITY FLOOR — diff touches ${floor.length} path(s) that always warrant a security ` +
+        `review, whatever \`review.security_paths\` says: ${list(floor)}. The floor is ` +
+        `${SECURITY_FLOOR_PATHS.join(", ")} — the gates, the task store and its tooling, and the ` +
+        `agent protocol. It is not configurable.` +
+        (matched.length
+          ? ` (It also matches ${matched.length} configured security path(s): ${list(matched)}.)`
+          : ""),
+    };
+  }
+
   if (matched.length) {
     return {
       run: true,
       matched,
-      reason: `diff touches ${matched.length} configured security path(s): ${matched.slice(0, 10).join(", ")}` +
-        (matched.length > 10 ? ` (+${matched.length - 10} more)` : ""),
+      floor,
+      bootstrap: false,
+      reason: `diff touches ${matched.length} configured security path(s): ${list(matched)}`,
     };
   }
   return {
     run: false,
     matched: [],
+    floor,
+    bootstrap: false,
     reason:
       `SKIPPED — none of the ${files.length} changed file(s) match the ${securityPaths.length} ` +
-      `configured security trigger path(s): ${securityPaths.join(", ")}. This skip is a decision, ` +
+      `configured security trigger path(s): ${securityPaths.join(", ")}, nor the security floor ` +
+      `(${SECURITY_FLOOR_PATHS.join(", ")}). This skip is a decision, ` +
       `not an omission; widen \`review.security_paths\` in .flow/config.yml if it is wrong.`,
   };
 }
@@ -480,6 +558,15 @@ const emit = (file, text) => { if (file) appendFileSync(file, text.endsWith("\n"
 // its repo root); the environment overrides (FLOW_CONFIG, REVIEW_OUT_DIR, BASE_REF,
 // REVIEW_DIFF_MAX_BYTES) still win over those defaults, because that is the contract
 // `_flow-review.yml` and the tests already rely on.
+//
+// REVIEW_REPO_DIR is flow-0079's addition to that contract, and it exists because the gate is now
+// EXECUTED FROM THE BASE BRANCH while it REASONS ABOUT THE PR. `_flow-review.yml` materialises
+// base's tree in a scratch worktree and runs the helper out of it, so every path an adapter pins
+// from its own realpath — the store, the output directory, and above all the repo its `git` runs
+// in — points at base rather than at the PR. `git` was the one of the four with no env override,
+// and without it canonical's adapter would diff base against itself and hand the reviewers an
+// empty patch: a gate that passes having read nothing. It overrides an adapter's pinned `git`
+// for exactly that reason, which is why it is the one override that beats an explicit `opts.git`.
 export function runReviewCli(argv, {
   env = process.env,
   configPath = ".flow/config.yml",
@@ -488,6 +575,10 @@ export function runReviewCli(argv, {
   git,
 } = {}) {
   const [cmd, ...rest] = argv;
+  const repoDir = env.REVIEW_REPO_DIR || "";
+  const gitFor = repoDir
+    ? (args) => execFileSync("git", args, { cwd: repoDir, encoding: "utf8", maxBuffer: 1024 * 1024 * 64 })
+    : git;
   try {
     if (cmd === "plan") {
       const plan = runPlan({
@@ -504,7 +595,10 @@ export function runReviewCli(argv, {
         callerSupplied: Boolean(env.HEAD_REF || env.PR_TITLE),
         prTitle: env.PR_TITLE || "",
         tasksDir: env.REVIEW_TASKS_DIR || tasksDir,
-        ...(git ? { git } : {}),
+        // Set by `_flow-review.yml` when the base branch carried no gate to plan from. It is a
+        // workflow-owned fact — the PR cannot set it, because the PR does not write the env.
+        bootstrap: Boolean(env.REVIEW_BOOTSTRAP),
+        ...(gitFor ? { git: gitFor } : {}),
       });
       const { cfg, changedFiles, security, diff, task } = plan;
       emit(env.GITHUB_OUTPUT, [
@@ -516,6 +610,7 @@ export function runReviewCli(argv, {
         `diff_truncated=${diff.truncated}`,
         `task_id=${task.id ?? ""}`,
         `task_found=${task.found}`,
+        `bootstrap=${Boolean(plan.bootstrap)}`,
       ].join("\n"));
       const summary = planSummary(plan);
       emit(env.GITHUB_STEP_SUMMARY, summary);
@@ -559,6 +654,7 @@ export function runPlan({
   headRef = process.env.HEAD_REF || "",
   prTitle = process.env.PR_TITLE || "",
   callerSupplied,
+  bootstrap = false,
   tasksDir = DEFAULT_TASKS_DIR,
   git = (args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 1024 * 1024 * 64 }),
   read = (p) => readFileSync(p, "utf8"),
@@ -571,7 +667,7 @@ export function runPlan({
   const cfg = parseReviewConfig(read(configPath));
   const changedFiles = git(["diff", "--name-only", `${baseRef}...HEAD`])
     .split("\n").map((s) => s.trim()).filter(Boolean);
-  const security = securityDecision({ changedFiles, securityPaths: cfg.securityPaths });
+  const security = securityDecision({ changedFiles, securityPaths: cfg.securityPaths, bootstrap });
   const diff = boundDiff(git(["diff", `${baseRef}...HEAD`]), { maxBytes });
   const task = taskContext({
     headRef, prTitle, tasksDir, ls, read,
@@ -583,10 +679,10 @@ export function runPlan({
   writeFileSync(join(outDir, "diff.patch"), diff.text);
   writeFileSync(join(outDir, "task.md"), task.text);
 
-  return { cfg, changedFiles, security, diff, task, outDir };
+  return { cfg, changedFiles, security, diff, task, outDir, bootstrap: Boolean(bootstrap) };
 }
 
-function planSummary({ cfg, changedFiles, security, diff, task }) {
+export function planSummary({ cfg, changedFiles, security, diff, task, bootstrap = false }) {
   const out = [
     "### Flow review gate — plan",
     "",
@@ -600,6 +696,19 @@ function planSummary({ cfg, changedFiles, security, diff, task }) {
       : `- task under review: **none resolved** — ${task.reason}`,
   ];
   for (const w of cfg.warnings) out.push(`- :warning: ${w}`);
+  // The bootstrap warning is last so it is the line a reader ends on, and it is phrased as a
+  // warning rather than an error because the case is legitimate exactly once. What must never
+  // happen is that it passes silently: the gate that decided this run came from the diff it was
+  // deciding about, and a human has to know that before reading the verdicts below it.
+  if (bootstrap) {
+    out.push(
+      "- :warning: **BOOTSTRAP — the review gate was planned from THIS PR, not from the base " +
+      "branch.** The base branch carries no `.flow/bin/flow-review.mjs` and/or no " +
+      "`.flow/config.yml`, so there was no independent copy to plan from. The security review is " +
+      "forced on, and the plan and verdict code you are trusting is the code in this diff. " +
+      "Expected on the PR that adopts the review gate, and on no other.",
+    );
+  }
   return out.join("\n");
 }
 

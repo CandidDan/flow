@@ -31,6 +31,17 @@ const QUEUE_RUNNER = join(REPO, ".github/workflows/_flow-queue-runner.yml");
 const reusableSrc = readFileSync(REUSABLE, "utf8");
 const wf = yamlMod ? yamlMod.parse(reusableSrc) : { jobs: {} };
 const REVIEW_JOBS = ["qa", "code-review", "security"];
+const HELPER_JOBS = ["plan", ...REVIEW_JOBS];
+
+// flow-0079: the helper is no longer invoked by its path in the checkout. `$FLOW_REVIEW_DIR` is
+// written to $GITHUB_ENV by the materialise step and points at the BASE branch's copy — so these
+// are what "a plan invocation" and "a verdict invocation" now look like.
+const PLAN_RUN = /node "\$FLOW_REVIEW_DIR"\/flow-review\.mjs plan\b/;
+const VERDICT_RUN = /node "\$FLOW_REVIEW_DIR"\/flow-review\.mjs verdict\b/;
+const stepsOf = (job) => wf.jobs[job]?.steps ?? [];
+const allSteps = () => Object.values(wf.jobs ?? {}).flatMap((j) => j.steps ?? []);
+const materialiseStep = (job) =>
+  stepsOf(job).find((s) => /Materialise the review gate from the BASE branch/.test(String(s.name ?? "")));
 
 // Every `uses: anthropics/claude-code-action@…` step in a job — the reviewer invocation itself.
 const reviewerSteps = (job) =>
@@ -80,8 +91,7 @@ test("the caller is a thin, pinned reference that passes the token by name", { s
 
 test("each reviewer's verdict is enforced by the helper, and enforced even if it died", { skip }, () => {
   for (const job of REVIEW_JOBS) {
-    const enforce = (wf.jobs[job].steps ?? []).filter((s) =>
-      String(s.run ?? "").includes("flow-review.mjs verdict"));
+    const enforce = stepsOf(job).filter((s) => VERDICT_RUN.test(String(s.run ?? "")));
     assert.equal(enforce.length, 1, `${job} must enforce exactly one verdict`);
     assert.match(String(enforce[0].run), new RegExp(`--check ${job}\\b`));
     assert.match(String(enforce[0].if ?? ""), /always\(\)/,
@@ -218,9 +228,7 @@ test("the fork fence sits on `plan` and nowhere else — so it suppresses all fo
 });
 
 test("every `plan` invocation is handed BOTH id sources, as env, never as shell text", { skip }, () => {
-  const planSteps = Object.values(wf.jobs ?? {})
-    .flatMap((j) => j.steps ?? [])
-    .filter((s) => String(s.run ?? "").includes("flow-review.mjs plan"));
+  const planSteps = allSteps().filter((s) => PLAN_RUN.test(String(s.run ?? "")));
   assert.equal(planSteps.length, 4,
     "the plan job plus one bounded-context step per reviewer — each materialises its own context");
   for (const s of planSteps) {
@@ -273,8 +281,7 @@ test("every reviewer reads the MATERIALISED task, not a prose instruction to go 
 
 test("every reviewer is handed a materialised, bounded context", { skip }, () => {
   for (const job of REVIEW_JOBS) {
-    const plan = (wf.jobs[job].steps ?? []).filter((s) =>
-      String(s.run ?? "").includes("flow-review.mjs plan"));
+    const plan = stepsOf(job).filter((s) => PLAN_RUN.test(String(s.run ?? "")));
     assert.equal(plan.length, 1, `${job} must materialise .flow-review/ before the reviewer runs`);
   }
   for (const p of prompts()) {
@@ -338,4 +345,81 @@ test("the inherited Definition-of-Done block every future task carries is update
       `worker to review its own work`);
   }
   assert.match(dod, /checks on the PR/);
+});
+
+// ── flow-0079: the gate that decides comes from BASE, the thing decided about comes from the PR ──
+// `plan` used to run `.flow/bin/flow-review.mjs` out of the PR checkout against `.flow/config.yml`
+// in that same checkout, so the diff being reviewed owned both the trigger list and the `verdict`
+// code that turns a reviewer's words into a red check. These are structural properties of the
+// workflow — the helper cannot test where it was invoked from — so they are pinned here.
+
+test("no step invokes the helper from the PR checkout — every call goes through the base copy", { skip }, () => {
+  for (const s of allSteps()) {
+    const run = String(s.run ?? "");
+    assert.doesNotMatch(run, /node\s+(?:"?\$GITHUB_WORKSPACE\/)?\.flow\/bin\/flow-review\.mjs/,
+      `a step runs the helper from the checkout: ${String(s.name ?? run).slice(0, 60)}. That copy ` +
+      `is part of the diff under review, so a PR editing \`verdict\` decides its own check.`);
+  }
+  const invocations = allSteps().filter((s) =>
+    PLAN_RUN.test(String(s.run ?? "")) || VERDICT_RUN.test(String(s.run ?? "")));
+  assert.equal(invocations.length, 7,
+    "four plans (the plan job plus one bounded context per reviewer) and three verdicts");
+});
+
+test("every job that runs the helper materialises the BASE branch first", { skip }, () => {
+  for (const job of HELPER_JOBS) {
+    const steps = stepsOf(job);
+    const mat = steps.findIndex((s) => s === materialiseStep(job));
+    assert.ok(mat >= 0, `${job} must materialise the base gate before it runs anything`);
+    const firstUse = steps.findIndex((s) =>
+      PLAN_RUN.test(String(s.run ?? "")) || VERDICT_RUN.test(String(s.run ?? "")));
+    assert.ok(firstUse > mat,
+      `${job} uses $FLOW_REVIEW_DIR before the step that sets it — the var would be empty`);
+  }
+});
+
+test("the materialised helper and config are the BASE branch's, in a scratch tree outside the checkout", { skip }, () => {
+  for (const job of HELPER_JOBS) {
+    const run = String(materialiseStep(job).run);
+    assert.match(run, /base_dir="\$RUNNER_TEMP\/flow-review-base"/,
+      `${job} must materialise base outside the working tree — a copy inside it is part of the diff`);
+    assert.match(run, /git worktree add -q --detach "\$base_dir" "origin\/\$BASE_BRANCH"/,
+      "a worktree, not a single-file `git show`: the helper imports touches-guard.mjs and " +
+      "parse-task-id.mjs, and in canonical it is an adapter over project-template/.flow/bin/");
+    assert.match(run, /FLOW_REVIEW_DIR=\$base_dir\/\.flow\/bin"/,
+      `${job} must invoke BASE's helper — this is the criterion: not the checkout's copy`);
+    assert.match(run, /FLOW_CONFIG=\$base_dir\/\.flow\/config\.yml/,
+      "and read BASE's security_paths, so a PR cannot delete the glob covering its own diff");
+
+    // …while everything the gate REASONS ABOUT still comes from the PR.
+    assert.match(run, /REVIEW_REPO_DIR=\$GITHUB_WORKSPACE/,
+      "the diff must still be the PR's. Without this an adapter pinned to its own realpath " +
+      "diffs base against itself and hands three reviewers an empty patch");
+    assert.match(run, /REVIEW_OUT_DIR=\$GITHUB_WORKSPACE\/\.flow-review/,
+      "the bounded context has to land where the reviewer prompts say it is");
+    assert.match(run, /REVIEW_TASKS_DIR=\$GITHUB_WORKSPACE\/\.flow\/tasks/);
+
+    assert.equal(materialiseStep(job).env?.BASE_BRANCH, "${{ github.base_ref }}",
+      "the ref name reaches the shell through env, never ${{ }} — same rule as the PR title");
+  }
+});
+
+test("a base branch with no gate BOOTSTRAPS: the PR's helper, forced security, a visible warning", { skip }, () => {
+  for (const job of HELPER_JOBS) {
+    const run = String(materialiseStep(job).run);
+    assert.match(run, /git cat-file -e "origin\/\$BASE_BRANCH:\.flow\/bin\/flow-review\.mjs"/,
+      "the bootstrap case is DETECTED, not assumed — a repo adopting the gate in this very PR");
+    assert.match(run, /elif \[ -f \.flow\/bin\/flow-review\.mjs \]; then/);
+    assert.match(run, /FLOW_REVIEW_DIR=\$GITHUB_WORKSPACE\/\.flow\/bin"/,
+      "bootstrap falls back to the PR's copy — fail-closed, never a skipped check");
+    assert.match(run, /REVIEW_BOOTSTRAP=1/,
+      "which is what makes the helper force the security review on (see flow-review.test.mjs)");
+    assert.match(run, /BOOTSTRAP[\s\S]*>> "\$GITHUB_STEP_SUMMARY"/,
+      "and the human is told, in the run summary, that the gate came from the diff it graded");
+    // The pre-existing failure mode must survive the new branch: no gate anywhere is an ERROR.
+    assert.match(run, /::error::\.flow\/bin\/flow-review\.mjs is missing/,
+      "a repo that bumped the workflow tag without running flow-sync must still be told so, " +
+      "rather than dying on `node: not found`");
+    assert.match(run, /exit 1/, "…and the job must fail, not carry on with an unset helper path");
+  }
 });
