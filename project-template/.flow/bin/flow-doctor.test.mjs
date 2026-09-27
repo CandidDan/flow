@@ -1,11 +1,11 @@
 // Tests for flow-doctor — the store validator validates itself.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync, readFileSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runDoctor, compareVersions, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, intentFindings, evidenceShape, INTENT_REQUIRED } from "./flow-doctor.mjs";
+import { runDoctor, compareVersions, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES } from "./flow-doctor.mjs";
 
 // The vision every fixture gets unless it asks for none: two live goals, one non-goal, one
 // retired goal. Written in the shape flow-doctor's line regex reads, deliberately mixing the
@@ -73,8 +73,12 @@ function fixture(files, { dirs = ["src"], vision = VISION, intents = {} } = {}) 
 }
 
 // An intent file in the shape `.flow/intents/_TEMPLATE.md` ships.
-//   omit      field names to leave out entirely (undefined, not empty) — the missing-field case
-//   evidence  raw YAML for the value; null omits the key altogether
+//   omit        field names to leave out entirely (undefined, not empty) — the missing-field case
+//   evidence    raw YAML for the value; null omits the key altogether
+//   serves      raw YAML for the value; omitted entirely when not given, which is the shape of
+//               every intent written before flow-0073 added the field
+//   supersedes  the id this intent replaces; omitted entirely when not given
+//   body        extra Markdown appended after the Outcome section
 const intent = (id, f = {}) => {
   const fields = {
     id: `"${id}"`,
@@ -85,10 +89,12 @@ const intent = (id, f = {}) => {
     approved_by: `"${f.approved_by ?? ""}"`,
     approved_at: `"${f.approved_at ?? ""}"`,
   };
+  if (f.serves !== undefined) fields.serves = f.serves;
+  if (f.supersedes !== undefined) fields.supersedes = `"${f.supersedes}"`;
   for (const k of f.omit ?? []) delete fields[k];
   const lines = Object.entries(fields).map(([k, v]) => `${k}: ${v}`);
   if (f.evidence !== null) lines.push(`evidence: ${f.evidence ?? "[]"}`);
-  return `---\n${lines.join("\n")}\n---\n\n## Problem\n\nTheir words.\n\n## Outcome\n\nWhat changes for them.\n`;
+  return `---\n${lines.join("\n")}\n---\n\n## Problem\n\nTheir words.\n\n## Outcome\n\nWhat changes for them.\n${f.body ?? ""}`;
 };
 // Removes the whole fixture repo, not just the `.flow` inside it.
 const cleanup = (flowDir) => rmSync(dirname(flowDir), { recursive: true, force: true });
@@ -1277,3 +1283,249 @@ test("the intent _TEMPLATE.md's Outcome guidance is about the person, not the ar
   assert.match(outcome, /"A dashboard exists" is not an outcome/);
   assert.doesNotMatch(text, /^## Success/m, "the section is Outcome, not Success");
 });
+
+// ── the intent template, part 2 (flow-0073) ──
+// flow-0063 shipped the store, the template and a shape-only checker. This slice adds the four
+// things the interview skill needs to write into — `serves`, `supersedes`, the stated `status`
+// vocabulary and the `[assumption]` marker — plus the three sections that hold the interview's
+// answers. Every new CHECK below is a warning, because the intent layer still has no teeth
+// (ADR-0007); what is proved here is that each one FIRES and that none of them fails the gate.
+
+// The published intent template, and — in canonical only — the copy canonical authors its own
+// intents from. Read once: several assertions below are about the same bytes.
+const INTENT_TEMPLATE_PATH = join(import.meta.dirname, "..", "intents", "_TEMPLATE.md");
+const INTENT_TEMPLATE = readFileSync(INTENT_TEMPLATE_PATH, "utf8");
+const INTENT_TEMPLATE_HEAD = INTENT_TEMPLATE.slice(3, INTENT_TEMPLATE.indexOf("\n---", 3));
+// The shipped worked example. An adopting repo is told it may delete it, so every assertion
+// about it is skipped rather than failed when it is not there.
+const EXAMPLE_PATH = join(import.meta.dirname, "..", "intents", "newsletter-send-cadence.md");
+const haveExample = existsSync(EXAMPLE_PATH);
+
+// A section of a Markdown file, from its `## Heading` to the next one.
+function mdSection(text, heading) {
+  const start = text.indexOf(`\n## ${heading}`);
+  if (start === -1) return "";
+  const rest = text.slice(start + 1);
+  const next = rest.indexOf("\n## ", 1);
+  return next === -1 ? rest : rest.slice(0, next);
+}
+
+test("criterion 1: both shipped intent templates declare `serves: []` and `supersedes: \"\"`, and are byte-identical", () => {
+  // Proved through both readers, for the same reason flow-0063 did it: the YAML parser says the
+  // frontmatter is well-formed, and flow-doctor's dependency-free scan says the SHAPE is the one
+  // the checker can actually see. A `serves` the checker reads as empty is a check gone quiet.
+  if (yamlParse) {
+    const parsed = yamlParse(INTENT_TEMPLATE_HEAD);
+    assert.deepEqual(parsed.serves, [], "`serves` must ship as an empty list, not a plausible id");
+    assert.equal(parsed.supersedes, "", "`supersedes` must ship as an empty string");
+  }
+  const servesLine = INTENT_TEMPLATE_HEAD.split("\n").find((l) => l.startsWith("serves:"));
+  assert.ok(servesLine, "no `serves:` line at column 0 of the intent template's frontmatter");
+  assert.equal(servesLine.replace(/^serves:\s*/, "").split("#")[0].trim(), "[]");
+  const supersedesLine = INTENT_TEMPLATE_HEAD.split("\n").find((l) => l.startsWith("supersedes:"));
+  assert.ok(supersedesLine, "no `supersedes:` line at column 0 of the intent template's frontmatter");
+  assert.equal(supersedesLine.replace(/^supersedes:\s*/, "").split("#")[0].trim(), '""');
+
+  // The byte-identity half. Canonical is the only checkout that HAS two copies; everywhere else
+  // there is one file and nothing to compare. (The same pairing is asserted independently by
+  // "canonical's own .flow/intents/_TEMPLATE.md is byte-identical to the published one" above —
+  // stated twice on purpose, because this criterion is about the two fields AND the identity.)
+  if (inCanonical) {
+    const own = readFileSync(join(canonicalRoot, ".flow", "intents", "_TEMPLATE.md"), "utf8");
+    assert.equal(own, INTENT_TEMPLATE, "canonical's intent template has drifted from the published one");
+  }
+});
+
+test("criterion 2: the template documents the [assumption] marker, the three statuses, and the three new sections", () => {
+  assert.match(INTENT_TEMPLATE, /\[assumption\]/,
+    "the template never names the marker, so a hand-written intent and a skill-written one will not look alike");
+  assert.match(INTENT_TEMPLATE, /never reports these lines|flow-doctor never reports/i,
+    "the template does not say the marker is never reported — an author who thinks it will nag stops marking");
+  assert.match(INTENT_TEMPLATE, /except `## Problem`|Problem.{0,80}only the human's words/s,
+    "the template does not state that Problem holds only the human's words and never an assumption");
+
+  // The vocabulary, read out of the checker rather than retyped, so the guidance cannot describe
+  // a set the code does not enforce.
+  for (const v of INTENT_STATUSES)
+    assert.ok(INTENT_TEMPLATE_HEAD.includes(v), `the template's status guidance omits "${v}"`);
+
+  for (const heading of ["Cost of inaction", "Constraints", "Open questions"])
+    assert.ok(mdSection(INTENT_TEMPLATE, heading), `the template has no "## ${heading}" section`);
+
+  const open = mdSection(INTENT_TEMPLATE, "Open questions").replace(/\s+/g, " ");
+  assert.match(open, /[Ss]urface them; never resolve them|never resolved/,
+    "the Open questions guidance does not say questions are surfaced, never resolved");
+  assert.match(open, /empty section/i,
+    "the Open questions guidance does not say an empty section is a claim that nothing is uncertain");
+});
+
+test("criterion 3: the worked example is clean under flow-doctor, and carries an assumption and an open question",
+  { skip: haveExample ? false : "the shipped example intent has been removed from this repo" }, () => {
+    const text = readFileSync(EXAMPLE_PATH, "utf8");
+    assert.ok(/^\s*(?:[-*]\s+)?\[assumption\]/m.test(text),
+      "the worked example carries no `[assumption]` line — the marker is documented and never demonstrated");
+    assert.ok(mdSection(text, "Open questions").split("\n").some((l) => /^\s*[-*]\s+\S/.test(l)),
+      "the worked example's Open questions section holds no question");
+    assert.match(text, /^status: "proposed"$/m, "the worked example must ship at the status every intent starts at");
+
+    // Run the real doctor over the repo this file ships in — in canonical that is the template
+    // repo, whose VISION.md declares the G1 the example serves. Filtered to the example's own
+    // findings: the criterion is about this file, not about whatever else the host repo's store
+    // happens to be carrying.
+    const r = runDoctor({ flowDir: join(import.meta.dirname, "..") });
+    const mine = (xs) => xs.filter((x) => x.includes("newsletter-send-cadence"));
+    assert.deepEqual(mine(r.problems), [], `the shipped example must be a clean intent: ${JSON.stringify(r.problems)}`);
+    assert.deepEqual(mine(r.warnings), [], `the shipped example must not warn either: ${JSON.stringify(r.warnings)}`);
+  });
+
+test("criterion 4: an intent whose `serves` names an undeclared id → WARNING naming file and id, exit still 0", () => {
+  const d = cliFixture({ "0001-a.md": task("P-0001") }, {
+    intents: { "drifted.md": intent("drifted", { serves: '["G404"]' }) },
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, [], `an intent is not a unit of work — this must never fail the gate: ${JSON.stringify(r.problems)}`);
+  assert.ok(r.warnings.some((w) => w.includes(".flow/intents/drifted.md") && w.includes("G404")),
+    `expected a warning naming the file and the id, got ${JSON.stringify(r.warnings)}`);
+  // Exit 0 asserted through the CLI, not inferred from an empty problems array: the two can
+  // disagree, and the process exit code is what a consuming repo's gate actually reads.
+  const { code, out } = runCli(d);
+  assert.equal(code, 0, out);
+  assert.match(out, /WARN[\s\S]*G404/);
+  cleanup(d);
+});
+
+test("criterion 4b: `maintenance`, and a declared id, both resolve silently on an intent", () => {
+  // The reserved id is the same reserved id tasks use — one vocabulary, or an author has to know
+  // which store they are writing into before they can name what the work is for.
+  const d = fixture({ "0001-a.md": task("P-0001") }, {
+    intents: {
+      "upkeep.md": intent("upkeep", { serves: '["maintenance"]' }),
+      "real.md": intent("real", { serves: '["G1", "G2"]' }),
+      "nonlist.md": intent("nonlist", { serves: '\n  - "G1"' }),   // the block form too
+    },
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.warnings.filter((w) => w.includes("serves")), [],
+    `a resolvable serves must be silent, got ${JSON.stringify(r.warnings)}`);
+  cleanup(d);
+});
+
+test("criterion 5: no VISION.md → no per-intent `serves` warning, just the one vision-inactive line", () => {
+  // Graceful adoption, and the same posture the task side takes. Repeating "the vision layer is
+  // off" once per intent is how a one-line adoption nudge turns into a wall nobody reads.
+  const d = fixture({ "0001-a.md": task("P-0001") }, {
+    vision: null,
+    intents: { "anchored.md": intent("anchored", { serves: '["G1", "G404"]' }) },
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.warnings.filter((w) => w.includes(".flow/intents/") && w.includes("serves")), [],
+    `no VISION.md means the serves check is inactive, got ${JSON.stringify(r.warnings)}`);
+  assert.equal(r.warnings.filter((w) => /vision layer is inactive/.test(w)).length, 1,
+    `exactly one vision-inactive warning, got ${JSON.stringify(r.warnings)}`);
+  cleanup(d);
+});
+
+test("criterion 6: an intent whose `status` is outside the vocabulary → WARNING naming file and value", () => {
+  const d = fixture({ "0001-a.md": task("P-0001") }, {
+    intents: { "wrong-status.md": intent("wrong-status", { status: "done" }) },
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, [], `the vocabulary has no teeth in this slice: ${JSON.stringify(r.problems)}`);
+  assert.ok(r.warnings.some((w) => w.includes(".flow/intents/wrong-status.md") && w.includes("done")),
+    `expected a warning naming the file and the value "done", got ${JSON.stringify(r.warnings)}`);
+  cleanup(d);
+});
+
+test("criterion 6b: each of the three allowed statuses is silent, and a missing one is still a PROBLEM", () => {
+  // The vocabulary check must not shadow the presence check flow-0063 shipped: absent is a
+  // PROBLEM, and "outside the three" is a warning about a value that is actually there.
+  for (const status of INTENT_STATUSES) {
+    const d = fixture({ "0001-a.md": task("P-0001") }, { intents: { "s.md": intent("s", { status }) } });
+    const r = runDoctor({ flowDir: d });
+    assert.deepEqual(r.warnings.filter((w) => w.includes("status")), [],
+      `"${status}" is in the vocabulary and must be silent, got ${JSON.stringify(r.warnings)}`);
+    cleanup(d);
+  }
+  const d = fixture({ "0001-a.md": task("P-0001") }, { intents: { "s.md": intent("s", { omit: ["status"] }) } });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(r.problems.some((p) => p.includes(".flow/intents/s.md") && p.includes("status")),
+    `a missing status is still a required-field PROBLEM, got ${JSON.stringify(r.problems)}`);
+  cleanup(d);
+});
+
+test("criterion 7: `supersedes` naming an id no intent declares → WARNING naming file and missing id", () => {
+  const d = fixture({ "0001-a.md": task("P-0001") }, {
+    intents: { "replacement.md": intent("replacement", { supersedes: "never-written" }) },
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.ok(r.warnings.some((w) => w.includes(".flow/intents/replacement.md") && w.includes("never-written")),
+    `expected a warning naming the file and the missing id, got ${JSON.stringify(r.warnings)}`);
+  cleanup(d);
+});
+
+test("criterion 7b: a `supersedes` that resolves is silent — including a forward reference", () => {
+  // The store is read whole before any file is checked. Read file-by-file instead and "z.md
+  // supersedes a-old" would warn purely because `z` sorts after `a`, which is a bug that only
+  // shows up on some filenames.
+  const d = fixture({ "0001-a.md": task("P-0001") }, {
+    intents: {
+      "a-newer.md": intent("a-newer", { supersedes: "z-older" }),   // names an id LATER in sort order
+      "z-older.md": intent("z-older", { status: "superseded" }),
+      "empty.md": intent("empty", { supersedes: "" }),
+    },
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.warnings.filter((w) => w.includes("supersedes")), [],
+    `a resolvable (or empty) supersedes must be silent, got ${JSON.stringify(r.warnings)}`);
+  cleanup(d);
+});
+
+test("criterion 8: `[assumption]` lines are never reported, and `approved` is no exception", () => {
+  // The one rule stated as an absence. An intent may be approved with assumptions still standing
+  // in it — that is why they are marked — so a checker that mentioned them at any status would
+  // teach authors to stop marking, which costs the marker everything it is worth.
+  const body = [
+    "\n## Constraints\n",
+    "[assumption] Three options is enough granularity.",
+    "- [assumption] Weekly is the right default.",
+    "\n## Open questions\n",
+    "- What happens to the people already on the list?\n",
+  ].join("\n");
+  for (const status of ["proposed", "approved", "superseded"]) {
+    const d = fixture({ "0001-a.md": task("P-0001") }, {
+      intents: { "guessy.md": intent("guessy", { status, body }) },
+    });
+    const r = runDoctor({ flowDir: d });
+    assert.deepEqual(r.problems, [], `status ${status}: ${JSON.stringify(r.problems)}`);
+    assert.deepEqual(r.warnings.filter((w) => /assumption/i.test(w)), [],
+      `status ${status}: an assumption line must never be reported, got ${JSON.stringify(r.warnings)}`);
+    cleanup(d);
+  }
+});
+
+test("intentFindings resolves `serves` only when handed a goal map — the switch, stated directly", () => {
+  // The unit-level statement of criteria 4 and 5, so the on/off switch is provable without a
+  // whole repo fixture around it, and cannot be satisfied by some other check going quiet.
+  const d = fixture({ "0001-a.md": task("P-0001") }, {
+    intents: { "x.md": intent("x", { serves: '["G404"]' }) },
+  });
+  const dir = join(d, "intents");
+  assert.deepEqual(intentFindings(dir).warnings, [], "no goal map → the serves check is off");
+  assert.deepEqual(intentFindings(dir, { goals: null }).warnings, [], "an explicit null → the serves check is off");
+  const { goals } = parseVisionGoals(VISION);
+  assert.equal(intentFindings(dir, { goals }).warnings.length, 1, "a goal map → the check resolves");
+  assert.equal(intentFindings(dir, { goals }).count, 1);
+  cleanup(d);
+});
+
+test("criterion 9: changes/flow-0073.md exists and describes the additions",
+  { skip: inCanonical ? false : "not canonical" }, () => {
+    const fragment = readFileSync(join(canonicalRoot, "changes", "flow-0073.md"), "utf8");
+    for (const thing of ["serves", "supersedes", "[assumption]", "Open questions"])
+      assert.ok(fragment.includes(thing), `the changelog fragment does not mention ${thing}`);
+    assert.match(fragment, /flow-0073/, "the fragment does not name the task it belongs to");
+  });

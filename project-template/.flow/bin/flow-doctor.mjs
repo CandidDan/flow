@@ -26,7 +26,9 @@
 //   below) · a task touching a top-level directory that doesn't exist yet (new-subsystem tell) ·
 //   no VISION.md (vision layer inactive) · a retired goal, or an unresolvable `serves` on a
 //   non-ready task · no `.flow/intents/` (intent layer inactive) · an intent whose `evidence` is
-//   declared but isn't a list of paths.
+//   declared but isn't a list of paths, whose `status` is outside the three allowed values,
+//   whose `serves` names an id VISION.md doesn't declare, or whose `supersedes` names an id no
+//   intent declares (all of them warnings — see "intent store" below).
 // NOTES (exit 0): a check that was skipped because its precondition wasn't met (e.g. not run
 //   inside a git work tree, so the uncommitted-task guard can't read `git status`).
 //
@@ -394,7 +396,40 @@ export function parseVisionGoals(text) {
 //   · `_TEMPLATE.md` is excluded, exactly as it is in `.flow/tasks/` — the published shape is
 //     not an instance of itself, and validating it would fail every repo on the empty fields it
 //     ships on purpose.
+//
+// WHAT flow-0073 ADDED, AND WHY EVERY ONE OF IT IS A WARNING. The template grew `serves`,
+// `supersedes`, a stated `status` vocabulary and the `[assumption]` marker, so the checker has
+// three more mechanical questions it can answer. It is still slice 1, so it still spends no
+// teeth: the whole intent layer is warn-only until slice 2, when tasks start depending on
+// intents and a dangling reference stops being cosmetic.
+//
+//   · `serves` resolves against VISION.md exactly as a task's does, reserved `maintenance`
+//     included — same ids, one store of goals. Unresolvable → WARNING (a ready task gets a
+//     PROBLEM for the same thing; an intent is not a unit of work and nothing is scheduled off
+//     it yet). No VISION.md, or a VISION.md nothing parses out of, and the check is INACTIVE:
+//     not one per-intent line, because the repo-level warning already said the layer is off and
+//     repeating it per file is how an adoption nudge turns into noise.
+//     A `serves` naming a NON-GOAL or a RETIRED goal is deliberately not reported here. Both are
+//     declared ids, so they are not the "does not declare" case, and the task-side warnings that
+//     do cover them exist to prompt a re-anchor or a drop — neither of which is a move anyone
+//     can make on an intent, whose body is never revised.
+//   · `status` outside `proposed | approved | superseded` → WARNING naming the value. Presence is
+//     still a PROBLEM (it is in INTENT_REQUIRED); this is only about the vocabulary. Nothing acts
+//     on the value yet, so a typo must not redden the gate — but a typo that nothing ever
+//     mentions is how `aproved` ends up in the store for a year.
+//   · `supersedes` naming an id no intent in the store declares → WARNING naming both. This is
+//     the one rule that reads across files rather than within one, so ids are collected from
+//     every intent before any of them is checked.
+//   · `[assumption]` lines are NEVER reported, at any status, and there is deliberately no code
+//     below that looks for one. An intent can be approved with assumptions still standing in it
+//     — that is what marking them is for. A checker that nagged about them would teach authors
+//     to stop marking, which costs the marker its entire value.
 export const INTENT_REQUIRED = ["id", "title", "status", "created", "source"];
+
+// The `status` vocabulary, in the order the template lists it. Exported so the template's own
+// guidance can be asserted against the checker's set rather than against a second hand-typed
+// copy of it.
+export const INTENT_STATUSES = ["proposed", "approved", "superseded"];
 
 // A YAML scalar that is not a string, written bare. `evidence` holds repo paths, so these are the
 // values that mean someone typed the wrong kind of thing rather than a path.
@@ -446,14 +481,23 @@ function parseIntent(text) {
   const fm = splitFrontmatter(text);
   if (!fm) return null;
   const get = scalarReader(fm.head);
-  const out = { evidence: evidenceShape(fm.head) };
+  const out = {
+    evidence: evidenceShape(fm.head),
+    supersedes: get("supersedes"),
+    servesList: parseListField(fm.head, "serves"),
+  };
   for (const k of INTENT_REQUIRED) out[k] = get(k);
   return out;
 }
 
 // Validate `<flowDir>/intents/`. Exported so the shape contract can be asserted directly, and
 // because a consuming repo's own tests are the only place some of this is reachable.
-export function intentFindings(intentsDir) {
+//
+// `goals` is the VISION.md goal map (`parseVisionGoals().goals`) when the vision layer is active
+// and usable, and null otherwise — no VISION.md, or one nothing parses out of. Null switches the
+// `serves` check OFF rather than failing every entry: the caller has already emitted exactly one
+// repo-level finding about the vision layer, and restating it per intent would bury it.
+export function intentFindings(intentsDir, { goals = null } = {}) {
   const problems = [], warnings = [];
   if (!existsSync(intentsDir)) {
     warnings.push("no .flow/intents/ — the intent layer is inactive, so nothing records who asked " +
@@ -461,14 +505,20 @@ export function intentFindings(intentsDir) {
       "intent-writer skill");
     return { problems, warnings, count: 0 };
   }
-  const seen = new Map();
-  let count = 0;
+  // Read every intent before checking any of them: `supersedes` resolves against the ids the
+  // whole store declares, so a forward reference to an intent later in the sort order must not
+  // read as dangling.
+  const parsed = [];
   for (const name of readdirSync(intentsDir).sort()) {
     if (!name.endsWith(".md") || name === "_TEMPLATE.md") continue;
     const rel = `.flow/intents/${name}`;
     const intent = parseIntent(readFileSync(join(intentsDir, name), "utf8"));
     if (!intent) { problems.push(`${rel}: malformed frontmatter`); continue; }
-    count++;
+    parsed.push({ rel, intent });
+  }
+  const declared = new Set(parsed.map(({ intent }) => intent.id).filter(Boolean));
+  const seen = new Map();
+  for (const { rel, intent } of parsed) {
     const missing = INTENT_REQUIRED.filter((k) => !intent[k]);
     if (missing.length) problems.push(`${rel}: missing required field(s): ${missing.join(", ")}`);
     if (intent.id) {
@@ -481,8 +531,31 @@ export function intentFindings(intentsDir) {
         "list of repo paths to evidence records, so a scalar or a mapping there will not be read; " +
         "a warning, not a failure, while nothing consumes it");
     }
+    // Vocabulary only — an absent `status` is already a PROBLEM above, and this says nothing
+    // about whether the value is the RIGHT one, which is the merge event's business (slice 4).
+    if (intent.status && !INTENT_STATUSES.includes(intent.status)) {
+      warnings.push(`${rel}: status "${intent.status}" is not one of ` +
+        `${INTENT_STATUSES.join(" | ")} — nothing reads the value yet, so this is a warning, but ` +
+        "a status outside the vocabulary will not be read when something does");
+    }
+    const supersedes = (intent.supersedes ?? "").trim();
+    if (supersedes && !declared.has(supersedes)) {
+      warnings.push(`${rel}: supersedes "${supersedes}", which no intent in .flow/intents/ declares — ` +
+        "a replacement has to name the intent it replaces by its id, or the record of the changed " +
+        "mind points at nothing");
+    }
+    if (goals) {
+      for (const raw of intent.servesList ?? []) {
+        const entry = raw.trim();
+        if (!entry || entry.toLowerCase() === MAINTENANCE_SERVES) continue;
+        if (!goals.has(entry.toUpperCase())) {
+          warnings.push(`${rel}: serves "${entry}", which VISION.md does not declare — ` +
+            "goal ids are append-only and never renumbered, so this resolves to nothing");
+        }
+      }
+    }
   }
-  return { problems, warnings, count };
+  return { problems, warnings, count: parsed.length };
 }
 
 // The non-wildcard leading path of a glob, trimmed to whole segments — what we compare for overlap.
@@ -730,6 +803,10 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
   // the check can't retroactively fail history (flow-doctor fails store-wide, not per-PR: one
   // unanchored task would otherwise redden every open PR in the repo, including PRs whose
   // authors can't fix it, because the store is main-only).
+  // Non-null only once the vision layer is both present and usable, which is exactly when a
+  // `serves` on an intent can be resolved. Handed to intentFindings below so the two stores read
+  // one goal map — a second parse could drift from this one and disagree about the same file.
+  let visionGoals = null;
   const visionPath = join(repoRoot, "VISION.md");
   if (!existsSync(visionPath)) {
     warnings.push("no VISION.md at the repo root — the vision layer is inactive and `serves` is unchecked; " +
@@ -747,6 +824,7 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
         '"### G<n> — <title>" (and "### NG<n> — <title>" for non-goals). Until one parses, ' +
         "every serves check is vacuous, which is worse than no check at all.");
     } else {
+      visionGoals = goals;
       for (const t of tasks) {
         const ready = t.status === "ready";
         const entries = (t.servesList ?? []).map((e) => e.trim()).filter(Boolean);
@@ -792,7 +870,7 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
 
   // Intent store: shape only, and an absent store is one warning — see the intent-store block above.
   {
-    const f = intentFindings(join(flowDir, "intents"));
+    const f = intentFindings(join(flowDir, "intents"), { goals: visionGoals });
     problems.push(...f.problems);
     warnings.push(...f.warnings);
   }
