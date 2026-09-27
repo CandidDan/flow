@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0082"
 title: "A failed qa or code-review check dispatches a bounded auto-fix worker onto the same PR"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -11,8 +11,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits on flow-0079. Until the reviewers read their config and helper from the base branch, an auto-fix commit could edit `review.security_paths` or `flow-review.mjs` in the same PR, so the loop could 'fix' the reviewer instead of the code."
-blocked_by: ["flow-0079"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G12", "G10"]    # G12: every escalation is one decision card. G10: a fix may not pass review by weakening the tests.
 touches:
   - ".github/workflows/_flow-kickback.yml"
@@ -35,6 +35,8 @@ notes:
   - "2026-09-25 (orchestrator): AMENDED BY THE HUMAN: guard against passing review by weakening the tests. The easiest way for a model to satisfy 'criterion X has no proving test' is to loosen an assertion or rename a test until the reviewer is satisfied. An auto-fix round may add or strengthen tests; a round whose commits delete a test or remove an assertion escalates instead of pushing. This is why the WORKFLOW pushes, not the fixer: the check has to sit between the commit and the push."
   - "2026-09-25 (orchestrator): AMENDED BY THE HUMAN: blocked_by flow-0079. Before it lands, the reviewers read `review.security_paths` and `flow-review.mjs` from the PR head, so an auto-fix commit could change the reviewer itself. flow-0079 closes that route. A diff-level guard here would duplicate flow-0079, so there isn't one."
   - "2026-09-25 (orchestrator): DECIDED: DO NOT TOUCH `_flow-review.yml`. flow-0079 is editing it, and the fixer and the card writer can read the verdicts from the PR conversation, where every reviewer already posts them. Triggering off the review workflow's completion needs no change to it."
+  - "2026-09-27 (orchestrator): unblocked. flow-0079 is done (PR #111), so the reviewers now read their config and helper from the base branch."
+  - "2026-09-27 (orchestrator): AMENDED BY THE HUMAN: the round count comes from the PR, not from notes committed to `main`. Each pushed round's commit carries a `Flow-Auto-Fix-Round: N/CAP` trailer, and rounds used is the number of the PR's commits that carry one. The kickback workflow therefore never writes to `main`, which removes its only need for `contents: write` on the default branch, and a PR's round history lives on the PR it belongs to. Known limit, accepted: a human who squashes or rewrites the PR branch resets the count. That is a human act, and the cap exists to bound the machine."
   - "2026-09-25 (orchestrator): NOT parallel-safe with flow-0050, flow-0070 and flow-0077 (all share `project-template/.flow/config.yml`) or flow-0080 (shares `docs/flow-reusable-workflows.md`). pick-task skips it while any of them is in progress; whichever lands second rebases."
 ---
 
@@ -78,7 +80,7 @@ The bounds below are the substance of the task, not decoration.
 ### Deciding whether to dispatch
 
 - **Decision logic is code, not YAML.** `project-template/.flow/bin/flow-kickback.mjs` holds
-  pure, dependency-free functions (`decide`, `weakensTests`, `decisionCard`). The workflow
+  pure, dependency-free functions (`decide`, `countRounds`, `weakensTests`, `decisionCard`). The workflow
   gathers facts and acts on the results. Canonical's `.flow/bin/flow-kickback.mjs` is a thin
   adapter, per the adapter convention in canonical's `CLAUDE.md` (no copy, no symlink).
 - **`decide(facts)`** returns `dispatch`, `skip`, or `escalate`, with a one-line reason. Its
@@ -88,7 +90,7 @@ The bounds below are the substance of the task, not decoration.
   - whether the PR is from a fork;
   - the PR's labels;
   - the task's status on `main`;
-  - rounds already used;
+  - rounds already used (from `countRounds` over the PR's commit messages);
   - the configured cap;
   - whether `FLOW_AI` is `true`;
   - whether `FLOW_PAT` is present.
@@ -110,16 +112,17 @@ The bounds below are the substance of the task, not decoration.
     and ships it **commented out**, so adopting repos are off by default.
   - **Above 3:** clamped to 3, with a step-summary warning naming the configured value.
   - **Canonical:** its own `.flow/config.yml` sets 2.
-- **Counting rounds.** The count lives in the task file on `main`. Each dispatch appends a
-  `notes` entry, committed straight to `main` like other task-state writes. The entry has a fixed
-  prefix: `"<YYYY-MM-DD> (auto-fix): round N/CAP dispatched for <check names>, review run <url>"`.
-  Rounds used is the number of `notes` entries with the `(auto-fix): round` prefix. It is not
-  stored anywhere else, so a human can read it in the task file.
+- **Counting rounds.** The count lives on the PR, not on `main`. Every round the workflow pushes
+  carries exactly one commit with the git trailer `Flow-Auto-Fix-Round: N/CAP` (see step 7 of
+  a round). `countRounds(messages)` takes the PR's commit messages (`gh api
+  repos/{owner}/{repo}/pulls/{n}/commits`) and returns how many carry a well-formed trailer.
+  It is a pure function. The kickback workflow never commits to `main`. A human reads the count
+  in the PR's commit list and in the decision card's footer.
 
 ### One auto-fix round
 
-1. Record the PR head SHA as this round's **base**.
-2. Append the round note to the task on `main`.
+1. Record the PR head SHA as this round's **base**, and the round number N (rounds used + 1).
+2. Write N/CAP and the failing check names to the step summary. Nothing is written to `main`.
 3. Convert the PR to draft (`gh pr ready --undo`), so the round's work does not trigger three
    reviewers part-way through.
 4. Run a fresh `claude-code-action` worker on the PR branch. Use the same action pin,
@@ -135,7 +138,12 @@ The bounds below are the substance of the task, not decoration.
    3. The remote branch head still equals the base. If it moved, the worker pushed despite the
       limit, and the round escalates.
    4. `weakensTests(diff base..HEAD)` is empty, or the round escalates as "weakened tests".
-7. If every check passes, the **workflow** pushes and runs `gh pr ready`, which triggers review
+   5. For a `fixed` outcome, `base..HEAD` holds at least one commit, or the round escalates as
+      "claimed fixed, changed nothing".
+7. If every check passes, the **workflow** stamps the round: it amends the round's last commit
+   to add the trailer `Flow-Auto-Fix-Round: N/CAP` (`git commit --amend --no-edit --trailer`).
+   This is the only amend, it changes no content, and it happens before anything leaves the
+   runner. Then the workflow pushes and runs `gh pr ready`, which triggers review
    again. Whatever that review says re-enters at "Deciding whether to dispatch".
 
 A final `if: always()` step makes sure a round that died part-way still ends in an escalation.
@@ -205,7 +213,7 @@ Plus one footer line: rounds used out of the cap, and how to re-arm (remove the 
   - For a disputed round, and for a round the guard stopped, the card comes from the worker's
     `outcome.json`, amended with the guard's reason.
   - Every other escalation (security, exhausted, did not hand back) runs one bounded,
-    **read-only** model call. It reads the verdict comments, the round notes and the diff, and
+    **read-only** model call. It reads the verdict comments, the PR's round trailers and the diff, and
     writes the same four fields. It does not fix anything.
 - **Validation is code.** `decisionCard` rejects input missing any of the four fields, or a
   recommendation that is neither `merge` nor `kickback` with a non-empty `change`. On rejection,
@@ -247,10 +255,16 @@ Unit tests go in `flow-kickback.test.mjs`. Workflow-structure assertions go in
 - [ ] Given `review.auto_fix_rounds` absent or 0, then `skip`, "auto-fix off".
 - [ ] Given `review.auto_fix_rounds: 5`, then the effective cap is 3 and a warning names the
       configured 5.
-- [ ] Given cap 2 and two `(auto-fix): round` notes, when review fails again, then `escalate`
-      (exhausted). Given one note, then `dispatch` as round 2/2.
-- [ ] Round counting counts only notes with the exact `(auto-fix): round` prefix. An unrelated
-      note that mentions auto-fix is not counted.
+- [ ] Given cap 2 and two PR commits carrying `Flow-Auto-Fix-Round:` trailers, when review fails
+      again, then `escalate` (exhausted). Given one, then `dispatch` as round 2/2.
+
+**`countRounds`**
+
+- [ ] Given commit messages where two carry `Flow-Auto-Fix-Round: 1/2` and `Flow-Auto-Fix-Round:
+      2/2` in their trailer block, then it returns 2.
+- [ ] Given a message that mentions `Flow-Auto-Fix-Round` in its body but not as a trailer, or a
+      malformed trailer value, then that message is not counted.
+- [ ] Given no messages, then it returns 0.
 
 **`weakensTests`**
 
@@ -286,7 +300,10 @@ Unit tests go in `flow-kickback.test.mjs`. Workflow-structure assertions go in
 - [ ] The fixer step disallows `git push` and `gh pr ready`, and its checkout sets
       `persist-credentials: false`.
 - [ ] The push and `gh pr ready` happen in a workflow step that runs only after the outcome
-      check, the remote-head check and the `weakensTests` check, in that order.
+      check, the remote-head check, the `weakensTests` check and the has-commits check, in that
+      order, and the pushed head carries the `Flow-Auto-Fix-Round` trailer.
+- [ ] No step in the workflow commits or pushes to the default branch, and its `permissions:`
+      block needs no write access beyond the PR branch, PR comments and labels.
 - [ ] An `if: always()` step escalates a round that ended with the PR still draft and unlabelled.
 - [ ] Every escalation path posts through `decisionCard` and adds `flow:needs-human`. No path
       adds the label without a card.

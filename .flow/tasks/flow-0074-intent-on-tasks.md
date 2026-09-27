@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0074"
 title: "intent: on tasks — a ready task names the intent it derives from (warn-first, forward-only)"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -11,8 +11,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waiting on flow-0063 (PR #105): this is slice 2 of the intent layer, and ADR-0007, which settles its rollout and grandfathering, is in that PR and not yet approved. Unblock when flow-0063 is done; if the ADR changed at approval, reconcile the notes below with it first."
-blocked_by: ["flow-0063"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G11"]
 touches:
   - "project-template/.flow/tasks/_TEMPLATE.md"
@@ -27,6 +27,7 @@ touches:
   - "changes/flow-0074.md"
 labels: [intent-layer, protocol, flow-doctor, task-writer]
 notes:
+  - "2026-09-27 (orchestrator): unblocked. flow-0063 is done, and ADR-0007 has one commit (30e9769, inside flow-0063), so it did not change at approval and the notes below need no reconciling. Sequencing still holds: flow-0052 (ready) also edits `flow-doctor.mjs`; pick-task keeps them apart."
   - "2026-09-24 (orchestrator): ORIGIN. Written from `_private/intent-layer-drafts/tasks-derive-from-intents.md` (2026-09-03), which predates flow-0063 and ADR-0007. The human asked for it on 2026-09-24. ADR-0007 says slices 2 and 4 are deliberately not written until the ADR settles their decisions. It now does (warn-first rollout, forward-only grandfathering, merge as the approval event), but it is unmerged, hence `blocked` rather than `ready`. The notes below record every place this task departs from the draft, so a worker does not reintroduce the draft's version."
   - "2026-09-24 (orchestrator): DECIDED: 'APPROVED' MEANS 'PRESENT ON main', NOT `status: approved`. The draft required the named intent to have `status: approved` and failed on `proposed`. Under ADR-0007 that cannot work. Intents live on the code plane and reach `main` only by a merged PR, and the merge IS the approval event. Nothing flips `status` to `approved` until slice 4 (CI stamping). The template ships `status: \"proposed\"`, and ADR-0007 says nothing reads that value yet. So an intent file that exists in `.flow/intents/` on `main` is approved by construction. Do not read `status` for approval; `approved_by`/`approved_at` stay slice 4's."
   - "2026-09-24 (orchestrator): DECIDED: WARN-FIRST, WITH ONE FAIL. ADR-0007 says slice 2 is 'warn-first, exactly as `serves` was rolled out', and ADR-0004's teeth budget forbids failing on judgment. So: (a) a missing `intent` on an in-scope ready task is a WARNING. Escalating it to a failure is a later task, once intent-derived tasks exist to justify it. (b) A NON-EMPTY `intent` that names no intent file is a FAILURE on a `ready` task and a warning otherwise. That is a fact check (a typo or a dangling id), it cannot redden any existing task (none carry `intent` today), and it mirrors `serves`' unresolvable-id rule in ADR-0004. (c) An intent whose `status` is `superseded` is a WARNING. If the human wants (b) to be a warning too at approval, the change is one line and one test; it is recorded here so the rejection is cheap."
