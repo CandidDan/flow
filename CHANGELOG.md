@@ -6,6 +6,360 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 2.1.0 — 2026-09-27 (pending tag + canary)
+
+**MINOR: new backward-compatible capability, no required caller change.** New here: the intent
+store and template (flow-0063, flow-0073), `source_roots` checks as a gates matrix (flow-0077),
+the review gate planned from the base branch (flow-0079), the release repo's `vMAJOR` alias
+mirror (flow-0045), and changelog fragments (flow-0069), plus the `flow-sync` fixes (0048, 0054,
+0075, 0076, 0078). The entries below each state their caller action; the ones to read before
+syncing are flow-0048 (the next sync PR proposes `.flow/PROTOCOL.md`), flow-0058 (check your pins
+if `flow-init` onboarded you) and flow-0077 (an optional migration). `v2.0.0` is the rollback
+point: `git tag -f v2 v2.0.0 && git push -f origin v2`.
+
+- **`flow-sync` now carries `.flow/PROTOCOL.md`, so a protocol fix can reach the fleet at all**
+  (`_flow-sync.yml`, `.flow/bin/sync-surface.test.mjs`, flow-0048). **Caller action: expect your
+  next `flow-sync` PR to propose changes to `.flow/PROTOCOL.md` for the first time** — read that
+  part of the diff rather than waving it through, because the protocol is the contract every
+  session in your repo works under. No caller *edit* is required: the reusable's `workflow_call`
+  inputs and its one declared secret are unchanged, so a pinned `@v2` caller needs nothing done
+  to it.
+
+  The copied surface was `.flow/bin/`, `.github/workflows/flow-*.yml` and the `.flow/VERSION`
+  stamp. `flow-init` copies the protocol once, at adoption; nothing refreshed it afterwards, so an
+  adopting repo's protocol was frozen at whatever version it adopted, permanently, through any
+  number of syncs. That is not a documentation staleness problem — the protocol is the file that
+  decides when a worker stops. 1.3.1 fixed a session-hygiene trip condition that fired on routine
+  harness-side truncation, and until then every fresh worker in `CandidDan/later` claimed its task,
+  ran one search, wrote a handoff and ended before implementing anything. The fix was released in
+  canonical and could not reach that repo by any sanctioned route; it went in by hand as
+  `CandidDan/later#14`, a knowing exception to the rule that repos adopt infra rather than patch it.
+
+  Worse, the stamp moved without the content: a sync wrote the new version into `.flow/VERSION`
+  while leaving the protocol alone, after which `flow-sync decide` — which compares stamps and
+  nothing else — answered `current` and the repo stopped being told it was behind.
+
+  **A repo that hand-patched its protocol should expect a no-op on any section already matching
+  canonical.** This is a whole-file copy, not a patch: it cannot conflict, and it produces no diff
+  for content that already agrees. Where a hand-patch diverged from canonical — a local wording
+  change, or a fix applied differently — the sync PR proposes canonical's version, which is the
+  intended direction. Anything in your protocol that you want to keep belongs upstream in
+  canonical, not in your copy.
+
+  `AGENTS.md` and `CLAUDE.md` stay excluded, and the copy step now says so in a comment naming the
+  reason: each carries a `## Project notes` section holding context that exists nowhere else, so a
+  blind overwrite would destroy it. The protocol has no such section, which is exactly why it can be
+  mirrored and they cannot.
+
+  The copy is guarded rather than bare. `canonical_ref` may be pinned to a release older than the
+  split that created `project-template/.flow/PROTOCOL.md` (v1.0.0, v1.1.0 and v1.1.1 have none),
+  and an unguarded `cp` would have aborted the whole sync for those callers under `set -e`. Those
+  syncs now emit a `::warning` naming the ref and complete as before.
+
+- **`flow-init` now derives its default canonical ref from canonical's `VERSION` stamp instead of
+  a literal** (`project-template/.flow/bin/flow-init.mjs`, flow-0058). **Caller action: if your
+  repo was onboarded through `flow-init` before this landed, check your callers' `uses:` pins —
+  they say `@v1`.** Two ways to correct one, both already supported: re-run `flow-init` with an
+  explicit `--canonical-ref v2 --force`, or simply let `flow-sync` run — it copies the template's
+  `flow-*.yml` callers verbatim, and since flow-0056 those are pinned `@v2`, so the next sync PR
+  repins the repo for you. No migration script, and nothing to do at all in a repo adopted from
+  this release onwards.
+
+  `DEFAULT_CANONICAL_REF = "v1"` survived the 2.0.0 re-cut. flow-0056 moved the ten published
+  callers and `_flow-sync.yml`'s own checkout to `@v2`; this third reference stayed behind, and it
+  governed the one path neither of those touches — a repo being onboarded for the first time. With
+  no `--canonical-ref` and no `canonical.ref` in its config, `flow-init` wrote `@v1` pins into a
+  repo whose `.flow/VERSION` it had just stamped `2.0.0`. The two halves of the release disagreed
+  from the repo's first commit and nothing reported it, because a pin at a tag that still resolves
+  is indistinguishable from a correct one.
+
+  The default is now computed from the same `VERSION` file `buildPlan` copies to the new repo's
+  `.flow/VERSION`, so the pins and the stamp agree by construction rather than by someone
+  remembering to edit both. A repo adopted from a 3.0.0 canonical is born on `@v3` with no source
+  change — which is the property the constant could not have, and the reason this is a derivation
+  rather than the same literal relabelled `v2`. The stamp is looked up in priority order:
+  `<--from>/VERSION`, then canonical's root `VERSION` (for the clone path, where the ref must be
+  known before there is a checkout to read), then the `.flow/VERSION` beside the copy that travels
+  into an adopting repo.
+
+  It is still never a guess. If no stamp answers, there is no default: the run exits 1 naming
+  `canonical.ref` and telling the caller to pass `--canonical-ref`, consistent with `flow-init`'s
+  standing rule that it invents no config value. Precedence is unchanged — `--canonical-ref`
+  beats `canonical.ref` in the config file, which beats the default — and an explicit ref is
+  passed through untouched, never re-derived or reduced to a major.
+
+  `--help` is part of the fix rather than cosmetics: its advertised default and its
+  copy-pasteable JSON example are now rendered from the same resolved value a real run uses, so
+  neither can quietly go stale while the code moves. A run that fell back to the default also says
+  so, naming the stamp it derived from.
+
+- **`flow-doctor` learns about `.flow/intents/`, and Flow ships an intent template**
+  (`project-template/.flow/bin/flow-doctor.mjs`, `project-template/.flow/intents/_TEMPLATE.md`,
+  `docs/adr/0007-intent-layer.md`, flow-0063). **No caller action** — a repo with no
+  `.flow/intents/` directory gets one warning and nothing else, exactly as it already does for a
+  missing `VISION.md`, and nothing that was passing starts failing.
+
+  `VISION.md`'s G11 says work traces to a stated intent, and the protocol's headline sentence
+  advertises "two touchpoints — approve the intent, approve the merge". One of those two had no
+  implementation anywhere in the repo. This is the first of four slices: the store, the template
+  that fixes its shape, and a validator with no teeth beyond shape.
+
+  `.flow/intents/_TEMPLATE.md` carries `id`, `title`, `status`, `created`, `source` (whose words
+  the Problem section holds), `approved_by`/`approved_at` (written by CI from the merge, not by
+  hand) and an append-only `evidence: []` of paths to separate evidence records. Its success
+  section is **Outcome**, defined in the template itself as an external observable change rather
+  than a delivered artefact. `flow-init` copies it into new repos with the rest of `.flow/`.
+
+  `flow-doctor` reports malformed intent frontmatter, missing required fields and duplicate ids as
+  PROBLEMS; a malformed `evidence` as a WARNING; and `approved_by`/`approved_at` not at all — an
+  intent is unapproved by definition while its PR is open. `_TEMPLATE.md` is excluded, as it is in
+  `.flow/tasks/`. `docs/adr/0007-intent-layer.md` records the grandfathering decision
+  (forward-only), the teeth decision (none in this slice), the deferred triage collision, the
+  evidence-linkage decision, and the deferred validation contract — each as a decision with its
+  reason rather than as an omission.
+
+- **Changelog entries are per-task fragments, and the release assembles them** (`changes/`,
+  `.flow/bin/changelog-fragments.mjs`, `project-template/.flow/bin/release-guard.mjs`,
+  `project-template/.flow/PROTOCOL.md`, `docs/flow-versioning-policy.md`, flow-0069). **No caller action** —
+  no reusable workflow, input or secret changed, and a consuming repo has no `changes/`
+  directory, so nothing about this reaches the fleet.
+
+  This is a queue fix wearing a changelog's clothes. `touches` is what `pick-task` uses to keep two
+  sessions out of the same files: a `ready` task whose `touches` overlap an `in_progress` task's is
+  skipped. `CHANGELOG.md` is append-only, so every task that changed anything declared it — and a
+  path in *every* task's `touches` makes almost every task ineligible the moment any one is
+  claimed. Measured on `origin/main` on 2026-09-23: 12 of the 23 open tasks listed `CHANGELOG.md`,
+  including 9 of the 13 `ready` ones. Nothing was ever in genuine conflict; the whole queue was
+  serialised behind a file every task only appends to.
+
+  A task now writes `changes/<task-id>.md` and declares *that* in `touches`. Two tasks write two
+  different files and never overlap. `node .flow/bin/changelog-fragments.mjs --assemble` folds
+  every fragment into the existing `## Unreleased` section in ascending task-id order and deletes
+  the fragments; `--check` lists what is pending and writes nothing. Assembly inserts rather than
+  writing a numbered section, so the manual release fold stays the human's step and
+  `release-stamp.test.mjs`'s `## Unreleased`-must-exist property is untouched. A changelog with no
+  `## Unreleased` heading fails loudly and writes nothing, rather than inventing a section the
+  release fold would never look at.
+
+  `release-guard` closes the other half. A release cut without its notes is invisible: the change
+  ships, the changelog does not mention it, and nothing in the release path ever says so. The guard
+  now reports a **problem** when a release tag points at a tree that still contains fragments —
+  scoped to a real release tag, because `main` carrying pending fragments between releases is
+  exactly what the directory is for. A tree with no `changes/` directory, which is every consuming
+  repo, reports nothing.
+
+- **The intent template gains the four fields and three sections an interview actually produces,
+  and flow-doctor gains three warn-only rules over them** (`.flow/intents/_TEMPLATE.md`,
+  `project-template/.flow/intents/`, `project-template/.flow/bin/flow-doctor.mjs`, flow-0073).
+  **Caller action: none, and nothing existing changes shape.** Every field is additive and every
+  new rule is a warning, so an intent written against the flow-0063 template still validates
+  exactly as it did. Adopting repos pick the new template up with `flow-sync`.
+
+  flow-0063 shipped the intent store (slice 1 of the layer behind VISION.md's G11 — *work traces
+  to a stated intent*). It deliberately left out everything the intent-writer interview needs
+  somewhere to put. This fills that in:
+
+  - **`serves: []`** — the VISION.md goal ids the intent advances, with the same ids, the same
+    resolution rules and the same reserved `maintenance` id as a task's `serves`, so the anchor
+    reaches past the task to the thing a human actually asked for.
+  - **`supersedes: ""`** — the id of the intent this one replaces. An approved intent's body is
+    never revised (ADR-0007), so a changed mind is a new intent naming the old one, and the old
+    one's text stays exactly as it was written.
+  - **A stated `status` vocabulary** — `proposed | approved | superseded`, those three and no
+    others. `proposed` is still what the template ships as.
+  - **The `[assumption]` marker** — a line beginning `[assumption]` (a list item counts) is
+    detail the writer supplied that the human never said, written so the human can strike it or
+    keep it. `## Problem` holds only the human's words and never carries one. This replaces the
+    `ASSUMED:` convention flow-0072 had sketched; defining it in the template rather than in the
+    skill means a hand-written intent and a skill-written one look the same.
+  - **Cost of inaction, Constraints and Open questions** sections. The Open questions guidance is
+    the load-bearing half: questions are *surfaced, never resolved* — a model answering its own
+    open question converts an unknown into a decision nobody made, and an empty section is a
+    claim that nothing is uncertain rather than a blank to be tidied away.
+
+  A **worked example intent** ships alongside the template at
+  `project-template/.flow/intents/newsletter-send-cadence.md`, filled in and `proposed`, carrying
+  an `[assumption]` line and three open questions — the same role
+  `project-template/.flow/tasks/0001-newsletter-signup.md` plays for tasks. Canonical's own
+  `.flow/intents/` gets the template and no example.
+
+  **flow-doctor** now also reports, all as warnings and never as failures: a `serves` naming an id
+  VISION.md does not declare; a `status` outside the three values; and a `supersedes` naming an id
+  no intent in the store declares. With no `VISION.md` the per-intent `serves` check is inactive
+  and the existing single vision-inactive warning covers it — the same graceful-adoption posture
+  the task side takes. `[assumption]` lines are never reported at any status, including
+  `approved`: an intent can be approved with assumptions still standing in it, which is the whole
+  reason they are marked. The layer keeps its no-teeth budget until slice 2, when tasks start
+  depending on intents.
+
+- **`flow-sync` no longer treats a leftover sync branch as an open PR** (`.github/workflows/_flow-sync.yml`,
+  `project-template/.flow/bin/flow-sync.mjs`, flow-0075). **No caller action** — adopting repos pick
+  this up on their next sync.
+
+  The idempotency check read *the branch exists* as *a sync PR is open*, logged that claim without
+  having looked, and exited 0. A sync PR closed without merging therefore left its branch behind and
+  made that version permanently unofferable: every later run was a green no-op announcing a PR that
+  did not exist, so a repo could sit behind canonical indefinitely with nothing reporting it. The
+  only way out was deleting the branch by hand.
+
+  The workflow now gathers three facts — does the branch exist, is there an **open** PR from it
+  (`gh pr list --state open`), and which canonical commit its head records — and hands them to a new
+  `flow-sync.mjs existing` subcommand, which answers `create`, `rebuild`, `refresh` or `noop`.
+  `rebuild` (branch, no open PR) and `refresh` (open PR, stale head) both rebuild the branch from
+  current canonical on current `main` and push it with `--force-with-lease`; `rebuild` then opens a
+  fresh PR, `refresh` does not, because the open PR picks up the new head by itself. A closed PR
+  stays closed and no branch is ever deleted.
+
+  Two supporting changes. The sync commit now carries a `Canonical-SHA: <sha>` trailer recording the
+  canonical commit it was built from — `.flow/VERSION` answers only *which version*, and
+  `canonical_ref` is normally a moving branch, so the stamp alone cannot tell a current sync branch
+  from one built from an older `v2`. A head with no trailer (every branch built before this change)
+  counts as stale, so the worst case is one unnecessary rebuild. And every verdict now logs the facts
+  it was reached from; a lookup that fails stops the run with an `::error` naming it, rather than
+  degrading to a no-op that is indistinguishable from success in a log.
+
+- **`flow-sync` keeps a customised caller instead of silently deleting its extra jobs**
+  (`.github/workflows/_flow-sync.yml`, `project-template/.flow/bin/flow-sync.mjs`, flow-0076).
+  **No caller action** — adopting repos pick this up on their next sync. A repo that has added jobs
+  to one of its `flow-*.yml` callers will now see a `::warning` on that sync run and a **Kept:
+  customised callers** section in the sync PR, and must reconcile that caller by hand (or move the
+  checks into `.flow/config.yml`'s `source_roots`) to receive canonical's changes to it again.
+
+  The caller-copy loop was `[ -e "$f" ] && cp "$f" .github/workflows/` — an unconditional overwrite.
+  Callers are meant to be thin, but a repo that needs something the reusable cannot express adds jobs
+  to its own: CandidDan/Nudge carried `edge-parse`, `mcp-build` and `mobile-check`, one per tree, and
+  the 2.0.0 sync deleted all three while the PR body listed the file under **Modified** and said
+  nothing else. `edge-parse` is the guard against a Deno parse error reaching production as a
+  `BOOT_ERROR`; the last time it was absent that cost about seven days of dropped WhatsApp inbounds.
+  A gate that stops checking while staying green is the failure this repo exists to prevent, and a
+  sync was shipping it.
+
+  The loop now asks before it overwrites. A new `flow-sync.mjs extra-jobs --local FILE --incoming
+  FILE` subcommand prints the top-level job keys the local caller declares that canonical's template
+  does not; any output at all means the copy would destroy work, so the file is left untouched, a
+  `::warning` names it and every job that would have gone, and `pr-body` renders it under **Kept:
+  customised callers** with the reason. Everything else copies exactly as before — including a caller
+  that is new to the repo, which has no local file to lose.
+
+  Two deliberate limits. "Customised" means **extra top-level job keys**, not a text diff: a diff
+  against the *previous* template needs a version the sync run does not have, and a diff against the
+  *incoming* one would flag every caller canonical legitimately changed. A caller that differs only
+  in its `uses:` pin, a `with:` input or a job's contents is still overwritten. And the kept caller
+  is kept **whole** — nothing merges canonical's changes into it, because keeping it as it is, and
+  saying so, is the behaviour that can be explained in a warning.
+
+- **`_flow-gates.yml` now runs every declared `source_roots` check as a matrix job** (`.github/workflows/_flow-gates.yml`,
+  `project-template/.flow/bin/source-roots.mjs`, flow-0077). **Caller action: none to keep working; one
+  optional migration.** Adopting repos pick this up on their next sync. A repo that hand-wrote a job per
+  extra tree can now delete those jobs and declare the trees in `.flow/config.yml` instead.
+
+  `source_roots` has always declared every tree that holds source and the command that parses it, but
+  nothing ran those checks — flow-doctor only proved each entry existed on disk. So a repo with a second
+  runtime dropped out of the thin-caller model and hand-wrote a job per tree: near-identical jobs,
+  unpushable by a worker credential (`.github/workflows/` needs Workflows: Write), and overwritten by the
+  next `flow-sync`. Gating a tree is now a `.flow/config.yml` edit, which any worker can push.
+
+  Two jobs do it. `source-roots-plan` runs `.flow/bin/source-roots.mjs plan`, which reads the config and
+  emits a matrix; `source-root` fans out over it, sets up the entry's runtime and runs its check. An entry
+  whose `check` is exactly one of `commands.build`, `.lint`, `.test` or `.coverage` is **left out**, because
+  the `gate` job already runs that command — so a single-stack repo (and canonical itself) plans a count of
+  zero and sees a **skipped** job, never a red one. Entries still holding the shipped `REPLACE-ME` sentinel
+  are left out too, so a repo mid-adoption stays green.
+
+  Three optional per-entry fields, each with a default: `runtime` (`node`, the default; `deno`; or `none`,
+  meaning no setup step because the check provisions its own toolchain), `version` (defaults to `22` for
+  node and `v2.x` for deno, ignored for `none`) and `retry` (0–3, default 0 — the check is attempted
+  `1 + retry` times and the log names the attempt that succeeded). The cap is deliberate: an unbounded
+  retry lets a check that is simply broken pass as merely flaky. Any other field is a hard error naming the
+  entry and the field, rather than a silently ignored key. The check runs from the repo root exactly as
+  written, so install steps belong inside it (`cd mcp && npm ci && npm run build`).
+
+  `path` and `check` come from a file a PR can edit, so no `run:` block in the new jobs interpolates
+  `${{ matrix.* }}` — the values reach the runner through `env:` only, and a test fails the build if that
+  ever changes. `denoland/setup-deno` is pinned to a commit SHA like every other third-party action.
+
+  The `source_roots` parser moved out of flow-doctor into the new shared helper, so there is one parser
+  rather than two that drift. flow-doctor loads it optionally: a repo that bumped its workflow refs without
+  syncing `.flow/bin/` gets one note and keeps every other store check, instead of a module-resolution
+  stack trace. The plan job names that same state explicitly and tells you to run `flow-sync`.
+
+- **`flow-init.test.mjs` now passes in an adopting repo, not just in canonical**
+  (`project-template/.flow/bin/flow-init.test.mjs`, flow-0078). **Caller action:** if your repo's
+  `flow-gates / flow-tooling` job is red on `flow-init.test.mjs`, syncing this release is the fix —
+  no change on your side, and you no longer need to add `AGENTS.md` to go green.
+
+  `project-template/.flow/bin/` is copied into every adopting repo and its tests run there, so a
+  file in it has two homes: in canonical `<this dir>/../..` is `project-template/`, downstream it is
+  **the adopter's own repo root**. The fixture built part of its fake canonical checkout from that
+  path, so two of its forty tests were asserting on the adopter rather than on flow-init, and were
+  permanently red in every repo that had adopted Flow — while canonical, which only ever ran them in
+  place, reported them green. `CandidDan/Nudge#297` could not pass its own gate because of it.
+
+  The two observed causes, both environmental rather than behavioural: the fixture copied the
+  adopter's **live `.flow/board.html`**, which is already pointed at its own repo and, if it predates
+  the `const REPO = "";` placeholder, offers `prepareBoard`'s anchored patterns nothing to rewrite at
+  all (that is the real shape of Nudge's board — no `const REPO` declaration, not a stale one); and
+  it copied the adopter's own **`CLAUDE.md`/`AGENTS.md`**, so "both host files ship" was a claim
+  about a repo part-way through a 1.x → 2.x sync, which has no `AGENTS.md` yet. `flow-init.mjs` is
+  unchanged: nothing was wrong with the tool.
+
+  The fixture now writes its own board and both host files, so the assertions test flow-init's
+  behaviour — the board is re-pointed at the repo being initialised and its task snapshot emptied,
+  and both host files travel — and hold in any repo the file is copied into. The board assertions
+  also lose their `if (existsSync(…))` guard, which previously let "no board here" pass by skipping.
+  Canonical still runs the same forty tests, and that the real template ships `AGENTS.md` is still
+  asserted, by `.flow/bin/protocol-portability.test.mjs` where it belongs.
+
+  New in canonical only: **`.flow/bin/flow-init-downstream.test.mjs`**, the harness that would have
+  caught this. It builds a minimal adopter layout in a temp directory — the template's `.flow/bin/`,
+  `.claude/`, callers and `CLAUDE.md`, an adopter board with its own tasks and no `REPO` placeholder,
+  no `AGENTS.md` — runs the copied test there in a child process, and fails if it goes red. The
+  copied tests it covers are a one-line list, so extending it later is cheap.
+
+- **The review gate is now planned and enforced from the base branch, so a PR can no longer
+  narrow its own security review** (`.github/workflows/_flow-review.yml`,
+  `project-template/.flow/bin/flow-review.mjs`, flow-0079). **Caller action: none** — the change
+  is entirely inside the reusable workflow and the helper, and the thin caller is unchanged.
+  Adopting repos get it by bumping the `_flow-review.yml` tag; running `flow-sync` as well is what
+  turns on the new security floor, which lives in the helper.
+
+  `plan` checked out the pull request and ran `node .flow/bin/flow-review.mjs plan` **from that
+  checkout**, reading `review.security_paths` from `.flow/config.yml` in the same checkout. Both
+  files were therefore controlled by the diff being reviewed. A PR could remove a glob from
+  `security_paths` and, in the same diff, change a file that glob used to cover: the security
+  review was then skipped "visibly", with a reason that read as a legitimate scoping decision. A
+  PR could equally edit `flow-review.mjs` itself, including the `verdict` code that decides
+  pass/fail. flow-0068 fenced PRs from forks; this was the same hole for PRs from inside the repo,
+  which is every PR the queue runner opens.
+
+  Each of the four jobs now materialises the **base branch** in a scratch git worktree under
+  `RUNNER_TEMP` and runs *that* helper against *that* config — for `plan` and for each reviewer's
+  `verdict` step, so the code that turns a written verdict into a red check comes from base too.
+  Everything the gate reasons *about* still comes from the PR: the diff, the changed-file list and
+  the task. A worktree rather than a `git show` of the single file, because the helper is not one
+  file — it imports `touches-guard.mjs` and `parse-task-id.mjs`, and in canonical
+  `.flow/bin/flow-review.mjs` is an adapter over `project-template/.flow/bin/`.
+
+  That split needs one new environment override, **`REVIEW_REPO_DIR`**, which points the helper's
+  git back at the PR checkout. It is the only pinned path that had no env escape, and without it a
+  repo whose helper is an adapter (canonical's is) would diff base against itself and hand three
+  reviewers an empty patch — a gate that passes having read nothing. `FLOW_CONFIG`,
+  `REVIEW_OUT_DIR` and `REVIEW_TASKS_DIR` already existed and carry the rest.
+
+  **A security floor**, applied regardless of `review.security_paths`: the security review always
+  runs when the diff touches `.flow/**`, `.github/**`, `.claude/**`, `CLAUDE.md` or `AGENTS.md`.
+  Those are the paths that decide what every gate does, and a repo scoping `security_paths` tightly
+  to its product code is not thereby asking for its CI to be unreviewable. The run summary names
+  the floor as the reason, distinct from a `security_paths` match, and the floor is deliberately
+  not configurable — one a repo can lower is not a floor. Widening it is what `security_paths` is
+  for. A skip now names both lists it was measured against.
+
+  **Bootstrap**, for the repo adopting the review gate in the very PR that adds it: when the base
+  branch carries no `.flow/bin/flow-review.mjs` or no `.flow/config.yml`, the PR's own helper is
+  used, the security review is **forced on**, and a warning naming the bootstrap case is written to
+  the run summary and published as a `bootstrap` output. Fail-closed, never a skip, never silent —
+  and expected exactly once.
+
 - **The release repo now carries the floating `vMAJOR` alias the fleet actually pins**
   (`flow-release-publish.yml`, `.flow/bin/release-publish.mjs`, flow-0045). **No caller action** —
   adopting repos still pin canonical; flow-0030 is the task that repoints them at the release repo,
@@ -314,7 +668,7 @@ after a canary passes). Note any **caller action** required (a caller change is 
   `v1` alias into an adopting repo. This entry's own presence, with the gate green, is the proof
   the fix works.]
 
-## 2.0.0 — 2026-09-16 (pending tag + canary)
+## 2.0.0 — 2026-09-16 (tagged `v2.0.0` at `175b7d8` on 2026-09-27, after the fact: the commit `v2` carried from 2026-09-18 until 2.1.0)
 
 **This is 1.3.0 and 1.3.1, renumbered. No new work ships here** — the same tree, correctly
 classified. The sections below for 1.3.0 and 1.3.1 are left exactly as they were: they are the
