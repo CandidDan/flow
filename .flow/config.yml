@@ -41,6 +41,19 @@ commands:
 # ever disagree, so the duplication cannot drift silently.
 coverage_min: 83.5
 
+# The CLAUDE.md ceiling, in BYTES of the RESOLVED IMPORT SET — `CLAUDE.md` plus every file Claude
+# Code loads from it by `@`-import, each counted once. Enforced by `.flow/bin/check-claude-md.mjs`
+# in the gate. `wc -c CLAUDE.md` is NOT the measurement: a repo can halve that number and increase
+# what it loads by moving prose behind an import, which is exactly what adopting Flow does.
+#
+# MEASURED, not chosen. `node .flow/bin/check-claude-md.mjs` reported 6935 bytes across 1 file
+# (canonical's root CLAUDE.md declares no imports — it points at the protocol in prose rather than
+# importing it, because canonical AUTHORS the template rather than adopting it). Ceiling: 12000,
+# leaving 5065 bytes of headroom — room for roughly one more section of real orientation, and not
+# room for the 24,596-byte protocol to be pasted back in, which is the specific regression this
+# number catches. Raise it deliberately and say why; never raise it to go green.
+claude_md_max: 12000
+
 # Gate-coverage floor. Note an honest limitation, recorded rather than papered over: every one
 # of canonical's source trees lives under a dot-directory (`.flow/bin/`, `.github/workflows/`,
 # `project-template/.flow/bin/`), and flow-doctor's undeclared-tree scan skips dot-directories.

@@ -39,6 +39,27 @@ commands:
 # raise it over time, never lower it silently. Sitting exactly at the floor proves nothing.
 coverage_min: 80
 
+# The CLAUDE.md ceiling, in BYTES — and what it measures is the point of it. `CLAUDE.md` auto-loads
+# into EVERY session in this repo, so every byte of it is always-on context. The ceiling applies to
+# the RESOLVED IMPORT SET: `CLAUDE.md` plus every file Claude Code loads from it by `@`-import
+# (transitively, to its limit of 5 hops), each unique file counted once. `wc -c CLAUDE.md` is NOT
+# the measurement and never was — this repo's own `CLAUDE.md` is 2.3k characters and imports the
+# 24.6k-character `.flow/PROTOCOL.md`, so byte-counting the one file would report a tenth of what a
+# session loads, and moving prose behind an import would read as an improvement.
+#
+# `.flow/bin/check-claude-md.mjs` enforces it in the gate: over the ceiling fails, with a per-file
+# breakdown largest-first naming what to cut. Removing this key does not switch the check off — it
+# reports the total and warns that nothing is enforcing it.
+#
+# The cost being bounded is ADHERENCE, not window space. A 1M-token window is not running out; what
+# degrades is that every rule in an always-on block competes with every other rule, and that does
+# not improve as windows grow.
+#
+# The default below is the protocol (~24.6k) plus a ~25k allowance for this project's own notes.
+# CALIBRATE IT: measure yours with `node .flow/bin/check-claude-md.mjs` and set the number from what
+# you measure, with stated headroom — the same way `coverage_min` is set. Never raise it to go green.
+claude_md_max: 50000
+
 # Source roots — the gate-coverage floor. Declare every tree that holds source AND the command
 # that parses/lints it. flow-doctor enforces this on every PR: a declared root that's missing or
 # has no check FAILS, and any top-level source tree NOT covered here FAILS too — so a new runtime
