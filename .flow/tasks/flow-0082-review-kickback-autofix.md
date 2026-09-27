@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0082"
 title: "A failed qa or code-review check dispatches a bounded auto-fix worker onto the same PR"
-status: "ready"
+status: "blocked"
 priority: 2
 project: "flow"
 owner: ""
@@ -11,8 +11,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
-blocked_by: []
+blocked_reason: "Waits on flow-0085. The reviewers still read the task file, and so the acceptance criteria, from the PR checkout; an auto-fix round could edit the criteria it is trying to satisfy. flow-0085 moves that read to the base branch."
+blocked_by: ["flow-0085"]
 serves: ["G12", "G10"]    # G12: every escalation is one decision card. G10: a fix may not pass review by weakening the tests.
 touches:
   - ".github/workflows/_flow-kickback.yml"
@@ -37,6 +37,7 @@ notes:
   - "2026-09-25 (orchestrator): DECIDED: DO NOT TOUCH `_flow-review.yml`. flow-0079 is editing it, and the fixer and the card writer can read the verdicts from the PR conversation, where every reviewer already posts them. Triggering off the review workflow's completion needs no change to it."
   - "2026-09-27 (orchestrator): unblocked. flow-0079 is done (PR #111), so the reviewers now read their config and helper from the base branch."
   - "2026-09-27 (orchestrator): AMENDED BY THE HUMAN: the round count comes from the PR, not from notes committed to `main`. Each pushed round's commit carries a `Flow-Auto-Fix-Round: N/CAP` trailer, and rounds used is the number of the PR's commits that carry one. The kickback workflow therefore never writes to `main`, which removes its only need for `contents: write` on the default branch, and a PR's round history lives on the PR it belongs to. Known limit, accepted: a human who squashes or rewrites the PR branch resets the count. That is a human act, and the cap exists to bound the machine."
+  - "2026-09-27 (orchestrator): re-blocked on flow-0085 the same day it was unblocked. The flow-0079 worker flagged that reviewers still read `.flow/tasks/<id>.md` from the PR head; for an automated fixer whose job is to turn qa green, rewriting the criteria is the cheapest route. The fixer prompt and store-guard are the current guards; flow-0085 removes the route."
   - "2026-09-25 (orchestrator): NOT parallel-safe with flow-0050, flow-0070 and flow-0077 (all share `project-template/.flow/config.yml`) or flow-0080 (shares `docs/flow-reusable-workflows.md`). pick-task skips it while any of them is in progress; whichever lands second rebases."
 ---
 
