@@ -103,6 +103,33 @@ jobs:
             echo "covmin=$(yq -r '.coverage_min' .flow/config.yml)"
           } >> "$GITHUB_OUTPUT"
 
+      # ── The CLAUDE.md ceiling (flow-0050) ──
+      #
+      # Straight after the config read, and BEFORE install/build: this needs nothing installed, and
+      # a repo whose always-on instruction block has doubled should hear about it without waiting
+      # for the slow half of the gate.
+      #
+      # It measures the RESOLVED IMPORT SET — CLAUDE.md plus every file Claude Code loads from it by
+      # `@`-import — not `wc -c CLAUDE.md`. Those differ by design in every Flow repo: the template's
+      # CLAUDE.md is 2.3k characters and imports the 24.6k-character .flow/PROTOCOL.md, so a
+      # byte-counting check would be defeated on day one by canonical's own template, and moving
+      # prose behind an import would read as an improvement.
+      #
+      # Same shape as the source-roots plan guard below: an ABSENT helper is an error naming the
+      # file and the fix, never a quiet skip (flow-0008). A repo with no `claude_md_max` in its
+      # config is NOT an error — the helper warns and exits 0, so adopting this does not turn the
+      # fleet red.
+      - name: CLAUDE.md ceiling (claude_md_max)
+        run: |
+          set -euo pipefail
+          if [ ! -f .flow/bin/check-claude-md.mjs ]; then
+            echo "::error::.flow/bin/check-claude-md.mjs is missing. This reusable needs it to"
+            echo "::error::enforce claude_md_max from .flow/config.yml. Run the flow-sync workflow"
+            echo "::error::to pick up the rest of .flow/bin/, then re-run this check."
+            exit 1
+          fi
+          node .flow/bin/check-claude-md.mjs
+
       - name: Install
         run: ${{ steps.cfg.outputs.install }}
 
