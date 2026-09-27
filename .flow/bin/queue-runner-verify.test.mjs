@@ -7,7 +7,13 @@
 //     rather than failing the job (the bootstrap guard, executed for real against a bare dir)
 //   · `_flow-queue-runner.yml`, parsed the way GitHub parses it, carries the new step in the
 //     `dispatch` job, not gated on `if: failure()`, gated on `steps.pick.outputs.task_id != ''`
-// The pure decision function's behaviour is proved in
+// Criteria proved here (flow-0049):
+//   · the verify step carries an `id:` and publishes its facts to `$GITHUB_OUTPUT` BEFORE the
+//     verifier that may fail the job; the explain step reads them from that step
+//   · a checkout with no helper publishes no outputs and the explain step still renders the
+//     generic two-branch text without erroring (executed for real against a bare dir)
+//   · the adapter re-exports the renderer — function identity, not a second copy of the text
+// The pure decision and renderer behaviour are proved in
 // `project-template/.flow/bin/queue-runner-verify.test.mjs`.
 
 import { test } from "node:test";
@@ -76,7 +82,12 @@ const WF = join(REPO, ".github", "workflows", "_flow-queue-runner.yml");
 const wfSrc = () => readFileSync(WF, "utf8");
 const verifyStep = () => {
   const steps = yamlMod.parse(wfSrc()).jobs.dispatch.steps;
-  return { steps, step: steps.find((s) => /queue-runner-verify\.mjs/.test(s.run || "")) };
+  // Two steps invoke the helper since flow-0049; the verifier is the one that judges rather
+  // than renders. Without excluding `--mode explain`, reordering the steps would silently point
+  // every assertion below at the wrong one.
+  const isVerify = (s) =>
+    /queue-runner-verify\.mjs/.test(s.run || "") && !/--mode explain/.test(s.run || "");
+  return { steps, step: steps.find(isVerify) };
 };
 
 test("the verify step exists in the dispatch job, after the worker step", { skip }, () => {
@@ -115,6 +126,87 @@ test("a checkout without the helper no-ops with a message instead of failing", {
     const r = spawnSync("bash", [script], { cwd: dir, encoding: "utf8", env: { ...process.env, TASK_ID: "x-1" } });
     assert.equal(r.status, 0, `the guard must no-op, not fail:\n${r.stderr}`);
     assert.match(r.stdout, /No \.flow\/bin\/queue-runner-verify\.mjs in this repo yet/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── flow-0049: the adapter re-exports the renderer, and the workflow carries the facts ──
+
+test("the adapter re-exports the template's renderer rather than duplicating it", async () => {
+  // Function identity, not behavioural equivalence: two copies that happen to agree today is
+  // exactly the drift the adapter shape exists to prevent (the assertion adapters.test.mjs
+  // makes for its siblings, in the form this file's single re-export allows).
+  const template = await import(
+    new URL("../../project-template/.flow/bin/queue-runner-verify.mjs", import.meta.url).href);
+  const adapter = await import("./queue-runner-verify.mjs");
+  for (const name of ["renderClaimNotice", "explainArgsFromFlags", "runCli", "verifyOutcome"]) {
+    assert.equal(typeof adapter[name], "function", `the adapter must expose ${name}`);
+    assert.equal(adapter[name], template[name],
+      `${name} must BE the template's function — a copy would let canonical's notice drift ` +
+      `from the one every adopting repo renders`);
+  }
+});
+
+test("adapter CLI --mode explain renders the outcome it was handed, and exits 0", () => {
+  const r = cli(["--mode", "explain", "--task-id", "flow-0049", "--branch", "flow/flow-0049-x",
+                 "--branch-exists", "1", "--ahead", "2", "--has-open-pr", "1"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /pull request is open/);
+  assert.doesNotMatch(r.stdout, /No PR (was|is) open/i);
+});
+
+const explainStep = () =>
+  yamlMod.parse(wfSrc()).jobs.dispatch.steps.find((s) => /Explain what happens to the claim/.test(s.name || ""));
+
+test("the verify step carries an id, and the explain step reads that step's outputs", { skip }, () => {
+  const { step } = verifyStep();
+  assert.ok(step.id, "without an `id:` the facts it derives cannot leave the step");
+  const explain = explainStep();
+  assert.ok(explain, "the explain step must still exist");
+  const env = Object.values(explain.env || {}).join("\n");
+  for (const out of ["facts_known", "branch", "branch_exists", "ahead", "has_open_pr"]) {
+    assert.match(env, new RegExp(`steps\\.${step.id}\\.outputs\\.${out}`),
+      `the notice must read ${out} from the step that derived it, not re-derive or guess it`);
+  }
+  assert.match(explain.run, /--mode explain/,
+    "rendering belongs to the pure function, so the step must call it");
+});
+
+test("the verify step writes its outputs BEFORE invoking the verifier", { skip }, () => {
+  const { step } = verifyStep();
+  const wrote = step.run.indexOf('>> "$GITHUB_OUTPUT"');
+  const invoked = step.run.indexOf("node .flow/bin/queue-runner-verify.mjs");
+  assert.ok(wrote > 0, "the step must publish the facts it derived");
+  assert.ok(invoked > 0, "the step must still invoke the verifier");
+  assert.ok(wrote < invoked,
+    "the verifier exits non-zero on a wasted run and a run: block stops there — outputs " +
+    "written after it would be missing on exactly the failure path that needs them");
+});
+
+test("the explain step no-ops to the generic two-branch text when no facts were published", { skip }, () => {
+  const explain = explainStep();
+  // A repo that has not synced the helper: the verify step's bootstrap guard published nothing,
+  // and there is no renderer to call either. Execute the script for real in a bare directory.
+  const dir = mkdtempSync(join(tmpdir(), "qrv-explain-"));
+  try {
+    const script = join(dir, "step.sh");
+    const summary = join(dir, "summary.md");
+    writeFileSync(script, explain.run);
+    const r = spawnSync("bash", [script], {
+      cwd: dir, encoding: "utf8",
+      // No FACTS_KNOWN/BRANCH/... — precisely what GitHub passes when the step published none.
+      env: { ...process.env, TASK_ID: "x-1", GITHUB_STEP_SUMMARY: summary,
+             FACTS_KNOWN: "", BRANCH: "", BRANCH_EXISTS: "", AHEAD: "", HAS_OPEN_PR: "" },
+    });
+    assert.equal(r.status, 0, `the fallback must not error:\n${r.stderr}`);
+    const md = readFileSync(summary, "utf8");
+    assert.match(md, /Worker run failed for `x-1`/);
+    assert.match(md, /branch pushed, ahead of `main`/, "the generic two-branch text is the fallback");
+    assert.match(md, /nothing pushed/);
+    assert.match(md, /flow-recover/);
+    assert.doesNotMatch(md, /No PR (was|is) open/i,
+      "with no facts published the step knows nothing about a PR, so it must assert nothing");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
