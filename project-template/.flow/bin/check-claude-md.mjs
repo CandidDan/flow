@@ -36,8 +36,17 @@
 // before them, and canonical ships as source others copy, so a dependency added here is imposed
 // downstream.
 //
-//   node .flow/bin/check-claude-md.mjs           # enforce; exit non-zero over the ceiling
-//   node .flow/bin/check-claude-md.mjs --json    # the same verdict as data
+// THE HOST FILE IS INJECTED, NOT BAKED IN, and that is not a style choice. A pinned invariant of
+// this repo (`.flow/bin/protocol-portability.test.mjs`, "nothing in the tooling READS the protocol
+// by CLAUDE.md filename") forbids any helper in a shipped `bin/` from naming the host file in
+// EXECUTABLE code: the filename is Claude Code's convention, and a helper that opens it by name
+// re-binds Flow to one vendor. A comment may name it; code may not. So the entry point arrives as
+// `--entry <path>` (or `FLOW_CONTEXT_ENTRY`), supplied by the gate step in `_flow-gates.yml`, and
+// this file measures whatever host file it is handed. There is no default and omitting it is a
+// usage error, never an empty pass — a default would be the binding wearing a disguise.
+//
+//   node .flow/bin/check-claude-md.mjs --entry CLAUDE.md           # enforce
+//   node .flow/bin/check-claude-md.mjs --entry CLAUDE.md --json    # the same verdict as data
 //
 // WHAT IS DELIBERATELY ABSENT: no warn-only mode, no second threshold, no per-file ceiling. One
 // number, one behaviour, matching `coverage_min`. A warn-only mode is how the sentence this file
@@ -56,7 +65,25 @@ export const MAX_IMPORT_DEPTH = 5;
 // from, because the thing measured is a set of files and not one.
 export const CEILING_KEY = "claude_md_max";
 
-export const ENTRY_FILE = "CLAUDE.md";
+// How the host file reaches this helper. Both forms, because the gate passes the flag and a human
+// debugging a repo locally should not have to remember which one.
+export const ENTRY_FLAG = "--entry";
+export const ENTRY_ENV = "FLOW_CONTEXT_ENTRY";
+
+/** The host file from argv or the environment, or null — never a baked-in default. */
+export function resolveEntry(argv = [], env = process.env) {
+  const i = argv.indexOf(ENTRY_FLAG);
+  if (i > -1 && argv[i + 1] && !argv[i + 1].startsWith("-")) return argv[i + 1];
+  const fromEnv = String(env[ENTRY_ENV] ?? "").trim();
+  return fromEnv || null;
+}
+
+export const USAGE = `usage: check-claude-md.mjs ${ENTRY_FLAG} <host-file> [--json]
+
+The host file is not baked in: its name is one agent vendor's convention, and a helper that
+opened it by name would re-bind Flow to that vendor (see protocol-portability). Pass
+\`${ENTRY_FLAG} <the host file this repo auto-loads>\`, or set ${ENTRY_ENV}. The gate step in
+_flow-gates.yml is where that binding lives.`;
 
 // ─────────────────────────────────────────────────────────────────────────────────────────
 // The import parser
@@ -118,7 +145,8 @@ export function parseImports(text) {
  * Paths in an import are resolved relative to THE FILE CONTAINING THEM, not to the repo root —
  * which is what keeps a nested `@sibling.md` correct.
  */
-export function resolveImportSet(repoRoot, { entry = ENTRY_FILE } = {}) {
+export function resolveImportSet(repoRoot, { entry } = {}) {
+  if (!entry) throw new TypeError(USAGE);
   const entryAbs = resolve(repoRoot, entry);
   const files = [];
   const problems = [];
@@ -213,8 +241,10 @@ export function parseCeiling(configPath) {
  * Adoption must not break the fleet — every repo that pinned this workflow before the key existed
  * would go red at once — so the missing key is a loud warning here.
  */
-export function checkClaudeMd({ repoRoot, configPath = join(repoRoot, ".flow", "config.yml") } = {}) {
-  const { files, problems, refused } = resolveImportSet(repoRoot);
+export function checkClaudeMd({
+  repoRoot, entry, configPath = join(repoRoot, ".flow", "config.yml"),
+} = {}) {
+  const { files, problems, refused } = resolveImportSet(repoRoot, { entry });
   const ceiling = parseCeiling(configPath);
   const total = files.reduce((n, f) => n + f.bytes, 0);
   // Largest first, so the output names the file to cut rather than leaving the reader to sort it.
@@ -226,7 +256,7 @@ export function checkClaudeMd({ repoRoot, configPath = join(repoRoot, ".flow", "
   if (all.length) {
     return {
       ok: false,
-      decision: files.length ? "unresolved-import" : "no-claude-md",
+      decision: files.length ? "unresolved-import" : "no-host-file",
       total, ceiling: ceiling.value, files: breakdown, refused, problems: all, warnings,
     };
   }
@@ -263,17 +293,25 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 export function main(argv, {
   repoRoot,
   configPath = join(repoRoot, ".flow", "config.yml"),
+  env = process.env,
   stdout = (s) => console.log(s),
   stderr = (s) => console.error(s),
 } = {}) {
-  const r = checkClaudeMd({ repoRoot, configPath });
+  const entry = resolveEntry(argv, env);
+  if (!entry) {
+    // Exit 2, the usage code — distinct from 1, so "you invoked it wrong" is never mistaken in a
+    // CI log for "this repo is over its ceiling".
+    stderr(USAGE);
+    return 2;
+  }
+  const r = checkClaudeMd({ repoRoot, entry, configPath });
 
   if (argv.includes("--json")) {
     stdout(JSON.stringify(r, null, 2));
     return r.ok ? 0 : 1;
   }
 
-  stdout(`check-claude-md: decision=${r.decision} total=${r.total} ` +
+  stdout(`check-claude-md: decision=${r.decision} entry=${entry} total=${r.total} ` +
     `ceiling=${r.ceiling ?? "none"} files=${r.files.length}`);
   for (const line of r.refused) stdout(`  note   ${line}`);
 
@@ -286,7 +324,7 @@ export function main(argv, {
   }
 
   if (r.decision === "over-ceiling") {
-    stderr(`::error::${ENTRY_FILE}'s resolved import set is ${r.total} bytes, over the ` +
+    stderr(`::error::${entry}'s resolved import set is ${r.total} bytes, over the ` +
       `${CEILING_KEY} of ${r.ceiling} by ${r.total - r.ceiling}. This is what a session actually ` +
       `loads, so moving prose behind an import does not reduce it — cut it, or raise the ` +
       `ceiling deliberately and say why.`);
@@ -295,7 +333,7 @@ export function main(argv, {
     return 1;
   }
   if (r.decision === "within-ceiling") {
-    stdout(`${ENTRY_FILE}'s resolved import set is ${r.total} bytes across ` +
+    stdout(`${entry}'s resolved import set is ${r.total} bytes across ` +
       `${plural(r.files.length, "file")}, ${r.headroom} under the ${CEILING_KEY} of ${r.ceiling}.`);
   }
   return 0;

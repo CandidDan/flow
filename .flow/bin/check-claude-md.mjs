@@ -17,8 +17,12 @@
 // template and the command would still exit 0, having measured the wrong repo — and the number it
 // printed would even look plausible.)
 //
-//   node .flow/bin/check-claude-md.mjs           # enforce; exit non-zero over the ceiling
-//   node .flow/bin/check-claude-md.mjs --json    # the same verdict as data
+// The host file is NOT defaulted here either, for the same reason it is not defaulted in the
+// template: `protocol-portability.test.mjs` forbids the filename in a bin helper's executable code
+// in BOTH directories. It arrives as `--entry <path>`, from the gate step.
+//
+//   node .flow/bin/check-claude-md.mjs --entry CLAUDE.md           # enforce
+//   node .flow/bin/check-claude-md.mjs --entry CLAUDE.md --json    # the same verdict as data
 
 import { realpathSync as __realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -36,8 +40,8 @@ const __isMain = (() => {
 // ---------------------------------------------------------------------------------------
 
 export {
-  CEILING_KEY, ENTRY_FILE, MAX_IMPORT_DEPTH, checkClaudeMd, main, parseCeiling, parseImports,
-  resolveImportSet,
+  CEILING_KEY, ENTRY_ENV, ENTRY_FLAG, MAX_IMPORT_DEPTH, USAGE, checkClaudeMd, main, parseCeiling,
+  parseImports, resolveEntry, resolveImportSet,
 } from "../../project-template/.flow/bin/check-claude-md.mjs";
 
 // Canonical's own root — two levels up from this `bin/` directory — and the config beside it.

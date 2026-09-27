@@ -36,7 +36,7 @@ imported above and arrives in full every session; what it stopped counting again
 CLAUDE.md`, and that is why `wc -c` is not the measurement and is not sufficient — halving it by
 moving prose behind an import *increases* what a session loads.
 
-Run `node .flow/bin/check-claude-md.mjs` for the real total, the headroom, and a per-file breakdown
+Run `node .flow/bin/check-claude-md.mjs --entry CLAUDE.md` for the real total, the headroom, and a per-file breakdown
 largest-first; the gate runs the same command and fails over the ceiling.
 
 What is being bounded is **adherence**, not window space. Nothing is running out — measured live,
