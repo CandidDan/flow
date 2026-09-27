@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0049"
 title: "Make the queue-runner's failure summary state the run's actual outcome instead of asserting one"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-code-worker"
