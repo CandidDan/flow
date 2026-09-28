@@ -173,6 +173,11 @@ jobs:
       # finished or blocked outcome (see flow-0025 / issue #33). flow-recover still owns
       # healing the claim; this step only stops the run from lying about its own result.
       - name: Verify the worker produced an outcome
+        # `id:` so the facts derived below survive the step. They are the same three facts that
+        # decide what `Explain what happens to the claim` has to say, and until flow-0049 they
+        # were shell locals this step threw away — leaving the notice to print a hypothetical
+        # from a job that already knew the answer.
+        id: verify
         if: ${{ !cancelled() && steps.pick.outputs.task_id != '' }}
         env:
           TASK_ID: ${{ steps.pick.outputs.task_id }}
@@ -207,6 +212,20 @@ jobs:
               process.stdout.write(String(prs.filter((p) => p.title.startsWith(prefix)).length));
             ')"
           fi
+          # Publish the facts BEFORE the verdict below, never after: the helper exits non-zero on
+          # a wasted run, and a `run:` block stops at the first failing command — so outputs
+          # written after it would be missing on exactly the path that needs them. `facts_known`
+          # is the flag the explain step keys off; the bootstrap guard above returns early, so an
+          # unsynced repo publishes nothing and that step falls back to its generic text.
+          # `branch` comes from `git ls-remote | sed` and is a single ref name by construction
+          # (refs cannot contain whitespace or newlines), so it cannot forge extra output lines.
+          {
+            echo "facts_known=1"
+            echo "branch=$branch"
+            echo "branch_exists=$branch_exists"
+            echo "ahead=$ahead"
+            echo "has_open_pr=$has_open_pr"
+          } >> "$GITHUB_OUTPUT"
           # The task's state lives on main, which moved after checkout if the worker claimed or
           # blocked it — refresh the store from origin/main so the helper reads current state.
           git checkout -q origin/main -- .flow/tasks/
@@ -218,24 +237,45 @@ jobs:
       # from the summary alone: the claim is NOT released here, and must not be — releasing it
       # from the failure path would race a worker that is still finishing. flow-recover owns
       # that decision, on its own schedule, from the evidence on the remote.
+      #
+      # `if: failure()` is ANY step failing, not specifically a worker that produced nothing, so
+      # this step must not assert an absence it never checked: a worker that pushes, opens its
+      # PR and *then* exits non-zero fires this step too. It therefore renders the outcome the
+      # verify step above actually observed (`renderClaimNotice`, colocated with the decision it
+      # describes) rather than the two-branch hypothetical it used to print.
       - name: Explain what happens to the claim
         if: ${{ failure() && steps.pick.outputs.task_id != '' }}
         env:
           TASK_ID: ${{ steps.pick.outputs.task_id }}
+          FACTS_KNOWN: ${{ steps.verify.outputs.facts_known }}
+          BRANCH: ${{ steps.verify.outputs.branch }}
+          BRANCH_EXISTS: ${{ steps.verify.outputs.branch_exists }}
+          AHEAD: ${{ steps.verify.outputs.ahead }}
+          HAS_OPEN_PR: ${{ steps.verify.outputs.has_open_pr }}
         run: |
-          {
-            echo "### Worker run failed for \`$TASK_ID\`"
-            echo
-            echo "No PR was opened. The claim on \`$TASK_ID\` is left as-is — **flow-recover**"
-            echo "resolves it on the next sweep, and which way it goes depends on what this run"
-            echo "managed to push:"
-            echo
-            echo "- **branch pushed, ahead of \`main\`** → the PR is re-opened from that branch,"
-            echo "  and the work survives."
-            echo "- **nothing pushed** → the task resets to \`ready\` once it passes the staleness"
-            echo "  threshold, and the next queue-runner starts it over from zero."
-            echo
-            echo "If this is the same task capping repeatedly, the cap is the symptom to look"
-            echo "past, not the thing to raise: check that a branch and a \`notes\` entry are"
-            echo "actually landing between runs, then consider splitting the task."
-          } >> "$GITHUB_STEP_SUMMARY"
+          # No facts, no claim about them. Two ways to get here: the repo has not synced the
+          # helper yet (the verify step's bootstrap guard no-ops, publishing nothing, and there
+          # is no renderer to call either), or that step died before publishing. Both fall back
+          # to the generic two-branch text — which is honest when the outcome is genuinely
+          # unknown, and is the only copy of it, so the two paths cannot drift.
+          if [ "$FACTS_KNOWN" != "1" ] || [ ! -f .flow/bin/queue-runner-verify.mjs ]; then
+            {
+              echo "### Worker run failed for \`$TASK_ID\`"
+              echo
+              echo "The claim on \`$TASK_ID\` is left as-is — **flow-recover** resolves it on the"
+              echo "next sweep, and which way it goes depends on what this run managed to push:"
+              echo
+              echo "- **branch pushed, ahead of \`main\`** → the PR is re-opened from that branch,"
+              echo "  and the work survives."
+              echo "- **nothing pushed** → the task resets to \`ready\` once it passes the staleness"
+              echo "  threshold, and the next queue-runner starts it over from zero."
+              echo
+              echo "If this is the same task capping repeatedly, the cap is the symptom to look"
+              echo "past, not the thing to raise: check that a branch and a \`notes\` entry are"
+              echo "actually landing between runs, then consider splitting the task."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node .flow/bin/queue-runner-verify.mjs --mode explain --task-id "$TASK_ID" \
+            --branch "$BRANCH" --branch-exists "$BRANCH_EXISTS" --ahead "$AHEAD" \
+            --has-open-pr "$HAS_OPEN_PR" >> "$GITHUB_STEP_SUMMARY"
