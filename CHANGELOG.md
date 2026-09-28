@@ -249,8 +249,12 @@ point: `git tag -f v2 v2.0.0 && git push -f origin v2`.
   saying so, is the behaviour that can be explained in a warning.
 
 - **`_flow-gates.yml` now runs every declared `source_roots` check as a matrix job** (`.github/workflows/_flow-gates.yml`,
-  `project-template/.flow/bin/source-roots.mjs`, flow-0077). **Caller action: none to keep working; one
-  optional migration.** Adopting repos pick this up on their next sync. A repo that hand-wrote a job per
+  `project-template/.flow/bin/source-roots.mjs`, flow-0077). **Caller action: none to keep working once
+  you sync this release; one optional migration.** The new `source-roots-plan` job needs
+  `.flow/bin/source-roots.mjs`, which only arrives through `flow-sync`. A repo pinned to `@v2-edge`
+  ran the new workflow before the helper existed there (progress #103, #104): its `source-roots-plan`
+  check failed until this release's `VERSION` bump let `flow-sync` deliver the helper. Repos on `@v2`
+  get both together. A repo that hand-wrote a job per
   extra tree can now delete those jobs and declare the trees in `.flow/config.yml` instead.
 
   `source_roots` has always declared every tree that holds source and the command that parses it, but
