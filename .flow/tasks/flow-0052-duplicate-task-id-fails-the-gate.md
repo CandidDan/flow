@@ -1,12 +1,12 @@
 ---
 id: "flow-0052"
 title: "Make a duplicate task id fail the gate, instead of waiting for a human to notice"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0052"
 created: "2026-09-15"
-started: ""
+started: "2026-09-28T00:51:09Z"
 branch: ""
 pr: ""
 issue: ""
