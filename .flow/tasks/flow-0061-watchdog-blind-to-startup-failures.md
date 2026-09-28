@@ -1,12 +1,12 @@
 ---
 id: "flow-0061"
 title: "The watchdog cannot see a workflow that never starts — a startup failure reads as silence"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-code-worker-flow-0061"
 created: "2026-09-16"
-started: ""
+started: "2026-09-28T04:31:26Z"
 branch: ""
 pr: ""
 issue: ""
