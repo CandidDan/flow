@@ -21,16 +21,18 @@
 //
 // Exits 0 when the run left a verifiable outcome (branch pushed / PR open / blocked with a
 // reason), 1 otherwise — the non-zero exit is what fails the queue-runner job.
+//
+// `--mode explain` is the other half, and reads the SAME facts rather than re-deriving them:
+// it renders the failure notice for `$GITHUB_STEP_SUMMARY` and always exits 0, because
+// describing an outcome is not judging one.
+//
+//   node .flow/bin/queue-runner-verify.mjs --mode explain --task-id flow-0025 \
+//        --branch flow/flow-0025-x --branch-exists 1 --ahead 3 --has-open-pr 0
 
 import { realpathSync as __realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath as __fileURLToPath } from "node:url";
-import {
-  parseFlags,
-  reportAndExit,
-  runVerify,
-  verifyArgsFromFlags,
-} from "../../project-template/.flow/bin/queue-runner-verify.mjs";
+import { runCli } from "../../project-template/.flow/bin/queue-runner-verify.mjs";
 
 // --- main-module detection (do not simplify back to a string compare) -------------------
 // A verifier whose CLI block never runs exits 0 having checked nothing — the job goes green
@@ -47,9 +49,12 @@ const __isMain = (() => {
 // The public surface, re-exported rather than reimplemented — same posture as the other
 // adapters, so a consumer can import from either path and get one implementation.
 export {
+  explainArgsFromFlags,
   parseFlags,
   readTaskState,
+  renderClaimNotice,
   reportAndExit,
+  runCli,
   runVerify,
   verifyArgsFromFlags,
   verifyOutcome,
@@ -67,6 +72,5 @@ export function canonicalTasksDir(root = canonicalRepoRoot()) {
 
 // ── CLI ──
 if (__isMain) {
-  const flags = parseFlags(process.argv.slice(2));
-  reportAndExit(runVerify(verifyArgsFromFlags(flags, canonicalTasksDir())));
+  runCli(process.argv.slice(2), canonicalTasksDir());
 }

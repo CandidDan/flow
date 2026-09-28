@@ -339,8 +339,13 @@ test("the task-writer skill tells the orchestrator to declare the fragment, neve
 });
 
 test("canonical dogfoods its own convention: this change's entry is a fragment", () => {
-  assert.ok(existsSync(join(REPO, FRAGMENT_DIR, "flow-0069.md")),
-    "flow-0069's own changelog entry must be a fragment, or the convention starts with an exception");
+  // Pending, the entry is `changes/flow-0069.md`; once a release has run `--assemble`, the
+  // fragment is deleted by design and the entry lives in CHANGELOG.md. Either is the convention
+  // working. Asserting only the file would make every release's own gate red.
+  const pending = existsSync(join(REPO, FRAGMENT_DIR, "flow-0069.md"));
+  const assembled = readFileSync(join(REPO, "CHANGELOG.md"), "utf8").includes("flow-0069). **No caller action**");
+  assert.ok(pending || assembled,
+    "flow-0069's own changelog entry must be a fragment (or an assembled one), or the convention starts with an exception");
   assert.ok(existsSync(join(REPO, FRAGMENT_DIR, "README.md")), "the convention must be documented where it lives");
   assert.equal(UNRELEASED, "## Unreleased");
 });
