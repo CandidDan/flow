@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0050"
 title: "Enforce the CLAUDE.md ceiling against resolved context, not file bytes"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0050"
