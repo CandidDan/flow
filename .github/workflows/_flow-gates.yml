@@ -261,10 +261,15 @@ jobs:
   # one — an empty matrix is the correct answer for a single-tree repo, and for canonical itself
   # (all four of its entries are `npm run lint`/`npm run build`, which the gate job above runs).
   # fail-fast is off: one broken tree must not cancel the others' verdicts.
+  #
+  # The name is STATIC on purpose (flow-0087). GitHub never evaluates a skipped job's name, so a
+  # `${{ matrix.path }}` in it showed up verbatim on every PR where this job skips — the common
+  # case — and read as broken templating. A static name still gets the matrix values appended
+  # in parentheses when the job runs.
   source-root:
     needs: source-roots-plan
     if: needs.source-roots-plan.outputs.count != '0'
-    name: source-root (${{ matrix.path }})
+    name: source-root
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
