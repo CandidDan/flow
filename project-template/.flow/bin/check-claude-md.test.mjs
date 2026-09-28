@@ -460,9 +460,15 @@ test("criterion 13 (the CLI runs, and against CANONICAL's root): silence is the 
 
 test("criterion 14: the changelog fragment names the caller action, both halves of it", (t) => {
   if (!CANON) return t.skip(notCanonical);
+  // Pending, the entry is `changes/flow-0050.md`. After a release runs `--assemble` the fragment
+  // is deleted by design and the entry lives in CHANGELOG.md, whose file list ends `, flow-0050)`.
+  // Either is the convention working; requiring the file made every release's own gate red.
   const path = join(CANON, "changes", "flow-0050.md");
-  assert.ok(existsSync(path), "the entry goes in changes/<task-id>.md, never in CHANGELOG.md");
-  const text = readFileSync(path, "utf8");
+  const text = existsSync(path)
+    ? readFileSync(path, "utf8")
+    : (readFileSync(join(CANON, "CHANGELOG.md"), "utf8").split(/\n(?=- \*\*)/)
+        .find((e) => /`, flow-0050\)/.test(e)) ?? "");
+  assert.ok(text, "the entry goes in changes/<task-id>.md (or, once released, CHANGELOG.md)");
 
   assert.match(text, /caller action/i, "the entry must state whether a caller has to act");
   assert.match(text, new RegExp(CEILING_KEY),

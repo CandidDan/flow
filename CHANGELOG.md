@@ -6,6 +6,83 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 2.1.1 — 2026-09-28 (pending tag + canary)
+
+**PATCH: 2.1.0 turned every synced repo's `flow-tooling` check red. No caller action; the next
+`flow-sync` fixes it.**
+
+- **Synced tests no longer read files an adopting repo does not have** (`project-template/.flow/bin/flow-doctor.test.mjs`,
+  `project-template/.flow/bin/source-roots.test.mjs`, `.flow/bin/adopter-layout.test.mjs`). **No caller action**:
+  adopting repos pick this up on their next sync.
+
+  flow-sync copies `.flow/bin/`, tests included, into every repo, and `flow-tooling` runs them there.
+  2.1.0 shipped five tests that only pass inside canonical. Three read `.flow/intents/_TEMPLATE.md`,
+  which flow-sync does not deliver (flow-0063, flow-0073). Two read canonical's own config or expect
+  the template's `REPLACE-ME` placeholder, which a calibrated repo has replaced (flow-0077). Found
+  on progress, the canary, after `v2` had already moved. They now skip, with the reason, outside
+  the repo they are about.
+
+  The class is now gated: `.flow/bin/adopter-layout.test.mjs` (canonical-only) copies the
+  published template into a scratch git repo, removes what flow-sync does not carry, fills in the
+  config, and runs every synced test there. Against 2.1.0's tests it reports exactly the five
+  failures progress hit.
+
+  Not fixed here: whether flow-sync should deliver the intent template at all. The intent-writer
+  skill (flow-0072) will want it in every repo; that is a separate change.
+
+- **The `CLAUDE.md` ceiling is now enforced, and measured against what a session actually loads**
+  (`project-template/.flow/bin/check-claude-md.mjs`, `.flow/bin/check-claude-md.mjs`,
+  `_flow-gates.yml`, flow-0050). **Caller action, two parts.** (1) Add `claude_md_max: <bytes>` to
+  `.flow/config.yml` beside `coverage_min`, calibrated from `node .flow/bin/check-claude-md.mjs` in
+  your own repo — without it the gate step prints the resolved total and a `no ceiling declared`
+  warning and exits 0, so nothing is enforcing it. (2) A repo whose `CLAUDE.md` carries the
+  `@.flow/PROTOCOL.md` import **without the file present** will now **fail** the gate naming the
+  unresolved path, instead of loading a `CLAUDE.md` with no protocol in it and reporting nothing.
+
+  `project-template/CLAUDE.md` has always told every adopting repo to keep itself "well under 25k
+  characters (`wc -c CLAUDE.md`)". Nothing measured it — `CandidDan/Nudge` sat at 36,338
+  characters, 45% over, with nothing reporting it — and the measurement it named was the wrong one.
+  Line 11 of that same file is `@.flow/PROTOCOL.md`, a Claude Code **import**: the target is
+  resolved and loaded into the context window in full at session start. So a repo can halve `wc -c
+  CLAUDE.md` and *increase* the context it loads, by moving prose behind an import. Nudge's
+  adoption PR does exactly that, honestly and with the arithmetic stated: 36,338 → 25,630 while the
+  session gains the whole 23,753-character protocol. A byte-counting check would have called that a
+  10,708-character improvement; it is a ~13,000-character regression. A check measuring file bytes
+  is defeated on day one by canonical's own template.
+
+  The check therefore measures the **resolved import set**: start at the repo-root `CLAUDE.md`,
+  follow `@`-paths relative to the file containing them, transitively to Claude Code's limit of 5
+  hops (a 6th hop is named in the output and not counted, because Claude Code would not load it
+  either), count each unique file once, and sum the bytes. Imports inside inline backticks and
+  inside fenced code blocks are not imports — Claude Code's parser skips both, which is why the
+  template tells you to leave the pointer outside both. Over the ceiling fails with a per-file
+  breakdown ordered largest-first, so the output names the file to cut; at or under it prints the
+  total and the headroom. No `CLAUDE.md` at the root at all is a **failure**, not a pass, the same
+  rule `build` and `lint` follow.
+
+  The number is per-repo and the mechanism is not — deliberately the `coverage_min` shape, no
+  second config idiom. Every Flow repo auto-loads a `CLAUDE.md` and suffers the same dilution, so
+  enforcement is shared infra authored in canonical; the allowance cannot be shared, because a repo
+  carrying generated routing tables needs a different one from a repo that does not. The template
+  ships a calibrated default (`50000` — the protocol plus a ~25k allowance for project notes) and
+  canonical declares `12000` against its own measured 6,935.
+
+  What is being bounded is **adherence**, not window space, and the distinction is on the record so
+  it does not get re-framed later: measured in a live session, `CLAUDE.md` was 14.2k tokens against
+  a 1M window — 1.4%, with 75.7% of the window free. Nothing is running out. The cost of a large
+  always-on instruction block is that every rule competes with every other rule for adherence, and
+  that does not improve as windows grow.
+
+- **The skipped `source-root` check no longer shows a raw `${{ matrix.path }}`**
+  (`.github/workflows/_flow-gates.yml`, flow-0087). The `source-root` job is now named
+  `source-root`, not `source-root (${{ matrix.path }})`. GitHub never evaluates a skipped job's
+  name, and this job skips whenever the primary gate covers every `source_root`, which is the
+  common case. So PRs showed a check titled `flow-gates / source-root (${{ matrix.path }})` that
+  looked like broken templating. A job that runs still shows its matrix values: GitHub appends all
+  of them in parentheses (`path`, `check`, `runtime` and the rest). **No caller action**, unless
+  your repo made `source-root (<path>)` a required status check. In that case, update the rule to
+  the new name.
+
 ## 2.1.0 — 2026-09-27 (pending tag + canary)
 
 **MINOR: new backward-compatible capability, no required caller change.** New here: the intent
