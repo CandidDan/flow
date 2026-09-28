@@ -280,7 +280,7 @@ function startupRunTell(latestRun) {
   const r = latestRun ?? null;
   if (!r || r.conclusion !== "failure") return "";
   if (!r.createdAt || !r.updatedAt || r.createdAt !== r.updatedAt) return "";
-  return `. Corroborated by the latest run: a \`${r.event ?? "?"}\` run that failed with zero duration` +
+  return `. Corroborated by the latest run: a ${codeSpan(r.event ?? "?")} run that failed with zero duration` +
     " (created_at equals updated_at), which is GitHub reporting a workflow it could not start rather" +
     " than a job that ran and failed";
 }
@@ -296,10 +296,13 @@ export function startupFailure(entry) {
   if (declared === null) return null; // declares no name, so the path is legitimately its name
   if (declared === path) return null; // named after its own path on purpose — see case 2 above
 
+  // `declared` is text from the pushed file, so it goes through codeSpan like every other
+  // workflow-controlled string here: a backtick in it must not close the span and let the rest
+  // render as live Markdown in the auto-filed issue.
   return {
     state: UNPARSEABLE_STATE,
     reason: `GitHub could not parse this workflow file — it registered the workflow under its own ` +
-      `path, discarding the \`name: ${declared}\` the file declares, so the workflow cannot start ` +
+      `path, discarding the ${codeSpan(`name: ${declared}`)} the file declares, so the workflow cannot start ` +
       `at all${startupRunTell(e.latestRun)}`,
   };
 }

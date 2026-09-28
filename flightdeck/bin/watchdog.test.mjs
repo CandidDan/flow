@@ -856,6 +856,31 @@ test("flow-0061 criterion 3 (corroboration): the run-level tell uses the run dat
   assert.doesNotMatch(ordinary.reason, /zero duration/);
 });
 
+test("flow-0061: a declared name carrying backticks and a link stays inside a code span in the reason and the issue", () => {
+  // The declared name is written by whoever pushed the unparseable file. A hand-rolled backtick
+  // pair let a backtick in it close the span early, so the rest rendered as a live link in the
+  // auto-filed issue.
+  const path = ".github/workflows/flow-sync.yml";
+  const evil = "x` and [click here](https://evil.example/phish) `";
+  const text = BROKEN_SCHEDULED.replace(/^name:.*$/m, `name: ${evil}`);
+  assert.equal(declaredWorkflowName(text), evil, "fixture: the parser must hand back the hostile name intact");
+
+  const verdict = startupFailure({ path, name: path, text, latestRun: null });
+  assert.equal(verdict.state, UNPARSEABLE_STATE);
+  assert.ok(verdict.reason.includes(codeSpan(`name: ${evil}`)), "the name must be rendered through codeSpan");
+
+  // Outcome, not mechanism: with every code span removed (CommonMark: a run of N backticks closes
+  // only on a run of exactly N), no Markdown link is left to render.
+  const outsideSpans = (md) => md.replace(/(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g, "");
+  assert.doesNotMatch(outsideSpans(verdict.reason), /\]\(https?:/, "a link escaped the code span in the reason");
+  const body = renderIssueBody({
+    fullName: "CandidDan/flow",
+    workflow: { path, name: path, state: verdict.state, reason: verdict.reason },
+    now: new Date("2026-09-28T00:00:00Z"),
+  });
+  assert.doesNotMatch(outsideSpans(body), /\]\(https:\/\/evil/, "a link escaped the code span in the issue body");
+});
+
 test("flow-0061 criterion 4: a workflow whose author genuinely named it after its own path is NOT reported", async () => {
   const { io, state } = fakeGitHub({
     // GitHub parsed this file perfectly and registered exactly the name it declares, which happens
