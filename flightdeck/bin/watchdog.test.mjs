@@ -20,6 +20,8 @@ import {
   applyActions,
   codeSpan,
   ensureLabel,
+  UNPARSEABLE_STATE,
+  declaredWorkflowName,
   evaluateWorkflows,
   findIssueForWorkflow,
   issueTitle,
@@ -28,6 +30,7 @@ import {
   renderIssueBody,
   reportRun,
   runWatchdog,
+  startupFailure,
   watchRepo,
   workflowMarker,
 } from "./watchdog.mjs";
@@ -69,7 +72,10 @@ function fakeGitHub({ workflows = [], openIssues = [], labelExists = true }) {
       return {
         workflows: workflows.map((w, idx) => ({
           id: idx + 1,
-          name: parseYaml(w.text).name,
+          // `apiName` is what GitHub REGISTERED, which is only the same as the file's `name:` when
+          // GitHub could parse the file. An unparseable workflow registers under its own path, and
+          // no amount of parsing the fixture text can produce that — so the fixture states it.
+          name: w.apiName ?? parseYaml(w.text).name,
           path: `.github/workflows/${w.file}`,
           state: w.state ?? "active",
         })),
@@ -709,4 +715,309 @@ test("flow-0055: reportRun prints all three failure buckets and tallies them ind
   assert.match(joined, /o\/empty enrolled but not adopted/);
   assert.match(joined, /o\/broke file failed for x\.yml: 500/);
   assert.match(joined, /1 repo\(s\) unreadable, 1 enrolled but not adopted, 1 with failed writes/);
+});
+
+
+// ── flow-0061: the watchdog cannot see a workflow that never starts ──────────────────────────
+//
+// Every criterion in `.flow/tasks/flow-0061-watchdog-blind-to-startup-failures.md` is proved by
+// name below. The fixtures matter as much as the assertions: an unparseable workflow is one whose
+// REGISTERED name (what GitHub recorded) differs from what its file declares, and only the fake's
+// `apiName` override can express that — parsing the fixture text can never produce it, which is
+// precisely why the defect was invisible.
+
+// The flow-0060 shape, verbatim in structure: a scheduled workflow with an invalid `permissions:`
+// value. The YAML is well-formed; GitHub's SCHEMA rejects it, so the workflow registers under its
+// own path and never starts. `apiName` is that registration.
+const BROKEN_SCHEDULED = `name: flow-sync\non:\n  schedule:\n    - cron: "0 6 * * 1"\n  workflow_dispatch:\npermissions:\n  workflows: write\n`;
+const BROKEN_EVENT = `name: gates\non:\n  pull_request:\npermissions:\n  workflows: write\n`;
+const BROKEN_MANUAL = `name: release\non:\n  workflow_dispatch:\npermissions:\n  workflows: write\n`;
+
+// The false-positive fixtures. Both register with `name` equal to `path` for entirely legitimate
+// reasons, and neither may be reported.
+const SELF_NAMED = `name: .github/workflows/odd.yml\non:\n  pull_request:\n`;       // author genuinely did this
+const NAMELESS = `on:\n  pull_request:\n`;                                          // GitHub defaults to the path
+
+// A zero-duration failed `push` run: what GitHub records for the push that carried a file it could
+// not parse. `created_at` equals `updated_at` because nothing executed.
+const STARTUP_RUN = { conclusion: "failure", html_url: "https://x/startup", event: "push", created_at: "2026-08-28T07:55:00Z", updated_at: "2026-08-28T07:55:00Z" };
+
+test("flow-0061 criterion 1: a workflow GitHub could not parse is reported in its own state, and the reason names the PARSE failure rather than the staleness symptom", async () => {
+  const { io, state } = fakeGitHub({
+    workflows: [{ file: "flow-sync.yml", text: BROKEN_SCHEDULED, apiName: ".github/workflows/flow-sync.yml", lastSuccessAt: new Date(NOW - 673 * HOUR).toISOString(), latestRun: STARTUP_RUN }],
+  });
+
+  const result = await watchRepo({ io, fullName: REPO, now: NOW });
+
+  assert.equal(result.down.length, 1);
+  assert.equal(result.down[0].state, UNPARSEABLE_STATE, "a state of its own");
+  assert.notEqual(result.down[0].state, "crit");
+  assert.notEqual(result.down[0].state, "good");
+  // The defect this closes was a TRUE sentence naming the wrong thing. The old reason for this
+  // exact fixture was `last success 673.2h ago, cron interval ~168.0h` — a reader concludes the
+  // staleness bug is back. Neither that nor "no successful run recorded" may be the reason now.
+  assert.match(result.down[0].reason, /could not parse this workflow file/);
+  assert.doesNotMatch(result.down[0].reason, /last success/);
+  assert.doesNotMatch(result.down[0].reason, /no successful run recorded/);
+
+  const body = filings(state)[0].body.body;
+  assert.match(body, /\.github\/workflows\/flow-sync\.yml/, "names the file");
+  assert.match(body, /State:.*`unparseable`/);
+});
+
+test("flow-0061 criterion 2: a workflow broken five minutes ago — last success well inside its cron interval — is reported, the case BOTH existing rules call healthy", async () => {
+  // A weekly cron with a success 30 minutes ago. `scheduledLiveness` is emphatically right that
+  // this is on time; the file has been unparseable for five of those minutes.
+  const broken = { file: "flow-sync.yml", text: BROKEN_SCHEDULED, lastSuccessAt: new Date(NOW - 0.5 * HOUR).toISOString() };
+
+  // Contrast FIRST, so the claim "both rules call this healthy" is proved and not asserted: the
+  // identical fixture, with GitHub having taken the file's name (i.e. it parsed), is silent.
+  const parsed = fakeGitHub({ workflows: [{ ...broken }] });
+  const parsedResult = await watchRepo({ io: parsed.io, fullName: REPO, now: NOW });
+  assert.deepEqual(parsedResult.down, [], "with the file parsing, the cadence rule reports it healthy");
+  assert.equal(filings(parsed.state).length, 0);
+
+  // Same timings, same cron, same last success — only the registration differs.
+  const { io, state } = fakeGitHub({ workflows: [{ ...broken, apiName: ".github/workflows/flow-sync.yml", latestRun: STARTUP_RUN }] });
+  const result = await watchRepo({ io, fullName: REPO, now: NOW });
+  assert.equal(result.down[0]?.state, UNPARSEABLE_STATE, "reported despite being perfectly on schedule");
+  assert.equal(filings(state).length, 1, "and an issue is filed, so a human hears about it");
+});
+
+test("flow-0061 criterion 2 (event shape): an unparseable EVENT workflow is reported, where eventLiveness reads an empty run list as good", () => {
+  const out = evaluateWorkflows([
+    { path: ".github/workflows/gates.yml", name: ".github/workflows/gates.yml", text: BROKEN_EVENT, disabled: false, latestRun: null },
+  ], NOW);
+
+  assert.equal(out.length, 1);
+  assert.equal(out[0].state, UNPARSEABLE_STATE);
+  // Prove the contrast in the same breath: the only difference is the registered name.
+  const parsed = evaluateWorkflows([
+    { path: ".github/workflows/gates.yml", name: "gates", text: BROKEN_EVENT, disabled: false, latestRun: null },
+  ], NOW);
+  assert.equal(parsed[0].state, "good", "eventLiveness calls a workflow with no runs good — unchanged");
+});
+
+test("flow-0061 criterion 2 (manual shape): a manual workflow that cannot parse is reported, even though the cadence rules rightly skip it", () => {
+  // The manual drop is a statement about CADENCE, not about parseability: a dispatch-only workflow
+  // cannot be late, but it can certainly fail to start when someone dispatches it.
+  const out = evaluateWorkflows([
+    { path: ".github/workflows/release.yml", name: ".github/workflows/release.yml", text: BROKEN_MANUAL, disabled: false },
+  ], NOW);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].state, UNPARSEABLE_STATE);
+  assert.equal(out[0].kind, "manual", "still classified manual — the drop is skipped, not the classification");
+});
+
+test("flow-0061 criterion 3: the detection adds NO API call — the read set for an unparseable repo is identical to the same repo with the file parsing", async () => {
+  const wf = { file: "flow-sync.yml", text: BROKEN_SCHEDULED, lastSuccessAt: new Date(NOW - 0.5 * HOUR).toISOString(), latestRun: STARTUP_RUN };
+
+  // `--dry-run` isolates the question. It plans and writes nothing, so the read set is exactly the
+  // cost of DETECTING — the label GET a filing performs is the cost of reacting, and it is the same
+  // GET any `crit` filing already made.
+  const healthy = fakeGitHub({ workflows: [{ ...wf }] });
+  await watchRepo({ io: healthy.io, fullName: REPO, now: NOW, dryRun: true });
+
+  const broken = fakeGitHub({ workflows: [{ ...wf, apiName: ".github/workflows/flow-sync.yml" }] });
+  const brokenResult = await watchRepo({ io: broken.io, fullName: REPO, now: NOW, dryRun: true });
+
+  assert.equal(brokenResult.down[0]?.state, UNPARSEABLE_STATE, "the detection did fire, on the same reads");
+  assert.deepEqual(broken.state.reads, healthy.state.reads, "same GET sequence, in the same order");
+
+  // And reacting costs no more than reacting to a stale schedule already did: both file one issue
+  // after the one label GET, so nothing new is spent per unparseable workflow either.
+  const staleFiling = fakeGitHub({ workflows: [{ file: "q.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString() }] });
+  await watchRepo({ io: staleFiling.io, fullName: REPO, now: NOW });
+  const brokenFiling = fakeGitHub({ workflows: [{ ...wf, apiName: ".github/workflows/flow-sync.yml" }] });
+  await watchRepo({ io: brokenFiling.io, fullName: REPO, now: NOW });
+  assert.equal(brokenFiling.state.reads.length, staleFiling.state.reads.length, "one filing, the same reads");
+  // And the tell itself is a comparison of two values the workflows listing already returns.
+  const src = readFileSync(join(import.meta.dirname, "watchdog.mjs"), "utf8");
+  const fn = src.match(/export function startupFailure\(entry\) \{[\s\S]*?\n\}/)[0];
+  assert.doesNotMatch(fn, /io\b/, "startupFailure is pure — it cannot reach the network to ask");
+  assert.doesNotMatch(fn, /await/, "nor await one");
+});
+
+test("flow-0061 criterion 3 (corroboration): the run-level tell uses the run data already read, and is never required for detection", () => {
+  const entry = { path: ".github/workflows/flow-sync.yml", name: ".github/workflows/flow-sync.yml", text: BROKEN_SCHEDULED };
+
+  // Present: the zero-duration push run is quoted as corroboration.
+  const withRun = startupFailure({ ...entry, latestRun: { conclusion: "failure", event: "push", createdAt: "2026-08-28T07:55:00Z", updatedAt: "2026-08-28T07:55:00Z" } });
+  assert.match(withRun.reason, /zero duration/);
+  assert.match(withRun.reason, /`push`/);
+
+  // Absent (the latest-run read is allowed to fail): the reason is weaker, the detection is not.
+  const withoutRun = startupFailure({ ...entry, latestRun: null });
+  assert.equal(withoutRun.state, UNPARSEABLE_STATE);
+  assert.doesNotMatch(withoutRun.reason, /zero duration/);
+
+  // An ordinary failing run HAS a duration, so it never corroborates anything.
+  const ordinary = startupFailure({ ...entry, latestRun: { conclusion: "failure", event: "push", createdAt: "2026-08-28T07:50:00Z", updatedAt: "2026-08-28T07:55:00Z" } });
+  assert.doesNotMatch(ordinary.reason, /zero duration/);
+});
+
+test("flow-0061: a declared name carrying backticks and a link stays inside a code span in the reason and the issue", () => {
+  // The declared name is written by whoever pushed the unparseable file. A hand-rolled backtick
+  // pair let a backtick in it close the span early, so the rest rendered as a live link in the
+  // auto-filed issue.
+  const path = ".github/workflows/flow-sync.yml";
+  const evil = "x` and [click here](https://evil.example/phish) `";
+  const text = BROKEN_SCHEDULED.replace(/^name:.*$/m, `name: ${evil}`);
+  assert.equal(declaredWorkflowName(text), evil, "fixture: the parser must hand back the hostile name intact");
+
+  const verdict = startupFailure({ path, name: path, text, latestRun: null });
+  assert.equal(verdict.state, UNPARSEABLE_STATE);
+  assert.ok(verdict.reason.includes(codeSpan(`name: ${evil}`)), "the name must be rendered through codeSpan");
+
+  // Outcome, not mechanism: with every code span removed (CommonMark: a run of N backticks closes
+  // only on a run of exactly N), no Markdown link is left to render.
+  const outsideSpans = (md) => md.replace(/(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g, "");
+  assert.doesNotMatch(outsideSpans(verdict.reason), /\]\(https?:/, "a link escaped the code span in the reason");
+  const body = renderIssueBody({
+    fullName: "CandidDan/flow",
+    workflow: { path, name: path, state: verdict.state, reason: verdict.reason },
+    now: new Date("2026-09-28T00:00:00Z"),
+  });
+  assert.doesNotMatch(outsideSpans(body), /\]\(https:\/\/evil/, "a link escaped the code span in the issue body");
+});
+
+test("flow-0061 criterion 4: a workflow whose author genuinely named it after its own path is NOT reported", async () => {
+  const { io, state } = fakeGitHub({
+    // GitHub parsed this file perfectly and registered exactly the name it declares, which happens
+    // to be the path. A pure `name === path` comparison would alarm here.
+    workflows: [{ file: "odd.yml", text: SELF_NAMED, apiName: ".github/workflows/odd.yml", latestRun: { conclusion: "success" } }],
+  });
+
+  const result = await watchRepo({ io, fullName: REPO, now: NOW });
+  assert.deepEqual(result.down, [], "not reported");
+  assert.equal(filings(state).length, 0, "and nothing filed");
+});
+
+test("flow-0061 criterion 4 (the other false positive): a file declaring no `name:` at all registers under its path by GitHub's own default and is NOT reported", async () => {
+  const { io, state } = fakeGitHub({
+    workflows: [{ file: "nameless.yml", text: NAMELESS, apiName: ".github/workflows/nameless.yml", latestRun: { conclusion: "success" } }],
+  });
+  const result = await watchRepo({ io, fullName: REPO, now: NOW });
+  assert.deepEqual(result.down, []);
+  assert.equal(filings(state).length, 0);
+});
+
+test("flow-0061 criterion 4 (how the two are told apart): the rule is GitHub's registration DISAGREEING with the file, so it is not a string comparison on the path", () => {
+  const path = ".github/workflows/x.yml";
+  // Identical registered name in all three. Only the FILE differs, and only the file decides.
+  assert.equal(startupFailure({ path, name: path, text: `name: something-else\non:\n  pull_request:\n` })?.state, UNPARSEABLE_STATE);
+  assert.equal(startupFailure({ path, name: path, text: `name: ${path}\non:\n  pull_request:\n` }), null);
+  assert.equal(startupFailure({ path, name: path, text: `on:\n  pull_request:\n` }), null);
+  // And a registration that took the file's name is never a parse failure, whatever else is true.
+  assert.equal(startupFailure({ path, name: "something-else", text: `name: something-else\non:\n  pull_request:\n` }), null);
+});
+
+test("flow-0061 criterion 4 (the declared name is read as YAML reads it): quotes are stripped and an unquoted trailing comment is not part of the name", () => {
+  // Without the comment handling, a self-named file carrying a trailing comment would read as a
+  // disagreement and alarm — a false positive manufactured by the parser rather than by GitHub.
+  assert.equal(declaredWorkflowName(`name: flow-sync\n`), "flow-sync");
+  assert.equal(declaredWorkflowName(`name: "flow sync"\n`), "flow sync");
+  assert.equal(declaredWorkflowName(`name: 'flow sync'\n`), "flow sync");
+  assert.equal(declaredWorkflowName(`name: .github/workflows/x.yml # self-named on purpose\n`), ".github/workflows/x.yml");
+  assert.equal(declaredWorkflowName(`on:\n  push:\n`), null, "declares none");
+  assert.equal(declaredWorkflowName(`name:\non:\n  push:\n`), null, "an empty value declares none");
+  // A step's or a job's `name:` is indented and can never be mistaken for the workflow's own.
+  assert.equal(declaredWorkflowName(`on:\n  push:\njobs:\n  build:\n    name: not the workflow\n`), null);
+
+  const path = ".github/workflows/x.yml";
+  assert.equal(startupFailure({ path, name: path, text: `name: ${path} # deliberate\non:\n  push:\n` }), null, "the comment does not manufacture a disagreement");
+});
+
+test("flow-0061 criterion 5: an ordinary failing run — a workflow that starts and exits non-zero — reports exactly what it reported before, never unparseable", async () => {
+  const { io, state } = fakeGitHub({
+    workflows: [{ file: "gates.yml", text: EVENT_WF, latestRun: { conclusion: "failure", html_url: "https://x/9", event: "pull_request", created_at: "2026-08-28T07:50:00Z", updated_at: "2026-08-28T07:55:00Z" } }],
+  });
+
+  const result = await watchRepo({ io, fullName: REPO, now: NOW });
+  assert.equal(result.down.length, 1);
+  assert.equal(result.down[0].state, "crit", "still the pre-existing eventLiveness verdict");
+  assert.equal(result.down[0].reason, "latest run failed");
+  assert.equal(filings(state).length, 1, "one issue, the same one as before — nothing new is added");
+  assert.doesNotMatch(filings(state)[0].body.body, /could not parse/);
+});
+
+test("flow-0061 criterion 6: for a repo with no unparseable workflow the output is BYTE-identical to the pre-change implementation — pinned from it", async () => {
+  // Captured by running the implementation as it stood before this rule existed, over a mixed repo:
+  // a scheduled workflow past its cadence (files an issue), a healthy event workflow, and a manual
+  // one (dropped). Pinned as text, not as a structure, so key order and wording are both held.
+  const PRE_CHANGE_JSON = "{\n  \"repo\": \"CandidDan/flow\",\n  \"status\": \"ok\",\n  \"failures\": [],\n  \"watched\": 2,\n  \"down\": [\n    {\n      \"path\": \".github/workflows/flow-queue-runner.yml\",\n      \"state\": \"crit\",\n      \"reason\": \"last success 20.0h ago, cron interval ~6.0h, longest scheduled gap ~6.0h \u2014 past that gap plus one interval of slack\"\n    }\n  ],\n  \"actions\": [\n    {\n      \"type\": \"file\",\n      \"path\": \".github/workflows/flow-queue-runner.yml\",\n      \"issueNumber\": 100\n    }\n  ],\n  \"orphaned\": []\n}";
+  const PRE_CHANGE_TITLE = "Automation down: queue-runner";
+  const PRE_CHANGE_BODY = "<!-- flow-watchdog:workflow=.github/workflows/flow-queue-runner.yml -->\n\n**Workflow:** `.github/workflows/flow-queue-runner.yml` (`queue-runner`)\n**Repository:** `CandidDan/flow`\n**Trigger type:** scheduled\n**Last successful run:** 2026-08-27T12:00:00.000Z\n**State:** `crit`\n**Rule that fired:** last success 20.0h ago, cron interval ~6.0h, longest scheduled gap ~6.0h — past that gap plus one interval of slack\n\nGitHub notifies on failure, never on absence — a scheduled workflow that stops running emits\nno event at all. This issue is that missing event. It was filed by `flow-watchdog` in\ncanonical and will be **closed automatically** when the workflow succeeds again.\n\n_First detected 2026-08-28T08:00:00.000Z._";
+
+  const { io, state } = fakeGitHub({
+    workflows: [
+      { file: "flow-queue-runner.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString(), lastSuccessUrl: "https://x/1" },
+      { file: "gates.yml", text: EVENT_WF, latestRun: { conclusion: "success", html_url: "https://x/2", event: "pull_request", created_at: "2026-08-28T07:00:00Z", updated_at: "2026-08-28T07:02:00Z" } },
+      { file: "release.yml", text: MANUAL_WF },
+    ],
+  });
+
+  const result = await watchRepo({ io, fullName: REPO, now: NOW });
+  assert.equal(JSON.stringify(result, null, 2), PRE_CHANGE_JSON, "the run summary is unchanged, byte for byte");
+  assert.equal(filings(state)[0].body.title, PRE_CHANGE_TITLE);
+  assert.equal(filings(state)[0].body.body, PRE_CHANGE_BODY, "and so is the issue body — the new paragraph is conditional");
+});
+
+test("flow-0061 criterion 7: the filed issue names the file, says GITHUB could not parse it, and says a startup-failure run is not attached to a pull request as a check", async () => {
+  const { io, state } = fakeGitHub({
+    workflows: [{ file: "flow-sync.yml", text: BROKEN_SCHEDULED, apiName: ".github/workflows/flow-sync.yml", latestRun: STARTUP_RUN }],
+  });
+
+  await watchRepo({ io, fullName: REPO, now: NOW });
+  const body = filings(state)[0].body.body;
+
+  assert.match(body, /`\.github\/workflows\/flow-sync\.yml`/, "names the file");
+  assert.match(body, /GitHub could not parse/, "attributes the failure to GitHub's parser, not to a test");
+  assert.match(body, /not attached to a pull request as a check/, "the reason this class survives review");
+  assert.match(body, /Actions tab/, "and where it IS visible instead");
+  assert.match(body, /shows all green and\nmerges/, "states the consequence plainly");
+});
+
+test("flow-0061: an unparseable workflow dedupes like any other — a second run comments on the one open issue rather than filing again", async () => {
+  const { io, state } = fakeGitHub({
+    workflows: [{ file: "flow-sync.yml", text: BROKEN_SCHEDULED, apiName: ".github/workflows/flow-sync.yml", latestRun: STARTUP_RUN }],
+  });
+
+  await watchRepo({ io, fullName: REPO, now: NOW });
+  await watchRepo({ io, fullName: REPO, now: NOW + HOUR });
+
+  assert.equal(filings(state).length, 1, "exactly one issue");
+  assert.equal(comments(state).length, 1, "re-detection is a comment");
+  assert.equal(state.issues.filter((i) => i.state === "open").length, 1);
+});
+
+test("flow-0061: once the file parses again the issue closes, because the workflow returns to a normal verdict", async () => {
+  const { io, state } = fakeGitHub({
+    workflows: [{ file: "gates.yml", text: BROKEN_EVENT, apiName: ".github/workflows/gates.yml", latestRun: STARTUP_RUN }],
+  });
+  await watchRepo({ io, fullName: REPO, now: NOW });
+  assert.equal(filings(state).length, 1);
+
+  // The fix: GitHub now registers the name the file declares, and the workflow runs green.
+  const fixed = fakeGitHub({
+    workflows: [{ file: "gates.yml", text: BROKEN_EVENT, latestRun: { conclusion: "success", html_url: "https://x/ok" } }],
+    openIssues: state.issues.filter((i) => i.state === "open"),
+  });
+  const result = await watchRepo({ io: fixed.io, fullName: REPO, now: NOW + HOUR });
+  assert.deepEqual(result.down, []);
+  assert.equal(patches(fixed.state).length, 1, "the issue is closed");
+  assert.equal(patches(fixed.state)[0].body.state, "closed");
+});
+
+test("flow-0061: unparseable is in the reportable set and is not treated as a recovery", () => {
+  // Guards the two ways a new state goes wrong silently: never filed, or filed and then instantly
+  // closed by the recovery branch.
+  const machinery = [{ path: ".github/workflows/x.yml", name: ".github/workflows/x.yml", state: UNPARSEABLE_STATE, reason: "r" }];
+  const { actions } = planRepoActions({ fullName: REPO, machinery, openIssues: [], now: NOW });
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].type, "file");
+
+  const tracked = [{ number: 7, body: workflowMarker(".github/workflows/x.yml") }];
+  const again = planRepoActions({ fullName: REPO, machinery, openIssues: tracked, now: NOW });
+  assert.equal(again.actions[0].type, "comment", "never `close` — the workflow still cannot start");
 });
