@@ -1,7 +1,7 @@
 ---
 id: "flow-0052"
 title: "Make a duplicate task id fail the gate, instead of waiting for a human to notice"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0052"
