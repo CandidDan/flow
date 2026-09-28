@@ -253,3 +253,27 @@ test("the workflow still declares `on: workflow_call` with the setup_node_versio
   assert.equal(call.inputs.setup_node_version.default, "22",
     "flow-0077 does not touch this input — a changed default would silently alter every consumer's gate");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// flow-0087: the job name is static, so a SKIPPED job does not show a raw expression
+// ─────────────────────────────────────────────────────────────────────────────────────────
+
+// GitHub never evaluates the name of a skipped job, and this job skips in canonical and in every
+// single-tree repo. An expression in the name is therefore printed verbatim on most PRs, as
+// `source-root (${{ matrix.path }})`, which reads as broken templating.
+const nameHasExpression = (text) => /\$\{\{/.test(String(jobs(text)[MATRIX_JOB].name ?? ""));
+
+test("flow-0087: the source-root job name carries no ${{ }} expression", { skip }, () => {
+  assert.equal(nameHasExpression(source), false,
+    "a skipped job's name is never evaluated, so an expression in it shows up raw on the PR");
+
+  // Proved against a mutated copy too: the assertion must be able to fail.
+  const mutated = source.replace(/^(\s+)name: source-root$/m, "$1name: source-root (${{ matrix.path }})");
+  assert.notEqual(mutated, source, "the mutation must actually change the file");
+  assert.equal(nameHasExpression(mutated), true, "the check must catch the old templated name");
+});
+
+test("flow-0087: the source-root job name is exactly `source-root`", { skip }, () => {
+  assert.equal(jobs(source)[MATRIX_JOB].name, "source-root",
+    "GitHub appends matrix values to a static name when the job runs; skipped, it reads plainly");
+});
