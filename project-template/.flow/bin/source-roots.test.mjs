@@ -205,8 +205,17 @@ test("a check that merely RESEMBLES a primary command still runs — the match i
   cleanup(root);
 });
 
-test("canonical's own .flow/config.yml plans a count of 0 — every entry is already gated", () => {
-  const canonicalRoot = resolve(import.meta.dirname, "..", "..", "..");
+// Two tests below are about canonical and its published template, not about the repo running
+// them. Synced into an adopting repo, `../../..` is outside the repo and `../config.yml` is that
+// repo's own calibrated config, so they skip there (2.1.1: both failed every synced repo).
+const canonicalRoot = resolve(import.meta.dirname, "..", "..", "..");
+const NOT_CANONICAL =
+  resolve(canonicalRoot, "project-template", ".flow", "bin") === resolve(import.meta.dirname)
+    ? false
+    : "canonical-only: this copy of the helper was synced into an adopting repo";
+
+test("canonical's own .flow/config.yml plans a count of 0 — every entry is already gated",
+  { skip: NOT_CANONICAL }, () => {
   const configPath = join(canonicalRoot, ".flow", "config.yml");
   const { matrix, count, excluded, errors } = planSourceRoots({ configPath, repoRoot: canonicalRoot });
   assert.deepEqual(errors, [], "canonical's own config must satisfy the schema it publishes");
@@ -251,7 +260,8 @@ test("a half-calibrated entry — real path, REPLACE-ME check — is excluded to
   cleanup(root);
 });
 
-test("the published template's own config plans 0 and exits 0 — a fresh adoption is green", () => {
+test("the published template's own config plans 0 and exits 0 — a fresh adoption is green",
+  { skip: NOT_CANONICAL }, () => {
   const configPath = join(import.meta.dirname, "..", "config.yml");
   const repoRoot = resolve(import.meta.dirname, "..", "..");
   const { count, errors, excluded } = planSourceRoots({ configPath, repoRoot });

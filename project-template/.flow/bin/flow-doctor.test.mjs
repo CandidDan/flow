@@ -1118,7 +1118,17 @@ test("approved_by and approved_at both empty → not a problem, not even a warni
   cleanup(d);
 });
 
-test("an intent store holding only _TEMPLATE.md is clean — the template is excluded", () => {
+// flow-sync delivers `.flow/bin/` but NOT `.flow/intents/`, so in an adopting repo the published
+// intent template is normally absent. The tests below that read the template's own bytes skip
+// there instead of failing: they are checks on the artefact canonical publishes, and canonical
+// (plus any repo that copied the template in) still runs them. 2.1.1: five of these failed
+// every synced repo's flow-tooling job.
+const INTENT_TEMPLATE_PATH = join(import.meta.dirname, "..", "intents", "_TEMPLATE.md");
+const NO_INTENT_TEMPLATE = existsSync(INTENT_TEMPLATE_PATH)
+  ? false
+  : "no .flow/intents/_TEMPLATE.md in this repo (flow-sync does not deliver it)";
+
+test("an intent store holding only _TEMPLATE.md is clean — the template is excluded", { skip: NO_INTENT_TEMPLATE }, () => {
   // Criterion 6. The template ships empty required fields on purpose; validating it would fail
   // every repo that adopted the layer and had not yet written an intent.
   const tpl = readFileSync(join(import.meta.dirname, "..", "intents", "_TEMPLATE.md"), "utf8");
@@ -1131,7 +1141,7 @@ test("an intent store holding only _TEMPLATE.md is clean — the template is exc
   cleanup(d);
 });
 
-test("the shipped intent _TEMPLATE.md declares every field the validator requires", () => {
+test("the shipped intent _TEMPLATE.md declares every field the validator requires", { skip: NO_INTENT_TEMPLATE }, () => {
   // Criteria 7 and 9. The template cannot describe a shape its own checker rejects, and it ships
   // `evidence` as an empty list. Asserted through BOTH readers: a real YAML parser where one is
   // available, and flow-doctor's own dependency-free scan, which is the one every consuming repo
@@ -1272,7 +1282,7 @@ test("ADR-0007 records the evidence-linkage decision and the validation-contract
     ]) assert.ok(adr.includes(heading), `ADR-0007 must state "${heading}" as its own decision`);
   });
 
-test("the intent _TEMPLATE.md's Outcome guidance is about the person, not the artefact", () => {
+test("the intent _TEMPLATE.md's Outcome guidance is about the person, not the artefact", { skip: NO_INTENT_TEMPLATE }, () => {
   // Criterion 12. An outcome written as a delivered artefact is what makes intents
   // solution-shaped, so the definition and its non-example are both load-bearing template text.
   const text = readFileSync(join(import.meta.dirname, "..", "intents", "_TEMPLATE.md"), "utf8");
@@ -1293,8 +1303,7 @@ test("the intent _TEMPLATE.md's Outcome guidance is about the person, not the ar
 
 // The published intent template, and — in canonical only — the copy canonical authors its own
 // intents from. Read once: several assertions below are about the same bytes.
-const INTENT_TEMPLATE_PATH = join(import.meta.dirname, "..", "intents", "_TEMPLATE.md");
-const INTENT_TEMPLATE = readFileSync(INTENT_TEMPLATE_PATH, "utf8");
+const INTENT_TEMPLATE = NO_INTENT_TEMPLATE ? "" : readFileSync(INTENT_TEMPLATE_PATH, "utf8");
 const INTENT_TEMPLATE_HEAD = INTENT_TEMPLATE.slice(3, INTENT_TEMPLATE.indexOf("\n---", 3));
 // The shipped worked example. An adopting repo is told it may delete it, so every assertion
 // about it is skipped rather than failed when it is not there.
@@ -1310,7 +1319,7 @@ function mdSection(text, heading) {
   return next === -1 ? rest : rest.slice(0, next);
 }
 
-test("criterion 1: both shipped intent templates declare `serves: []` and `supersedes: \"\"`, and are byte-identical", () => {
+test("criterion 1: both shipped intent templates declare `serves: []` and `supersedes: \"\"`, and are byte-identical", { skip: NO_INTENT_TEMPLATE }, () => {
   // Proved through both readers, for the same reason flow-0063 did it: the YAML parser says the
   // frontmatter is well-formed, and flow-doctor's dependency-free scan says the SHAPE is the one
   // the checker can actually see. A `serves` the checker reads as empty is a check gone quiet.
@@ -1336,7 +1345,7 @@ test("criterion 1: both shipped intent templates declare `serves: []` and `super
   }
 });
 
-test("criterion 2: the template documents the [assumption] marker, the three statuses, and the three new sections", () => {
+test("criterion 2: the template documents the [assumption] marker, the three statuses, and the three new sections", { skip: NO_INTENT_TEMPLATE }, () => {
   assert.match(INTENT_TEMPLATE, /\[assumption\]/,
     "the template never names the marker, so a hand-written intent and a skill-written one will not look alike");
   assert.match(INTENT_TEMPLATE, /never reports these lines|flow-doctor never reports/i,
