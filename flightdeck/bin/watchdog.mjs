@@ -17,6 +17,14 @@
 // spec would drift, in the one component whose entire job is detecting drift. If a rule is
 // missing, extend `liveness.mjs`; do not fork it into this file.
 //
+// ONE PREDICATE IS DELIBERATELY LOCAL, AND IT IS NOT A LIVENESS RULE. `startupFailure` (flow-0061)
+// asks *can this workflow start at all*, which is a different question from *is it running on
+// time* and is answered from different inputs: GitHub's own workflow REGISTRATION versus the text
+// of the file, never run history or cadence. It lives here because its inputs are this file's IO
+// shape — `liveness.mjs` is handed liveness facts, not a registration — and because nothing in it
+// forks a rule that module owns. It is not an exception to the paragraph above; it is a rule that
+// paragraph does not cover.
+//
 // IO IS INJECTED, exactly as `mission-control.mjs` does it, so every decision branch below is a
 // table test with no network and no clock of its own. The one real IO implementation is at the
 // bottom and is never reached from a test.
@@ -57,8 +65,18 @@ export const LABEL_DESCRIPTION = "Filed by flow-watchdog: a workflow in this rep
 // shut around the 2x boundary. So: file/comment on crit|off, close only on `good`, and let `warn`
 // change nothing. An issue opened at crit stays open, silently, until the workflow is genuinely
 // healthy again.
-export const REPORTABLE_STATES = new Set(["crit", "off"]);
+//
+// `unparseable` (flow-0061) joins the reportable set rather than reusing `crit`, because the whole
+// defect it fixes was a true sentence naming the wrong thing: a workflow GitHub cannot start was
+// already being reported `crit` with reason "no successful run recorded", which reads as the
+// staleness bug and sends a human looking for an outage. A distinct state is what makes the two
+// tellable apart at a glance, and it is never a *degree* of crit — it is a different question.
+export const REPORTABLE_STATES = new Set(["crit", "off", "unparseable"]);
 export const RECOVERED_STATE = "good";
+
+// The state a workflow GitHub could not parse is reported in. Exported so a consumer can match it
+// without restating the literal.
+export const UNPARSEABLE_STATE = "unparseable";
 
 // ── the dedupe key ───────────────────────────────────────────────────────────────────────────
 // Keyed on the workflow's PATH, not its display name: `name:` inside a workflow file is editable
@@ -125,6 +143,31 @@ function formatWhen(iso) {
   return Number.isFinite(ms) ? new Date(ms).toISOString() : String(iso);
 }
 
+// The extra paragraph an unparseable workflow's issue carries, and nothing else does — empty for
+// every other state, so a repo with no unparseable workflow gets a byte-identical body to before
+// (flow-0061 criterion 6). It says the three things a reader needs and cannot get from the fields
+// above: which file, that GITHUB could not parse it (so it is not a test failure to go hunting for),
+// and — the reason this class survives review at all — that the failed run GitHub records for it is
+// NOT a check on the pull request. A green check list is what let flow-0060 merge.
+function startupFailureNote(w) {
+  if (w.state !== UNPARSEABLE_STATE) return [];
+  return [
+    "",
+    `**GitHub could not parse ${codeSpan(w.path ?? "?")}, so this workflow cannot start at all.** It is`,
+    "not a job that ran and failed: nothing ran. Until the file parses, the workflow has no run",
+    "history, which is why the cadence rules describe it as merely stale — or, if it broke recently,",
+    "as healthy.",
+    "",
+    "**A startup failure is not attached to a pull request as a check.** GitHub records a failed,",
+    "zero-duration run against the push that carried the file — visible in the Actions tab and",
+    "nowhere else. It is not in the PR's check list, so a PR carrying this defect shows all green and",
+    "merges. That is how this class of breakage reaches `main`, and why this issue exists.",
+    "",
+    "Fix the workflow file and push. Validate it before you do: GitHub's parser is the authority, and",
+    "canonical's `npm run build` parses every file under `.github/workflows/` for exactly this reason.",
+  ];
+}
+
 export function renderIssueBody({ fullName, workflow, now }) {
   const w = workflow ?? {};
   const lines = [
@@ -141,6 +184,7 @@ export function renderIssueBody({ fullName, workflow, now }) {
     `**Last successful run:** ${formatWhen(w.lastSuccessAt)}`,
     `**State:** ${codeSpan(w.state ?? "?")}`,
     `**Rule that fired:** ${w.reason ?? "(no reason recorded)"}`,
+    ...startupFailureNote(w),
     "",
     "GitHub notifies on failure, never on absence — a scheduled workflow that stops running emits",
     "no event at all. This issue is that missing event. It was filed by `flow-watchdog` in",
@@ -174,6 +218,92 @@ export function renderRecoveryComment({ workflow }) {
   ].join("\n");
 }
 
+// ── pure: can this workflow START at all? (flow-0061) ────────────────────────────────────────
+//
+// THE BLIND SPOT THIS CLOSES. Both liveness rules answer "is it running on time" from run history.
+// A workflow whose file GitHub cannot parse never reaches a run history at all, so `scheduled`
+// reports whatever its last success implies — `crit` with a staleness reason if it broke long ago,
+// and `good` if it broke five minutes ago — while `event` treats an empty run list as `good`. Every
+// one of those answers is true and every one of them names the wrong thing. This asks the other
+// question, and the answer is the only fact that tells a human what to do: the file does not parse.
+//
+// WHAT IT READS, AND WHAT IT COSTS. Nothing new. `/repos/{}/actions/workflows` — already fetched
+// once per repo — returns both `name` and `path` for every registered workflow, and for a workflow
+// GitHub could not parse **`name` is the path**, because the registration never took a name from
+// the file. So the tell is a comparison between two values already in hand. Zero extra API calls,
+// per workflow or per repo; `collectRepoEntries` widens the fields it keeps off the latest-run
+// response it already requests, and requests nothing more.
+//
+// WHY IT IS NOT A STRING COMPARISON ON THE PATH. Two entirely ordinary workflows also register
+// with `name` equal to `path`, and reporting either would be a false alarm in the one channel that
+// must never cry wolf:
+//
+//   1. A file that declares no `name:` at all. GitHub's documented default is the file's path, so
+//      the path IS that workflow's real, correct name. Very common.
+//   2. A file whose author genuinely wrote `name: .github/workflows/thing.yml`. Rare, legal, and
+//      indistinguishable from case 1 by the API alone.
+//
+// Both are excluded by asking the FILE, whose text this watchdog already has: a startup failure is
+// GitHub's registered name DISAGREEING with the name the file declares. Case 1 declares nothing to
+// disagree with; case 2 declares exactly what GitHub registered. Only a file that says "call me X"
+// while GitHub says "I know this as its path" has had its `name:` discarded — and the only thing
+// that discards it is a failure to parse.
+//
+// The one case this cannot separate is a file that fails to parse AND declares a name equal to its
+// own path. It is reported as healthy-named rather than risk case 2, which is the safe direction:
+// a missed alarm in a vanishingly rare shape, not a false one in a common shape.
+
+// The top-level `name:` the file declares, or null when it declares none. Column-anchored, so a
+// step's or a job's `name:` (always indented) can never be mistaken for the workflow's own. Quotes
+// are stripped; an unquoted scalar ends at a ` #` comment, the way YAML ends it — without that, a
+// self-naming file carrying a trailing comment would read as a disagreement and alarm.
+export function declaredWorkflowName(text) {
+  const m = String(text ?? "").match(/^name:[ \t]*(\S.*?)[ \t]*$/m);
+  if (!m) return null;
+  const raw = m[1];
+  const quote = raw[0];
+  if ((quote === '"' || quote === "'") && raw.length >= 2) {
+    const end = raw.lastIndexOf(quote);
+    if (end > 0) return raw.slice(1, end);
+  }
+  return raw.replace(/\s+#.*$/, "").trim();
+}
+
+// Corroboration, never the trigger. GitHub synthesises a run for the push that carried an
+// unparseable file: it is attributed to `push` whatever the workflow's declared triggers, it fails,
+// and `created_at` equals `updated_at` to the second because nothing executed. A run that ran and
+// failed has a duration, so this cannot fire on an ordinary failure — and because it only ever
+// appends to a reason that has already been decided, an ordinary failure cannot be reported by this
+// predicate at all. Silent when the run data is absent (the read is allowed to fail): the reason is
+// weaker, the detection is not.
+function startupRunTell(latestRun) {
+  const r = latestRun ?? null;
+  if (!r || r.conclusion !== "failure") return "";
+  if (!r.createdAt || !r.updatedAt || r.createdAt !== r.updatedAt) return "";
+  return `. Corroborated by the latest run: a \`${r.event ?? "?"}\` run that failed with zero duration` +
+    " (created_at equals updated_at), which is GitHub reporting a workflow it could not start rather" +
+    " than a job that ran and failed";
+}
+
+// `{ state, reason }` when GitHub could not parse this workflow file, or null. Takes one entry in
+// the shape `collectRepoEntries` assembles.
+export function startupFailure(entry) {
+  const e = entry ?? {};
+  const path = String(e.path ?? "");
+  if (!path || String(e.name ?? "") !== path) return null; // GitHub took a name from the file: it parsed
+
+  const declared = declaredWorkflowName(e.text);
+  if (declared === null) return null; // declares no name, so the path is legitimately its name
+  if (declared === path) return null; // named after its own path on purpose — see case 2 above
+
+  return {
+    state: UNPARSEABLE_STATE,
+    reason: `GitHub could not parse this workflow file — it registered the workflow under its own ` +
+      `path, discarding the \`name: ${declared}\` the file declares, so the workflow cannot start ` +
+      `at all${startupRunTell(e.latestRun)}`,
+  };
+}
+
 // ── pure: workflow files + run history -> liveness verdicts ──────────────────────────────────
 //
 // `entries` is what the IO layer assembled, one per workflow FILE that GitHub also knows as a
@@ -184,6 +314,30 @@ export function evaluateWorkflows(entries, now) {
   const out = [];
   for (const e of entries ?? []) {
     const trigger = classifyWorkflowTrigger(e.text);
+
+    // CAN IT START is asked FIRST, and it short-circuits: a workflow GitHub cannot parse has no run
+    // history for either rule below to reason about, so letting one of them answer anyway is what
+    // produced the wrong-cause report. One verdict per workflow, so which rule fired is legible in
+    // the `state` alone — and a single `path` still maps to a single issue.
+    //
+    // It is also asked BEFORE the manual drop, on purpose. The drop is a statement about CADENCE —
+    // a `workflow_dispatch`-only workflow cannot be late because it was never due. It is not a
+    // statement about parseability: a manual workflow that will not parse fails the moment someone
+    // dispatches it, which is exactly when they are relying on it. `can it start` applies to every
+    // workflow; `is it on time` does not.
+    const startup = startupFailure(e);
+    if (startup) {
+      out.push({
+        path: e.path,
+        name: e.name || e.path,
+        kind: trigger.kind,
+        lastSuccessAt: e.lastSuccessAt ?? null,
+        runUrl: e.latestRun?.html_url ?? null,
+        ...startup,
+      });
+      continue;
+    }
+
     if (trigger.kind === "manual") continue;
 
     if (trigger.kind === "scheduled") {
@@ -332,7 +486,16 @@ export async function collectRepoEntries({ io, fullName }) {
     try {
       const latest = await io.rest(`/repos/${fullName}/actions/workflows/${registered.id}/runs?per_page=1`);
       const run = (latest.workflow_runs ?? [])[0];
-      if (run) entry.latestRun = { conclusion: run.conclusion, html_url: run.html_url };
+      // `event` and the created/updated pair come from THIS response, which was already being
+      // requested — they are the run-level corroboration `startupFailure` appends to its reason
+      // (flow-0061), and keeping a field off a payload already in hand costs no API call.
+      if (run) entry.latestRun = {
+        conclusion: run.conclusion,
+        html_url: run.html_url,
+        event: run.event ?? null,
+        createdAt: run.created_at ?? null,
+        updatedAt: run.updated_at ?? null,
+      };
     } catch { /* eventLiveness treats a missing latest run as "no runs yet", which is `good` */ }
 
     entries.push(entry);
