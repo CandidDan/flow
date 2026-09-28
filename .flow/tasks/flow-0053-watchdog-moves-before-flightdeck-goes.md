@@ -1,12 +1,12 @@
 ---
 id: "flow-0053"
 title: "Move the watchdog off canonical before the flightdeck is deleted, and prove it runs where it lands"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_01Flow0053Worker"
 created: "2026-09-16"
-started: ""
+started: "2026-09-28T04:05:54Z"
 branch: ""
 pr: ""
 issue: ""
