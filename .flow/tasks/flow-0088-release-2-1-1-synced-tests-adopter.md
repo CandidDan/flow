@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0088"
 title: "Release 2.1.1: the synced tests pass in an adopting repo, and canonical's gate proves it"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "orchestrator"
