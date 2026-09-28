@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0087"
 title: "Stop the skipped source-root check showing a raw ${{ matrix.path }} name"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "flow"
 owner: "claude-worker-flow-0087"
