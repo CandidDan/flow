@@ -1539,7 +1539,7 @@ test("criterion 9: changes/flow-0073.md exists and describes the additions",
     const fragment = existsSync(fragPath)
       ? readFileSync(fragPath, "utf8")
       : readFileSync(join(canonicalRoot, "CHANGELOG.md"), "utf8")
-          .split(/\n(?=- \*\*)/).find((e) => e.startsWith("- **") && /flow-0073\)/.test(e)) ?? "";
+          .split(/\n(?=- \*\*)/).find((e) => e.startsWith("- **") && /`, flow-0073\)/.test(e)) ?? "";
     for (const thing of ["serves", "supersedes", "[assumption]", "Open questions"])
       assert.ok(fragment.includes(thing), `the changelog fragment does not mention ${thing}`);
     assert.match(fragment, /flow-0073/, "the fragment does not name the task it belongs to");
