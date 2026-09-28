@@ -18,10 +18,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
-  existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync,
+  existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CEILING_KEY, ENTRY_ENV, ENTRY_FLAG, MAX_IMPORT_DEPTH, checkClaudeMd, main, parseCeiling,
@@ -484,6 +485,26 @@ test("an @path is resolved relative to the FILE CONTAINING IT, not to the repo r
   const r = checkClaudeMd({ repoRoot: dir, entry: HOST });
   assert.equal(r.ok, true, `resolution must be relative to docs/a.md: ${r.problems.join("; ")}`);
   assert.equal(r.files.length, 3);
+});
+
+test("an @path outside the repo is never followed: absolute, ../ and symlink all fail as unresolved", () => {
+  // The walked file is PR-controlled. Were these followed, the gate would stat and read files on
+  // the runner and print their paths and sizes into CI output. Each target below EXISTS, so the
+  // only thing that can make it fail is the containment check, not a missing file.
+  const outside = repo({ "secret.md": "s\n" });
+  const abs = join(outside, "secret.md");
+  const dir = repo({ "CLAUDE.md": `root\n@${abs}\n`, "inner/x.md": "x\n" }, ceiling(10_000));
+  const up = relative(join(dir, "inner"), abs);
+  writeFileSync(join(dir, "inner", "x.md"), `x\n@${up}\n`);
+  writeFileSync(join(dir, "CLAUDE.md"), `root\n@${abs}\n@inner/x.md\n@link.md\n`);
+  symlinkSync(abs, join(dir, "link.md"));
+
+  const r = checkClaudeMd({ repoRoot: dir, entry: HOST });
+  assert.equal(r.ok, false);
+  assert.equal(r.decision, "unresolved-import");
+  assert.equal(r.problems.filter((p) => /outside the repository/.test(p)).length, 3,
+    `absolute, ../ and symlinked imports must each be refused: ${r.problems.join("; ")}`);
+  assert.ok(!r.files.some((f) => /secret\.md/.test(f.path)), "the outside file must never be read");
 });
 
 test("an email address and a scoped package name are not imports", () => {

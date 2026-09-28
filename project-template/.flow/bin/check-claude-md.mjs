@@ -53,7 +53,7 @@
 // replaces failed in the first place.
 
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Claude Code follows imports to a maximum depth of 5 hops. The root `CLAUDE.md` is hop 0, a file
@@ -157,6 +157,12 @@ export function resolveImportSet(repoRoot, { entry } = {}) {
   // symlink; the resolved path otherwise, so a problem message names what was written.
   const key = (abs) => { try { return realpathSync(abs); } catch { return abs; } };
   const rel = (abs) => relative(repoRoot, abs) || abs;
+  const rootReal = key(resolve(repoRoot));
+  const within = (root, abs) => {
+    const r = relative(root, abs);
+    return r === "" || (!r.startsWith("..") && !isAbsolute(r));
+  };
+  const insideRepo = (abs) => within(resolve(repoRoot), abs) && within(rootReal, key(abs));
 
   if (!existsSync(entryAbs) || !statSync(entryAbs).isFile()) {
     return {
@@ -179,6 +185,17 @@ export function resolveImportSet(repoRoot, { entry } = {}) {
 
     for (const spec of parseImports(text)) {
       const target = resolve(dirname(abs), spec);
+      // CONFINED TO THE REPO, checked before anything touches the target. The file being walked
+      // arrives in the very PR being gated, so `@/home/runner/.npmrc` or `@../../x.md` is
+      // attacker-controlled input: following it would make the gate stat and read files outside
+      // the checkout and print their paths and sizes into a public CI log. The lexical check
+      // catches `/` and `../`; the realpath check catches an in-repo symlink pointing out. Either
+      // way it is an unresolved import — a hard failure, never a silent zero.
+      if (!insideRepo(target)) {
+        problems.push(`unresolved import @${spec} in ${rel(abs)} — it points outside the ` +
+          `repository, which is never followed. An import must name a file in this repo.`);
+        continue;
+      }
       if (!existsSync(target) || !statSync(target).isFile()) {
         problems.push(`unresolved import @${spec} in ${rel(abs)} — it resolves to ` +
           `${rel(target)}, which does not exist. A pointer that silently does not resolve is ` +
