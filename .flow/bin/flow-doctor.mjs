@@ -29,7 +29,10 @@ const __isMain = (() => {
 })();
 // ---------------------------------------------------------------------------------------
 
-export { compareVersions, findUncommittedTasks, runDoctor } from "../../project-template/.flow/bin/flow-doctor.mjs";
+// Re-exported, never re-implemented: the store-identity scan (flow-0052) is the template's, so
+// every adopting repo gets the same invariant from the same lines. This adapter supplies only the
+// CLI shell and canonical's store location.
+export { compareVersions, duplicateIdProblems, filenameIdProblems, filenameTaskId, findUncommittedTasks, runDoctor } from "../../project-template/.flow/bin/flow-doctor.mjs";
 
 // Canonical's own store — `.flow/`, one level up from this `bin/` directory.
 export function canonicalFlowDir(here = __fileURLToPath(import.meta.url)) {

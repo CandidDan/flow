@@ -1,11 +1,11 @@
 // Tests for flow-doctor — the store validator validates itself.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync, lstatSync, readFileSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runDoctor, compareVersions, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES } from "./flow-doctor.mjs";
+import { runDoctor, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES } from "./flow-doctor.mjs";
 
 // The vision every fixture gets unless it asks for none: two live goals, one non-goal, one
 // retired goal. Written in the shape flow-doctor's line regex reads, deliberately mixing the
@@ -1534,4 +1534,163 @@ test("criterion 9: changes/flow-0073.md exists and describes the additions",
     for (const thing of ["serves", "supersedes", "[assumption]", "Open questions"])
       assert.ok(fragment.includes(thing), `the changelog fragment does not mention ${thing}`);
     assert.match(fragment, /flow-0073/, "the fragment does not name the task it belongs to");
+  });
+
+// ── store identity: one id, one file (flow-0052) ───────────────────────────────────────────
+// `allocate-task-id.mjs` allocates correctly but cannot make itself mandatory: the id lives in
+// the FILENAME as well as the frontmatter, so two sessions that each pick `flow-0049` write two
+// different paths, git merges both cleanly, and the store is left holding one id twice. That
+// happened on canonical's `main` on 2026-09-15. Nothing mechanical reported it; a human noticed.
+// These tests are the mechanism that would have.
+
+test("criterion 1: two files, one id → a problem naming the id AND both paths", () => {
+  const d = fixture({
+    "flow-0049-ceiling.md": task("flow-0049"),
+    "flow-0049-queue-runner.md": task("flow-0049"),
+  });
+  const r = runDoctor({ flowDir: d });
+  const dup = r.problems.filter((p) => p.includes("duplicate id flow-0049"));
+  assert.equal(dup.length, 1, `expected exactly one grouped message, got:\n${r.problems.join("\n")}`);
+  assert.match(dup[0], /\.flow\/tasks\/flow-0049-ceiling\.md/);
+  assert.match(dup[0], /\.flow\/tasks\/flow-0049-queue-runner\.md/,
+    "naming only one side leaves the reader to go find the other — the fix is choosing between them");
+  cleanup(d);
+});
+
+test("criterion 1: the CLI exits NON-ZERO on a duplicate id — the half CI actually reads", () => {
+  const d = cliFixture({
+    "flow-0049-ceiling.md": task("flow-0049"),
+    "flow-0049-queue-runner.md": task("flow-0049"),
+  });
+  const { code, out } = runCli(d);
+  assert.equal(code, 1, out);
+  assert.match(out, /FAIL.*duplicate id flow-0049/);
+  cleanup(d);
+});
+
+test("criterion 2: three files, one id → EVERY offending path is named, not the first two", () => {
+  const d = fixture({
+    "flow-0049-a.md": task("flow-0049"),
+    "flow-0049-b.md": task("flow-0049"),
+    "flow-0049-c.md": task("flow-0049"),
+  });
+  const r = runDoctor({ flowDir: d });
+  const dup = r.problems.filter((p) => p.includes("duplicate id flow-0049"));
+  assert.equal(dup.length, 1);
+  for (const n of ["a", "b", "c"])
+    assert.match(dup[0], new RegExp(`flow-0049-${n}\\.md`),
+      `flow-0049-${n}.md is unnamed — a pairwise chain reports each file against only its ` +
+      "predecessor, so the reader never sees the whole collision at once");
+  cleanup(d);
+});
+
+test("criterion 3: two DISTINCT ids whose files sort adjacently pass — not a proximity heuristic", () => {
+  const d = fixture({
+    "flow-0049-ceiling.md": task("flow-0049"),
+    "flow-0050-queue-runner.md": task("flow-0050"),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, [], "adjacent filenames sharing a slug prefix are not a collision");
+  assert.equal(r.count, 2);
+  cleanup(d);
+});
+
+test("criterion 4: frontmatter id disagreeing with the filename id is a problem naming BOTH", () => {
+  // The 2026-09-15 collision was cleared by a rename. A rename that forgets the frontmatter
+  // re-creates the same ambiguity one layer down: findable under one id, self-describing as
+  // another. The store then has no single answer to "which file is flow-0050?".
+  const d = fixture({ "flow-0050-queue-runner.md": task("flow-0049") });
+  const r = runDoctor({ flowDir: d });
+  assert.equal(r.problems.length, 1, r.problems.join("\n"));
+  assert.match(r.problems[0], /flow-0050-queue-runner\.md/, "the filename must be named");
+  assert.match(r.problems[0], /"flow-0049"/, "the frontmatter id must be named");
+  assert.match(r.problems[0], /"flow-0050"/, "the filename's id must be named");
+  cleanup(d);
+});
+
+test("criterion 4: the CLI exits NON-ZERO on a filename/frontmatter disagreement", () => {
+  const d = cliFixture({ "flow-0050-queue-runner.md": task("flow-0049") });
+  const { code, out } = runCli(d);
+  assert.equal(code, 1, out);
+  assert.match(out, /FAIL.*disagrees with the id in its own filename/);
+  cleanup(d);
+});
+
+test("a filename that declares no id at all is not a disagreement", () => {
+  // `project-template/.flow/tasks/0001-newsletter-signup.md` is exactly this shape, and adopting
+  // repos inherit it. A name with no `PREFIX-1234` opening declares nothing to disagree WITH.
+  const d = fixture({ "0001-newsletter-signup.md": task("PROJ-0001") });
+  assert.deepEqual(runDoctor({ flowDir: d }).problems, []);
+  cleanup(d);
+});
+
+test("a duplicate cannot hide behind an unrelated missing field in one of its halves", () => {
+  // The id is registered BEFORE the required-field and status guards `continue`. Registering it
+  // after would mean one malformed half suppressed the collision report for both.
+  const d = fixture({
+    "flow-0049-a.md": task("flow-0049"),
+    "flow-0049-b.md": task("flow-0049", { status: "shipping" }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(r.problems.some((p) => p.includes('illegal status "shipping"')));
+  const dup = r.problems.filter((p) => p.includes("duplicate id flow-0049"));
+  assert.equal(dup.length, 1, r.problems.join("\n"));
+  assert.match(dup[0], /flow-0049-b\.md/);
+  cleanup(d);
+});
+
+test("filenameTaskId reads the id a filename declares, and nothing it does not", () => {
+  assert.equal(filenameTaskId("flow-0052-duplicate-task-id.md"), "flow-0052");
+  assert.equal(filenameTaskId("flow-0052.md"), "flow-0052");
+  assert.equal(filenameTaskId("flow-00521-x.md"), "flow-00521",
+    "a longer number is its own id, never a prefix match against a shorter one");
+  assert.equal(filenameTaskId("PROJ_X-7-thing.md"), "PROJ_X-7");
+  assert.equal(filenameTaskId("0001-newsletter-signup.md"), null);
+  assert.equal(filenameTaskId("_TEMPLATE.md"), null);
+  assert.equal(filenameTaskId("notes.md"), null);
+});
+
+test("duplicateIdProblems: silent on a clean list, ignores entries with no id", () => {
+  assert.deepEqual(duplicateIdProblems([]), []);
+  assert.deepEqual(duplicateIdProblems([{ path: "a.md", id: "P-1" }, { path: "b.md", id: "P-2" }]), []);
+  assert.deepEqual(duplicateIdProblems([{ path: "a.md", id: "" }, { path: "b.md", id: undefined }]), [],
+    "a file with no parseable id is a MALFORMED-frontmatter finding, not a collision");
+});
+
+test("duplicateIdProblems: reports every duplicated id, each in its own message", () => {
+  const out = duplicateIdProblems([
+    { path: "a.md", id: "P-1" }, { path: "b.md", id: "P-2" },
+    { path: "c.md", id: "P-1" }, { path: "d.md", id: "P-2" },
+  ]);
+  assert.equal(out.length, 2, "two independent collisions must not be folded into one line");
+  assert.ok(out.some((p) => p.includes("P-1") && p.includes("a.md") && p.includes("c.md")));
+  assert.ok(out.some((p) => p.includes("P-2") && p.includes("b.md") && p.includes("d.md")));
+});
+
+test("criterion 5: canonical's OWN store holds no duplicate id and no filename disagreement",
+  { skip: inCanonical ? false : "not canonical" }, () => {
+    // The check is added green. `gitStatus` is injected so an in-flight working tree cannot make
+    // this assert the uncommitted-task guard instead of the thing under test.
+    const { problems } = runDoctor({
+      flowDir: join(canonicalRoot, ".flow"),
+      gitStatus: () => ({ inRepo: false, porcelain: "" }),
+    });
+    assert.deepEqual(problems.filter((p) => p.includes("duplicate id")), []);
+    assert.deepEqual(problems.filter((p) => p.includes("disagrees with the id in its own filename")), []);
+  });
+
+test("criterion 6: canonical's .flow/bin/flow-doctor.mjs ADAPTS this scan — it does not copy it",
+  { skip: inCanonical ? false : "not canonical" }, () => {
+    // Asserted the way `.flow/bin/adapters.test.mjs` asserts the other adapters: a copy here
+    // would put the fleet's store invariant in a file no adopting repo ever receives, and a
+    // symlink would resolve its realpath back into project-template/ and validate the FIXTURE
+    // store while still exiting 0.
+    const file = join(canonicalRoot, ".flow", "bin", "flow-doctor.mjs");
+    assert.ok(!lstatSync(file).isSymbolicLink(), "a symlink would read the template's fixture store");
+    const src = readFileSync(file, "utf8");
+    assert.match(src, /export \{[^}]*\bduplicateIdProblems\b[^}]*\} from "\.\.\/\.\.\/project-template\/\.flow\/bin\/flow-doctor\.mjs"/,
+      "the adapter must re-export the template's scan — one implementation, not two");
+    for (const fn of ["duplicateIdProblems", "filenameIdProblems", "filenameTaskId"])
+      assert.ok(!new RegExp(`function\\s+${fn}\\s*\\(`).test(src),
+        `${fn} is re-implemented in the adapter — that is the drift this criterion forbids`);
   });

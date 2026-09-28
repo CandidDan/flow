@@ -7,7 +7,8 @@
 //   node .flow/bin/flow-doctor.mjs
 //
 // PROBLEMS (exit 1): malformed frontmatter · missing required fields · illegal status ·
-//   duplicate ids · in_review without pr/branch · blocked without blocked_reason ·
+//   duplicate ids (one message per id, naming EVERY colliding path) · a frontmatter `id:` that
+//   disagrees with the id in its own filename · in_review without pr/branch · blocked without blocked_reason ·
 //   a populated `blocked_by` on a live non-blocked task, or a malformed `blocked_by` entry ·
 //   in_progress without owner/started · two in_progress tasks with overlapping touches (the
 //   atomic-claim rule was bypassed) · a declared, CALIBRATED source_root that's missing/uncovered,
@@ -558,6 +559,60 @@ export function intentFindings(intentsDir, { goals = null } = {}) {
   return { problems, warnings, count: parsed.length };
 }
 
+// ── store identity: one id, one file (flow-0052) ──────────────────────────────────────────
+// `allocate-task-id.mjs` allocates correctly, but using it is optional: a session that
+// hand-writes a task file bypasses it entirely and git raises nothing, because two slugs are
+// two paths — `flow-0049-claude-md-ceiling.md` and `flow-0049-queue-runner-*.md` merge cleanly.
+// That happened on canonical's `main` on 2026-09-15 and was cleared by a human who happened to
+// look. The harm is silent rather than loud: `flightdeck/bin/mission-control.mjs` keys tasks by
+// id, so the second file overwrites the first and one task disappears from the state report with
+// no error. These two functions are the store-level invariant behind the allocator — they make
+// incorrect allocation DETECTABLE; they do not make it impossible, and they deliberately do not
+// renumber anything (which file keeps the id is the orchestrator's call, not a guard's).
+
+// The id a task file's NAME declares, or null when the name carries none. The convention is
+// `<id>-<slug>.md`, and an id is `PREFIX-1234` (TASK_ID_RE's shape). A file whose name does not
+// open with an id — the template's own `0001-newsletter-signup.md`, say — declares nothing for
+// the frontmatter to disagree WITH, so it is not a finding. Anchored and lookahead-bounded so
+// `flow-0052-x.md`, `flow-0052.md` and `flow-00521-x.md` each yield their own id, never a prefix
+// of a longer one.
+export function filenameTaskId(name) {
+  const m = String(name).match(/^([A-Za-z][A-Za-z0-9_]*-\d+)(?=[-.]|$)/);
+  return m ? m[1] : null;
+}
+
+// One problem per duplicated id, naming EVERY path that declares it — not a count, and not the
+// first colliding pair. The fix is choosing which file gets renumbered, so a message that names
+// two of three paths sends whoever reads it back to the store to find the third.
+//   entries  `{ path, id }` in store order; entries with no id are ignored.
+export function duplicateIdProblems(entries) {
+  const byId = new Map();
+  for (const { path, id } of entries) {
+    if (!id) continue;
+    if (!byId.has(id)) byId.set(id, []);
+    byId.get(id).push(path);
+  }
+  const problems = [];
+  for (const [id, paths] of byId) {
+    if (paths.length < 2) continue;
+    problems.push(`duplicate id ${id} — declared by ${paths.length} task files: ${paths.join(", ")}. ` +
+      "Renumber all but one (allocate-task-id.mjs picks the next free id); until then the id " +
+      "resolves to whichever file is read last and the others vanish from every id-keyed view.");
+  }
+  return problems;
+}
+
+// The frontmatter id and the filename id must agree. The 2026-09-15 collision was cleared by a
+// rename, and a rename that forgets the frontmatter re-creates the same ambiguity one layer down:
+// the store then holds a file findable under one id and self-describing as another.
+export function filenameIdProblems(name, id) {
+  const fromName = filenameTaskId(name);
+  if (!fromName || !id || fromName === id) return [];
+  return [`.flow/tasks/${name}: frontmatter id "${id}" disagrees with the id in its own filename ` +
+    `("${fromName}") — a rename that forgot the frontmatter, or the reverse. Fix whichever is ` +
+    "wrong so the file is findable under the id it declares."];
+}
+
 // The non-wildcard leading path of a glob, trimmed to whole segments — what we compare for overlap.
 //   "a/b/**" -> "a/b" · "a/b/c.ts" -> "a/b/c.ts" · "a/**/x" -> "a"
 function staticPrefix(glob) {
@@ -681,7 +736,10 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
   const problems = [], warnings = [], notes = [];
   const repoRoot = dirname(flowDir);
   const tasksDir = join(flowDir, "tasks");
-  const seen = new Map();
+  // Every id the store declares, with the path that declared it — gathered for the duplicate
+  // scan below. Collected BEFORE the field/status guards below `continue`, on purpose: a
+  // collision must not be able to hide behind an unrelated missing field in one of its halves.
+  const declaredIds = [];
   const tasks = [];
   const onDiskTaskPaths = [];
 
@@ -690,11 +748,11 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
     onDiskTaskPaths.push(`.flow/tasks/${name}`);
     const t = parseTask(readFileSync(join(tasksDir, name), "utf8"));
     if (!t) { problems.push(`${name}: malformed frontmatter`); continue; }
+    if (t.id) declaredIds.push({ path: `.flow/tasks/${name}`, id: t.id });
+    problems.push(...filenameIdProblems(name, t.id));
     const missing = REQUIRED.filter((k) => !t[k]);
     if (missing.length) { problems.push(`${name}: missing required field(s): ${missing.join(", ")}`); continue; }
     if (!STATUSES.has(t.status)) { problems.push(`${name}: illegal status "${t.status}"`); continue; }
-    if (seen.has(t.id)) problems.push(`${name}: duplicate id ${t.id} (also in ${seen.get(t.id)})`);
-    seen.set(t.id, name);
 
     if (t.status === "in_review" && (!t.pr || !t.branch))
       problems.push(`${t.id}: in_review but ${!t.pr ? "pr" : "branch"} is empty — hand-off incomplete or flow-status didn't fire`);
@@ -726,6 +784,10 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
     }
     tasks.push(t);
   }
+
+  // One id, one file. Reported after the loop so every colliding path is named in a single
+  // message, rather than a chain of pairwise "also in …" lines that each omit the rest.
+  problems.push(...duplicateIdProblems(declaredIds));
 
   // Touches overlap among the *live* set (ready + in_progress). The concurrency model assumes a
   // ready task can be claimed without colliding with anything in flight, and that tasks the
@@ -759,8 +821,9 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
         else if (snapIds.get(t.id) !== t.status)
           warnings.push(`board snapshot has ${t.id}=${snapIds.get(t.id)}, files say ${t.status} — regenerate`);
       }
+      const storeIds = new Set(declaredIds.map((e) => e.id));
       for (const id of snapIds.keys())
-        if (!seen.has(id)) warnings.push(`board snapshot has ${id} but no task file exists — regenerate`);
+        if (!storeIds.has(id)) warnings.push(`board snapshot has ${id} but no task file exists — regenerate`);
     }
   }
 
