@@ -14,9 +14,10 @@ issue: ""
 blocked_reason: "Depends on flow-0019 (mission control). Flow has no dependency field — a gap ADR-0002 recorded — so `blocked` is how sequencing is expressed. Retiring these views before mission control exists AND has been trusted in practice leaves a window with no cross-project view at all. UNBLOCK: flip to ready once flow-0019 has merged and the human confirms the page actually answers 'where is every project up to'. Also sequence behind flow-0017, which claims project-template/.flow/bin/flow-doctor.mjs and its test; if flow-0017 is still live at unblock time, either wait for it or split the doctor edit out."
 blocked_by: ["flow-0053"]   # ADR-0006's ordering constraint, moved out of prose: the watchdog leaves canonical before the flightdeck does
 serves: ["maintenance"]   # re-anchored 2026-09-23 from retired G4 (decision D1)
-touches: ["project-template/.flow/board.html", "project-template/.claude/skills/board-builder/SKILL.md", "project-template/.claude/settings.json", "project-template/.flow/bin/flow-doctor.mjs", "project-template/.flow/bin/flow-doctor.test.mjs", "project-template/.gitattributes", ".gitattributes", ".gitignore", ".flow/bin/protocol-docs.test.mjs", "flightdeck/bin/flightdeck-state.mjs", "flightdeck/bin/flightdeck-state.test.mjs", "flightdeck/projects.example.yml", "flightdeck/.claude/agents/portfolio-manager.md", "flightdeck/CLAUDE.md", "flightdeck/README.md", "CHANGELOG.md"]
+touches: ["project-template/.flow/board.html", "project-template/.claude/skills/board-builder/SKILL.md", "project-template/.claude/settings.json", "project-template/.flow/bin/flow-doctor.mjs", "project-template/.flow/bin/flow-doctor.test.mjs", "project-template/.gitattributes", ".gitattributes", ".gitignore", ".flow/bin/protocol-docs.test.mjs", "flightdeck/bin/flightdeck-state.mjs", "flightdeck/bin/flightdeck-state.test.mjs", "flightdeck/projects.example.yml", "flightdeck/.claude/agents/portfolio-manager.md", "flightdeck/CLAUDE.md", "flightdeck/README.md", "changes/flow-0022.md"]
 labels: [infra, flightdeck, cleanup]
 notes:
+  - "2026-09-28 (orchestrator): CHANGELOG.md -> changes/flow-0022.md, human's decision. Since 2.1.0 canonical keeps one changelog fragment per task in `changes/` (see changes/README.md), and release assembles them into CHANGELOG.md. Declaring CHANGELOG.md was stale: a worker following the fragment convention would write `changes/flow-0022.md`, which was not in `touches`, and fail touches-guard, while one following the old wording would edit the shared file the convention exists to keep out of every task's `touches`. `touches`, the scope line and any criterion naming CHANGELOG.md now name the fragment instead. Write it in the shape changes/README.md gives, with no heading of its own; it lands under `## Unreleased` at release."
   - "2026-09-23 (orchestrator): serves re-anchored from G4 to `maintenance`, on the human's decision D1 in _private/flow-operating-model-spec.md: every open task on retired G4/G5 moves to `maintenance` in one orchestrator commit on main. This is a deliberate, human-directed exception to task-writer's no-retrofit rule for non-ready tasks, and nothing else about the task changed. G4 was retired on 2026-09-01 and no live goal names this work."
   - "2026-08-19: decided the same day — mission control (flow-0019) becomes the only view. This task is the machinery half; flow-0023 is the prose half. Split because the machinery must land atomically (you cannot delete board.html and keep the check that validates it) while the prose half is text with no test surface, and the prose half is where the file-claim collisions are (INIT.md/flow-0005, PROTOCOL.md + README/flow-0016)."
   - "2026-08-19: flightdeck/projects.yml is NOT a tracked file — it is gitignored as a private registry. The committed artefacts are flightdeck/projects.example.yml and the .gitignore entry; those are what 'remove projects.yml' resolves to here."
@@ -85,7 +86,7 @@ What deleting them changes is what the fleet receives. That is G4's sentence, no
   digest logic, its blocked-tier classifier and its hard rules are still wanted and carry over
   unchanged; what changes is where the data comes from. Drop the step-4 instruction to write
   `flightdeck.html` — that is the regenerated artifact this task retires.
-- `CHANGELOG.md`: one `## Unreleased` entry recording the removal, the bump class and the caller
+- `changes/flow-0022.md`: the changelog fragment (see `changes/README.md`) recording the removal, the bump class and the caller
   action (below).
 
 **Deliberately does NOT:**
@@ -113,7 +114,7 @@ What deleting them changes is what the fleet receives. That is G4's sentence, no
 
 ## The version bump: MINOR
 
-Say it in the CHANGELOG entry, and it is **MINOR**, not MAJOR. The policy's tell for MAJOR is
+Say it in the changelog fragment, and it is **MINOR**, not MAJOR. The policy's tell for MAJOR is
 explicit: *"if a change requires editing the per-repo callers, it is MAJOR."* This change edits no
 caller — no thin `flow-*.yml` gains or loses a `permissions` grant, an input or a secret, and
 `_flow-done` / `_flow-status` keep calling an unchanged `apply-board-edits.mjs`. The doctor change
@@ -153,7 +154,7 @@ not — the board simply stops being regenerated once the skill is gone.
 - [ ] Given `flightdeck/README.md` and `flightdeck/CLAUDE.md`, when they are read, then neither
       describes a registry, a `projects.yml`, a `flightdeck.html`, or `flightdeck-state.mjs`, and
       each says where the cross-project view now lives.
-- [ ] Given `CHANGELOG.md`, when the `## Unreleased` section is read, then it records the removal,
+- [ ] Given `changes/flow-0022.md`, when it is read, then it records the removal,
       states the bump as MINOR with the policy's caller-contract reasoning, and states the caller
       action as optional with what an adopting repo may delete.
 - [ ] Given `.flow/config.yml`'s declared `source_roots`, when `flow-doctor` runs after the
