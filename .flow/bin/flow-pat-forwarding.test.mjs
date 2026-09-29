@@ -1,4 +1,4 @@
-// flow-pat-forwarding.test.mjs — proving tests for flow-0026 and flow-0093.
+// flow-pat-forwarding.test.mjs — proving tests for flow-0026, flow-0093 and flow-0095.
 //
 // Criteria proved here (flow-0026):
 //   · "_flow-queue-runner.yml declares FLOW_PAT in on.workflow_call.secrets with required: false"
@@ -12,6 +12,19 @@
 //      four-permission list"
 //   · "the docs state the Actions PR-creation setting is not needed, with the reason"
 //   · "changes/flow-0093.md exists and states the caller action"
+//
+// Criteria proved here (flow-0095):
+//   · "the template caller's header no longer says the reusable never uses FLOW_PAT, and points
+//      to the permission list"
+//   · "changes/flow-0095.md exists and states the caller action"
+//
+// NOT proved here, on purpose — flow-0095's other three criteria are all instances of one rule,
+// "every caller forwards exactly the secrets its reusable declares, by name", and that rule has a
+// single owning test file: `secrets-scope.test.mjs`. Its table is where the expected secret set
+// for each caller is stated, so asserting the same three facts here as well would mean two places
+// to update and one of them silently going stale — which is the failure that produced this task
+// (that file's table still encoded a `v1` tag in which the reusable had no FLOW_PAT to forward).
+// This file keeps what is genuinely its own: the reusable's wiring, and the prose around it.
 //
 // Why it matters: pushes made with the Actions GITHUB_TOKEN don't trigger downstream workflows
 // (GitHub's recursion guard), so a worker branch pushed under GITHUB_TOKEN never fires
@@ -196,4 +209,49 @@ test("changes/flow-0093.md exists and states the caller action", () => {
   assert.match(fragment, /Workflows/,
     "the caller action is specifically to regenerate the PAT with the documented permissions, " +
     "and Workflows: Read and write is the one an existing token is guaranteed to be missing");
+});
+
+// ─── flow-0095: the prose around the caller, which no structure test can carry ───────────────
+//
+// The forwarding itself is asserted in secrets-scope.test.mjs (see the header note above). What
+// remains here is the part that is not a YAML shape: a header that told the reader the reusable
+// never used FLOW_PAT, and a changelog fragment telling an adopting repo it must act. The stale
+// sentence mattered because FLOW_PAT is optional — a reader who is talked out of setting it gets
+// a queue runner that works, and silently cannot push a workflow-file change or trigger the
+// checks on its own PR.
+
+const TEMPLATE_CALLER = join(REPO, "project-template/.github/workflows/flow-queue-runner.yml");
+const FRAGMENT_0095 = join(REPO, "changes/flow-0095.md");
+
+test("the template caller's header documents FLOW_PAT and points at the permission list", { skip }, () => {
+  const source = readFileSync(TEMPLATE_CALLER, "utf8");
+  // The header is the comment block above `on:` — the part a human reads before wiring the secret.
+  const header = source.slice(0, source.indexOf("\non:"));
+  assert.doesNotMatch(header, /FLOW_PAT it never uses|never uses FLOW_PAT/,
+    "the header used to justify passing one secret by claiming the reusable never uses FLOW_PAT. " +
+    "Since flow-0093 it uses it three times, and the stale sentence is what would talk the next " +
+    "reader out of the line this task adds");
+  assert.match(header, /FLOW_PAT/,
+    "the header must say what FLOW_PAT is for — it is optional, so a reader who does not know " +
+    "what it buys will simply not set it");
+  assert.match(header, /optional|OPTIONAL/,
+    "FLOW_PAT is declared `required: false`; the header must say so, or a reader will think a " +
+    "repo without it cannot run the queue runner at all");
+  assert.match(header, /\.github\/workflows\//,
+    "the header must name the concrete thing the worker cannot do without it: GitHub refuses a " +
+    "GITHUB_TOKEN push that changes a file under .github/workflows/");
+  assert.match(header, /docs\/flow-reusable-workflows\.md/,
+    "and it must point at the permission list flow-0093 wrote, rather than restating it — a " +
+    "third copy of that list is a third thing to drift");
+});
+
+test("changes/flow-0095.md exists and states the caller action", () => {
+  const fragment = readFileSync(FRAGMENT_0095, "utf8");
+  assert.match(fragment, /FLOW_PAT/, "the fragment must name the secret the change is about");
+  assert.match(fragment, /Caller action/,
+    "changes/README.md requires every fragment to say what a caller must do. This change needs " +
+    "one twice over: adopt the updated caller, and set the secret it now forwards");
+  assert.match(fragment, /flow-sync/,
+    "the caller action is specifically to adopt the updated thin caller via flow-sync (or add the " +
+    "one FLOW_PAT line by hand) — an adopting repo's existing caller does not change on its own");
 });
