@@ -1,4 +1,4 @@
-// flow-pat-forwarding.test.mjs — proving tests for flow-0026 and flow-0093.
+// flow-pat-forwarding.test.mjs — proving tests for flow-0026, flow-0093 and flow-0095.
 //
 // Criteria proved here (flow-0026):
 //   · "_flow-queue-runner.yml declares FLOW_PAT in on.workflow_call.secrets with required: false"
@@ -12,6 +12,16 @@
 //      four-permission list"
 //   · "the docs state the Actions PR-creation setting is not needed, with the reason"
 //   · "changes/flow-0093.md exists and states the caller action"
+//
+// Criteria proved here (flow-0095 — the CALLER side, which is what reaches an adopting repo):
+//   · "the template caller's secrets: block forwards FLOW_PAT by name, and does not use
+//      `secrets: inherit`"
+//   · "every secret the template caller forwards is declared by _flow-queue-runner.yml's
+//      on.workflow_call.secrets"
+//   · "canonical's caller and the template caller forward the same secret names"
+//   · "the template caller's header no longer says the reusable never uses FLOW_PAT, and points
+//      to the permission list"
+//   · "changes/flow-0095.md exists and states the caller action"
 //
 // Why it matters: pushes made with the Actions GITHUB_TOKEN don't trigger downstream workflows
 // (GitHub's recursion guard), so a worker branch pushed under GITHUB_TOKEN never fires
@@ -196,4 +206,92 @@ test("changes/flow-0093.md exists and states the caller action", () => {
   assert.match(fragment, /Workflows/,
     "the caller action is specifically to regenerate the PAT with the documented permissions, " +
     "and Workflows: Read and write is the one an existing token is guaranteed to be missing");
+});
+
+// ─── flow-0095: the template caller must actually FORWARD the secret ─────────────────────────
+//
+// Everything above is about the reusable. None of it reaches an adopting repo, because a reusable
+// workflow receives only the secrets its caller passes by name and the template caller passed just
+// CLAUDE_CODE_OAUTH_TOKEN — so in every repo that adopted Flow, `secrets.FLOW_PAT` evaluated empty
+// *inside* the reusable, the `||` fell through to GITHUB_TOKEN, and flow-0093's fix was a no-op
+// there while looking fully shipped here. The reusable declares FLOW_PAT `required: false`, so this
+// is additive: a caller that does not forward it keeps the old behaviour.
+
+const TEMPLATE_CALLER = join(REPO, "project-template/.github/workflows/flow-queue-runner.yml");
+const REPO_CALLER = join(REPO, ".github/workflows/flow-queue-runner.yml");
+const FRAGMENT_0095 = join(REPO, "changes/flow-0095.md");
+
+// The one job of a thin caller. Named lookups rather than `Object.values(...)[0]` so a second job
+// appearing (flow-0076's customised-caller case) surfaces as a clear failure, not a wrong answer.
+const callerSecrets = (file) => {
+  const job = yamlMod.parse(readFileSync(file, "utf8")).jobs?.["flow-queue-runner"];
+  assert.ok(job, `${file} must keep its job key \`flow-queue-runner\` — flow-sync matches on it`);
+  return job.secrets;
+};
+
+test("the template caller forwards FLOW_PAT by name, and does not use `secrets: inherit`", { skip }, () => {
+  const secrets = callerSecrets(TEMPLATE_CALLER);
+  assert.notEqual(secrets, "inherit",
+    "`secrets: inherit` would hand this job — which runs an agent with a repo-write credential — " +
+    "every other secret the adopting repo happens to hold. Naming is the whole reason the " +
+    "forwarding has to be maintained by hand");
+  assert.equal(secrets?.FLOW_PAT, "${{ secrets.FLOW_PAT }}",
+    "without this line `secrets.FLOW_PAT` is empty INSIDE the reusable, however the adopting repo " +
+    "has set the secret, so the checkout token and GH_TOKEN both fall through to GITHUB_TOKEN and " +
+    "flow-0093's fix never reaches the repo that needed it");
+});
+
+test("every secret the template caller forwards is declared by _flow-queue-runner.yml", { skip }, () => {
+  const declared = Object.keys(parseQueueRunner().on?.workflow_call?.secrets ?? {});
+  const forwarded = Object.keys(callerSecrets(TEMPLATE_CALLER) ?? {});
+  assert.ok(forwarded.length > 0, "the template caller must forward at least one secret");
+  for (const name of forwarded) {
+    assert.ok(declared.includes(name),
+      `the template caller forwards ${name}, which _flow-queue-runner.yml does not declare in ` +
+      `on.workflow_call.secrets. GitHub rejects an undeclared named secret at call time, so this ` +
+      `is not a silent no-op — it fails the whole run in every adopting repo. Declared: ` +
+      `{${declared.join(", ")}}`);
+  }
+});
+
+test("canonical's caller and the template caller forward the same secret names", { skip }, () => {
+  const template = Object.keys(callerSecrets(TEMPLATE_CALLER) ?? {}).sort();
+  const canonical = Object.keys(callerSecrets(REPO_CALLER) ?? {}).sort();
+  assert.deepEqual(template, canonical,
+    "canonical dogfoods the caller it publishes, so a divergence means canonical works and every " +
+    "adopting repo quietly does not — the exact shape of the flow-0093 gap this task closes. If " +
+    "the two must differ, that is a deliberate decision and this test is where it gets recorded");
+});
+
+test("the template caller's header documents FLOW_PAT and points at the permission list", { skip }, () => {
+  const source = readFileSync(TEMPLATE_CALLER, "utf8");
+  // The header is the comment block above `on:` — the part a human reads before wiring the secret.
+  const header = source.slice(0, source.indexOf("\non:"));
+  assert.doesNotMatch(header, /FLOW_PAT it never uses|never uses FLOW_PAT/,
+    "the header used to justify passing one secret by claiming the reusable never uses FLOW_PAT. " +
+    "Since flow-0093 it uses it three times, and the stale sentence is what would talk the next " +
+    "reader out of the line this task adds");
+  assert.match(header, /FLOW_PAT/,
+    "the header must say what FLOW_PAT is for — it is optional, so a reader who does not know " +
+    "what it buys will simply not set it");
+  assert.match(header, /optional|OPTIONAL/,
+    "FLOW_PAT is declared `required: false`; the header must say so, or a reader will think a " +
+    "repo without it cannot run the queue runner at all");
+  assert.match(header, /\.github\/workflows\//,
+    "the header must name the concrete thing the worker cannot do without it: GitHub refuses a " +
+    "GITHUB_TOKEN push that changes a file under .github/workflows/");
+  assert.match(header, /docs\/flow-reusable-workflows\.md/,
+    "and it must point at the permission list flow-0093 wrote, rather than restating it — a " +
+    "third copy of that list is a third thing to drift");
+});
+
+test("changes/flow-0095.md exists and states the caller action", () => {
+  const fragment = readFileSync(FRAGMENT_0095, "utf8");
+  assert.match(fragment, /FLOW_PAT/, "the fragment must name the secret the change is about");
+  assert.match(fragment, /Caller action/,
+    "changes/README.md requires every fragment to say what a caller must do. This change needs " +
+    "one twice over: adopt the updated caller, and set the secret it now forwards");
+  assert.match(fragment, /flow-sync/,
+    "the caller action is specifically to adopt the updated thin caller via flow-sync (or add the " +
+    "one FLOW_PAT line by hand) — an adopting repo's existing caller does not change on its own");
 });
