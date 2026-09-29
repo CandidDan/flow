@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0098"
 title: "Tests find a task's changelog entry whether it is still a fragment or already assembled, so the 2.1.2 release gate is green"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "orchestrator"
 created: "2026-09-29"
 started: "2026-09-29"
 branch: "flow/flow-0098-changelog-entry-helper"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/129"
 issue: ""
 blocked_reason: ""
 blocked_by: []
