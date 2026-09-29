@@ -80,3 +80,12 @@ test("given neither a fragment nor an assembled entry, it returns an empty strin
   try { assert.equal(changelogEntry(bare, "flow-9999"), ""); }
   finally { rmSync(bare, { recursive: true, force: true }); }
 });
+
+test("flow-0098's own changelog entry exists and states that a caller need do nothing", () => {
+  // Read through changelogEntry, so this passes both while the fragment is pending and after a
+  // release has assembled it into CHANGELOG.md, which is the point of flow-0098.
+  const repoRoot = join(import.meta.dirname, "..", "..");
+  const entry = changelogEntry(repoRoot, "flow-0098");
+  assert.ok(entry, "flow-0098 has no changelog entry, pending or assembled");
+  assert.match(entry, /Caller action: none/);
+});
