@@ -606,6 +606,38 @@ jobs:
           echo "flow-helpers: decision=materialised repo=$repo ref=$ref source=$src bin=$bin"
           echo "FLOW_BIN=$bin" >> "$GITHUB_ENV"
 
+      # flow-0097: install the repo's OWN dependencies before the check, for `runtime: node` only.
+      #
+      # `setup-node` puts a node on the PATH and nothing else, so before this step a check as
+      # ordinary as `npm run lint` exited 127 in any repo whose linter is a devDependency — the
+      # repo had already declared `commands.install` and this job ignored it. Repos worked around
+      # it by folding an install into every `check`, which is the config duplicating what the
+      # config already says.
+      #
+      # `matrix.install` is "" for `runtime: deno`, for `runtime: none` (whose contract is that
+      # the check provisions itself), and for a repo whose `commands.install` is absent or still
+      # REPLACE-ME — so the `if` below skips the step and the check still runs. The command is
+      # the repo's own config, and it reaches the shell through `env:` like every other matrix
+      # value; `${{ }}` in a `run:` block is substituted before bash parses it, so a crafted
+      # value would escape the quoting. `bash -c "$VAR"` hands it over as DATA instead — the same
+      # trust posture the `gate` job already has when it runs `commands.*`.
+      #
+      # No helper, and no FLOW_REPO_DIR: a `run:` step's working directory is already
+      # `github.workspace`, the caller's checkout, which is the repo root this must install into.
+      # The declared check needs the helper because the helper is what keeps `matrix.check` out
+      # of the `run:` line and owns the retry loop; an install has neither concern.
+      - name: Install the repo's dependencies
+        if: matrix.runtime == 'node' && matrix.install != ''
+        env:
+          # Deliberately not FLOW_SOURCE_ROOT_RETRY's sibling: `retry` is declared per
+          # source_root for a flaky CHECK, and silently applying it to the install would change
+          # what that number means without the config saying so.
+          FLOW_SOURCE_ROOT_INSTALL: ${{ matrix.install }}
+        run: |
+          set -euo pipefail
+          echo "source-roots: installing before the check — $FLOW_SOURCE_ROOT_INSTALL"
+          bash -c "$FLOW_SOURCE_ROOT_INSTALL"
+
       - name: Run the declared check
         env:
           FLOW_SOURCE_ROOT_PATH: ${{ matrix.path }}

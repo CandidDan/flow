@@ -5,6 +5,11 @@
 //   · three source_roots whose checks differ from every `commands.*` → a three-entry matrix
 //     carrying each entry's own path, check, runtime, version and retry, defaults filled in
 //   · an entry whose `check` equals `commands.lint` is EXCLUDED; canonical's own config plans 0
+//   · (flow-0097) an entry whose `check` equals one `&&`-separated SEGMENT of a primary command
+//     is excluded too, while `;` and `||` separate nothing and a near-miss like `npm run lint:e2e`
+//     still runs
+//   · (flow-0097) every `runtime: node` matrix row carries `commands.install`; `deno`, `none`, an
+//     absent install and a REPLACE-ME one all carry `""`, which is the workflow's skip signal
 //   · an entry whose `path` or `check` is REPLACE-ME is excluded and `plan` still exits 0
 //   · `runtime: python`, `retry: 5`, and an unknown field each fail `plan`, naming the entry
 //     and the field
@@ -29,7 +34,7 @@ import { join, resolve } from "node:path";
 import {
   DEFAULT_RETRY, DEFAULT_RUNTIME, DEFAULT_VERSIONS, ENTRY_FIELDS, MAX_RETRY, PLACEHOLDER,
   PRIMARY_COMMAND_KEYS, RUNTIMES, isPlaceholder, main, parseCommands, parseSourceRoots,
-  planSourceRoots, runCheck,
+  planSourceRoots, primaryChecks, runCheck,
 } from "./source-roots.mjs";
 
 // ─────────────────────────────────────────────────────────────────────────────────────────
@@ -203,6 +208,183 @@ test("a check that merely RESEMBLES a primary command still runs — the match i
   const { count, matrix } = planOf(root);
   assert.equal(count, 1, "`npm run lint:app` is not `npm run lint` and the gate job does not run it");
   assert.equal(matrix[0].check, "npm run lint:app");
+  cleanup(root);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// flow-0097 · Criterion: a check equal to one `&&` SEGMENT of a primary command is excluded
+// ─────────────────────────────────────────────────────────────────────────────────────────
+//
+// write's config is the motivating case: `commands.lint` is `npm run lint && npm run typecheck`,
+// and each of its three source_roots declares `check: "npm run lint"`. Whole-string equality
+// missed all three, so every PR ran lint four times.
+
+/** `COMMANDS` with one key replaced, so a fixture can declare a compound primary command. */
+const commandsWith = (overrides) => [
+  'commands:',
+  ...Object.entries({
+    install: "npm ci", build: "npm run build", lint: "npm run lint",
+    test: "npm test", coverage: "npm run coverage", ...overrides,
+  }).map(([k, v]) => `  ${k}: "${v}"`),
+  '',
+].join("\n");
+
+const WRITE_LINT = "npm run lint && npm run typecheck";
+
+test("a check equal to one `&&` segment of a primary command is EXCLUDED as covered", () => {
+  const root = repo([
+    'source_roots:',
+    '  - path: "src/"',
+    '    check: "npm run lint"',
+    '  - path: "scripts/"',
+    '    check: "npm run lint"',
+    '  - path: "e2e/"',
+    '    check: "npm run lint"',
+  ].join("\n"), { dirs: ["src", "scripts", "e2e"], commands: commandsWith({ lint: WRITE_LINT }) });
+
+  const { matrix, count, excluded, errors } = planOf(root);
+  assert.deepEqual(errors, []);
+  assert.equal(count, 0, `"npm run lint" is a segment of commands.lint ("${WRITE_LINT}"), so the ` +
+    "gate job has already run it over the whole repo — three extra jobs would prove nothing");
+  assert.deepEqual(matrix, []);
+  assert.deepEqual(excluded, [
+    { path: "src/", reason: "covered by the primary gate" },
+    { path: "scripts/", reason: "covered by the primary gate" },
+    { path: "e2e/", reason: "covered by the primary gate" },
+  ], "and the exclusion is reported per entry, so an empty matrix is still explicable");
+  cleanup(root);
+});
+
+test("the SECOND segment counts too — the rule is per-segment, not `the first one`", () => {
+  const root = repo('source_roots:\n  - path: "src/"\n    check: "npm run typecheck"\n',
+    { dirs: ["src"], commands: commandsWith({ lint: WRITE_LINT }) });
+  assert.equal(planOf(root).count, 0);
+  cleanup(root);
+});
+
+test("the WHOLE compound command still matches — the segment rule ADDS, it does not replace", () => {
+  const root = repo(`source_roots:\n  - path: "src/"\n    check: "${WRITE_LINT}"\n`,
+    { dirs: ["src"], commands: commandsWith({ lint: WRITE_LINT }) });
+  assert.equal(planOf(root).count, 0, "the pre-flow-0097 whole-string match must survive");
+  cleanup(root);
+});
+
+test("no substring and no prefix matching — `npm run lint:e2e` against the same primary still RUNS", () => {
+  const root = repo('source_roots:\n  - path: "e2e/"\n    check: "npm run lint:e2e"\n',
+    { dirs: ["e2e"], commands: commandsWith({ lint: WRITE_LINT }) });
+  const { count, matrix, excluded } = planOf(root);
+  assert.equal(count, 1, "`npm run lint:e2e` starts with a segment but is not one; a tree that " +
+    "silently stops being gated is the failure this whole job exists to prevent");
+  assert.equal(matrix[0].check, "npm run lint:e2e");
+  assert.deepEqual(excluded, []);
+  cleanup(root);
+});
+
+test("`;` is NOT a separator — neither half of `a; b` counts as covered", () => {
+  for (const check of ["npm run lint", "npm run typecheck"]) {
+    const root = repo(`source_roots:\n  - path: "src/"\n    check: "${check}"\n`,
+      { dirs: ["src"], commands: commandsWith({ lint: "npm run lint; npm run typecheck" }) });
+    assert.equal(planOf(root).count, 1,
+      `"${check}" must still run: \`;\` runs the second command whether or not the first passed, ` +
+      "so a green gate job does not prove this one succeeded. Only `&&` is parsed.");
+    cleanup(root);
+  }
+});
+
+test("`||` is NOT a separator — neither half of `a || b` counts as covered", () => {
+  for (const check of ["npm run lint", "npm run typecheck"]) {
+    const root = repo(`source_roots:\n  - path: "src/"\n    check: "${check}"\n`,
+      { dirs: ["src"], commands: commandsWith({ lint: "npm run lint || npm run typecheck" }) });
+    assert.equal(planOf(root).count, 1,
+      `"${check}" must still run: with \`||\` only one of the two is guaranteed to have run.`);
+    cleanup(root);
+  }
+});
+
+test("primaryChecks: the set is the whole commands plus their `&&` segments, trimmed, and nothing else", () => {
+  const set = primaryChecks({ lint: WRITE_LINT, test: "npm test", coverage: "", build: undefined });
+  assert.deepEqual([...set].sort(), [WRITE_LINT, "npm run lint", "npm run typecheck", "npm test"].sort());
+  assert.equal(set.has(""), false, "an empty segment must never be added — it would match an empty check");
+});
+
+test("primaryChecks ignores `install` — the gate job does install, but `check` is what is compared", () => {
+  assert.equal(primaryChecks({ install: "npm ci" }).size, 0,
+    "excluding a tree because its check happens to equal `commands.install` would drop a real check");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// flow-0097 · Criterion: every `runtime: node` row carries the repo's `commands.install`
+// ─────────────────────────────────────────────────────────────────────────────────────────
+//
+// The workflow half of this — a step guarded on `matrix.runtime == 'node'` that runs the command
+// through `env:` before the check — is proved in canonical's `.flow/bin/source-roots-gate.test.mjs`.
+// Here we prove the value that step reads.
+
+test("a `runtime: node` entry carries commands.install, so the job can install before the check", () => {
+  // write's shape: eslint is a devDependency, so `npm run lint` is exit 127 without an install.
+  const root = repo('source_roots:\n  - path: "e2e/"\n    check: "npm run lint:e2e"\n',
+    { dirs: ["e2e"], commands: commandsWith({ install: "npm ci" }) });
+  const { matrix } = planOf(root);
+  assert.equal(matrix[0].runtime, "node");
+  assert.equal(matrix[0].install, "npm ci",
+    "without this the job does setup-node and nothing else, and a devDependency binary is not on PATH");
+  cleanup(root);
+});
+
+test("`install` is present on EVERY row — a matrix entry is never partially specified", () => {
+  const root = repo(THREE_TREES, { dirs: ["supabase/functions", "mcp", "mobile"] });
+  for (const e of planOf(root).matrix) {
+    assert.ok(Object.hasOwn(e, "install"), `matrix entry for ${e.path} has no install`);
+  }
+  cleanup(root);
+});
+
+test("`runtime: deno` and `runtime: none` get an EMPTY install — their contract is unchanged", () => {
+  const root = repo([
+    'source_roots:',
+    '  - path: "supabase/functions/"',
+    '    check: "deno check supabase/functions/**/*.ts"',
+    '    runtime: "deno"',
+    '  - path: "api/"',
+    '    check: "uv run ruff check api"',
+    '    runtime: "none"',
+  ].join("\n"), { dirs: ["supabase/functions", "api"] });
+  const { matrix } = planOf(root);
+  assert.equal(matrix[0].install, "", "an `npm ci` in a Deno job is a step its config never asked for");
+  assert.equal(matrix[1].install, "",
+    "`none` means the check provisions its own toolchain; installing for it would contradict that");
+  cleanup(root);
+});
+
+test("an absent commands.install yields `install: \"\"` — the step is skipped, the check still runs", () => {
+  const root = repo('source_roots:\n  - path: "e2e/"\n    check: "npm run lint:e2e"\n', {
+    dirs: ["e2e"],
+    commands: ['commands:', '  lint: "npm run lint"', '  test: "npm test"', ''].join("\n"),
+  });
+  const { matrix, count, errors } = planOf(root);
+  assert.deepEqual(errors, [], "a repo with no declared install is not a broken config");
+  assert.equal(count, 1, "the check must still be planned");
+  assert.equal(matrix[0].install, "");
+  cleanup(root);
+});
+
+test("a REPLACE-ME commands.install yields `install: \"\"` — adoption must not run the sentinel", () => {
+  const root = repo('source_roots:\n  - path: "e2e/"\n    check: "npm run lint:e2e"\n',
+    { dirs: ["e2e"], commands: commandsWith({ install: PLACEHOLDER }) });
+  const { matrix, count } = planOf(root);
+  assert.equal(count, 1);
+  assert.equal(matrix[0].install, "", `"${PLACEHOLDER}" is not a command; running it would be a ` +
+    "confusing exit 127 in a repo that was told to leave the sentinel alone");
+  cleanup(root);
+});
+
+test("`install` reaches the emitted matrix JSON, which is what the workflow actually reads", () => {
+  const root = repo('source_roots:\n  - path: "e2e/"\n    check: "npm run lint:e2e"\n', { dirs: ["e2e"] });
+  const { stdout } = runMain(["plan"], { configPath: configOf(root), repoRoot: root });
+  const line = stdout.split("\n").find((l) => l.startsWith("matrix="));
+  const { include } = JSON.parse(line.slice("matrix=".length));
+  assert.equal(include[0].install, "npm ci",
+    "planSourceRoots returning it is not enough — the step reads ${{ matrix.install }}");
   cleanup(root);
 });
 

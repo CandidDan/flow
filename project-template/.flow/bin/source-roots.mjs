@@ -56,6 +56,11 @@ export const ENTRY_FIELDS = Object.freeze(["path", "check", "runtime", "version"
 // `none` means "no setup step" — the check provisions its own toolchain (a `uv sync`, a
 // `bundle install`, a container). It is the honest answer for a stack Flow does not model,
 // and it is why this list does not need to grow every time someone adopts a new language.
+//
+// `node` additionally runs the repo's `commands.install` before the check (flow-0097). Before
+// that, a `runtime: node` job did `setup-node` and nothing else, so a check as ordinary as
+// `npm run lint` exited 127 in any repo whose linter is a devDependency — the repo had already
+// declared how to install itself and the job ignored it. `deno` and `none` are unchanged.
 export const RUNTIMES = Object.freeze(["node", "deno", "none"]);
 export const DEFAULT_RUNTIME = "node";
 export const DEFAULT_VERSIONS = Object.freeze({ node: "22", deno: "v2.x" });
@@ -67,8 +72,39 @@ export const MAX_RETRY = 3;
 export const DEFAULT_RETRY = 0;
 
 // The four `commands.*` the `gate` job already runs. An entry whose `check` is exactly one of
-// these is left out of the matrix — see `planSourceRoots`.
+// these — or exactly one `&&`-separated segment of one — is left out of the matrix. See
+// `primaryChecks` and `planSourceRoots`.
 export const PRIMARY_COMMAND_KEYS = Object.freeze(["build", "lint", "test", "coverage"]);
+
+/**
+ * Every command string the `gate` job is already known to run, as a Set.
+ *
+ * WHY SEGMENTS (flow-0097). A repo whose `commands.lint` is `npm run lint && npm run typecheck`
+ * and whose source_roots each declare `check: "npm run lint"` used to get a job per tree
+ * re-running a command the `gate` job had just run over the whole repo — three redundant jobs on
+ * every PR, because the match was whole-string equality and the whole string was the pair.
+ * `&&` is unconditional-on-success sequencing, so every segment of a primary command that the
+ * gate job ran to completion did run; matching a segment is therefore sound, not a guess.
+ *
+ * DELIBERATELY ONLY `&&`. No `;`, no `||`, no pipes, no subshells — those are parsed as ordinary
+ * text and stay part of whichever segment they fall in. `a; b` and `a || b` are each ONE entry in
+ * this set, so neither `a` nor `b` alone counts as covered. The cost of being wrong here is a
+ * tree that silently stops being gated, which is the exact failure the whole job exists to
+ * prevent; a redundant job is merely slow. When in doubt this must run the check.
+ */
+export function primaryChecks(commands = {}) {
+  const out = new Set();
+  for (const key of PRIMARY_COMMAND_KEYS) {
+    const command = commands[key];
+    if (!command) continue;
+    out.add(command);                                // the whole command, exactly as before
+    for (const segment of command.split("&&")) {
+      const s = segment.trim();
+      if (s) out.add(s);
+    }
+  }
+  return out;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────────────────
 // The parser (moved here from flow-doctor — behaviour for `path`/`check` unchanged)
@@ -161,15 +197,26 @@ function label(root, index) {
  * Two kinds of entry are EXCLUDED rather than rejected:
  *   · uncalibrated — `path` or `check` still holds the shipped `REPLACE-ME` sentinel. A repo
  *     mid-adoption must not have its gate fail on a placeholder it was told to leave alone.
- *   · already covered — `check` is exactly equal to `commands.build`, `.lint`, `.test` or
- *     `.coverage`, which the `gate` job already runs. Canonical's own four entries are all
- *     `npm run lint` / `npm run build`, so canonical's matrix is empty BY DESIGN; without this
- *     rule every PR here would re-run lint three times for nothing.
+ *   · already covered — `check` equals `commands.build`, `.lint`, `.test` or `.coverage`, or one
+ *     `&&`-separated segment of one (see `primaryChecks`), all of which the `gate` job already
+ *     runs. Canonical's own four entries are all `npm run lint` / `npm run build`, so canonical's
+ *     matrix is empty BY DESIGN; without this rule every PR here would re-run lint three times
+ *     for nothing.
+ *
+ * Every surviving row also carries `install`: the repo's `commands.install` for a `runtime: node`
+ * entry, and `""` otherwise (a non-node runtime, an absent `commands.install`, or a REPLACE-ME
+ * one). `""` is the workflow's signal to skip its install step entirely.
  */
 export function planSourceRoots({ configPath, repoRoot = dirname(dirname(configPath)) } = {}) {
   const { declared, roots } = parseSourceRoots(configPath);
   const commands = parseCommands(configPath);
-  const primary = new Set(PRIMARY_COMMAND_KEYS.map((k) => commands[k]).filter(Boolean));
+  const primary = primaryChecks(commands);
+
+  // The repo's own `commands.install`, or "" when it is absent or still the shipped sentinel.
+  // Emitted on every matrix row so the shape stays uniform; the workflow's install step is
+  // guarded on `matrix.runtime == 'node' && matrix.install != ''`, so "" means "skip the step".
+  const declaredInstall = commands.install ?? "";
+  const install = declaredInstall && !isPlaceholder(declaredInstall) ? declaredInstall : "";
 
   const errors = [];
   const excluded = [];
@@ -251,6 +298,10 @@ export function planSourceRoots({ configPath, repoRoot = dirname(dirname(configP
       retry,
       cache: cacheable ? "npm" : "",
       cache_dependency_path: cacheable ? lock : "",
+      // flow-0097: `runtime: node` installs the repo's declared dependencies before the check.
+      // `deno` and `none` get "" — `none` means "the check provisions its own toolchain", and
+      // giving a Deno tree an `npm ci` would be inventing a step its config never asked for.
+      install: runtime === "node" ? install : "",
     });
   });
 

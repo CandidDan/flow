@@ -11,6 +11,8 @@
 //   · `actions/setup-node` runs only for `runtime: node`, `denoland/setup-deno` only for
 //     `runtime: deno`, and neither for `none`
 //   · the matrix job actually runs `source-roots.mjs run` — the wiring is end-to-end
+//   · (flow-0097) a `matrix.runtime == 'node' && matrix.install != ''` step installs the repo's
+//     dependencies before the declared check, with the command passed through `env:`
 //   · NO `run:` block in either new job contains `${{ matrix.` — matrix values reach the shell
 //     through `env:` only (the task's security note)
 //   · every new third-party `uses:` is pinned to a 40-character SHA
@@ -150,14 +152,88 @@ test("the matrix job runs `source-roots.mjs run`, and the plan job runs `source-
   }
 });
 
+/** The step that runs the DECLARED check — not flow-0097's install step, which runs the helper too. */
+const isCheckStep = (s) =>
+  /source-roots\.mjs run/.test(s.run ?? "") && /matrix\.check/.test(String(s.env?.FLOW_SOURCE_ROOT_CHECK ?? ""));
+const checkStep = (text = source) => (jobs(text)[MATRIX_JOB].steps ?? []).find(isCheckStep);
+
 test("the check's values reach the runner through env, and all three are passed", { skip }, () => {
-  const step = (jobs(source)[MATRIX_JOB].steps ?? []).find((s) => /source-roots\.mjs run/.test(s.run ?? ""));
+  const step = checkStep();
   assert.ok(step, "no step runs the helper");
   const env = step.env ?? {};
   assert.match(String(env.FLOW_SOURCE_ROOT_CHECK), /matrix\.check/);
   assert.match(String(env.FLOW_SOURCE_ROOT_RETRY), /matrix\.retry/);
   assert.match(String(env.FLOW_SOURCE_ROOT_PATH), /matrix\.path/,
     "without the path the job log cannot say which tree failed");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// flow-0097 · Criterion: a node-only install step runs BEFORE the declared check
+// ─────────────────────────────────────────────────────────────────────────────────────────
+//
+// `setup-node` alone leaves a devDependency binary off the PATH, so `check: "npm run lint"` was
+// exit 127 in any repo that did not fold an install into the check itself. The value comes from
+// `matrix.install`, which the planner fills from `commands.install` (proved in
+// project-template/.flow/bin/source-roots.test.mjs) and empties for deno / none / REPLACE-ME.
+
+/** The step flow-0097 added: the one that carries the entry's install command. */
+const INSTALL_ENV = "FLOW_SOURCE_ROOT_INSTALL";
+const isInstallStep = (s) => /matrix\.install/.test(String(s.env?.[INSTALL_ENV] ?? ""));
+const installStep = (text = source) => (jobs(text)[MATRIX_JOB].steps ?? []).find(isInstallStep);
+
+test("flow-0097: the matrix job has an install step, guarded on runtime node AND a non-empty install", { skip }, () => {
+  const step = installStep();
+  assert.ok(step, "no step installs the repo's dependencies — `npm run lint` is exit 127 without one");
+  const cond = String(step.if ?? "");
+  assert.match(cond, /matrix\.runtime\s*==\s*'node'/,
+    "unguarded, this would `npm ci` inside a Deno job and contradict `runtime: none`'s contract");
+  assert.match(cond, /matrix\.install\s*!=\s*''/,
+    "a repo with no `commands.install` (or a REPLACE-ME one) gets `install: \"\"`; running that " +
+    "is a confusing exit 127 in a repo that was told to leave the sentinel alone");
+});
+
+test("flow-0097: the install step runs BEFORE the declared check", { skip }, () => {
+  const steps = jobs(source)[MATRIX_JOB].steps ?? [];
+  const installAt = steps.findIndex(isInstallStep);
+  const checkAt = steps.findIndex(isCheckStep);
+  assert.ok(installAt > -1 && checkAt > -1, "both steps must exist");
+  assert.ok(installAt < checkAt,
+    "installing after the check is installing after the thing it exists to make runnable");
+});
+
+test("flow-0097: the install step runs AFTER setup-node — `npm ci` needs the version it declared", { skip }, () => {
+  const steps = jobs(source)[MATRIX_JOB].steps ?? [];
+  const installAt = steps.findIndex(isInstallStep);
+  const setupAt = steps.findIndex((st) => String(st.uses ?? "").startsWith("actions/setup-node@"));
+  assert.ok(setupAt > -1 && setupAt < installAt,
+    "installing before setup-node would build native modules against the runner's default node " +
+    "and then run the check on the entry's `version`");
+});
+
+test("flow-0097: the install command reaches the shell through `env:`, never `${{ }}` in the run block", { skip }, () => {
+  const step = installStep();
+  assert.match(String(step.env[INSTALL_ENV]), /matrix\.install/,
+    "the command must arrive as an environment value — .flow/config.yml is editable by a PR, and " +
+    "Actions substitutes a `${{ }}` into the script before bash parses it");
+  const run = String(step.run ?? "");
+  assert.ok(!/\$\{\{/.test(run), "the install step's `run:` must interpolate nothing at all");
+  assert.ok(run.includes(`"$${INSTALL_ENV}"`),
+    `the command must be used as the shell variable $${INSTALL_ENV}, quoted, so it stays data`);
+});
+
+test("flow-0097: the install step does not borrow the check's retry count", { skip }, () => {
+  assert.equal(installStep().env.FLOW_SOURCE_ROOT_RETRY, undefined,
+    "`retry` is declared per source_root for a flaky CHECK; silently applying it to the install " +
+    "changes what the number means without the config saying so");
+});
+
+test("flow-0097: the guard fails against a mutated copy — an unguarded install step is caught", { skip }, () => {
+  const mutated = source.replace(
+    "        if: matrix.runtime == 'node' && matrix.install != ''\n", "");
+  assert.notEqual(mutated, source, "the mutation must actually apply, or this proves nothing");
+  const step = installStep(mutated);
+  assert.ok(step, "the mutated file must still have the step");
+  assert.equal(step.if, undefined, "and this is the state the assertions above must reject");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────
