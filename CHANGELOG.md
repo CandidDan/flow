@@ -6,7 +6,155 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
-## 2.1.1 — 2026-09-28 (pending tag + canary)
+## 2.1.2 — 2026-09-29 (pending tag + canary)
+
+**PATCH: stops alias moves from breaking the fleet, and fixes the source-root and queue-runner
+failures 2.1.0/2.1.1 exposed.** The headline is flow-0094: the reusable workflows now run
+canonical's own helpers from their own commit, so a repo that has not synced yet can no longer be
+left without a helper its workflow calls. flow-0097 makes `source-root` jobs install dependencies
+for `runtime: node` and stops re-running checks the primary gate already covers. flow-0093 and
+flow-0095 let the queue-runner worker push and open PRs with `FLOW_PAT` in every repo (caller
+action: sync, and set `FLOW_PAT` with the permissions in the entry below). Also shipped here but
+omitted from 2.1.0's notes: flow-0049 (#113), the queue-runner failure summary now states the
+run's actual outcome. Rollback: `git tag -f v2 v2.1.1 && git push -f origin v2`.
+
+- **The watchdog's "last successful run" is now the newest success, not whatever GitHub returned
+  first** (`flightdeck/bin/watchdog.mjs`, flow-0065). **No caller action** — the watchdog runs on a
+  schedule in canonical and picks this up on its next sweep.
+
+  Both run lookups asked GitHub for `per_page=1` and trusted `workflow_runs[0]`, on the strength of
+  the list-runs endpoint documenting a `created_at` descending default. It is not always descending:
+  [Nudge#289](https://github.com/CandidDan/Nudge/issues/289) reported a last successful run of
+  `2026-09-07T18:04:59Z` for `flow-queue-runner` when the newest success was `2026-09-16T18:05:13Z`
+  — wrong by nine days, and read by a human as a week-long outage that never happened. A one-item
+  page is what made it undetectable: there is no second element whose timestamp could contradict the
+  first.
+
+  Both lookups now request one page of 100 runs and select the maximum `created_at`. That is the
+  API's largest single page, so it costs no extra request — rate limits count requests, not rows —
+  and a workflow with no success in its most recent 100 runs is dead by any definition the watchdog
+  has. A run carrying no parseable timestamp is skipped rather than coerced, so a workflow that has
+  never succeeded still reports `never` rather than a 1970 epoch date.
+
+- **The queue-runner's worker now pushes and runs `gh` as `FLOW_PAT`, so it can land tasks that
+  touch workflow files** (`.github/workflows/_flow-queue-runner.yml`, flow-0093). **Caller action:**
+  if your `FLOW_PAT` was issued before this change it almost certainly lacks `Workflows: Read and
+  write` and `Issues: Read and write`. Regenerate it with the four permissions now documented in
+  `docs/flow-reusable-workflows.md` (fine-grained, this repository only, short expiry) and update
+  the repo secret.
+
+  The worker held `FLOW_PAT` for the action's own API calls, but its `git push` authenticated with
+  whatever `actions/checkout` persisted — `GITHUB_TOKEN`. GitHub refuses any `GITHUB_TOKEN` push
+  that changes a file under `.github/workflows/`, server-side, however `permissions:` is written,
+  because `workflows` is not one of `GITHUB_TOKEN`'s grantable permissions. So a worker on a task
+  whose `touches` named a workflow file could not push at all, and setting `FLOW_PAT` did not help.
+  The checkout now takes `token: ${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}`, and the worker
+  step exports `GH_TOKEN` from the same expression so `gh pr create`, `gh pr ready` and
+  `gh issue create` authenticate too. Unset, both fall back to `GITHUB_TOKEN` and behaviour is
+  exactly as before.
+
+  `FLOW_PAT`'s required permissions are now written down once, in `_flow-open-pr.yml`'s header and
+  in `docs/flow-reusable-workflows.md`, with which workflow needs each one;
+  `.flow/bin/flow-pat-forwarding.test.mjs` parses both copies and fails the gate if they drift. The
+  docs also record that the "Allow GitHub Actions to create and approve pull requests" repository
+  setting is **not** the fix and should stay off: it only widens `GITHUB_TOKEN`, and a PR created by
+  `GITHUB_TOKEN` triggers no downstream workflows, so `flow-gates` and the three review checks
+  would never run on it.
+
+- **The gate now runs canonical's own helpers, fetched at the same commit as the workflow that
+  calls them** (`.github/workflows/_flow-gates.yml`, flow-0094). **Caller action: none.**
+
+  A repo adopts the two halves of Flow on different clocks: a reusable workflow changes for every
+  pinned repo the instant an alias moves, while the `.flow/bin/` helpers it invokes are files in
+  that repo and change only when its `flow-sync` PR merges. Any release that made a reusable need a
+  new helper therefore broke every pinned repo until it synced — 2.1.0 (`source-roots.mjs`) and
+  2.1.1 (`check-claude-md.mjs`) did exactly that on 28–29 Sep 2026, and every `@v2` repo went red
+  on every pull request for a reason unrelated to its own code.
+
+  `_flow-gates.yml` now fetches canonical's `project-template/.flow/bin/` at `${{ job.workflow_sha }}`
+  — the commit of the workflow file that defines the running job, not the caller's — and runs
+  `source-roots.mjs`, `check-claude-md.mjs` and `touches-guard.mjs` from there. The workflow and
+  the helper it needs ship as one unit, so moving an alias can no longer strand a repo without a
+  helper, and the `".flow/bin/<x>.mjs is missing, run flow-sync"` branches are gone: that state is
+  unreachable. `${{ job.workflow_repository }}` supplies the repo, so a fork of canonical gates
+  against its own fork. On GitHub Enterprise Server, where the `job` context is unavailable, a new
+  optional `flow_ref` input is the fallback; it defaults to empty and a moving branch is refused.
+
+  Because a helper run from canonical is not in the tree it is judging, it now takes the repo root
+  from **`FLOW_REPO_DIR`**, and **`FLOW_CI=1`** makes that variable required rather than optional —
+  without it a helper would resolve its store from its own realpath, read canonical's fixtures and
+  exit 0, which is a green gate over the wrong repo. With neither variable set the helpers behave
+  exactly as before, which is what keeps a repo pinned to an older workflow tag working.
+
+  `flow-doctor` and the `flow-tooling` test step deliberately keep running the repo's **own** copy:
+  they exist to validate the synced state, and running canonical's copy would make them unable to
+  fail for the reason they were added. `flow-sync` is no longer load-bearing for CI correctness —
+  it is how a repo picks up its local tooling. The decision, the evidence for `job.workflow_sha`
+  and the fallback's race are recorded in `docs/adr/0008-helpers-from-canonical.md`; the other
+  reusables (`_flow-done`, `_flow-open-pr`, `_flow-queue-runner`, `_flow-recover`, `_flow-status`)
+  are a follow-up with the same mechanism.
+
+- **The template's `flow-queue-runner` thin caller now forwards `FLOW_PAT`, so flow-0093's fix
+  actually reaches adopting repos** (`project-template/.github/workflows/flow-queue-runner.yml`,
+  flow-0095). **Caller action:** adopt the updated caller via `flow-sync` (or add the single
+  `FLOW_PAT: ${{ secrets.FLOW_PAT }}` line to your own `flow-queue-runner.yml` by hand), and set
+  the `FLOW_PAT` secret with the four permissions documented in
+  `docs/flow-reusable-workflows.md`.
+
+  A reusable workflow receives only the secrets its caller passes. flow-0093 taught
+  `_flow-queue-runner.yml` to check out and run `gh` as `${{ secrets.FLOW_PAT ||
+  secrets.GITHUB_TOKEN }}`, and canonical's own caller forwards `FLOW_PAT` — but the template
+  caller passed only `CLAUDE_CODE_OAUTH_TOKEN`, under a header asserting the reusable never used
+  `FLOW_PAT`. So in every adopting repo the secret evaluated **empty inside the reusable** however
+  the repo had set it, the `||` fell through to `GITHUB_TOKEN`, and the worker still could not push
+  a change under `.github/workflows/` — the fix looked shipped and was a no-op everywhere but here.
+
+  **Additive, not breaking.** The reusable declares `FLOW_PAT` with `required: false`, so a caller
+  that does not forward it keeps exactly today's behaviour, and a repo with no `FLOW_PAT` secret is
+  unaffected. Still passed **by name**, never `secrets: inherit` — the job runs an agent holding a
+  repo-write credential, and naming is what keeps every *other* secret out of it.
+
+  The caller's header is rewritten to say which secrets it forwards and why, that `FLOW_PAT` is
+  optional, and what the worker cannot do without it (push a workflow-file change; open a PR or
+  issue whose downstream checks actually run). It points at the one permission list rather than
+  restating it. `.flow/bin/secrets-scope.test.mjs` — the single owner of "every caller forwards
+  exactly the secrets its reusable declares" — fails the gate if the template caller and
+  canonical's caller ever forward different secret names again.
+
+### Fixed
+
+- **`source_roots` jobs install the repo's dependencies before a `runtime: node` check.**
+  **Caller action: none.** The
+  `source-root` matrix job ran `actions/setup-node` and then the declared check with no install
+  step, so a check as ordinary as `npm run lint` exited `127` in any repo whose linter is a
+  devDependency — the repo had already declared `commands.install` and the job ignored it. It now
+  runs that command in the repo root first, passed to the shell through `env:` like every other
+  matrix value. `runtime: deno` and `runtime: none` are unchanged (`none` still means "the check
+  provisions its own toolchain"), and a repo whose `commands.install` is absent or still
+  `REPLACE-ME` gets no install step and still runs its check.
+
+### Changed
+
+- **A check the primary gate already runs is no longer run twice, including as one `&&` segment.**
+  **Caller action: none** (see the next paragraph for repos that worked around it).
+  `planSourceRoots` excluded an entry only when its `check` equalled a whole `commands.*` value. A
+  repo whose `commands.lint` is `npm run lint && npm run typecheck`, with three `source_roots` each
+  declaring `check: "npm run lint"`, therefore got three extra jobs re-running what the `gate` job
+  had just run over the whole repo. A check that equals one `&&`-separated segment of a primary
+  command now counts as covered. Deliberately narrow: only `&&` separates, segments match exactly
+  after trimming (no substring or prefix matching), and `;`, `||`, pipes and subshells are parsed
+  as ordinary text — so neither half of `a; b` or `a || b` counts as covered.
+
+**Caller action: none.** Repos that worked around the missing install by folding one into every
+`check` keep working — the check travels verbatim — and may simplify those checks at leisure.
+
+- **Tests read a task's changelog entry whether it is still a fragment or already assembled**
+  (`.flow/bin/changelog-entry.mjs`, flow-0098). **Caller action: none** — canonical-only test
+  helper. `--assemble` deletes each `changes/<id>.md` by design, and tests that read the fragment
+  directly turned every release PR's own gate red (2.1.0, 2.1.1, and 2.1.2 before this). The
+  flow-0093, flow-0094 and flow-0095 changelog tests now go through `changelogEntry`.
+
+## 2.1.1 — 2026-09-28 (tagged `v2.1.1`)
 
 **PATCH: 2.1.0 turned every synced repo's `flow-tooling` check red. No caller action; the next
 `flow-sync` fixes it.**
@@ -83,7 +231,7 @@ after a canary passes). Note any **caller action** required (a caller change is 
   your repo made `source-root (<path>)` a required status check. In that case, update the rule to
   the new name.
 
-## 2.1.0 — 2026-09-27 (pending tag + canary)
+## 2.1.0 — 2026-09-27 (tagged `v2.1.0`)
 
 **MINOR: new backward-compatible capability, no required caller change.** New here: the intent
 store and template (flow-0063, flow-0073), `source_roots` checks as a gates matrix (flow-0077),
