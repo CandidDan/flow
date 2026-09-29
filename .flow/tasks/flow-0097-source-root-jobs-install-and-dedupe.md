@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0097"
 title: "source-root jobs install the repo's dependencies before a node check, and a check the primary gate already runs is not run twice"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0097"
 created: "2026-09-29"
-started: ""
+started: "2026-09-29T07:22:38Z"
 branch: ""
 pr: ""
 issue: ""
