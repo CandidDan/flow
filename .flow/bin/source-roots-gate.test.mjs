@@ -45,7 +45,11 @@ const skip = yamlMod ? false : "needs `npm ci` (yaml) — runs in the per-stack 
 
 const PLAN_JOB = "source-roots-plan";
 const MATRIX_JOB = "source-root";
-const HELPER = ".flow/bin/source-roots.mjs";
+// flow-0094: the gate no longer runs the CALLER's copy. `_flow-gates.yml` fetches canonical's
+// `project-template/.flow/bin/` at its own commit into `$FLOW_BIN` and runs that, so a release
+// that makes the gate need a new helper cannot strand a repo that has not synced yet.
+const HELPER = '"$FLOW_BIN"/source-roots.mjs';
+const CALLER_COPY = ".flow/bin/source-roots.mjs";
 
 const parse = (text = source) => yamlMod.parse(text);
 const jobs = (text) => parse(text).jobs;
@@ -136,9 +140,14 @@ test("`runtime: none` reaches neither setup step — every setup step in the job
 
 test("the matrix job runs `source-roots.mjs run`, and the plan job runs `source-roots.mjs plan`", { skip }, () => {
   const j = jobs(source);
-  assert.match(runScripts(j[MATRIX_JOB]), new RegExp(`node ${HELPER.replace(/\./g, "\\.")} run`),
+  assert.ok(runScripts(j[MATRIX_JOB]).includes(`node ${HELPER} run`),
     "the fan-out must invoke the runner; a matrix that sets up a toolchain and checks nothing is worse than no job");
-  assert.match(runScripts(j[PLAN_JOB]), new RegExp(`node ${HELPER.replace(/\./g, "\\.")} plan`));
+  assert.ok(runScripts(j[PLAN_JOB]).includes(`node ${HELPER} plan`));
+  for (const name of [PLAN_JOB, MATRIX_JOB]) {
+    assert.ok(!runScripts(j[name]).includes(`node ${CALLER_COPY}`),
+      `${name} must not run the caller's own copy — that is the 2.1.0 fleet break, where every ` +
+      "@v2 repo went red on a helper it had no way to have yet");
+  }
 });
 
 test("the check's values reach the runner through env, and all three are passed", { skip }, () => {
@@ -176,8 +185,8 @@ test("no `run:` block ANYWHERE in the file interpolates a matrix value", { skip 
 
 test("the rule fails against a mutated copy — moving the check into the `run:` line is caught", { skip }, () => {
   const mutated = source.replace(
-    "        run: node .flow/bin/source-roots.mjs run",
-    "        run: node .flow/bin/source-roots.mjs run \"${{ matrix.check }}\"");
+    `        run: node ${HELPER} run`,
+    `        run: node ${HELPER} run "\${{ matrix.check }}"`);
   assert.notEqual(mutated, source, "the mutation must actually apply, or this proves nothing");
   const offenders = Object.entries(jobs(mutated))
     .filter(([, job]) => /\$\{\{\s*matrix\./.test(runScripts(job)))
@@ -214,22 +223,31 @@ test("denoland/setup-deno is pinned, and its line carries a readable version com
 // Criterion: a consumer missing the helper gets a named error, not ERR_MODULE_NOT_FOUND
 // ─────────────────────────────────────────────────────────────────────────────────────────
 
-test("the plan job checks for the helper and fails with an ::error naming the file and flow-sync", { skip }, () => {
+test("the plan job no longer guards for a missing helper — it cannot be missing (flow-0094)", { skip }, () => {
   const script = runScripts(jobs(source)[PLAN_JOB]);
-  assert.match(script, /\[ ! -f \.flow\/bin\/source-roots\.mjs \]/,
-    "the guard must test for the file before invoking node");
-  const errorLines = script.split("\n").filter((l) => l.includes("::error::"));
-  assert.ok(errorLines.length > 0, "the failure must annotate the run, not only print to the log");
-  assert.ok(errorLines.some((l) => l.includes(HELPER)), "the missing file must be named");
-  assert.ok(errorLines.join("\n").includes("flow-sync"),
-    "and the fix — a caller bumped without syncing .flow/bin is the only way to reach this state");
-  assert.match(script, /exit 1/, "a missing helper is a failure; a skipped plan is an ungated tree");
+  assert.ok(!script.includes(`! -f ${CALLER_COPY}`),
+    "the `[ ! -f .flow/bin/source-roots.mjs ]` branch guarded against a caller that bumped its " +
+    "workflow refs without syncing .flow/bin/. The helper now arrives WITH the workflow, so that " +
+    "state is unreachable and the branch is dead code telling a caller to run a sync it does not need");
+  assert.ok(!/flow-sync/.test(script),
+    "and the advice must go with it — a gate that tells a repo to sync a helper it no longer uses " +
+    "sends the next person to fix the wrong thing");
+  assert.ok(script.includes(`node ${HELPER} plan`), "it still plans, from the fetched canonical copy");
 });
 
-test("the guard runs BEFORE the helper is invoked — order is the whole point", { skip }, () => {
-  const script = runScripts(jobs(source)[PLAN_JOB]);
-  assert.ok(script.indexOf("! -f .flow/bin/source-roots.mjs") < script.indexOf("source-roots.mjs plan"),
-    "checking after the call means node has already died with its own message");
+test("the plan job materialises canonical's helpers BEFORE invoking one, and pins a commit", { skip }, () => {
+  const steps = jobs(source)[PLAN_JOB].steps ?? [];
+  const fetchAt = steps.findIndex((st) => /job\.workflow_sha/.test(JSON.stringify(st.env ?? {})));
+  const planAt = steps.findIndex((st) => String(st.run ?? "").includes(`node ${HELPER} plan`));
+  assert.ok(fetchAt > -1, "no step resolves this workflow's own commit — see docs/adr/0008-helpers-from-canonical.md");
+  assert.ok(planAt > -1, "no step plans");
+  assert.ok(fetchAt < planAt, "fetching after the call means node has already died with its own message");
+
+  const fetch = String(steps[fetchAt].run ?? "");
+  assert.ok(/refs\/heads\/\*\)/.test(fetch) && /main\|master\|HEAD/.test(fetch),
+    "a moving branch must be REFUSED, not fetched: a gate that follows `main` cannot be " +
+    "reproduced from a run log, and every run of it gates against something different");
+  assert.ok(!/@main|origin\/main/.test(fetch), "and `main` must not appear as a fetch target at all");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────

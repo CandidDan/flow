@@ -744,10 +744,19 @@ test("the source-roots CLI's `run` subcommand runs a check and honours its retry
     "both attempts must be visible — a retry that hides the flake is the flake with the evidence removed");
 });
 
-test("_flow-gates.yml invokes the adapter by the path it is published at", () => {
+test("_flow-gates.yml runs source-roots from CANONICAL, not from the caller's .flow/bin", () => {
+  // flow-0094 moved this one. The adapter still exists and is still the local entry point — `npm
+  // run lint`, a human debugging canonical, and flow-doctor all reach the helper through it — but
+  // the GATE runs canonical's own copy, fetched at the workflow's own commit. Pinning both halves
+  // here is what stops a well-meaning revert to `.flow/bin/` from passing as a tidy-up.
   const src = readFileSync(join(WORKFLOWS, "_flow-gates.yml"), "utf8");
-  assert.match(src, /node \.flow\/bin\/source-roots\.mjs plan/);
-  assert.match(src, /node \.flow\/bin\/source-roots\.mjs run/);
+  assert.ok(src.includes('node "$FLOW_BIN"/source-roots.mjs plan'));
+  assert.ok(src.includes('node "$FLOW_BIN"/source-roots.mjs run'));
+  assert.ok(!src.includes("node .flow/bin/source-roots.mjs"),
+    "running the caller's copy is the 2.1.0 fleet break: the workflow moves with the alias, the " +
+    "copy moves with a sync PR, and every pinned repo is red in between");
+  assert.ok(existsSync(join(BIN, "source-roots.mjs")),
+    "the adapter still has to exist — it is the local and flow-doctor entry point");
   assert.ok(WORKFLOW_INVOKED_ADAPTERS.includes("source-roots.mjs"),
     "the hand-kept list must name it too, so its absence would be caught twice");
 });

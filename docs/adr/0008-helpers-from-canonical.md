@@ -64,8 +64,9 @@ GitHub Actions *Contexts reference* (fetched 2026-09-29,
 The same page's reusable-workflow example checks out the reusable's own source with
 `ref: ${{ job.workflow_sha }}`. So the mechanism is documented, first-party, and used by GitHub's
 own documentation for this precise purpose. **`job.workflow_sha` is the source of truth, and
-`job.workflow_repository` is how the fetch learns which repo to fetch from** — neither is
-hardcoded to `CandidDan/flow`, so a fork of canonical gates against its own fork.
+`job.workflow_repository` is how the fetch learns which repo to fetch from** — the canonical
+`owner/repo` is a last-resort constant in the workflow and is never the first answer, so a fork of
+canonical gates against its own fork rather than against the upstream it forked from.
 
 A commit SHA is immutable. That is the property that matters: the fetch pins the exact tree the
 running workflow was resolved from, so a run cannot be half at one release and half at another.
