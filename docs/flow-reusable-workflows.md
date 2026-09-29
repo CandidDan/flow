@@ -40,11 +40,52 @@ them. They are:
 
 **`FLOW_PAT` (CAN-58).** A PR opened with the Actions `GITHUB_TOKEN` does *not* trigger downstream
 workflows, so `flow-gates` would never fire on an auto-opened PR — the gate silently bypassed.
-`_flow-open-pr` / `_flow-recover` open PRs with a `FLOW_PAT` (fine-grained PAT: this repo, Contents
-Read + Pull requests Read/Write) so the `pull_request` event is attributed to a real actor and the
-gate runs. Falls back to `GITHUB_TOKEN` when the secret is unset (PR opens, but ungated), so adding
-the secret is a no-break enablement. Thin callers pass it by name — `FLOW_PAT: ${{ secrets.FLOW_PAT }}` —
-not `secrets: inherit`, so a caller only ever forwards the secret(s) its own reusable declares.
+`_flow-open-pr` / `_flow-recover` open PRs with a `FLOW_PAT` so the `pull_request` event is
+attributed to a real actor and the gate runs. Falls back to `GITHUB_TOKEN` when the secret is unset
+(PR opens, but ungated), so adding the secret is a no-break enablement. Thin callers pass it by
+name — `FLOW_PAT: ${{ secrets.FLOW_PAT }}` — not `secrets: inherit`, so a caller only ever forwards
+the secret(s) its own reusable declares.
+
+`_flow-queue-runner` uses the same secret twice more (flow-0093): its `actions/checkout` takes
+`token: ${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}`, which is what the *worker's* own `git
+push` later authenticates as, and the worker step exports `GH_TOKEN` from the same expression for
+its `gh` calls. Without the checkout token the persisted credential is `GITHUB_TOKEN`, and GitHub
+refuses a `GITHUB_TOKEN` push that changes anything under `.github/workflows/` — so a worker on a
+task whose `touches` names a workflow file could not push at all. The `github_token:` input alone
+does not fix it: it reaches the action's API calls, never git's stored credential.
+
+**The one permission list.** Every workflow above that takes `FLOW_PAT` shares one credential, so
+there is one list of what it must carry. It is duplicated in `_flow-open-pr.yml`'s header, and
+`.flow/bin/flow-pat-forwarding.test.mjs` parses both copies and fails the gate when they disagree.
+
+FLOW_PAT — required permissions (fine-grained PAT, this repository only, short expiry):
+
+- Contents: Read and write — flow-queue-runner's worker pushes the claim commit to main and then
+  pushes its task branch, and flow-sync pushes the sync branch. Read alone cannot push, and the run
+  dies at the first git push.
+- Pull requests: Read and write — flow-open-pr opens the draft PR, flow-recover re-opens a stranded
+  one, flow-sync opens the sync PR, and flow-queue-runner's worker runs gh pr create and gh pr
+  ready.
+- Issues: Read and write — flow-queue-runner's worker files an issue for a problem it finds outside
+  its own task, which is how that work gets captured instead of lost.
+- Workflows: Read and write — flow-queue-runner's worker and flow-sync both push commits that
+  change files under .github/workflows/, and GitHub refuses that push from any credential lacking
+  it. GITHUB_TOKEN can never have it, which is why the PAT is the only way.
+
+Grant all four. A token short one permission does not fail at setup; it fails later, at the one
+step that needed it. Keep the expiry short and rotate: `Workflows: Read and write` lets the holder
+edit CI, and `_flow-queue-runner` hands the token to an agent — the fences that make that
+acceptable are the task's declared `touches` plus the touches-guard check, the review checks, and a
+human merge, while the token's own limits are its single repository and its expiry date.
+
+**You do not need the "Allow GitHub Actions to create and approve pull requests" repository
+setting** (Settings → Actions → General → Workflow permissions), and turning it on is not an
+alternative to `FLOW_PAT`. All it does is widen `GITHUB_TOKEN` — and a PR created by `GITHUB_TOKEN`
+triggers no downstream workflows, so `flow-gates` and the three review checks would never run on
+it. That is precisely the silent gate bypass `_flow-open-pr` exists to avoid, so the setting buys a
+PR that looks fine and was never checked. It also does nothing at all for the push problem above:
+no repository setting grants `GITHUB_TOKEN` the `workflows` permission, because it is not one of
+`GITHUB_TOKEN`'s permissions.
 
 Because `actions/checkout` in a reusable workflow checks out the **caller's** repo, every
 `node .flow/bin/…` and `.flow/config.yml` reference resolves to the *consuming project's* store and

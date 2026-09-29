@@ -45,6 +45,19 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          # The credential this persists in `.git/config` is what the WORKER's `git push` uses
+          # later, and it is the only thing that decides whether that push is accepted. Left at
+          # the default it is GITHUB_TOKEN, and GitHub refuses any GITHUB_TOKEN push that adds or
+          # changes a file under `.github/workflows/` — server-side, however `permissions:` above
+          # is written, because `workflows` is not one of GITHUB_TOKEN's grantable permissions.
+          # The `github_token:` input below does NOT help: it reaches the action's own API calls,
+          # not git's persisted credential. So a worker on a task whose `touches` includes a
+          # workflow file cannot push at all (observed in an adopting repo, flow-0093), and
+          # canonical's own queue has several such tasks. FLOW_PAT is a fine-grained PAT and CAN
+          # carry Workflows: Read and write, so pushing as FLOW_PAT is the fix — see the header
+          # of _flow-open-pr.yml for the full permission list. Unset, this falls back to
+          # GITHUB_TOKEN and behaviour is exactly as before.
+          token: ${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
@@ -68,6 +81,15 @@ jobs:
         id: work
         if: ${{ steps.pick.outputs.task_id != '' }}
         uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+        env:
+          # The worker shells out to `gh` (pr create, pr ready, issue create) and `gh` reads its
+          # credential from the environment, not from the action's `github_token:` input. Without
+          # this the worker inherits whatever `gh` finds — in practice nothing, so `gh pr create`
+          # and `gh issue create` fail outright (the second half of what flow-0093's adopting repo
+          # hit). Same expression as the checkout `token:` above, deliberately: one credential for
+          # everything the worker does to this repo, so its permissions are one list to reason
+          # about rather than two that can disagree.
+          GH_TOKEN: ${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}
         with:
           # Subscription auth (Pro/Max) — uses your plan quota, not API credits.
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -77,11 +99,10 @@ jobs:
           # guard), which left worker branches sitting PR-less until the _flow-recover sweep or a
           # human noticed. Falls back to GITHUB_TOKEN when the secret isn't set: exactly today's
           # behaviour (branch pushes silently, _flow-open-pr/_flow-recover catch up after the
-          # fact). See _flow-open-pr.yml's header for FLOW_PAT setup, with two differences for
-          # THIS consumer:
-          #   - Permissions: Contents = Read/Write (not the Read that header documents) — the
-          #     worker pushes the claim commit to main and the task branch. A Read-only token
-          #     cannot push, and the run fails at the first git push.
+          # fact). See _flow-open-pr.yml's header for the ONE FLOW_PAT permission list every
+          # workflow shares (flow-0093: Contents, Pull requests, Issues and Workflows, all Read
+          # and write — the worker needs every one of the four). One difference for THIS
+          # consumer, and it is not about permissions:
           #   - Exposure model: open-pr/recover/sync only hand FLOW_PAT to fixed gh/git commands
           #     in deterministic run: blocks. Here it enters the worker agent's environment
           #     (bypassPermissions bash over task-file-derived prompts), and unlike the
