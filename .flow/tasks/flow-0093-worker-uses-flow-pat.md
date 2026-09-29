@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0093"
 title: "The queue-runner worker pushes and opens PRs with FLOW_PAT, so it can land tasks that touch workflow files"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0093"
 created: "2026-09-29"
-started: ""
+started: "2026-09-29T05:46:00Z"
 branch: ""
 pr: ""
 issue: ""
