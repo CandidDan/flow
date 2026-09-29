@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0098"
 title: "Tests find a task's changelog entry whether it is still a fragment or already assembled, so the 2.1.2 release gate is green"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "orchestrator"
