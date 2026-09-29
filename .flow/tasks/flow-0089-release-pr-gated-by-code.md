@@ -1,7 +1,7 @@
 ---
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0089"
-title: "A release PR carries only release files, is checked by code, and the reviewers stop guessing about it"
+title: "Release and sync PRs are classified by code, so the reviewers stop guessing about task-less PRs"
 status: "ready"
 priority: 2
 project: "flow"
@@ -25,6 +25,7 @@ labels: [review, release, flow-infra]
 notes:
   - "2026-09-28 (orchestrator): DECIDED WITH THE HUMAN. Two options were on the table: every release PR gets a task, or the reviewers exempt `release/*`. Neither. A pure release PR has no behaviour to write criteria for, so a task is ceremony, and a branch-name exemption is a loophole: any PR named `release/…` would skip review. The split: code changes always go through a task PR (a hotfix is a task PR, then a release PR); a release PR may touch only release files, and CODE decides that, not a model."
   - "2026-09-28 (orchestrator): EVIDENCE. #117 (2.1.0) and #121 (2.1.1) were both task-less release PRs. qa passed #117 ('no task, expected') and failed #121 ('no task resolved'). #121 also bundled test changes and a new test into the release, which is the smell this task removes; flow-0088 was written after the fact to give it criteria."
+  - "2026-09-29 (orchestrator): SCOPE ADDED from progress #107 (`flow-sync/2.1.1`, title `flow: adopt canonical Flow infra 2.1.1`): qa FAIL, 'no task id resolves'. A sync PR is task-less by design (see `_flow-sync.yml`'s header) and its surface is closed and known, so it is classified by code exactly like a release PR: branch `flow-sync/*`, every changed path inside the synced surface. This case matters more than the release one: it hits every adopting repo on every sync, not only canonical."
   - "2026-09-28 (orchestrator): NOT parallel-safe with flow-0084 or flow-0085 (both edit `_flow-review.yml` and its workflow test). pick-task keeps them apart; whichever lands later rebases."
 ---
 
@@ -49,6 +50,12 @@ which files a release PR may touch, and (b) telling the reviewers, in code, that
   fragments (import it; no new copy of its rules). Write the outcome into
   `.flow-review/task.md` as a third sentinel, `RELEASE PR`, listing the changed files and the
   guard's problems (if any).
+- Classify a PR as a **sync PR** the same way: head branch starts with `flow-sync/`, and every
+  changed path is inside flow-sync's copied surface (`.flow/bin/**`, `.github/workflows/flow-*.yml`,
+  `.flow/PROTOCOL.md`, `.flow/VERSION`, as `_flow-sync.yml`'s header lists them). Its sentinel is
+  `SYNC PR`, listing the changed files. There is no guard to run: the synced tests themselves run
+  in `flow-tooling`. The reviewers PASS it with "sync PR: synced surface only; flow-tooling
+  validates it". A `flow-sync/*` PR touching anything else is not a sync PR.
 - A `release/*` PR that touches ANY other path is not a release PR. It gets today's no-task
   handling unchanged, so the branch name alone exempts nothing, in canonical or in the fleet.
 - In `_flow-review.yml`, each reviewer's prompt handles the `RELEASE PR` sentinel explicitly:
@@ -79,6 +86,10 @@ Unit tests in `flow-review.test.mjs`; workflow-structure tests in `flow-review-w
       not hidden).
 - [ ] Given a release PR that leaves a fragment in `changes/` other than `README.md`, then the
       sentinel carries release-guard's leftover-fragment problem.
+- [ ] Given branch `flow-sync/9.9.9` changing only `.flow/bin/x.mjs`, `.flow/VERSION` and
+      `.github/workflows/flow-gates.yml`, then `task.md` begins with the `SYNC PR` sentinel; with
+      one extra path outside the surface (e.g. `.flow/config.yml`), it carries the no-task sentinel.
+- [ ] Every reviewer prompt names the `SYNC PR` sentinel with its PASS line.
 - [ ] The classification uses `checkRelease` imported from `release-guard.mjs`; no release rule is
       duplicated in `flow-review.mjs` (structure test on the import).
 - [ ] Every reviewer prompt in `_flow-review.yml` names the `RELEASE PR` sentinel with an explicit
