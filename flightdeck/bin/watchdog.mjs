@@ -458,6 +458,53 @@ async function listWorkflowFiles(io, fullName) {
   return out;
 }
 
+// ── run selection: never trust position 1 of a filtered page ────────────────────────────────
+//
+// THE DEFECT THIS EXISTS FOR (flow-0065). Both run lookups below used to ask for `per_page=1` and
+// take `workflow_runs[0]`, on the strength of the list-runs endpoint documenting a `created_at`
+// descending default. Observed to be wrong: CandidDan/Nudge#289, filed 2026-09-17, reported a last
+// successful run of `2026-09-07T18:04:59Z` for `flow-queue-runner` when the newest success was
+// `2026-09-16T18:05:13Z` — wrong by nine days, on a workflow with 646 runs behind a
+// `status=success` filter. The alarm was defensible (14.1h IS past the bound); the number it
+// printed was not, and sent its reader looking for a week-long outage that never happened.
+//
+// The structural fault is not the ordering, it is the `1`. A one-item page leaves NOTHING to
+// compare against, so a wrong answer cannot be contradicted by the code that receives it. Asking
+// for a page and taking the maximum makes the answer checkable, and is correct whether or not
+// GitHub's ordering is.
+//
+// WHY 100 IS A SAFE BOUND, rather than paging without limit. The watchdog sweeps every registered
+// workflow in every enrolled repo, so an unbounded history walk per workflow is the one cost that
+// scales with the fleet. 100 is the API's maximum single page, so the bound costs no extra
+// request over `per_page=1` — rate limits count requests, not rows. A workflow with no success in
+// its most recent 100 runs is dead by any definition this file has, and the `null` that a page of
+// 100 failures yields reports exactly that.
+export const RUN_PAGE = 100;
+
+// The newest run in `runs`, or null when there is none to pick.
+//
+// Ordering is by `created_at`, falling back to `run_started_at` when a payload omits it:
+// `created_at` is the field GitHub documents the sort on, so ordering by it is what makes a
+// disagreement with that documented order detectable here. The selected run's own
+// `run_started_at` stays the REPORTED instant (see the callers) because that is when the run
+// actually ran; the two differ only by the time a run sat queued.
+//
+// A run with neither timestamp, or with one that will not parse, is SKIPPED rather than coerced.
+// That is what keeps absence reported as absence: an empty list, or a list of nothing but
+// unusable entries, returns null rather than a zero or a 1970 epoch date that every downstream
+// age calculation would read as a catastrophic outage.
+export function newestRun(runs) {
+  let best = null;
+  let bestAt = -Infinity;
+  for (const run of Array.isArray(runs) ? runs : []) {
+    if (!run) continue;
+    const at = Date.parse(run.created_at ?? run.run_started_at ?? "");
+    if (!Number.isFinite(at)) continue;
+    if (at > bestAt) { best = run; bestAt = at; }
+  }
+  return best;
+}
+
 export async function collectRepoEntries({ io, fullName }) {
   const files = await listWorkflowFiles(io, fullName);
   const meta = await io.rest(`/repos/${fullName}/actions/workflows?per_page=100`);
@@ -480,15 +527,15 @@ export async function collectRepoEntries({ io, fullName }) {
     };
 
     try {
-      const ok = await io.rest(`/repos/${fullName}/actions/workflows/${registered.id}/runs?status=success&per_page=1`);
-      const run = (ok.workflow_runs ?? [])[0];
+      const ok = await io.rest(`/repos/${fullName}/actions/workflows/${registered.id}/runs?status=success&per_page=${RUN_PAGE}`);
+      const run = newestRun(ok.workflow_runs);
       entry.lastSuccessAt = run?.run_started_at ?? run?.created_at ?? null;
       entry.lastSuccessUrl = run?.html_url ?? null;
     } catch { /* leave null — scheduledLiveness correctly reports crit, never a blank */ }
 
     try {
-      const latest = await io.rest(`/repos/${fullName}/actions/workflows/${registered.id}/runs?per_page=1`);
-      const run = (latest.workflow_runs ?? [])[0];
+      const latest = await io.rest(`/repos/${fullName}/actions/workflows/${registered.id}/runs?per_page=${RUN_PAGE}`);
+      const run = newestRun(latest.workflow_runs);
       // `event` and the created/updated pair come from THIS response, which was already being
       // requested — they are the run-level corroboration `startupFailure` appends to its reason
       // (flow-0061), and keeping a field off a payload already in hand costs no API call.
