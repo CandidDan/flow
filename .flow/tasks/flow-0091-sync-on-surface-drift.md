@@ -3,7 +3,7 @@
 id: "flow-0091"
 title: "flow-sync opens a PR when the synced surface differs, not only when VERSION differs, so an edge repo can never be stranded without a helper its workflow calls"
 status: "ready"
-priority: 2
+priority: 3
 project: "flow"
 owner: ""
 created: "2026-09-29"
@@ -24,6 +24,7 @@ touches:
 labels: [flow-sync, release, flow-infra]
 notes:
   - "2026-09-29 (orchestrator): EVIDENCE, twice in one week on progress (the canary, pinned @v2-edge). flow-0077 made `_flow-gates.yml` call `.flow/bin/source-roots.mjs`; flow-0050 made it call `check-claude-md.mjs`. `v2-edge` moves on every merge, but flow-sync only copies `.flow/bin/` when canonical's VERSION is ahead. Canonical's VERSION did not move, so flow-sync answered 'up to date, nothing to do' while every progress PR failed with an error telling the human to run flow-sync. Only a release unblocked it."
+  - "2026-09-29 (orchestrator): PRIORITY LOWERED to 3. flow-0094 (reusables run canonical's own helpers) removes the breakage this task was written for. This task remains worth doing so repos' local copies do not go stale on the edge, but it is no longer what keeps PRs green."
   - "2026-09-29 (orchestrator): DECIDED: fix it in flow-sync, not with a per-workflow version check. Declaring a minimum helper version in each reusable would be one more number to forget to bump. Comparing the actual surface is exact: if canonical's copy of the synced files differs from the repo's, the repo is not current, whatever the stamps say. On `@v2` (stable) the surface only changes at a release, so the fleet sees no new noise; on `@v2-edge` the canary gets a sync PR per merge that changes the surface, which is what the canary is for."
 ---
 
