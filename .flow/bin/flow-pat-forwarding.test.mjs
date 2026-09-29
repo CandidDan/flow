@@ -37,6 +37,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { changelogEntry } from "./changelog-entry.mjs";
 
 // DEPENDENCY NOTE. Same posture as check-workflows.test.mjs: `_flow-gates.yml`'s flow-tooling
 // job runs `node --test .flow/bin/*.test.mjs` with no install step, so when `yaml` is missing
@@ -199,7 +200,9 @@ test("the docs rule out the Actions PR-creation setting, and say why", () => {
 });
 
 test("changes/flow-0093.md exists and states the caller action", () => {
-  const fragment = readFileSync(FRAGMENT, "utf8");
+  // Fragment while pending; assembled CHANGELOG entry after a release (flow-0098).
+  const fragment = changelogEntry(REPO, "flow-0093");
+  assert.ok(fragment, "flow-0093 has no changelog entry, pending or assembled");
   assert.match(fragment, /FLOW_PAT/,
     "the fragment must name the secret the change is about");
   assert.match(fragment, /Caller action|No caller action/,
@@ -246,7 +249,9 @@ test("the template caller's header documents FLOW_PAT and points at the permissi
 });
 
 test("changes/flow-0095.md exists and states the caller action", () => {
-  const fragment = readFileSync(FRAGMENT_0095, "utf8");
+  // Fragment while pending; assembled CHANGELOG entry after a release (flow-0098).
+  const fragment = changelogEntry(REPO, "flow-0095");
+  assert.ok(fragment, "flow-0095 has no changelog entry, pending or assembled");
   assert.match(fragment, /FLOW_PAT/, "the fragment must name the secret the change is about");
   assert.match(fragment, /Caller action/,
     "changes/README.md requires every fragment to say what a caller must do. This change needs " +

@@ -24,6 +24,7 @@ import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
+import { changelogEntry } from "./changelog-entry.mjs";
 import test from "node:test";
 
 const REPO = resolve(import.meta.dirname, "..", "..");
@@ -292,10 +293,10 @@ test("docs/flow-reusable-workflows.md explains which copy of a helper CI runs, a
 });
 
 test("changes/flow-0094.md exists and states that a caller need do nothing", () => {
-  const fragment = join(REPO, "changes", "flow-0094.md");
-  assert.ok(existsSync(fragment),
+  // Fragment while pending; assembled CHANGELOG entry after a release (flow-0098).
+  const text = changelogEntry(REPO, "flow-0094");
+  assert.ok(text,
     "a task that changes what every adopting repo's CI executes owes the changelog an entry");
-  const text = readFileSync(fragment, "utf8");
   assert.match(text, /Caller action: none/,
     "the caller-action line is what a reader of the release notes scans for; saying nothing " +
     "leaves them to work out whether they have to act");
