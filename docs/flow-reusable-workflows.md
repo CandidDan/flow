@@ -28,7 +28,7 @@ them. They are:
 
 | Reusable workflow | What it does | Inputs / secrets |
 |---|---|---|
-| `_flow-gates.yml` | The Definition-of-Done gate: store-is-main-only guard, build/lint/test/coverage from the caller's `.flow/config.yml`, flow-tooling tests, touches-guard, plus a matrix job per declared `source_roots` entry the primary gate doesn't already cover (optional `runtime` / `version` / `retry` per entry; needs `.flow/bin/source-roots.mjs`) | input `setup_node_version` (default `22`; `""` for non-Node) |
+| `_flow-gates.yml` | The Definition-of-Done gate: store-is-main-only guard, build/lint/test/coverage from the caller's `.flow/config.yml`, flow-tooling tests, touches-guard, plus a matrix job per declared `source_roots` entry the primary gate doesn't already cover (optional `runtime` / `version` / `retry` per entry; a `runtime: node` entry installs with the repo's `commands.install` first — see below) | input `setup_node_version` (default `22`; `""` for non-Node) |
 | `_flow-status.yml` | PR marked ready for review → `in_review`; draft PR opened → stays `in_progress` with `branch` + `pr` recorded (flow-0039); a PR opened directly as non-draft still goes straight to `in_review`; closed-unmerged → `ready`. An action it does not model is a logged no-op, so a caller pinned ahead of the reusable degrades to silence. Id resolved from the branch **or** the PR title (CAN-52), so non-`flow/` branches (e.g. cloud `claude/…`) still transition | — |
 | `_flow-done.yml` | PR merged → task `done`. Same branch-**or**-title id resolution (CAN-52) | — |
 | `_flow-open-pr.yml` | On a `flow/<id>-…` branch push, auto-opens the PR if the branch is ahead of base with no PR yet (CAN-50) — a worker that stops short of `gh pr create` no longer strands the task. Opens it as a **draft** (flow-0039), falling back to non-draft where drafts are unavailable; the worker's `gh pr ready` is what asks for review. Idempotent. Opens with `FLOW_PAT` so the PR triggers `flow-gates` (CAN-58) | secret `FLOW_PAT` (optional) |
@@ -131,6 +131,52 @@ Two consequences worth knowing:
 - **`flow-sync` is no longer load-bearing for CI correctness.** It is how a repo picks up the local
   tooling — what a human runs by hand, and what `flow-doctor` reports on — and a repo that is
   behind is no longer red for it.
+
+### Per-tree `source_roots` jobs — what installs, and what is skipped (flow-0097)
+
+The `source-roots-plan` job reads the caller's `source_roots:` block and emits one matrix row per
+tree that still needs a job of its own; `source-root` fans out over them. Two rules decide what
+that job does, and both used to surprise people.
+
+**A `runtime: node` entry installs the repo's dependencies before its check.** The job runs
+`commands.install` from the caller's `.flow/config.yml`, in the repo root, after `setup-node` and
+before the declared check. Before flow-0097 it ran `setup-node` and nothing else, so a check as
+ordinary as `npm run lint` exited `127` in any repo whose linter is a devDependency — the repo had
+already declared how to install itself and the job ignored it. The command travels to the shell
+through `env:`, never interpolated into a `run:` block, exactly like `check` and `retry`.
+
+- `runtime: deno` and `runtime: none` are **unchanged**: they get no install step. `none` still
+  means precisely what it always meant — *the check provisions its own toolchain* (a `uv sync`, a
+  `bundle install`, a container), which is how a stack Flow does not model still gets gated.
+- A repo whose `commands.install` is absent, or still the shipped `REPLACE-ME` sentinel, also gets
+  no install step, and its check runs anyway. Adoption must not fail the gate on a placeholder.
+- **Caller action: none.** A repo that worked around this by folding an install into every `check`
+  (`cd mcp && npm ci && npm run build`) keeps working — the check travels verbatim and an `npm ci`
+  run twice is idempotent. Those checks *may* now be simplified, at leisure.
+
+**A check the primary gate already runs is not run twice, including as one `&&` segment.** An
+entry is excluded from the matrix when its `check` equals `commands.build`, `.lint`, `.test` or
+`.coverage` — or equals one `&&`-separated segment of one, trimmed.
+
+The motivating config: a repo whose `commands.lint` is `npm run lint && npm run typecheck`, with
+three `source_roots` (`src/`, `scripts/`, `e2e/`) each declaring `check: "npm run lint"`. Whole-
+string equality matched none of them, so every PR ran lint four times over the same tree. `&&` is
+run-on-success sequencing, so a `gate` job that went green did run each segment — matching one is
+sound, not a guess.
+
+The rule is deliberately narrow, because the cost of being wrong is asymmetric: a redundant job is
+merely slow, while a tree wrongly judged "covered" silently stops being gated, which is the exact
+failure these jobs exist to prevent.
+
+- **Only `&&` separates.** `;`, `||`, pipes and subshells are ordinary text and stay inside
+  whichever segment they fall in. Given `commands.lint: "a; b"` or `"a || b"`, neither `a` nor `b`
+  alone counts as covered — with `;` the second runs whether or not the first passed, and with
+  `||` only one of the two is guaranteed to have run at all.
+- **Segments match exactly**, after trimming. No substring and no prefix matching: against
+  `npm run lint && npm run typecheck`, a check of `npm run lint:e2e` still gets its own job.
+- The exclusion is **reported** in the plan job's log (`source-roots: skipping "src/" — covered by
+  the primary gate`), so an empty matrix is always explicable. Canonical's own four entries are
+  all excluded this way; `count=0` here is the rule working, not the plan failing.
 
 ### 2. Repos adopt by reference — `project-template/.github/workflows/flow-*.yml`
 

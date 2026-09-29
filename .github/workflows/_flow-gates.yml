@@ -618,16 +618,25 @@ jobs:
       # the check provisions itself), and for a repo whose `commands.install` is absent or still
       # REPLACE-ME — so the `if` below skips the step and the check still runs. The command is
       # the repo's own config, and it reaches the shell through `env:` like every other matrix
-      # value; `${{ }}` in a `run:` block is substituted before bash parses it.
+      # value; `${{ }}` in a `run:` block is substituted before bash parses it, so a crafted
+      # value would escape the quoting. `bash -c "$VAR"` hands it over as DATA instead — the same
+      # trust posture the `gate` job already has when it runs `commands.*`.
+      #
+      # No helper, and no FLOW_REPO_DIR: a `run:` step's working directory is already
+      # `github.workspace`, the caller's checkout, which is the repo root this must install into.
+      # The declared check needs the helper because the helper is what keeps `matrix.check` out
+      # of the `run:` line and owns the retry loop; an install has neither concern.
       - name: Install the repo's dependencies
         if: matrix.runtime == 'node' && matrix.install != ''
         env:
-          FLOW_SOURCE_ROOT_CHECK: ${{ matrix.install }}
-          # No FLOW_SOURCE_ROOT_RETRY: an install is not the flaky thing `retry` exists for, and
-          # borrowing the check's count would silently change what that number means.
-          FLOW_REPO_DIR: ${{ github.workspace }}
-          FLOW_CI: "1"
-        run: node "$FLOW_BIN"/source-roots.mjs run
+          # Deliberately not FLOW_SOURCE_ROOT_RETRY's sibling: `retry` is declared per
+          # source_root for a flaky CHECK, and silently applying it to the install would change
+          # what that number means without the config saying so.
+          FLOW_SOURCE_ROOT_INSTALL: ${{ matrix.install }}
+        run: |
+          set -euo pipefail
+          echo "source-roots: installing before the check — $FLOW_SOURCE_ROOT_INSTALL"
+          bash -c "$FLOW_SOURCE_ROOT_INSTALL"
 
       - name: Run the declared check
         env:
