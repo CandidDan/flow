@@ -154,8 +154,10 @@ jobs:
   ever receives what its caller names, so the `FLOW_PAT` line is not optional bookkeeping — omit
   it and `secrets.FLOW_PAT` evaluates **empty inside the reusable** however the repo has set the
   secret, the `||` falls through to `GITHUB_TOKEN`, and the worker silently loses the ability to
-  push a change under `.github/workflows/`. `.flow/bin/flow-pat-forwarding.test.mjs` fails the
-  gate if the template caller and canonical's own caller ever forward different names.
+  push a change under `.github/workflows/`. `.flow/bin/secrets-scope.test.mjs` is the single
+  owner of this rule for every caller, and fails the gate if a caller forwards a secret its
+  reusable does not declare, or if the template caller and canonical's own caller ever
+  forward different names.
 - **Inputs:** `flow-queue-runner` forwards its `workflow_dispatch` `task_id` via `with:`.
 - **Pinning:** callers pin `@v1` for stability (the plan's choice over `@main`). Bump the tag to
   adopt a new Flow version.
