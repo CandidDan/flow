@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0094"
 title: "The reusable workflows run canonical's own helpers from their own commit, so moving an alias can never strand a repo without a helper"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude-worker"
