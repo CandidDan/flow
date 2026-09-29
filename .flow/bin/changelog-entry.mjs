@@ -11,7 +11,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const OTHER_TASK = /, ([a-z][a-z0-9-]*-\d{4})\)/;
+// The file list can wrap, so the comma and the id may be split across lines: allow any whitespace.
+const OTHER_TASK = /,\s+([a-z][a-z0-9-]*-\d{4})\)/;
 
 /**
  * The changelog entry for `id` in the repo at `repo`: the fragment if it still exists, otherwise
@@ -28,7 +29,7 @@ export function changelogEntry(repo, id) {
   const logPath = join(repo, "CHANGELOG.md");
   if (!existsSync(logPath)) return "";
   const lines = readFileSync(logPath, "utf8").split("\n");
-  const marker = `, ${id})`;
+  const marker = new RegExp(`,\\s+${id.replace(/[-]/g, "\\-")}\\)`);
 
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
@@ -41,7 +42,7 @@ export function changelogEntry(repo, id) {
         bullet += "\n" + lines[j];
         if (lines[j].trim() === "") break;
       }
-      if (bullet.includes(marker)) { start = i; break; }
+      if (marker.test(bullet)) { start = i; break; }
     }
   }
   if (start === -1) return "";

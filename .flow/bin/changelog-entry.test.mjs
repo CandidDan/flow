@@ -61,6 +61,17 @@ test("given the entry is last before a heading, the heading is not included", ()
   } finally { rmSync(d, { recursive: true, force: true }); }
 });
 
+test("given a file list that wraps before the task id, it still finds and bounds the entry", () => {
+  const log = "## 9.9.9\n\n- **Wrapped** (`x.yml`,\n  flow-7777). Caller action: none.\n\n- **Next** (`y.yml`,\n  flow-6666). Other.\n";
+  const d = repo({ "CHANGELOG.md": log });
+  try {
+    const e = changelogEntry(d, "flow-7777");
+    assert.match(e, /Wrapped/);
+    assert.doesNotMatch(e, /Next/);
+    assert.match(changelogEntry(d, "flow-6666"), /Other\./);
+  } finally { rmSync(d, { recursive: true, force: true }); }
+});
+
 test("given neither a fragment nor an assembled entry, it returns an empty string", () => {
   const d = repo({ "CHANGELOG.md": LOG });
   try { assert.equal(changelogEntry(d, "flow-4242"), ""); }
