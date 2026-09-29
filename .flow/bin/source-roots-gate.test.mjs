@@ -150,8 +150,13 @@ test("the matrix job runs `source-roots.mjs run`, and the plan job runs `source-
   }
 });
 
+/** The step that runs the DECLARED check — not flow-0097's install step, which runs the helper too. */
+const checkStep = (text = source) =>
+  (jobs(text)[MATRIX_JOB].steps ?? [])
+    .find((s) => /source-roots\.mjs run/.test(s.run ?? "") && /matrix\.check/.test(String(s.env?.FLOW_SOURCE_ROOT_CHECK ?? "")));
+
 test("the check's values reach the runner through env, and all three are passed", { skip }, () => {
-  const step = (jobs(source)[MATRIX_JOB].steps ?? []).find((s) => /source-roots\.mjs run/.test(s.run ?? ""));
+  const step = checkStep();
   assert.ok(step, "no step runs the helper");
   const env = step.env ?? {};
   assert.match(String(env.FLOW_SOURCE_ROOT_CHECK), /matrix\.check/);
@@ -184,9 +189,14 @@ test("no `run:` block ANYWHERE in the file interpolates a matrix value", { skip 
 });
 
 test("the rule fails against a mutated copy — moving the check into the `run:` line is caught", { skip }, () => {
-  const mutated = source.replace(
-    `        run: node ${HELPER} run`,
-    `        run: node ${HELPER} run "\${{ matrix.check }}"`);
+  // `run: node "$FLOW_BIN"/source-roots.mjs run` now appears twice (flow-0097 added an install
+  // step that reuses the helper), so mutate the LAST one — the declared-check step.
+  const marker = `        run: node ${HELPER} run`;
+  const at = source.lastIndexOf(marker);
+  assert.ok(at > -1, "the check step's run line must be findable, or this proves nothing");
+  const mutated = source.slice(0, at) +
+    `        run: node ${HELPER} run "\${{ matrix.check }}"` +
+    source.slice(at + marker.length);
   assert.notEqual(mutated, source, "the mutation must actually apply, or this proves nothing");
   const offenders = Object.entries(jobs(mutated))
     .filter(([, job]) => /\$\{\{\s*matrix\./.test(runScripts(job)))
