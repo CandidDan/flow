@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0065"
 title: "The watchdog's \"last successful run\" is simply wrong — a one-item filtered page is trusted as the newest, and it is not"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0065"
