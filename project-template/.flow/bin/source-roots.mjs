@@ -350,6 +350,57 @@ export function main(argv, {
   return 2;
 }
 
+// ── The repo-root contract (flow-0094, ADR-0008) ─────────────────────────────────────────
+//
+// `_flow-gates.yml` no longer runs the CALLER's copy of this helper. It fetches canonical's
+// `project-template/.flow/bin/` at the running workflow's own commit (`job.workflow_sha`) and runs
+// THAT — so a release that changes a workflow and its helper together reaches CI as one unit,
+// instead of breaking every pinned repo until its flow-sync PR merges.
+//
+// Which makes the default below actively dangerous in CI: run from a canonical checkout under
+// `$RUNNER_TEMP`, `templateRepoRoot()` resolves to CANONICAL's `project-template/`, whose
+// `.flow/config.yml` is the uncalibrated REPLACE-ME fixture — and every command still exits 0.
+// A green gate that measured the wrong repo is worse than the red one it replaces, because it is
+// silent. So the converted steps pass the target explicitly, and in CI mode the absence of that
+// value is an error rather than a fallback.
+//
+// IT LIVES IN THIS FILE, and the two sibling helpers import it, because this is the helper that
+// already owns the gate's `FLOW_*` environment contract (`FLOW_SOURCE_ROOT_*` above). One
+// implementation, three callers — the same rule the adapters follow.
+export const REPO_DIR_ENV = "FLOW_REPO_DIR";
+export const CI_MODE_ENV = "FLOW_CI";
+
+/**
+ * Resolve the repo a helper must operate on.
+ *
+ * - `FLOW_REPO_DIR` set → that path wins, always. It is how a helper run from outside the repo
+ *   is told which repo it is judging.
+ * - `FLOW_CI` set without it → `{ error }`, naming the variable. Never a silent fallback.
+ * - Neither set → `fallback()`, i.e. the module-relative default. This is the local-run path,
+ *   and it is also what a repo still pinned to an OLDER `_flow-gates.yml` uses: that workflow
+ *   sets neither variable, and it must keep working, or this change is the 2.1.x break with the
+ *   halves swapped. That is why `FLOW_CI` is an explicit opt-in and not `GITHUB_ACTIONS`.
+ *
+ * Returns `{ repoRoot, explicit }` or `{ error }`; it never throws and never exits. `explicit`
+ * is what a caller `chdir`s on: being TOLD which repo to read is the only case where moving the
+ * process out of the directory a human invoked it from is right. On the fallback path the cwd is
+ * already the answer, and changing it would break every local and test invocation.
+ */
+export function resolveRepoRoot({ env = process.env, fallback = () => process.cwd() } = {}) {
+  const given = (env[REPO_DIR_ENV] || "").trim();
+  if (given) return { repoRoot: resolve(given), explicit: true };
+  if ((env[CI_MODE_ENV] || "").trim()) {
+    return {
+      error: `::error::${CI_MODE_ENV} is set but ${REPO_DIR_ENV} is not. A Flow reusable is ` +
+        `running this helper from canonical's own checkout, so it cannot infer which repo to ` +
+        `read — falling back to its own directory would silently check canonical's fixtures ` +
+        `and exit 0. Set ${REPO_DIR_ENV} to the repo root (the converted steps pass ` +
+        `\${{ github.workspace }}). See docs/adr/0008-helpers-from-canonical.md.`,
+    };
+  }
+  return { repoRoot: fallback(), explicit: false };
+}
+
 // The tree this file governs: `<root>/.flow/bin/source-roots.mjs` → `<root>`. Resolved from the
 // REALPATH of this module, which is why a symlinked `.flow/bin` would read the wrong store.
 export function templateRepoRoot(here = fileURLToPath(import.meta.url)) {
@@ -369,8 +420,16 @@ const __isMain = (() => {
 // ---------------------------------------------------------------------------------------
 
 if (__isMain) {
+  const { repoRoot, error, explicit } = resolveRepoRoot({ fallback: templateRepoRoot });
+  if (error) {
+    console.error(error);
+    process.exit(1);
+  }
+  // `chdir` only when told: it makes the `check` subprocess, and any `git` that check shells out
+  // to, see the target repo rather than the canonical checkout this file was loaded from.
+  if (explicit) process.chdir(repoRoot);
   process.exit(main(process.argv.slice(2), {
-    configPath: templateConfigPath(),
-    repoRoot: templateRepoRoot(),
+    configPath: join(repoRoot, ".flow", "config.yml"),
+    repoRoot,
   }));
 }

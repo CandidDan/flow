@@ -55,6 +55,7 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveRepoRoot } from "./source-roots.mjs";
 
 // Claude Code follows imports to a maximum depth of 5 hops. The root `CLAUDE.md` is hop 0, a file
 // it imports is hop 1, and an import that would land at hop 6 is NOT loaded by Claude Code — so
@@ -373,5 +374,15 @@ const __isMain = (() => {
 // ---------------------------------------------------------------------------------------
 
 if (__isMain) {
-  process.exit(main(process.argv.slice(2), { repoRoot: templateRepoRoot() }));
+  // The repo-root contract (flow-0094, ADR-0008) — see `resolveRepoRoot`'s header in
+  // source-roots.mjs. `_flow-gates.yml` runs this file from canonical's checkout, where the
+  // module-relative default would measure canonical's own fixture CLAUDE.md against the
+  // uncalibrated REPLACE-ME config, and exit 0.
+  const { repoRoot, error, explicit } = resolveRepoRoot({ fallback: templateRepoRoot });
+  if (error) {
+    console.error(error);
+    process.exit(1);
+  }
+  if (explicit) process.chdir(repoRoot);
+  process.exit(main(process.argv.slice(2), { repoRoot }));
 }

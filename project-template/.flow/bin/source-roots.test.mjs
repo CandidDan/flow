@@ -21,7 +21,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -604,4 +605,106 @@ test("the schema constants are frozen — an accidental push() would widen the s
   }
   assert.deepEqual([...RUNTIMES], ["node", "deno", "none"]);
   assert.deepEqual([...ENTRY_FIELDS], ["path", "check", "runtime", "version", "retry"]);
+});
+
+// ── The repo-root contract (flow-0094, ADR-0008) ────────────────────────────────────────
+//
+// `_flow-gates.yml` fetches canonical's `project-template/.flow/bin/` at the running workflow's
+// own commit and plans from THERE, so a release that makes the gate need a new helper no longer
+// breaks every pinned repo until its flow-sync PR merges. From that checkout the module-relative
+// default reads canonical's own uncalibrated `project-template/.flow/config.yml` — the REPLACE-ME
+// fixture — and still exits 0, which is a gate that planned the wrong repo and said nothing.
+function canonicalCheckout() {
+  const root = mkdtempSync(join(tmpdir(), "flow-canon-"));
+  const bin = join(root, "project-template", ".flow", "bin");
+  mkdirSync(bin, { recursive: true });
+  // The decoy the fallback would read.
+  writeFileSync(join(root, "project-template", ".flow", "config.yml"),
+    'source_roots:\n  - path: "decoy/"\n    check: "echo decoy"\n');
+  writeFileSync(join(bin, "source-roots.mjs"),
+    readFileSync(join(import.meta.dirname, "source-roots.mjs"), "utf8"));
+  return { root, helper: join(bin, "source-roots.mjs") };
+}
+
+function targetRepo(tree, check) {
+  const root = mkdtempSync(join(tmpdir(), "flow-target-"));
+  mkdirSync(join(root, ".flow"), { recursive: true });
+  mkdirSync(join(root, tree), { recursive: true });
+  writeFileSync(join(root, ".flow", "config.yml"),
+    `source_roots:\n  - path: "${tree}/"\n    check: "${check}"\n`);
+  return root;
+}
+
+function runHelper(helper, args, env, cwd) {
+  const r = spawnSync(process.execPath, [helper, ...args], {
+    cwd, encoding: "utf8", env: { ...process.env, ...env },
+  });
+  return { code: r.status, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
+}
+
+test("run from outside the repo with FLOW_REPO_DIR set, `plan` reads the repo it was pointed at", () => {
+  const { root: canon, helper } = canonicalCheckout();
+  // Two repos whose source_roots share no path and no check, so the planned matrix names exactly
+  // one of them and could not have come from the other — or from the checkout in between.
+  const a = targetRepo("alpha", "echo alpha-check");
+  const b = targetRepo("beta", "echo beta-check");
+  const neutral = mkdtempSync(join(tmpdir(), "flow-cwd-"));
+  try {
+    const ra = runHelper(helper, ["plan"], { FLOW_CI: "1", FLOW_REPO_DIR: a }, neutral);
+    assert.equal(ra.code, 0, ra.out);
+    assert.match(ra.out, /alpha-check/);
+    assert.doesNotMatch(ra.out, /beta-check/);
+    assert.doesNotMatch(ra.out, /decoy/, "it must not have planned the checkout it was loaded from");
+
+    const rb = runHelper(helper, ["plan"], { FLOW_CI: "1", FLOW_REPO_DIR: b }, neutral);
+    assert.equal(rb.code, 0, rb.out);
+    assert.match(rb.out, /beta-check/);
+    assert.doesNotMatch(rb.out, /alpha-check/);
+  } finally {
+    for (const d of [canon, a, b, neutral]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("`run` executes the declared check INSIDE the target repo, not the checkout it was loaded from", () => {
+  const { root: canon, helper } = canonicalCheckout();
+  const a = targetRepo("alpha", "echo unused");
+  const neutral = mkdtempSync(join(tmpdir(), "flow-cwd-"));
+  try {
+    // `pwd` is the only assertion that can tell the two apart, and it is the one that matters:
+    // a check run in the wrong directory lints the wrong tree and passes.
+    const r = runHelper(helper, ["run"], {
+      FLOW_CI: "1", FLOW_REPO_DIR: a, FLOW_SOURCE_ROOT_CHECK: "pwd", FLOW_SOURCE_ROOT_PATH: "alpha/",
+    }, neutral);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, new RegExp(realpathSync(a).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    for (const d of [canon, a, neutral]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("in CI mode with FLOW_REPO_DIR unset, `plan` exits non-zero and names the variable", () => {
+  const { root: canon, helper } = canonicalCheckout();
+  const a = targetRepo("alpha", "echo alpha-check");
+  try {
+    const r = runHelper(helper, ["plan"], { FLOW_CI: "1" }, a);
+    assert.notEqual(r.code, 0, "an unplanned tree is an ungated tree — it must not pass quietly");
+    assert.match(r.out, /FLOW_REPO_DIR/);
+    assert.doesNotMatch(r.out, /^count=/m, "it must not emit a matrix at all");
+  } finally {
+    for (const d of [canon, a]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("without FLOW_CI the helper keeps its old behaviour — a repo on an older workflow tag still works", () => {
+  const a = targetRepo("alpha", "echo alpha-check");
+  try {
+    mkdirSync(join(a, ".flow", "bin"), { recursive: true });
+    const copy = join(a, ".flow", "bin", "source-roots.mjs");
+    writeFileSync(copy, readFileSync(join(import.meta.dirname, "source-roots.mjs"), "utf8"));
+    const r = runHelper(copy, ["plan"], { GITHUB_ACTIONS: "true" }, a);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /alpha-check/);
+  } finally {
+    rmSync(a, { recursive: true, force: true });
+  }
 });

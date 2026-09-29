@@ -393,10 +393,16 @@ test("criterion 12: _flow-gates.yml runs the check in the gate job, after the co
   const nextJob = rest.search(/\n {2}[a-z][\w-]*:\n/);
   const gate = nextJob === -1 ? rest : rest.slice(0, nextJob);
 
-  const invocation = gate.indexOf("node .flow/bin/check-claude-md.mjs");
+  // The path is canonical's, not the caller's (flow-0094): the gate fetches
+  // `project-template/.flow/bin/` at this workflow's own commit into `$FLOW_BIN` and runs that, so
+  // a release that needs a new helper no longer breaks every pinned repo until it syncs.
+  const invocation = gate.indexOf('node "$FLOW_BIN"/check-claude-md.mjs');
   assert.ok(invocation > -1,
     "REGRESSION: the check must run in the GATE job. A helper nothing invokes is the sentence in " +
     "the template all over again, only with tests.");
+  assert.equal(gate.includes("node .flow/bin/check-claude-md.mjs"), false,
+    "REGRESSION: the gate must not run the CALLER's copy — that is the 2.1.1 fleet break, where " +
+    "every @v2 repo went red on a helper it had no way to have yet");
   const cfgRead = gate.indexOf("Read commands from .flow/config.yml");
   assert.ok(cfgRead > -1 && invocation > cfgRead, "it runs AFTER the config read");
 
@@ -580,4 +586,94 @@ test("the check measures whatever host file it is handed, not one hard-coded nam
     "host file a repo has is that repo's business");
   assert.equal(a.total, bytes("agents\n"));
   assert.notEqual(a.total, checkClaudeMd({ repoRoot: dir, entry: HOST }).total);
+});
+
+// ── The repo-root contract (flow-0094, ADR-0008) ────────────────────────────────────────
+//
+// `_flow-gates.yml` fetches canonical's `project-template/.flow/bin/` at the running workflow's
+// own commit and runs this helper from there, so the workflow and the helper it needs arrive as
+// one unit instead of the helper waiting on a flow-sync PR. From that checkout the module-relative
+// default measures CANONICAL's fixture host file against canonical's uncalibrated config — and
+// prints a plausible number, and exits 0. These prove it measures the repo it was pointed at.
+function canonicalCheckout() {
+  const root = mkdtempSync(join(tmpdir(), "flow-canon-"));
+  const bin = join(root, "project-template", ".flow", "bin");
+  mkdirSync(bin, { recursive: true });
+  // The decoy the fallback would find: a host file and a ceiling that belong to neither target.
+  writeFileSync(join(root, "project-template", "HOST.md"), "x".repeat(4321) + "\n");
+  mkdirSync(join(root, "project-template", ".flow"), { recursive: true });
+  writeFileSync(join(root, "project-template", ".flow", "config.yml"), "claude_md_max: 99999\n");
+  for (const f of ["check-claude-md.mjs", "source-roots.mjs"]) {
+    writeFileSync(join(bin, f), readFileSync(join(import.meta.dirname, f), "utf8"));
+  }
+  return { root, helper: join(bin, "check-claude-md.mjs") };
+}
+
+function targetRepo(ceiling, bytes) {
+  const root = mkdtempSync(join(tmpdir(), "flow-target-"));
+  mkdirSync(join(root, ".flow"), { recursive: true });
+  writeFileSync(join(root, ".flow", "config.yml"), `claude_md_max: ${ceiling}\n`);
+  writeFileSync(join(root, "HOST.md"), "y".repeat(bytes - 1) + "\n");
+  return root;
+}
+
+function runHelper(helper, env, cwd) {
+  const r = spawnSync(process.execPath, [helper, "--entry", "HOST.md"], {
+    cwd, encoding: "utf8", env: { ...process.env, ...env },
+  });
+  return { code: r.status, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
+}
+
+test("run from outside the repo with FLOW_REPO_DIR set, the ceiling check measures the repo it was pointed at", () => {
+  const { root: canon, helper } = canonicalCheckout();
+  // Two repos that share no number: different ceilings and different host-file sizes, so every
+  // field of the verdict identifies which one was actually read.
+  const a = targetRepo(8000, 1234);
+  const b = targetRepo(7000, 2345);
+  const neutral = mkdtempSync(join(tmpdir(), "flow-cwd-"));
+  try {
+    const ra = runHelper(helper, { FLOW_CI: "1", FLOW_REPO_DIR: a }, neutral);
+    assert.equal(ra.code, 0, ra.out);
+    assert.match(ra.out, /ceiling=8000/);
+    assert.match(ra.out, /total=1234\b/);
+    assert.doesNotMatch(ra.out, /99999/, "it must not have measured the checkout it was loaded from");
+
+    const rb = runHelper(helper, { FLOW_CI: "1", FLOW_REPO_DIR: b }, neutral);
+    assert.equal(rb.code, 0, rb.out);
+    assert.match(rb.out, /ceiling=7000/);
+    assert.match(rb.out, /total=2345\b/);
+  } finally {
+    for (const d of [canon, a, b, neutral]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("in CI mode with FLOW_REPO_DIR unset, the ceiling check exits non-zero and names the variable", () => {
+  const { root: canon, helper } = canonicalCheckout();
+  const a = targetRepo(8000, 1234);
+  try {
+    const r = runHelper(helper, { FLOW_CI: "1" }, a);
+    assert.notEqual(r.code, 0, "a silent fallback is what would make a wrong measurement green");
+    assert.match(r.out, /FLOW_REPO_DIR/);
+    assert.doesNotMatch(r.out, /check-claude-md: decision=/, "it must not reach a verdict at all");
+  } finally {
+    for (const d of [canon, a]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("without FLOW_CI the helper keeps its old behaviour — a repo on an older workflow tag still works", () => {
+  // A repo that has synced new helpers but is still pinned to an older `_flow-gates.yml` sets
+  // neither variable. That is the 2.1.x break with the halves swapped, and it must not happen.
+  const { root: canon } = canonicalCheckout();
+  const a = targetRepo(8000, 1234);
+  try {
+    mkdirSync(join(a, ".flow", "bin"), { recursive: true });
+    for (const f of ["check-claude-md.mjs", "source-roots.mjs"]) {
+      writeFileSync(join(a, ".flow", "bin", f), readFileSync(join(import.meta.dirname, f), "utf8"));
+    }
+    const r = runHelper(join(a, ".flow", "bin", "check-claude-md.mjs"), { GITHUB_ACTIONS: "true" }, a);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /ceiling=8000/);
+  } finally {
+    for (const d of [canon, a]) rmSync(d, { recursive: true, force: true });
+  }
 });
