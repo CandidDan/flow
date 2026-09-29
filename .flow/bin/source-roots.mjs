@@ -41,7 +41,7 @@ const __isMain = (() => {
 export {
   DEFAULT_RETRY, DEFAULT_RUNTIME, DEFAULT_VERSIONS, ENTRY_FIELDS, MAX_RETRY, PLACEHOLDER,
   PRIMARY_COMMAND_KEYS, RUNTIMES, isPlaceholder, main, parseCommands, parseSourceRoots,
-  planSourceRoots, primaryChecks, runCheck,
+  planSourceRoots, runCheck,
 } from "../../project-template/.flow/bin/source-roots.mjs";
 
 // Canonical's own root — two levels up from this `bin/` directory — and the config beside it.
