@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0095"
 title: "The template queue-runner caller forwards FLOW_PAT, so flow-0093's fix reaches adopting repos"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-worker-flow-0095"
