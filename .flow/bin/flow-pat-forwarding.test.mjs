@@ -13,15 +13,18 @@
 //   · "the docs state the Actions PR-creation setting is not needed, with the reason"
 //   · "changes/flow-0093.md exists and states the caller action"
 //
-// Criteria proved here (flow-0095 — the CALLER side, which is what reaches an adopting repo):
-//   · "the template caller's secrets: block forwards FLOW_PAT by name, and does not use
-//      `secrets: inherit`"
-//   · "every secret the template caller forwards is declared by _flow-queue-runner.yml's
-//      on.workflow_call.secrets"
-//   · "canonical's caller and the template caller forward the same secret names"
+// Criteria proved here (flow-0095):
 //   · "the template caller's header no longer says the reusable never uses FLOW_PAT, and points
 //      to the permission list"
 //   · "changes/flow-0095.md exists and states the caller action"
+//
+// NOT proved here, on purpose — flow-0095's other three criteria are all instances of one rule,
+// "every caller forwards exactly the secrets its reusable declares, by name", and that rule has a
+// single owning test file: `secrets-scope.test.mjs`. Its table is where the expected secret set
+// for each caller is stated, so asserting the same three facts here as well would mean two places
+// to update and one of them silently going stale — which is the failure that produced this task
+// (that file's table still encoded a `v1` tag in which the reusable had no FLOW_PAT to forward).
+// This file keeps what is genuinely its own: the reusable's wiring, and the prose around it.
 //
 // Why it matters: pushes made with the Actions GITHUB_TOKEN don't trigger downstream workflows
 // (GitHub's recursion guard), so a worker branch pushed under GITHUB_TOKEN never fires
@@ -208,60 +211,17 @@ test("changes/flow-0093.md exists and states the caller action", () => {
     "and Workflows: Read and write is the one an existing token is guaranteed to be missing");
 });
 
-// ─── flow-0095: the template caller must actually FORWARD the secret ─────────────────────────
+// ─── flow-0095: the prose around the caller, which no structure test can carry ───────────────
 //
-// Everything above is about the reusable. None of it reaches an adopting repo, because a reusable
-// workflow receives only the secrets its caller passes by name and the template caller passed just
-// CLAUDE_CODE_OAUTH_TOKEN — so in every repo that adopted Flow, `secrets.FLOW_PAT` evaluated empty
-// *inside* the reusable, the `||` fell through to GITHUB_TOKEN, and flow-0093's fix was a no-op
-// there while looking fully shipped here. The reusable declares FLOW_PAT `required: false`, so this
-// is additive: a caller that does not forward it keeps the old behaviour.
+// The forwarding itself is asserted in secrets-scope.test.mjs (see the header note above). What
+// remains here is the part that is not a YAML shape: a header that told the reader the reusable
+// never used FLOW_PAT, and a changelog fragment telling an adopting repo it must act. The stale
+// sentence mattered because FLOW_PAT is optional — a reader who is talked out of setting it gets
+// a queue runner that works, and silently cannot push a workflow-file change or trigger the
+// checks on its own PR.
 
 const TEMPLATE_CALLER = join(REPO, "project-template/.github/workflows/flow-queue-runner.yml");
-const REPO_CALLER = join(REPO, ".github/workflows/flow-queue-runner.yml");
 const FRAGMENT_0095 = join(REPO, "changes/flow-0095.md");
-
-// The one job of a thin caller. Named lookups rather than `Object.values(...)[0]` so a second job
-// appearing (flow-0076's customised-caller case) surfaces as a clear failure, not a wrong answer.
-const callerSecrets = (file) => {
-  const job = yamlMod.parse(readFileSync(file, "utf8")).jobs?.["flow-queue-runner"];
-  assert.ok(job, `${file} must keep its job key \`flow-queue-runner\` — flow-sync matches on it`);
-  return job.secrets;
-};
-
-test("the template caller forwards FLOW_PAT by name, and does not use `secrets: inherit`", { skip }, () => {
-  const secrets = callerSecrets(TEMPLATE_CALLER);
-  assert.notEqual(secrets, "inherit",
-    "`secrets: inherit` would hand this job — which runs an agent with a repo-write credential — " +
-    "every other secret the adopting repo happens to hold. Naming is the whole reason the " +
-    "forwarding has to be maintained by hand");
-  assert.equal(secrets?.FLOW_PAT, "${{ secrets.FLOW_PAT }}",
-    "without this line `secrets.FLOW_PAT` is empty INSIDE the reusable, however the adopting repo " +
-    "has set the secret, so the checkout token and GH_TOKEN both fall through to GITHUB_TOKEN and " +
-    "flow-0093's fix never reaches the repo that needed it");
-});
-
-test("every secret the template caller forwards is declared by _flow-queue-runner.yml", { skip }, () => {
-  const declared = Object.keys(parseQueueRunner().on?.workflow_call?.secrets ?? {});
-  const forwarded = Object.keys(callerSecrets(TEMPLATE_CALLER) ?? {});
-  assert.ok(forwarded.length > 0, "the template caller must forward at least one secret");
-  for (const name of forwarded) {
-    assert.ok(declared.includes(name),
-      `the template caller forwards ${name}, which _flow-queue-runner.yml does not declare in ` +
-      `on.workflow_call.secrets. GitHub rejects an undeclared named secret at call time, so this ` +
-      `is not a silent no-op — it fails the whole run in every adopting repo. Declared: ` +
-      `{${declared.join(", ")}}`);
-  }
-});
-
-test("canonical's caller and the template caller forward the same secret names", { skip }, () => {
-  const template = Object.keys(callerSecrets(TEMPLATE_CALLER) ?? {}).sort();
-  const canonical = Object.keys(callerSecrets(REPO_CALLER) ?? {}).sort();
-  assert.deepEqual(template, canonical,
-    "canonical dogfoods the caller it publishes, so a divergence means canonical works and every " +
-    "adopting repo quietly does not — the exact shape of the flow-0093 gap this task closes. If " +
-    "the two must differ, that is a deliberate decision and this test is where it gets recorded");
-});
 
 test("the template caller's header documents FLOW_PAT and points at the permission list", { skip }, () => {
   const source = readFileSync(TEMPLATE_CALLER, "utf8");
