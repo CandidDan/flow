@@ -19,6 +19,7 @@ import {
   AUTOMATION_DOWN_LABEL,
   applyActions,
   codeSpan,
+  collectRepoEntries,
   ensureLabel,
   UNPARSEABLE_STATE,
   declaredWorkflowName,
@@ -26,9 +27,11 @@ import {
   findIssueForWorkflow,
   issueTitle,
   markedIssues,
+  newestRun,
   planRepoActions,
   renderIssueBody,
   reportRun,
+  RUN_PAGE,
   runWatchdog,
   startupFailure,
   watchRepo,
@@ -84,11 +87,17 @@ function fakeGitHub({ workflows = [], openIssues = [], labelExists = true }) {
     const runs = path.match(/\/actions\/workflows\/(\d+)\/runs\?(.*)$/);
     if (runs) {
       const wf = byId.get(Number(runs[1]));
+      // `successRuns` / `runs` are served VERBATIM, in the order the fixture wrote them, so a test
+      // can hand back a page that is NOT sorted by `created_at` — the shape flow-0065 was filed
+      // for, and the one the old `workflow_runs[0]` read could not survive. The `lastSuccessAt` /
+      // `latestRun` shorthands remain for every test that does not care about ordering.
       if (runs[2].includes("status=success")) {
+        if (Array.isArray(wf.successRuns)) return { workflow_runs: wf.successRuns };
         return wf.lastSuccessAt
           ? { workflow_runs: [{ run_started_at: wf.lastSuccessAt, html_url: wf.lastSuccessUrl ?? null }] }
           : { workflow_runs: [] };
       }
+      if (Array.isArray(wf.runs)) return { workflow_runs: wf.runs };
       return wf.latestRun ? { workflow_runs: [wf.latestRun] } : { workflow_runs: [] };
     }
     if (/\/issues\?labels=/.test(path)) return state.issues.filter((i) => i.state !== "closed");
@@ -1020,4 +1029,173 @@ test("flow-0061: unparseable is in the reportable set and is not treated as a re
   const tracked = [{ number: 7, body: workflowMarker(".github/workflows/x.yml") }];
   const again = planRepoActions({ fullName: REPO, machinery, openIssues: tracked, now: NOW });
   assert.equal(again.actions[0].type, "comment", "never `close` — the workflow still cannot start");
+});
+
+// ── flow-0065: the "last successful run" figure is only as good as the run it was picked from ──
+//
+// Every test below hands back a `status=success` page whose FIRST element is not the newest run.
+// That is not a contrived shape: CandidDan/Nudge#289 is exactly it, observed against a workflow
+// with 646 runs, and the old `per_page=1` read had no second element that could have contradicted
+// the first. The property under test is always the same one — the reported success is the MAXIMUM
+// by `created_at`, never position 1.
+
+// The real Nudge#289 numbers, kept in one place because four tests below reason about them.
+const NUDGE_289_SWEEP = Date.parse("2026-09-17T08:09:00Z");
+const NUDGE_289_NEWEST = "2026-09-16T18:05:13Z";  // run 646 — the true newest success
+const NUDGE_289_STALE = "2026-09-07T18:04:59Z";   // what the issue actually printed, nine days out
+const CLUSTERED_WEEKDAY = `name: flow-queue-runner\non:\n  schedule:\n    - cron: "0 9-18 * * 1-5"\n`;
+
+// A `status=success` page in the shape GitHub returns it, deliberately NOT sorted.
+const successPage = (stamps) => stamps.map((created_at, i) => ({
+  created_at,
+  run_started_at: created_at,
+  conclusion: "success",
+  html_url: `https://github.com/${REPO}/actions/runs/${600 + i}`,
+}));
+
+test("flow-0065 criterion 1: a success newer than the first item returned is the one reported, not position 1", async () => {
+  const { io } = fakeGitHub({
+    workflows: [{
+      file: "flow-queue-runner.yml",
+      text: SCHEDULED_6H,
+      // Position 1 is a real success. It is simply not the newest one, which is the entire defect.
+      successRuns: successPage(["2026-08-20T05:00:00Z", "2026-08-28T05:00:00Z", "2026-08-24T05:00:00Z"]),
+    }],
+  });
+
+  const [entry] = await collectRepoEntries({ io, fullName: REPO });
+
+  assert.equal(entry.lastSuccessAt, "2026-08-28T05:00:00Z", "the NEWEST success, not the first returned");
+  assert.notEqual(entry.lastSuccessAt, "2026-08-20T05:00:00Z", "position 1 is not trusted");
+  assert.match(entry.lastSuccessUrl, /\/601$/, "the url comes from the run actually selected");
+});
+
+test("flow-0065 criterion 2: over a page returned out of created_at order, lastSuccessAt is the maximum created_at", async () => {
+  const stamps = [
+    "2026-08-14T05:00:00Z",
+    "2026-08-27T23:59:59Z",
+    "2026-08-02T05:00:00Z",
+    "2026-08-28T05:00:00Z", // the maximum, buried at the end
+    "2026-08-19T05:00:00Z",
+  ];
+  const { io } = fakeGitHub({
+    workflows: [{ file: "flow-queue-runner.yml", text: SCHEDULED_6H, successRuns: successPage(stamps) }],
+  });
+
+  const [entry] = await collectRepoEntries({ io, fullName: REPO });
+
+  const max = stamps.reduce((a, b) => (Date.parse(b) > Date.parse(a) ? b : a));
+  assert.equal(entry.lastSuccessAt, max, "equals the maximum created_at among the successful runs");
+
+  // And the same property stated directly on the selector, with no IO in the way: shuffling the
+  // page cannot change the answer, which is what "not position 1" means operationally.
+  for (let i = 0; i < stamps.length; i++) {
+    const rotated = successPage([...stamps.slice(i), ...stamps.slice(0, i)]);
+    assert.equal(newestRun(rotated).created_at, max, `rotation ${i} selects the same newest run`);
+  }
+});
+
+test("flow-0065 criterion 3: the Nudge#289 case reports ~14.1h, the real gap, and never the ~230.1h it printed", async () => {
+  const { io } = fakeGitHub({
+    workflows: [{
+      file: "flow-queue-runner.yml",
+      text: CLUSTERED_WEEKDAY,
+      // The stale run FIRST, exactly as the filtered one-item query handed it over on 2026-09-17.
+      successRuns: successPage([NUDGE_289_STALE, NUDGE_289_NEWEST]),
+    }],
+  });
+
+  const entries = await collectRepoEntries({ io, fullName: REPO });
+  assert.equal(entries[0].lastSuccessAt, NUDGE_289_NEWEST, "the newest success, nine days later than the one printed");
+
+  const [verdict] = evaluateWorkflows(entries, NUDGE_289_SWEEP);
+  assert.equal(verdict.ageHours.toFixed(1), "14.1", "the overnight gap the schedule fully explains");
+
+  // Stated as the negative too, because "not 230.1" is the claim a reader of #289 cares about: a
+  // 230.1h figure sends them looking for a week-long outage that never happened.
+  const staleAge = (NUDGE_289_SWEEP - Date.parse(NUDGE_289_STALE)) / HOUR;
+  assert.equal(staleAge.toFixed(1), "230.1", "the fixture really does reproduce the wrong figure's source");
+  assert.notEqual(verdict.ageHours.toFixed(1), staleAge.toFixed(1));
+
+  // The figure a human reads is the selected run's, so pin the rendered body rather than the
+  // verdict alone — the wrong NUMBER, not a wrong state, is what this task exists to fix.
+  const body = renderIssueBody({ fullName: REPO, workflow: verdict, now: NUDGE_289_SWEEP });
+  assert.match(body, /\*\*Last successful run:\*\* 2026-09-16T18:05:13/, "the body names the newest success");
+  assert.doesNotMatch(body, /2026-09-07T18:04:59/, "and never the stale one that was returned first");
+});
+
+test("flow-0065 criterion 4: the close path and the staleness path cannot disagree within one sweep", async () => {
+  // A workflow that has genuinely recovered — newest success one hour ago — whose success page
+  // returns a ten-day-old success first. Nudge#278 was closed for this workflow succeeding and
+  // Nudge#289 filed 101 minutes later asserting it had not; that is this fixture, read twice.
+  const { io, state } = fakeGitHub({
+    workflows: [{
+      file: "flow-queue-runner.yml",
+      text: SCHEDULED_6H,
+      successRuns: successPage([
+        new Date(NOW - 240 * HOUR).toISOString(),
+        new Date(NOW - HOUR).toISOString(),
+      ]),
+    }],
+    openIssues: [{
+      number: 278,
+      title: issueTitle("flow-queue-runner"),
+      body: workflowMarker(".github/workflows/flow-queue-runner.yml"),
+      labels: [{ name: AUTOMATION_DOWN_LABEL }],
+      state: "open",
+    }],
+  });
+
+  const result = await watchRepo({ io, fullName: REPO, now: NOW });
+
+  assert.deepEqual(result.actions.map((a) => a.type), ["close"], "recovery closes, and does nothing else");
+  assert.equal(filings(state).length, 0, "no issue is filed asserting it has not succeeded");
+  assert.equal(patches(state)[0].body.state, "closed");
+
+  // The invariant, stated independently of this fixture: one verdict per path drives both
+  // decisions, so a single plan can never carry a close AND a file/comment for the same workflow.
+  const closed = new Set(result.actions.filter((a) => a.type === "close").map((a) => a.path));
+  const reported = new Set(result.actions.filter((a) => a.type !== "close").map((a) => a.path));
+  for (const p of closed) assert.equal(reported.has(p), false, `${p} is both closed and reported in one sweep`);
+});
+
+test("flow-0065 criterion 5: no successful run at all is reported as absence, never as zero or an epoch date", async () => {
+  const { io, state } = fakeGitHub({
+    workflows: [{
+      file: "flow-queue-runner.yml",
+      text: SCHEDULED_6H,
+      successRuns: [], // the page is genuinely empty: this workflow has never succeeded
+    }],
+  });
+
+  const [entry] = await collectRepoEntries({ io, fullName: REPO });
+  assert.equal(entry.lastSuccessAt, null, "absence is null, not 0 and not a timestamp");
+
+  await watchRepo({ io, fullName: REPO, now: NOW });
+  const body = filings(state)[0].body.body;
+  assert.match(body, /\*\*Last successful run:\*\* never/, "the body says never");
+  assert.doesNotMatch(body, /1970/, "never rendered as the epoch");
+  assert.match(body, /no successful run recorded/, "and the rule that fired says so too");
+
+  // Unusable rows are skipped rather than coerced, which is what keeps the epoch out: a page of
+  // runs carrying no parseable timestamp is still an absence.
+  assert.equal(newestRun([]), null);
+  assert.equal(newestRun(null), null);
+  assert.equal(newestRun([{ created_at: null }, { created_at: "not a date" }, null]), null);
+});
+
+test("flow-0065: the bound is one page of 100, and both run lookups ask for it — never per_page=1", async () => {
+  const { io, state } = fakeGitHub({
+    workflows: [{ file: "flow-queue-runner.yml", text: SCHEDULED_6H, lastSuccessAt: "2026-08-28T05:00:00Z" }],
+  });
+
+  await collectRepoEntries({ io, fullName: REPO });
+
+  const runReads = state.reads.filter((p) => /\/actions\/workflows\/\d+\/runs\?/.test(p));
+  assert.equal(runReads.length, 2, "still exactly two run reads per workflow — the fix costs no extra request");
+  for (const r of runReads) {
+    assert.match(r, new RegExp(`per_page=${RUN_PAGE}`), "a page that can be checked against itself");
+    assert.doesNotMatch(r, /per_page=1(?!\d)/, "never a one-item page, which leaves nothing to compare against");
+  }
+  assert.equal(RUN_PAGE, 100, "the API's maximum single page — a workflow with no success in 100 runs is dead");
 });
