@@ -272,3 +272,33 @@ test("the same stale adopter fails the OLD invocation — the proof above is not
     rmSync(repoDir, { recursive: true, force: true });
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// The written record
+// ─────────────────────────────────────────────────────────────────────────────────────────
+
+test("docs/flow-reusable-workflows.md explains which copy of a helper CI runs, and which copy the repo keeps", () => {
+  const doc = readFileSync(join(REPO, "docs", "flow-reusable-workflows.md"), "utf8");
+  assert.match(doc, /job\.workflow_sha/,
+    "the mechanism must be findable from the docs, not only from the ADR");
+  assert.match(doc, new RegExp(REPO_DIR_ENV),
+    "a repo debugging a gate failure needs the variable named where it is already reading");
+  assert.match(doc, /flow-doctor/,
+    "and why flow-doctor stays on the repo's own copy — otherwise the split reads as an oversight");
+  assert.match(doc, /local runs/i,
+    "the repo's copy still has a job: local runs and the repo's own tests");
+  assert.match(doc, /0008-helpers-from-canonical/,
+    "and the doc must point at the decision rather than re-arguing it");
+});
+
+test("changes/flow-0094.md exists and states that a caller need do nothing", () => {
+  const fragment = join(REPO, "changes", "flow-0094.md");
+  assert.ok(existsSync(fragment),
+    "a task that changes what every adopting repo's CI executes owes the changelog an entry");
+  const text = readFileSync(fragment, "utf8");
+  assert.match(text, /Caller action: none/,
+    "the caller-action line is what a reader of the release notes scans for; saying nothing " +
+    "leaves them to work out whether they have to act");
+  assert.ok(!/^#/m.test(text),
+    "a fragment is assembled verbatim under `## Unreleased` — it carries no heading of its own");
+});

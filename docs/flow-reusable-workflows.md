@@ -91,6 +91,47 @@ Because `actions/checkout` in a reusable workflow checks out the **caller's** re
 `node .flow/bin/…` and `.flow/config.yml` reference resolves to the *consuming project's* store and
 tooling — exactly what the gate must read.
 
+### Which copy of a helper CI runs — and why there are two (flow-0094)
+
+A repo adopts the two halves of Flow on **different clocks**, and that used to be a live bug:
+
+- a **reusable workflow** is resolved by GitHub at the ref the caller pinned, so moving `v2`
+  changes it in every repo on the next run, with no commit in that repo;
+- the **`.flow/bin/` helpers** it invokes are *files in that repo*, and change only when its
+  `flow-sync` PR merges — hours or days later.
+
+So a release that made a reusable depend on a new helper broke every pinned repo until it synced.
+2.1.0 (`source-roots.mjs`) and 2.1.1 (`check-claude-md.mjs`) did exactly that on 28–29 Sep 2026:
+every `@v2` repo went red on every pull request, for a reason that had nothing to do with its own
+code.
+
+**`_flow-gates.yml` now fetches canonical's `project-template/.flow/bin/` at the same commit as the
+running workflow file and runs the helper from there.** The commit comes from
+`${{ job.workflow_sha }}` — the *job* context, which describes the file that defines the current
+job, where `github.workflow_sha` describes the caller's three-line caller. The workflow and the
+helper it needs therefore ship as one unit, and moving an alias can no longer strand a repo without
+a helper. `${{ job.workflow_repository }}` supplies the repo, so a fork of canonical gates against
+its own fork. The decision, the evidence, and the GitHub Enterprise Server fallback (`flow_ref`)
+are in [`docs/adr/0008-helpers-from-canonical.md`](adr/0008-helpers-from-canonical.md).
+
+| Helper | What CI runs | What the repo's own copy is for |
+|---|---|---|
+| `source-roots.mjs`, `check-claude-md.mjs`, `touches-guard.mjs` | **canonical's**, fetched at the workflow's commit | local runs, and the repo's own `flow-tooling` tests |
+| `flow-doctor.mjs`, and `node --test .flow/bin/*.test.mjs` | **the repo's own** | — they exist to validate the *synced* state, so running canonical's copy would make them unable to fail for the reason they were added |
+| everything the other reusables call | the repo's own (not yet converted) | — |
+
+Two consequences worth knowing:
+
+- **A helper run from canonical is not in the tree it is judging**, so it is told which repo to read
+  through **`FLOW_REPO_DIR`** (the converted steps pass `${{ github.workspace }}`). `FLOW_CI=1`
+  makes that variable *required*: without both, a helper would resolve its store from its own
+  realpath, read canonical's `project-template/` fixtures, and **exit 0** — a green gate that
+  checked the wrong repo. Neither variable set is the old behaviour, unchanged, which is what keeps
+  a repo pinned to an *older* workflow tag working.
+- **`flow-sync` is no longer load-bearing for CI correctness.** It is how a repo picks up the local
+  tooling — what a human runs by hand, and what `flow-doctor` reports on — and a repo that is
+  behind is no longer red for it.
+
 ### 2. Repos adopt by reference — `project-template/.github/workflows/flow-*.yml`
 
 Each caller keeps only the trigger (`on:`) — which a reusable workflow can't declare — and a
