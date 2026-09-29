@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0065"
 title: "The watchdog's \"last successful run\" is simply wrong — a one-item filtered page is trusted as the newest, and it is not"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0065"
 created: "2026-09-17"
-started: ""
+started: "2026-09-29T05:22:10Z"
 branch: ""
 pr: ""
 issue: "https://github.com/CandidDan/Nudge/issues/289"
