@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0095"
 title: "The template queue-runner caller forwards FLOW_PAT, so flow-0093's fix reaches adopting repos"
-status: "in_review"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0095"
 created: "2026-09-29"
-started: "2026-09-29T06:28:32Z"
+started: "2026-09-29T06:51:34Z"
 branch: "flow/flow-0095-caller-forwards-flow-pat"
 pr: "https://github.com/CandidDan/flow/pull/127"
 issue: ""
