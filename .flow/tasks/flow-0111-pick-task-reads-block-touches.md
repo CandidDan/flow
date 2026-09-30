@@ -2,13 +2,13 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0111"
 title: "pick-task reads block-form `touches`, so the queue runner stops dispatching into collisions"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-cowork-orchestrator"
 created: "2026-10-01"
-started: ""
-branch: ""
+started: "2026-09-30T23:49:29Z"
+branch: "flow/flow-0111-pick-task-reads-block-touches"
 pr: ""
 issue: ""
 blocked_reason: ""
