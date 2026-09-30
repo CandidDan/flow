@@ -66,8 +66,8 @@ claude_md_max: 50000
 # added six months from now (a worker, edge functions, a second language) can't slip in ungated
 # the way it silently could before. Calibrate at scaffold (list what's actually in the repo);
 # it ratchets like coverage_min — widen it as the repo grows, the drift check keeps it honest.
-# Single-stack repos just declare one root. If a tree genuinely shouldn't be gated, add it to
-# flow-doctor's ROOT_IGNORE rather than leaving it silently uncovered.
+# Single-stack repos just declare one root. If a tree genuinely shouldn't be gated, name it in
+# `source_roots_ignore:` below rather than leaving it silently uncovered.
 #
 # Since Flow 2.x the gate also RUNS these checks. `_flow-gates.yml` plans a job per entry whose
 # `check` is not already one of the four `commands.*` above — those the `gate` job runs anyway, so
@@ -96,6 +96,16 @@ source_roots:
   #   check: "deno check supabase/functions/**/*.ts"
   #   runtime: "deno"           # installs Deno instead of Node before running the check
   #   retry: 1                  # one retry, for a flaky remote-module fetch
+
+# Top-level folders that hold source-extension files but are deliberately NOT gated — this repo's
+# additions to flow-doctor's built-in ignore list (build output, deps, VCS), so extending it is a
+# config edit here rather than a patch to Flow's own code that the next flow-sync overwrites.
+# Bare top-level folder names only: no "/", no globs. An ignored folder is NEVER gated, so
+# ignoring one is a decision you are recording — prefer a `source_root` with a real check, and use
+# this only where there is genuinely no check to run (prose, a scratch tree the human has ruled
+# out). A malformed entry, or one naming a folder that isn't there, is a flow-doctor warning
+# naming it and exempts nothing.
+source_roots_ignore: []         # e.g. ["docs", "holding"]
 
 # Security expectations the security review check enforces on top of its general review.
 # List anything stack- or project-specific that has bitten you before.

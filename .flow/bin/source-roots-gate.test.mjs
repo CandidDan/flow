@@ -32,6 +32,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { changelogEntry } from "./changelog-entry.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
@@ -370,4 +371,17 @@ test("flow-0087: the source-root job name carries no ${{ }} expression", { skip 
 test("flow-0087: the source-root job name is exactly `source-root`", { skip }, () => {
   assert.equal(jobs(source)[MATRIX_JOB].name, "source-root",
     "GitHub appends matrix values to a static name when the job runs; skipped, it reads plainly");
+});
+
+// Canonical-only: the template's flow-doctor tests travel to adopting repos, which have no
+// `changes/` and no canonical CHANGELOG, so a task's own changelog entry is proved here.
+test("changes/flow-0102.md exists and states that no caller action is needed", () => {
+  // Fragment while pending; assembled CHANGELOG entry after a release (flow-0098).
+  const text = changelogEntry(REPO, "flow-0102");
+  assert.ok(text, "a new config key every adopting repo can set owes the changelog an entry");
+  assert.match(text, /No caller action/,
+    "the caller-action line is what a reader of the release notes scans for");
+  assert.match(text, /source_roots_ignore/, "and it names the key a repo opts in with");
+  assert.ok(!/^#/m.test(text),
+    "a fragment is assembled verbatim under `## Unreleased` — it carries no heading of its own");
 });
