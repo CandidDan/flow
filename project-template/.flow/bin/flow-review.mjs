@@ -18,7 +18,8 @@
 //   verdict  — turns a reviewer's written verdict into an exit code. FAIL-CLOSED: a missing,
 //              empty or unparseable verdict is a failure, never a pass. A reviewer that died
 //              mid-run must not read as approval — that is the one bug that would make this
-//              whole gate theatre.
+//              whole gate theatre. So is a PASS on a diff the plan clipped, which is why
+//              `--diff-truncated` is required and turns one into a FAIL (flow-0103).
 //
 // Zero dependencies, Node >= 18. `_flow-gates.yml`'s `flow-tooling` job runs
 // `node --test .flow/bin/*.test.mjs` with NO install step in front of it, so an import of
@@ -26,7 +27,7 @@
 // narrow, tolerant reader of the two shapes config.yml actually uses, not a YAML parser.
 //
 //   node .flow/bin/flow-review.mjs plan
-//   node .flow/bin/flow-review.mjs verdict .flow-review/qa.json --check qa
+//   node .flow/bin/flow-review.mjs verdict .flow-review/qa.json --check qa --diff-truncated false
 
 import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
@@ -608,30 +609,112 @@ const findingLine = (f) =>
     : [f?.file && `${f.file}${f.line ? `:${f.line}` : ""}`, f?.issue, f?.fix && `fix: ${f.fix}`]
       .filter(Boolean).join(" · ") || JSON.stringify(f);
 
+// ── the truncation fact (flow-0103) ───────────────────────────────────────────────────────
+// `plan` bounds the diff and already reports whether it clipped one, both in the run summary and
+// as the `diff_truncated` step output. `verdict` used to take a PASS at face value anyway, which
+// left the rule "a reviewer must not approve what it could not read" living entirely in three
+// prompts (flow-0101) — and a prompt is an instruction, not a gate. On the PR that prompted this,
+// qa refused a 789 KB diff cut at 300 KB while code-review and security passed it, and two green
+// checks were read as a full review.
+//
+// The fact arrives as a REQUIRED flag from the workflow, from the plan's own output expression,
+// never from `.flow-review/` — the reviewer can write to the workspace, and a fact it can edit is
+// not a fact. Required rather than defaulted because the workflow and this helper ship from the
+// same commit (flow-0094): there is no version skew for a default to absorb, and a silently
+// absent flag is exactly the fail-open shape this whole file refuses.
+export const TRUNCATION_FLAG = "--diff-truncated";
+
+// Parsed, not coerced. `Boolean("false")` is `true`, which is the one-character version of this
+// bug: a workflow that passed the string "false" through a truthiness check would fail every
+// check, and one that passed "maybe" would pass every truncated one.
+export function parseDiffTruncated(raw) {
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  throw new ReviewError(
+    `${TRUNCATION_FLAG} is required and must be exactly "true" or "false", got ` +
+    `${JSON.stringify(raw ?? null)}. It carries whether \`plan\` clipped the diff the reviewers ` +
+    `read; without it a PASS cannot be told from a PASS on half a change, so the check fails ` +
+    `closed. _flow-review.yml passes it from the plan job's \`diff_truncated\` output.`);
+}
+
+// Optional, and only ever used to make the failure legible — the byte counts never decide
+// anything, so a missing or malformed one degrades the message rather than the gate.
+const byteCount = (raw) => (POSITIVE_INT_RE.test(String(raw ?? "")) ? Number(raw) : null);
+
 // Decide the check's outcome from a parsed verdict. A self-contradicting verdict — PASS while
 // naming an unproven criterion or a blocking finding — resolves to FAIL. The reviewer's stated
-// letter grade is not allowed to overrule its own evidence.
-export function verdictOutcome(parsed, { check = "review" } = {}) {
+// letter grade is not allowed to overrule its own evidence, and neither is it allowed to overrule
+// the plan's truncation fact.
+export function verdictOutcome(parsed, {
+  check = "review",
+  diffTruncated = false,
+  diffBytes = null,
+  diffFullBytes = null,
+} = {}) {
   const lines = [];
   let failed = parsed.verdict === "FAIL";
+  // First, because it is the reason this check is red regardless of what the reviewer wrote.
+  if (diffTruncated) {
+    failed = true;
+    const kept = byteCount(diffBytes);
+    const full = byteCount(diffFullBytes);
+    const bytes = kept !== null && full !== null ? ` ${kept} of ${full} bytes were handed over.` : "";
+    lines.push(
+      `${check}: the diff was TRUNCATED before the reviewers read it, so this check cannot ` +
+      `pass — a PASS here would certify what nobody reviewed.${bytes}`);
+    lines.push(
+      `  two ways out: raise \`review.max_diff_bytes\` in .flow/config.yml so the whole diff is ` +
+      `reviewed, or merge past this check as a deliberate human decision that the diff was not ` +
+      `fully reviewed.`);
+  }
+  // The reviewer's own evidence, kept separate from the truncation lines above so that a bare
+  // FAIL still states its reason on a truncated diff instead of being swallowed by them.
+  const findings = [];
   if (parsed.unproven.length) {
     failed = true;
-    lines.push(`${check}: ${parsed.unproven.length} acceptance criterion/criteria with no proving test:`);
-    for (const c of parsed.unproven) lines.push(`  unproven criterion: ${c}`);
+    findings.push(`${check}: ${parsed.unproven.length} acceptance criterion/criteria with no proving test:`);
+    for (const c of parsed.unproven) findings.push(`  unproven criterion: ${c}`);
   }
   if (parsed.blocking.length) {
     failed = true;
-    lines.push(`${check}: ${parsed.blocking.length} blocking finding(s):`);
-    for (const f of parsed.blocking) lines.push(`  blocking: ${findingLine(f)}`);
+    findings.push(`${check}: ${parsed.blocking.length} blocking finding(s):`);
+    for (const f of parsed.blocking) findings.push(`  blocking: ${findingLine(f)}`);
   }
-  if (failed && !lines.length) {
-    lines.push(`${check}: verdict FAIL${parsed.summary ? ` — ${parsed.summary}` : ""}`);
+  if (parsed.verdict === "FAIL" && !findings.length) {
+    findings.push(`${check}: verdict FAIL${parsed.summary ? ` — ${parsed.summary}` : ""}`);
   }
+  lines.push(...findings);
   return { ok: !failed, code: failed ? 1 : 0, lines, summary: parsed.summary };
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────
 const emit = (file, text) => { if (file) appendFileSync(file, text.endsWith("\n") ? text : `${text}\n`); };
+
+// Every flag `verdict` takes a VALUE for. The set exists so the positional argument — the verdict
+// file — is found by skipping flag values rather than by taking the first thing that does not
+// start with `--`. That older rule read `--check qa report.json` as the file `qa`, and flow-0103
+// adds three more values it could have swallowed the same way.
+const VERDICT_VALUE_FLAGS = new Set(["--check", TRUNCATION_FLAG, "--diff-bytes", "--diff-full-bytes"]);
+
+export function parseVerdictArgs(argv) {
+  const flags = new Map();
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (VERDICT_VALUE_FLAGS.has(arg)) { flags.set(arg, argv[i + 1]); i += 1; continue; }
+    if (arg.startsWith("--")) continue;
+    positional.push(arg);
+  }
+  return {
+    file: positional[0],
+    check: flags.get("--check") ?? "review",
+    // Throws when absent or not exactly true/false — the check fails closed rather than guessing
+    // whether the reviewers saw the whole change.
+    diffTruncated: parseDiffTruncated(flags.get(TRUNCATION_FLAG)),
+    diffBytes: flags.get("--diff-bytes") ?? null,
+    diffFullBytes: flags.get("--diff-full-bytes") ?? null,
+  };
+}
 
 // The whole CLI, exported as a function that RETURNS the exit code instead of calling
 // process.exit. Canonical's `.flow/bin/flow-review.mjs` adapter invokes this same shell against
@@ -695,6 +778,11 @@ export function runReviewCli(argv, {
         `security_reason=${security.reason.replace(/\r?\n/g, " ")}`,
         `changed_count=${changedFiles.length}`,
         `diff_truncated=${diff.truncated}`,
+        // flow-0103: the two numbers `verdict` quotes back when it fails a truncated diff. They
+        // are reporting only — `diff_truncated` is the fact that decides — which is why the
+        // verdict step treats them as optional and this one keeps emitting them unconditionally.
+        `diff_bytes=${diff.bytes}`,
+        `diff_full_bytes=${diff.fullBytes}`,
         `task_id=${task.id ?? ""}`,
         `task_found=${task.found}`,
         `bootstrap=${Boolean(plan.bootstrap)}`,
@@ -706,16 +794,17 @@ export function runReviewCli(argv, {
     }
 
     if (cmd === "verdict") {
-      const file = rest.find((a) => !a.startsWith("--"));
-      const ci = rest.indexOf("--check");
-      const check = ci !== -1 ? rest[ci + 1] : "review";
-      if (!file) throw new ReviewError("usage: flow-review.mjs verdict <file> [--check <name>]");
+      const { file, check, diffTruncated, diffBytes, diffFullBytes } = parseVerdictArgs(rest);
+      if (!file) {
+        throw new ReviewError(
+          `usage: flow-review.mjs verdict <file> [--check <name>] ${TRUNCATION_FLAG} true|false`);
+      }
       if (!existsSync(file)) {
         throw new ReviewError(`no verdict at ${file} — the ${check} reviewer produced none. ` +
           `A missing verdict fails the check: a reviewer that did not report has not approved.`);
       }
       const parsed = parseVerdict(readFileSync(file, "utf8"));
-      const outcome = verdictOutcome(parsed, { check });
+      const outcome = verdictOutcome(parsed, { check, diffTruncated, diffBytes, diffFullBytes });
       const md = [`### ${check} review — ${outcome.ok ? "PASS" : "FAIL"}`, ""]
         .concat(parsed.summary ? [parsed.summary, ""] : [])
         .concat(outcome.lines.map((l) => `- ${l}`))

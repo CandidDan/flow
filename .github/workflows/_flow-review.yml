@@ -122,6 +122,14 @@ jobs:
       security_run: ${{ steps.plan.outputs.security_run }}
       security_reason: ${{ steps.plan.outputs.security_reason }}
       task_id: ${{ steps.plan.outputs.task_id }}
+      # flow-0103. The truncation fact, decided ONCE here and read by all three verdict steps, so
+      # a PASS on a diff the plan clipped cannot clear a check. It is published as a job output
+      # rather than read from each reviewer's own bounded-context step for two reasons: the three
+      # checks must agree about what was reviewed, and the reviewer itself writes into the
+      # workspace — a fact it could overwrite is not a fact. The byte counts are reporting only.
+      diff_truncated: ${{ steps.plan.outputs.diff_truncated }}
+      diff_bytes: ${{ steps.plan.outputs.diff_bytes }}
+      diff_full_bytes: ${{ steps.plan.outputs.diff_full_bytes }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
@@ -339,7 +347,18 @@ jobs:
             task state. The only file you write is .flow-review/qa.json.
       - name: Enforce the qa verdict
         if: always()
-        run: node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/qa.json --check qa
+        # flow-0103: the plan's truncation fact, from the plan job's output. Through `env:` rather
+        # than `${{ }}` in the script, the same rule the PR title and `security_reason` follow —
+        # cheaper to keep than to re-argue per value. The flag is REQUIRED by the helper, so an
+        # empty value here fails the check rather than passing a partly-read diff.
+        env:
+          DIFF_TRUNCATED: ${{ needs.plan.outputs.diff_truncated }}
+          DIFF_BYTES: ${{ needs.plan.outputs.diff_bytes }}
+          DIFF_FULL_BYTES: ${{ needs.plan.outputs.diff_full_bytes }}
+        run: >-
+          node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/qa.json --check qa
+          --diff-truncated "$DIFF_TRUNCATED"
+          --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
 
   # ── code-review ────────────────────────────────────────────────────────────────────────
   code-review:
@@ -466,7 +485,18 @@ jobs:
             task state. The only file you write is .flow-review/code-review.json.
       - name: Enforce the code-review verdict
         if: always()
-        run: node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/code-review.json --check code-review
+        # flow-0103: the plan's truncation fact, from the plan job's output. Through `env:` rather
+        # than `${{ }}` in the script, the same rule the PR title and `security_reason` follow —
+        # cheaper to keep than to re-argue per value. The flag is REQUIRED by the helper, so an
+        # empty value here fails the check rather than passing a partly-read diff.
+        env:
+          DIFF_TRUNCATED: ${{ needs.plan.outputs.diff_truncated }}
+          DIFF_BYTES: ${{ needs.plan.outputs.diff_bytes }}
+          DIFF_FULL_BYTES: ${{ needs.plan.outputs.diff_full_bytes }}
+        run: >-
+          node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/code-review.json --check code-review
+          --diff-truncated "$DIFF_TRUNCATED"
+          --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
 
   # ── security ───────────────────────────────────────────────────────────────────────────
   # CONDITIONAL, and the condition comes from the repo's `review.security_paths`. This job
@@ -626,4 +656,15 @@ jobs:
             task state. The only file you write is .flow-review/security.json.
       - name: Enforce the security verdict
         if: ${{ always() && needs.plan.outputs.security_run == 'true' }}
-        run: node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/security.json --check security
+        # flow-0103: the plan's truncation fact, from the plan job's output. Through `env:` rather
+        # than `${{ }}` in the script, the same rule the PR title and `security_reason` follow —
+        # cheaper to keep than to re-argue per value. The flag is REQUIRED by the helper, so an
+        # empty value here fails the check rather than passing a partly-read diff.
+        env:
+          DIFF_TRUNCATED: ${{ needs.plan.outputs.diff_truncated }}
+          DIFF_BYTES: ${{ needs.plan.outputs.diff_bytes }}
+          DIFF_FULL_BYTES: ${{ needs.plan.outputs.diff_full_bytes }}
+        run: >-
+          node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/security.json --check security
+          --diff-truncated "$DIFF_TRUNCATED"
+          --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
