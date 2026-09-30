@@ -24,6 +24,7 @@ notes:
   - "2026-09-30 (orchestrator): Open question for the human, deliberately NOT in this task: whether `verdict` should fail closed in code whenever the plan truncated the diff, rather than relying on the prompt. That would block every oversized PR until a human overrides. This task only makes the three prompts consistent."
   - "2026-09-30 (orchestrator): Overlaps flow-0084, flow-0085 and flow-0089 on _flow-review.yml; sequence."
   - "2026-09-30 (worker): Built on branch flow/flow-0101-reviewers-refuse-truncated-diff, pushed. All three prompts in _flow-review.yml now carry one byte-identical truncation instruction (do NOT return a PASS verdict; name the truncation), and security's `FAIL iff High/Critical` verdict contract gained a clause naming truncation as a second cause so it does not contradict it. Four new assertions in flow-review-workflow.test.mjs; mutation-checked by deleting the security copy, which fails test 26. Gate green locally: build 34 workflows, lint 101 .mjs, test 1437 pass, coverage 95.81%. Next action: open the PR and mark it ready for review."
+  - "2026-09-30 (worker): PR #134 open and marked ready for review; flow-status owns the in_review transition. Work is complete — nothing left on the branch. Open question for the human, restated because it is the only decision outstanding: whether `verdict` should fail closed in code on a truncated diff rather than relying on the prompt (see the second orchestrator note). Deliberately not in this PR."
 ---
 
 ## Context
