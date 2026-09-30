@@ -213,8 +213,7 @@ jobs:
             FILE="${LINE%%:*}"
             REF="${LINE##*/_flow-sync.yml@}"
             REF="${REF%%[[:space:]]*}"
-            PAIRS="${PAIRS}${FILE} ${REF}
-"
+            PAIRS="${PAIRS}${FILE} ${REF}"$'\n'
           done <<< "$PINS"
 
           DISTINCT="$(printf '%s' "$PAIRS" | awk 'NF {print $2}' | sort -u)"
