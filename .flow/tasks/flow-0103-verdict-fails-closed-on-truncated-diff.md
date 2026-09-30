@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0103"
 title: "verdict fails closed when the plan truncated the diff: no reviewer can PASS what it did not see"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0103"
 created: "2026-09-30"
-started: ""
+started: "2026-09-30T06:04:11Z"
 branch: ""
 pr: ""
 issue: ""
