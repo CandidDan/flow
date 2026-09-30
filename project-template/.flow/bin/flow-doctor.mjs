@@ -281,7 +281,8 @@ function rootCovers(declaredPath, topDir) {
 //                  - "api/x.ts"
 // (A naive same-line scan misses the multi-line form — it would read those tasks as having
 // empty touches, silencing both the empty-touches warning and overlap detection below.)
-function parseListField(head, key) {
+// Exported for pick-task.mjs (flow-0111): one list parser for the whole store, not three.
+export function parseListField(head, key) {
   const lines = head.split("\n");
   const i = lines.findIndex((l) => new RegExp(`^\\s*${key}:`).test(l));
   if (i === -1) return [];

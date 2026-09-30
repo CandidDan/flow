@@ -154,3 +154,59 @@ test("a fragment path does not collide with a neighbouring fragment by prefix", 
   assert.ok(globsOverlap("changes/flow-0101.md", "changes/flow-0101.md"));
   assert.ok(touchesOverlap(["CHANGELOG.md"], ["CHANGELOG.md"]));
 });
+
+// ── flow-0111: block-form `touches` ──
+// Every real task file writes `touches` as a YAML block sequence. pick-task used to read only
+// the inline array, so the overlap filter saw [] everywhere and never skipped anything.
+
+const taskText = (id, status, touchesYaml) =>
+  `---\nid: "${id}"\nstatus: "${status}"\npriority: 2\ntouches:${touchesYaml}\nlabels: [x]\n---\n\n## Context\n`;
+
+test("flow-0111: parseTask reads block-form touches, quotes stripped, comments ignored", () => {
+  const t = parseTask(taskText("CAN-1", "ready", '\n  - "src/a.mjs"   # the helper\n  - \'src/b/**\'\n'));
+  assert.deepEqual(t.touches, ["src/a.mjs", "src/b/**"]);
+});
+
+test("flow-0111: parseTask still reads the inline-array form exactly as before", () => {
+  const t = parseTask(taskText("CAN-2", "ready", ' ["src/a.mjs", "src/b/**"]  # inline'));
+  assert.deepEqual(t.touches, ["src/a.mjs", "src/b/**"]);
+});
+
+test("flow-0111: a ready task sharing a path with an in_progress task is skipped, both in block form", () => {
+  const running = parseTask(taskText("CAN-10", "in_progress", '\n  - "lib/globalSetup.ts"\n  - "lib/a.ts"\n'));
+  const clash = parseTask(taskText("CAN-11", "ready", '\n  - "lib/globalSetup.ts"\n'));
+  const clear = parseTask(taskText("CAN-12", "ready", '\n  - "docs/x.md"\n'));
+  assert.equal(pickTask([running, clash]), null, "the overlapping task must not be dispatched");
+  assert.equal(pickTask([running, clash, clear]), "CAN-12");
+});
+
+test("flow-0111: no task in a real store that declares touches parses to an empty list", async () => {
+  const { existsSync, readdirSync, readFileSync } = await import("node:fs");
+  const { dirname, resolve } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const here = dirname(fileURLToPath(import.meta.url));
+  // This repo's own store (an adopter's synced copy sits in .flow/bin, so ../tasks), and in
+  // canonical, where this file lives under project-template/, the canonical store as well.
+  const stores = [resolve(here, "..", "tasks"), resolve(here, "..", "..", "..", ".flow", "tasks")]
+    .filter((d, i, all) => existsSync(d) && all.indexOf(d) === i);
+  let checked = 0;
+  for (const dir of stores) {
+    const parsed = new Map(readTasks(dir).map((t) => [t.id, t]));
+    for (const name of readdirSync(dir).filter((n) => n.endsWith(".md") && n !== "_TEMPLATE.md")) {
+      const head = readFileSync(join(dir, name), "utf8").split("\n---")[0];
+      const declares = /^touches:\s*(\[\s*["'][^\]]+\]|\n\s*-\s)/m.test(head);
+      const id = (head.match(/^id:\s*"?([^"\n]+)"?/m) || [])[1];
+      if (!declares || !id || !parsed.has(id)) continue;
+      checked += 1;
+      assert.ok(parsed.get(id).touches.length > 0, `${name}: touches declared but parsed as empty`);
+    }
+  }
+  assert.ok(checked > 0, "found no task declaring touches — the guard proved nothing");
+});
+
+test("flow-0111: pick-task has one list parser, flow-doctor's, and no touches regex of its own", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("./pick-task.mjs", import.meta.url), "utf8");
+  assert.match(src, /import \{ parseListField \} from "\.\/flow-doctor\.mjs";/);
+  assert.doesNotMatch(src, /\/\^touches:/, "a second touches regex is how this bug happened");
+});
