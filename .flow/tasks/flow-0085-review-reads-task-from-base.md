@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0085"
 title: "The reviewers read the task and its acceptance criteria from the base branch, so a PR cannot choose the criteria it is judged against"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-cowork-orchestrator"
