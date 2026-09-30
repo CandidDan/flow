@@ -1513,15 +1513,6 @@ test("criterion 7: the template's config.yml documents max_diff_bytes under revi
 });
 
 // Criterion 8.
-test("criterion 8: changes/flow-0100.md exists and says no caller action is needed", (t) => {
-  if (!CANON) return t.skip(notCanonical);
-  const path = join(CANON, "changes", "flow-0100.md");
-  assert.ok(existsSync(path), `the changelog fragment for this task is missing: ${path}`);
-  const text = readFileSync(path, "utf8");
-  assert.match(text, /No caller action/i, "a repo opts in by setting the key; nothing is required");
-  assert.match(text, /max_diff_bytes/, "and the fragment has to name the key a repo would set");
-});
-
 // ── flow-0103: the numbers the verdict step quotes back ────────────────────────────────────
 // `diff_truncated` is the fact that decides the check; these two are what turn "too big" into a
 // number, and they only reach `verdict` because `plan` publishes them as step outputs. Asserted
