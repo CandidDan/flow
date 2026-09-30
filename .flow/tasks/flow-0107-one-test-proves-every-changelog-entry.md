@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0107"
 title: "One canonical test proves every task's changelog entry, and task-writer names it in the criterion"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0107"
 created: "2026-09-30"
-started: ""
+started: "2026-09-30T06:34:43Z"
 branch: ""
 pr: ""
 issue: ""
