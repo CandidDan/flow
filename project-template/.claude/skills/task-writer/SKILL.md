@@ -95,6 +95,15 @@ them mechanically rather than trusting a plausible-sounding narrative:
    `touches` overlap is what makes a `ready` task ineligible while another is `in_progress` — so
    declaring it serialises the queue behind a file no two tasks ever actually conflict over. One
    fragment per task, and two tasks stop overlapping.
+   **And where that directory exists, the changelog criterion names the test that proves it.**
+   qa maps every criterion to a proving test *by name*, and "the fragment exists and states the
+   caller action" is a property of the whole store — so it is proved once, for every task at once,
+   not by a one-off test per task. Cite the repo's store-wide test in the criterion itself. In
+   canonical (the repo that authors Flow) that test is
+   `.flow/bin/changelog-fragments.test.mjs :: every claimed task that declares a changelog fragment has an entry stating its caller action`.
+   Check the repo you are writing for actually has an equivalent before citing one; if it has
+   none, writing it is the first thing the task owes — never leave the worker to invent a one-off,
+   which is exactly how three tasks in a row failed qa on this criterion.
 2. **"Parallel-safe" is proven, not asserted.** Before calling two tasks parallel, actually
    intersect their `touches` lists. If they share *any* path — a classic one is two tasks both
    editing the same page/router to mount into it — they are NOT parallel: sequence them, or
