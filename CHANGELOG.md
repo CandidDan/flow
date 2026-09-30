@@ -6,7 +6,24 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
-## 2.1.2 — 2026-09-29 (pending tag + canary)
+## 2.1.3 — 2026-09-30 (pending tag + canary)
+
+**PATCH: the review gate agrees with `touches-guard` about which file is the task.** A repo whose
+task filenames do not carry the project prefix had its qa check fail on every task PR. No caller
+action.
+
+- **The review gate finds a task by its frontmatter `id` when no filename carries it**
+  (`project-template/.flow/bin/flow-review.mjs`, flow-0099). **No caller action** beyond picking
+  up the release.
+
+  `findTaskFile` matched only `<id>-<slug>.md` or `<id>.md`, which is canonical's own naming. A
+  repo that names task files `0021-<slug>.md` and keeps `id: "tanplan-0021"` only in frontmatter
+  got `NO TASK FILE RESOLVED` in `task.md`, so qa failed every task PR there, while
+  `touches-guard` (which reads frontmatter) resolved the same task. The filename match still runs
+  first and is unchanged; the frontmatter scan runs only when it finds nothing, skips
+  `_TEMPLATE.md`, and skips a file it cannot read instead of throwing.
+
+## 2.1.2 — 2026-09-29 (tagged `v2.1.2`)
 
 **PATCH: stops alias moves from breaking the fleet, and fixes the source-root and queue-runner
 failures 2.1.0/2.1.1 exposed.** The headline is flow-0094: the reusable workflows now run
