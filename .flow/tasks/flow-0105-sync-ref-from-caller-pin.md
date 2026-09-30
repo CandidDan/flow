@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0105"
 title: "flow-sync adopts from the ref its caller is pinned to, not a hard-coded v2, when run on schedule"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0105"
 created: "2026-09-30"
-started: ""
+started: "2026-09-30T08:31:07Z"
 branch: ""
 pr: ""
 issue: "https://github.com/CandidDan/flow/issues/55"
