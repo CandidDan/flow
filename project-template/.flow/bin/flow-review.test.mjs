@@ -8,6 +8,9 @@
 //     mode that shows up exactly when something already went wrong.
 //   · a repo that has not scoped `review.security_paths` must get the security review on every
 //     PR, not none of them.
+//   · a reviewer that was handed a TRUNCATED diff must not be able to clear the check with a
+//     PASS (flow-0103). Same shape as the two above: the gate would look green having graded
+//     part of a change.
 //
 // Zero dependencies on purpose: `_flow-gates.yml`'s `flow-tooling` job runs
 // `node --test .flow/bin/*.test.mjs` with no install step, so anything imported here has to be
@@ -34,8 +37,10 @@ import {
   UNTRUSTED_END,
   boundDiff,
   findTaskFile,
+  parseDiffTruncated,
   parseReviewConfig,
   parseVerdict,
+  parseVerdictArgs,
   planSummary,
   resolveMaxDiffBytes,
   reviewBlock,
@@ -811,7 +816,8 @@ test("CLI `verdict` exits non-zero and names the unproven criterion", () => {
     const f = join(dir, "qa.json");
     writeFileSync(f, JSON.stringify({ verdict: "FAIL", unproven: ["Given X, when Y, then Z"] }));
     const summary = join(dir, "summary.md");
-    const r = run(["verdict", f, "--check", "qa"], { env: { ...process.env, GITHUB_STEP_SUMMARY: summary } });
+    const r = run(["verdict", f, "--check", "qa", "--diff-truncated", "false"],
+      { env: { ...process.env, GITHUB_STEP_SUMMARY: summary } });
 
     assert.equal(r.status, 1, "a failed review must fail the check, not merely comment on it");
     assert.match(r.stderr, /Given X, when Y, then Z/);
@@ -824,14 +830,15 @@ test("CLI `verdict` exits zero on a clean pass", () => {
   try {
     const f = join(dir, "code.json");
     writeFileSync(f, JSON.stringify({ verdict: "PASS", summary: "in scope, tested" }));
-    const r = run(["verdict", f, "--check", "code-review"]);
+    const r = run(["verdict", f, "--check", "code-review", "--diff-truncated", "false"]);
     assert.equal(r.status, 0);
     assert.match(r.stdout, /code-review: PASS/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("CLI `verdict` FAILS CLOSED when the reviewer wrote no verdict file at all", () => {
-  const r = run(["verdict", join(tmpdir(), "no-such-verdict.json"), "--check", "security"]);
+  const r = run(["verdict", join(tmpdir(), "no-such-verdict.json"), "--check", "security",
+    "--diff-truncated", "false"]);
   assert.equal(r.status, 1, "a reviewer that died mid-run must not read as an approval");
   assert.match(r.stderr, /no verdict at/);
   assert.match(r.stderr, /has not approved/);
@@ -841,6 +848,158 @@ test("CLI rejects an unknown subcommand instead of exiting 0 having done nothing
   const r = run(["definitely-not-a-command"]);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /expected "plan" or "verdict"/);
+});
+
+// ── flow-0103: a PASS cannot clear a check on a diff the plan clipped ──────────────────────
+// `plan` bounds the diff and reports the clip; until now `verdict` took the reviewer's PASS at
+// face value anyway, so the rule lived only in the three prompts (flow-0101). On the run that
+// prompted this, qa refused a 789 KB diff cut at 300 KB while code-review and security passed it.
+// The tests below are written against the CLI as the workflow invokes it, because the exit code is
+// what actually blocks the PR.
+
+const verdictFile = (dir, name, body) => {
+  const f = join(dir, name);
+  writeFileSync(f, JSON.stringify(body));
+  return f;
+};
+
+// Criterion 1.
+test("a PASS on a TRUNCATED diff fails the check, naming the truncation and review.max_diff_bytes", () => {
+  const dir = tmp("trunc-pass");
+  try {
+    const f = verdictFile(dir, "code-review.json", { verdict: "PASS", summary: "looks fine to me" });
+    const summary = join(dir, "summary.md");
+    const r = run(["verdict", f, "--check", "code-review", "--diff-truncated", "true",
+      "--diff-bytes", "300000", "--diff-full-bytes", "789123"],
+      { env: { ...process.env, GITHUB_STEP_SUMMARY: summary } });
+
+    assert.equal(r.status, 1,
+      "a reviewer that read part of the change must not be able to clear the check — two green " +
+      "checks on a truncated diff are read as a full review");
+    assert.match(r.stderr, /TRUNCATED/, "the failure must say WHY, or it reads as a flaky gate");
+    assert.match(r.stderr, /review\.max_diff_bytes/,
+      "…and name the durable fix, which is the setting flow-0100 added, not a retry");
+    assert.match(r.stderr, /300000 of 789123 bytes/,
+      "the kept and full byte counts turn 'too big' into a number the human can act on");
+    assert.match(r.stderr, /merge past this check/,
+      "the second way out is a visible human decision; there is deliberately no override switch");
+    const md = readFileSync(summary, "utf8");
+    assert.match(md, /### code-review review — FAIL/,
+      "the run summary must agree with the exit code, not report the reviewer's own PASS");
+    assert.match(md, /TRUNCATED/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Criterion 2 — the regression guard. This is the ordinary case, and it must be untouched.
+test("a PASS on a diff that was NOT truncated still clears the check", () => {
+  const dir = tmp("trunc-none");
+  try {
+    const f = verdictFile(dir, "qa.json", { verdict: "PASS", summary: "all criteria proved" });
+    const r = run(["verdict", f, "--check", "qa", "--diff-truncated", "false",
+      "--diff-bytes", "4096", "--diff-full-bytes", "4096"]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /qa: PASS/);
+    assert.doesNotMatch(r.stderr, /TRUNCATED/,
+      "an untruncated diff must not carry a truncation line — a warning on every green check is " +
+      "a warning nobody reads");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Criterion 3.
+test("a FAIL on a truncated diff carries BOTH the reviewer's findings and the truncation line", () => {
+  const dir = tmp("trunc-fail");
+  try {
+    const f = verdictFile(dir, "qa.json", {
+      verdict: "FAIL",
+      unproven: ["Given a PASS verdict and --diff-truncated true, then verdict exits non-zero"],
+      summary: "1 criterion unproven",
+    });
+    const r = run(["verdict", f, "--check", "qa", "--diff-truncated", "true"]);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /unproven criterion: Given a PASS verdict/,
+      "the truncation must not swallow what the reviewer did find — the worker has to fix both");
+    assert.match(r.stderr, /TRUNCATED/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a bare FAIL still states its reason alongside the truncation line", () => {
+  // The line that reports a FAIL with no `unproven`/`blocking` used to be emitted only when
+  // NOTHING else had been reported, so the truncation lines would have silently replaced it.
+  const dir = tmp("trunc-bare");
+  try {
+    const f = verdictFile(dir, "security.json", { verdict: "FAIL", summary: "hardcoded token" });
+    const r = run(["verdict", f, "--check", "security", "--diff-truncated", "true"]);
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /verdict FAIL — hardcoded token/);
+    assert.match(r.stderr, /TRUNCATED/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Criterion 4 — the flag is required, and only two values are readable.
+test("a missing or non-boolean --diff-truncated fails the check and names the flag", () => {
+  const dir = tmp("trunc-flag");
+  try {
+    const f = verdictFile(dir, "qa.json", { verdict: "PASS", summary: "ok" });
+    for (const args of [[], ["--diff-truncated", "maybe"], ["--diff-truncated", "TRUE"],
+      ["--diff-truncated"], ["--diff-truncated", "1"], ["--diff-truncated", ""]]) {
+      const r = run(["verdict", f, "--check", "qa", ...args]);
+      assert.equal(r.status, 1,
+        `\`verdict ${args.join(" ")}\` exited 0 — an absent truncation fact must fail closed, ` +
+        `exactly like an absent verdict`);
+      assert.match(r.stderr, /--diff-truncated/,
+        "the error has to name the flag, or a workflow that stopped passing it reads as a bug " +
+        "in the reviewer");
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("parseDiffTruncated reads exactly true and false — never a truthy string", () => {
+  assert.equal(parseDiffTruncated("true"), true);
+  assert.equal(parseDiffTruncated("false"), false,
+    "`Boolean(\"false\")` is true — coercing this value would fail every check in the fleet");
+  for (const bad of [undefined, null, "", "maybe", "True", "0", "1", "yes"]) {
+    assert.throws(() => parseDiffTruncated(bad), ReviewError,
+      `${JSON.stringify(bad)} must not be readable as a truncation fact`);
+  }
+});
+
+test("verdictOutcome is where the rule lives, and the byte counts are optional", () => {
+  const pass = parseVerdict('{"verdict":"PASS","summary":"fine"}');
+  const clipped = verdictOutcome(pass, { check: "qa", diffTruncated: true });
+  assert.equal(clipped.ok, false, "the reviewer's letter grade does not overrule the plan's fact");
+  assert.equal(clipped.code, 1);
+  assert.ok(clipped.lines.some((l) => /TRUNCATED/.test(l)));
+  assert.ok(!clipped.lines.some((l) => /bytes were handed over/.test(l)),
+    "with no counts supplied the message degrades rather than reporting NaN or null");
+
+  const counted = verdictOutcome(pass, {
+    check: "qa", diffTruncated: true, diffBytes: "300000", diffFullBytes: "789123",
+  });
+  assert.ok(counted.lines.some((l) => l.includes("300000 of 789123 bytes")));
+
+  // A malformed count is reporting damage, never gate damage.
+  const junk = verdictOutcome(pass, { check: "qa", diffTruncated: true, diffBytes: "lots", diffFullBytes: "-1" });
+  assert.equal(junk.ok, false);
+  assert.ok(!junk.lines.some((l) => /lots|NaN/.test(l)));
+
+  assert.equal(verdictOutcome(pass, { check: "qa", diffTruncated: false }).ok, true);
+  assert.equal(verdictOutcome(pass, { check: "qa" }).ok, true,
+    "the default stays false so every existing caller of this function is unchanged");
+});
+
+test("the verdict file is found by skipping flag VALUES, not by taking the first bare word", () => {
+  // `rest.find((a) => !a.startsWith("--"))` read `--check qa report.json` as the file `qa`.
+  // flow-0103 adds three more flags with values, so the old rule had three more ways to go wrong.
+  const parsed = parseVerdictArgs(["--check", "qa", "--diff-truncated", "true",
+    "--diff-bytes", "10", "--diff-full-bytes", "20", "report.json"]);
+  assert.equal(parsed.file, "report.json",
+    "a flag value taken as the verdict file makes the check fail-closed for the wrong reason");
+  assert.equal(parsed.check, "qa");
+  assert.equal(parsed.diffTruncated, true);
+  assert.equal(parsed.diffBytes, "10");
+  assert.equal(parsed.diffFullBytes, "20");
+  assert.equal(parseVerdictArgs(["f.json", "--diff-truncated", "false"]).check, "review",
+    "`--check` stays optional — the default names the check in the message, nothing more");
 });
 
 // ── runReviewCli: the shell itself is exported, so an adapter never carries a copy of it ──
@@ -854,10 +1013,11 @@ test("runReviewCli RETURNS the exit code instead of exiting — pass, fail, and 
   try {
     const f = join(dir, "qa.json");
     writeFileSync(f, JSON.stringify({ verdict: "PASS", summary: "ok" }));
-    assert.equal(runReviewCli(["verdict", f, "--check", "qa"], { env: {} }), 0);
+    const flag = ["--diff-truncated", "false"];
+    assert.equal(runReviewCli(["verdict", f, "--check", "qa", ...flag], { env: {} }), 0);
     writeFileSync(f, JSON.stringify({ verdict: "FAIL", summary: "nope" }));
-    assert.equal(runReviewCli(["verdict", f, "--check", "qa"], { env: {} }), 1);
-    assert.equal(runReviewCli(["verdict", join(dir, "absent.json")], { env: {} }), 1,
+    assert.equal(runReviewCli(["verdict", f, "--check", "qa", ...flag], { env: {} }), 1);
+    assert.equal(runReviewCli(["verdict", join(dir, "absent.json"), ...flag], { env: {} }), 1,
       "a missing verdict must fail through the function exactly as through the process");
     assert.equal(runReviewCli(["definitely-not-a-command"], { env: {} }), 1,
       "an unknown command returning 0 would be a gate that passes having done nothing");
@@ -1360,4 +1520,31 @@ test("criterion 8: changes/flow-0100.md exists and says no caller action is need
   const text = readFileSync(path, "utf8");
   assert.match(text, /No caller action/i, "a repo opts in by setting the key; nothing is required");
   assert.match(text, /max_diff_bytes/, "and the fragment has to name the key a repo would set");
+});
+
+// ── flow-0103: the numbers the verdict step quotes back ────────────────────────────────────
+// `diff_truncated` is the fact that decides the check; these two are what turn "too big" into a
+// number, and they only reach `verdict` because `plan` publishes them as step outputs. Asserted
+// here rather than in the section above because `configWith`/`bigDiff` are defined further down.
+
+test("`plan` publishes diff_bytes and diff_full_bytes alongside diff_truncated", () => {
+  const dir = tmp("plan-bytes");
+  try {
+    writeFileSync(join(dir, "config.yml"), configWith());
+    const out = join(dir, "gh");
+    const opts = {
+      configPath: join(dir, "config.yml"),
+      outDir: join(dir, "out"),
+      git: (args) => (args.includes("--name-only") ? "src/auth/session.ts\n" : bigDiff),
+    };
+    assert.equal(runReviewCli(["plan"], { env: { GITHUB_OUTPUT: out }, ...opts }), 0);
+
+    const text = readFileSync(out, "utf8");
+    assert.match(text, /^diff_truncated=true$/m, "789 000 bytes at the default limit is a clip");
+    assert.match(text, /^diff_bytes=\d+$/m,
+      "the KEPT byte count — a `verdict` failure that cannot say how much was read leaves the " +
+      "human guessing how far over the limit the PR is");
+    assert.match(text, new RegExp(`^diff_full_bytes=${REPORTED_DIFF_BYTES}$`, "m"),
+      "and the FULL count, which is the number review.max_diff_bytes has to clear");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
