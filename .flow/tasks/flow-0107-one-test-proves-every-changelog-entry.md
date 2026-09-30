@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0107"
 title: "One canonical test proves every task's changelog entry, and task-writer names it in the criterion"
-status: "in_progress"
+status: "blocked"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0107"
@@ -11,7 +11,7 @@ started: "2026-09-30T06:34:43Z"
 branch: "flow/flow-0107-store-wide-changelog-entry-test"
 pr: "https://github.com/CandidDan/flow/pull/139"
 issue: ""
-blocked_reason: ""
+blocked_reason: "The build is complete, green on four of five gate commands and pushed on flow/flow-0107-store-wide-changelog-entry-test, but criterion 5 (the test passes against canonical's live store) cannot be met inside the declared touches, and closing it is a scope decision the task did not settle. The new test works exactly as specified and finds one real defect: flow-0097 (done, pull request 128, shipped in 2.1.2) declares changes/flow-0097.md in touches and never wrote it. CHANGELOG 2.1.2's section summary mentions flow-0097 in prose, but there is no bullet whose file list ends `, flow-0097)`, so changelogEntry returns empty and the store-wide test reports it. The fix is one file - changes/flow-0097.md - and it is not in this task's touches, which lists only changes/flow-0107.md. Per the protocol, a wider radius is the orchestrator's to grant, not the worker's to take. TWO WAYS OUT, either is a small diff. (1) Add changes/flow-0097.md to this task's touches on main and flip back to ready: the worker then writes a one-bullet fragment for flow-0097 (the material already exists in CHANGELOG 2.1.2's summary - source-root jobs install the repo's dependencies for runtime: node, and a check the primary gate already runs is no longer run twice; no caller action beyond picking up the release) and the live test goes green with nothing else changing. (2) Write changes/flow-0097.md as its own one-file task, land it, then flip this task to ready so the worker rebases onto it. Option 1 is cheaper and keeps the finding with the test that found it. SECOND DECISION, worth confirming rather than discovering later: the implemented status filter is in_progress/in_review/done, i.e. `blocked` is skipped alongside `ready`. The scope section says `status is not ready`, which as written also fails on eight blocked tasks that declare fragments they never wrote (flow-0022, 0030, 0046, 0053, 0082, 0083, 0086, 0110) - six of them never claimed at all, so the spec's own rationale for skipping ready (nothing has been written yet) applies to them verbatim. `done` was deliberately kept IN scope because criterion 4 (a fragment a release already assembled) is only reachable for a done task, so excluding done would make that criterion vacuous. If blocked tasks should be in scope after all, that is eight more fragments and a much larger touches widening - say so and it becomes a separate task, not this one. GATE AS IT STANDS ON THE BRANCH: build green (34 workflows), lint green (101 .mjs), coverage 95.89% vs floor 83.5, test 1482/1484 pass with 1 pre-existing skip and exactly the one failure above. NOT MACHINE-CHECKABLE: it is a scope/authority decision, so there is no task id or PR for a sweep to watch - blocked_by is empty on purpose."
 blocked_by: []
 serves: ["G10"]
 touches:
