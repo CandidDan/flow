@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0102"
 title: "A repo lists top-level folders that are not source in config.yml, so flow-doctor stops failing on them"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0102"
 created: "2026-09-30"
-started: ""
+started: "2026-09-30T04:50:12Z"
 branch: ""
 pr: ""
 issue: ""
