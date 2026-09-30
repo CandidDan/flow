@@ -23,6 +23,7 @@ notes:
   - "2026-09-30 (orchestrator): Found while triaging a tanplan-platform PR. All three reviewers read the same `.flow-review/diff.patch`, bounded at 300 KB. Only the qa prompt says 'If the diff says it was truncated, say so in your verdict rather than approving what you could not read.' code-review and security passed a 789 KB PR, which was read on the tanplan side as 'they read the full diff'. They did not: they passed on a partial read, and nothing told them not to."
   - "2026-09-30 (orchestrator): Open question for the human, deliberately NOT in this task: whether `verdict` should fail closed in code whenever the plan truncated the diff, rather than relying on the prompt. That would block every oversized PR until a human overrides. This task only makes the three prompts consistent."
   - "2026-09-30 (orchestrator): Overlaps flow-0084, flow-0085 and flow-0089 on _flow-review.yml; sequence."
+  - "2026-09-30 (worker): Built on branch flow/flow-0101-reviewers-refuse-truncated-diff, pushed. All three prompts in _flow-review.yml now carry one byte-identical truncation instruction (do NOT return a PASS verdict; name the truncation), and security's `FAIL iff High/Critical` verdict contract gained a clause naming truncation as a second cause so it does not contradict it. Four new assertions in flow-review-workflow.test.mjs; mutation-checked by deleting the security copy, which fails test 26. Gate green locally: build 34 workflows, lint 101 .mjs, test 1437 pass, coverage 95.81%. Next action: open the PR and mark it ready for review."
 ---
 
 ## Context
