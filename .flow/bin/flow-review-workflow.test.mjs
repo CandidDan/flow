@@ -560,3 +560,12 @@ test("changes/flow-0101.md exists and states that no caller action is needed", (
   assert.ok(!/^#/m.test(text),
     "a fragment is assembled verbatim under `## Unreleased` — it carries no heading of its own");
 });
+
+test("criterion 8 (flow-0100): its changelog entry exists, says no caller action, and names the key", () => {
+  // Moved here from the template's flow-review.test.mjs, which read the fragment file directly and
+  // so went red on the release that assembled it. Fragment first, assembled entry after (flow-0098).
+  const text = changelogEntry(REPO, "flow-0100");
+  assert.ok(text, "the changelog entry for flow-0100 is missing");
+  assert.match(text, /No caller action/i, "a repo opts in by setting the key; nothing is required");
+  assert.match(text, /max_diff_bytes/, "and the entry has to name the key a repo would set");
+});

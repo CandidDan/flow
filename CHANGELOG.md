@@ -6,7 +6,86 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
-## 2.1.3 — 2026-09-30 (pending tag + canary)
+## 2.2.0 — 2026-09-30 (pending tag + canary)
+
+**MINOR: the review gate stops passing work it did not read, and a repo can size it to its own
+PRs.** A PR whose diff exceeds the review limit now fails all three review checks, not just qa
+(flow-0101 in the prompts, flow-0103 in code). The limit is now per repo: set
+`review.max_diff_bytes` in `.flow/config.yml` on `main` (flow-0100). Separately, a repo can list
+top-level folders that are not source in `source_roots_ignore:` instead of patching flow-doctor
+(flow-0102). No caller action, but **a repo that opens PRs over 300 000 bytes of diff should set
+`review.max_diff_bytes` on `main` before moving to this release**, or those PRs go red on every
+review check.
+
+- **A repo can now set its own review diff limit** as `review.max_diff_bytes` in `.flow/config.yml`
+  (`project-template/.flow/bin/flow-review.mjs`, flow-0100). **No caller action** — a repo opts in
+  by setting the key, and an unconfigured repo keeps the 300 000-byte default it already had.
+
+  The limit was fixed fleet-wide in everything but name: `REVIEW_DIFF_MAX_BYTES` was read by the
+  helper, but no reusable workflow passes it, so 300 000 was the only value a consuming repo could
+  have. A repo that legitimately opens large PRs — generated docs, fixtures, a vendored bump — went
+  red on work the reviewers were never handed, with nothing to change. Reported from
+  tanplan-platform: a 789 KB diff cut at 300 KB, and qa correctly refusing to pass what it could
+  not read.
+
+  The effective limit is resolved from `REVIEW_DIFF_MAX_BYTES`, then `review.max_diff_bytes`, then
+  the default, and the plan's run summary now states the number **and** which of the three produced
+  it. Two bounds come with it: a value that is not a positive whole number of bytes, or is above
+  2 000 000, fails the plan step with an error naming the key and the value rather than silently
+  falling back; and the key is read from the **base** branch's copy of `config.yml`, like
+  `review.security_paths`, so a PR cannot raise the limit on its own diff. Raising it costs — all
+  three reviewers read the diff on every PR — so set it to fit the PRs you actually open.
+
+- **All three review gates now refuse to PASS a truncated diff** (`.github/workflows/_flow-review.yml`,
+  flow-0101). **No caller action** beyond picking up the release.
+
+  The qa, code-review and security prompts read the same byte-bounded `.flow-review/diff.patch`,
+  but only qa was told to react when the helper stamped a `DIFF TRUNCATED` marker into it. On an
+  oversized PR the other two could return PASS on a partial read, which a human reads as a full
+  review. All three now carry the same instruction, verbatim: a truncated diff must not PASS, and
+  the verdict must name the truncation. The diff limit itself is unchanged.
+
+- **A repo can declare which top-level folders are not source, in `source_roots_ignore:`**
+  (`project-template/.flow/bin/flow-doctor.mjs`, `project-template/.flow/config.yml`, flow-0102).
+  **No caller action** — the key is optional and ships empty; a repo opts in by setting it, and can
+  then drop any local `ROOT_IGNORE` patch at its next flow-sync.
+
+  flow-doctor fails a top-level folder that holds source-extension files, is not declared in
+  `source_roots:`, and is not in `ROOT_IGNORE` — and `ROOT_IGNORE` was hard-coded in
+  flow-doctor.mjs, so a repo with a deliberately ungated `docs/` or `holding/` could only go green
+  by patching Flow's own code, which the next flow-sync overwrote. `source_roots_ignore:` in
+  `.flow/config.yml` is the repo's half of that set: bare top-level folder names, each treated
+  exactly as a `ROOT_IGNORE` entry everywhere flow-doctor consults it. An entry holding a `/` or a
+  glob character, or naming a folder that is not there, is a warning naming the entry and exempts
+  nothing — never fatal. The undeclared-tree failure now names the config key as the fix instead of
+  `ROOT_IGNORE`.
+
+- **The review gate now fails closed when the diff was truncated**
+  (`project-template/.flow/bin/flow-review.mjs`, `.github/workflows/_flow-review.yml`, flow-0103).
+  **No caller action** beyond picking up the release — but read the paragraph below first if this
+  repo routinely opens large PRs.
+
+  A PR whose diff exceeds the review limit now **fails all three review checks** (qa, code-review
+  and security), whatever the reviewers wrote. Until now `verdict` took a PASS at face value even
+  when `plan` had clipped the diff, so the rule "do not approve what you could not read" lived
+  entirely in the three prompts (flow-0101) — and a prompt is an instruction, not a gate. On the
+  run that prompted this, qa refused a 789 KB diff cut at 300 KB while code-review and security
+  passed it, and the two green checks were read as a full review.
+
+  **If your repo routinely opens PRs larger than the limit, set `review.max_diff_bytes` in
+  `.flow/config.yml` (flow-0100) before taking this release** — otherwise those PRs go red with
+  nothing wrong with them. The failure names both ways out: raise the limit, or merge past the
+  check as a deliberate human decision that the diff was not fully reviewed. There is no override
+  label and no switch to disable the rule; merging past a red check is the override, and it is
+  visible.
+
+  Mechanically: `verdict` takes a required `--diff-truncated true|false`, which `_flow-review.yml`
+  passes to all three checks from the plan job's own `diff_truncated` output — never from
+  `.flow-review/`, which the reviewer itself writes to. A missing or non-boolean value fails the
+  check rather than defaulting. The failure quotes the kept and full byte counts, and a FAIL
+  verdict still reports the reviewer's own findings alongside the truncation.
+
+## 2.1.3 — 2026-09-30 (tagged `v2.1.3`)
 
 **PATCH: the review gate agrees with `touches-guard` about which file is the task.** A repo whose
 task filenames do not carry the project prefix had its qa check fail on every task PR. No caller
@@ -141,6 +220,7 @@ run's actual outcome. Rollback: `git tag -f v2 v2.1.1 && git push -f origin v2`.
 ### Fixed
 
 - **`source_roots` jobs install the repo's dependencies before a `runtime: node` check.**
+  (`.github/workflows/_flow-gates.yml`, `project-template/.flow/bin/source-roots.mjs`, flow-0097)
   **Caller action: none.** The
   `source-root` matrix job ran `actions/setup-node` and then the declared check with no install
   step, so a check as ordinary as `npm run lint` exited `127` in any repo whose linter is a
