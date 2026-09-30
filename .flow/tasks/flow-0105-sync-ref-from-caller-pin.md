@@ -23,6 +23,7 @@ touches:
   - "changes/flow-0105.md"
 labels: [flow-infra, flow-sync]
 notes:
+  - "2026-09-30 (worker): Build pushed on flow/flow-0105-sync-ref-from-caller-pin. Done: new `Resolve canonical ref` step in _flow-sync.yml (id: canonical-ref, output `ref`), clone step now reads `steps.canonical-ref.outputs.ref`, no `inputs.canonical_ref || 'v2'` left; template caller comment, both docs, changes/flow-0105.md. NOT done: `.flow/bin/sync-default-ref.test.mjs` (the proving tests). Next: write that test file, then run all five gate commands."
   - "2026-09-30 (orchestrator): Written at the human's request as the last open defect on #55 (defects 1-3 fixed by flow-0051, flow-0064, flow-0075). Close #55 when this merges."
   - "2026-09-30 (orchestrator): Latent today because the fleet pins @v2 and the default is 'v2'. It bites on the first repo pinned to anything else — the progress canary on v2-edge, the next major (v3), or the release-repo repin in flow-0030 — and it bites silently: a scheduled sync adopts from v2 and opens a PR that moves the repo's local copies to a different version than its callers run."
   - "2026-09-30 (orchestrator): Overlaps flow-0081, flow-0091 and flow-0092 on _flow-sync.yml, and flow-0030 (blocked) on the template caller. pick-task sequences them; rebase onto whichever lands first."
