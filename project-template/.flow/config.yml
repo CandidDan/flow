@@ -124,6 +124,22 @@ review:
   # Omit to use `model` for all three.
   security_model: "opus"
 
+  # Optional: how many BYTES of the PR diff the reviewers are handed. Omitted, it is 300000.
+  #
+  # Raise it if this repo legitimately opens large PRs — generated docs, fixtures, a vendored
+  # dependency bump. Past the limit the diff is cut, and all three reviewers are instructed to
+  # refuse to PASS what they could only partly read, so a repo whose normal PR exceeds it goes
+  # red on correct work with nothing to change. That is the case this key exists for.
+  #
+  # IT COSTS. Every one of the three reviewers reads the diff, on every PR, so each byte here is
+  # billed up to three times. Raise it to fit the PRs you actually open, not to the ceiling.
+  # Maximum 2000000; a value that is not a positive whole number within that bound fails the plan
+  # step with an error naming this key, rather than quietly falling back to the default.
+  #
+  # Read from the BASE branch's copy of this file, like `security_paths` below — a PR cannot raise
+  # the limit on its own diff.
+  # max_diff_bytes: 900000
+
   # The security review is CONDITIONAL: it runs when the diff touches one of these globs, and
   # is skipped — visibly, with the reason on the run — when it does not. It earns its keep on
   # auth, external input, data access and dependency diffs, and has little to chew on in a copy

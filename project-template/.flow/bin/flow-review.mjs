@@ -54,10 +54,29 @@ const __isMain = (() => {
 // quietly running on whatever this line happens to say.
 export const DEFAULT_MODEL = "sonnet";
 
-// Cap on the diff handed to a reviewer. The bound is the cost control: reviewers read the diff
-// and its blast radius, never the whole repo. A truncated diff is reported, not hidden — a
-// reviewer that silently saw half a change would approve on half the evidence.
+// Cap on the diff handed to a reviewer, when nothing else says otherwise. The bound is the cost
+// control: reviewers read the diff and its blast radius, never the whole repo. A truncated diff is
+// reported, not hidden — a reviewer that silently saw half a change would approve on half the
+// evidence.
+//
+// It is a DEFAULT, not a fleet-wide constant (flow-0100). It was effectively the latter: the only
+// override was `REVIEW_DIFF_MAX_BYTES`, and no reusable workflow passes it, so a repo that
+// legitimately opens large PRs — generated docs, fixtures, a vendored bump — had the gate go red
+// on work the reviewers were never handed. Reported from tanplan-platform: a 789 KB diff cut at
+// 300 KB, and qa correctly refused to pass what it could not read. `review.max_diff_bytes` is the
+// per-repo knob; this stays what an unconfigured repo gets.
 export const DEFAULT_MAX_DIFF_BYTES = 300_000;
+
+// The ceiling on any configured limit. Not a guess about what a model can read — a bound on what
+// this gate is allowed to cost, since every one of the three reviewers reads the diff on every PR,
+// so a byte here is up to three bytes billed. A repo whose diffs genuinely exceed it is telling
+// you something about the PR, not about the limit: split it, or accept a truncated read that the
+// reviewers are instructed to refuse to pass.
+//
+// It binds the env override too, deliberately. A ceiling one source can step over is not a
+// ceiling, and the env var is set by the workflow layer — the same layer a repo controls — so
+// exempting it would just relocate the knob rather than bound it.
+export const MAX_DIFF_BYTES_CEILING = 2_000_000;
 
 // Where the task store lives, relative to the repo the review is planned against. An adapter
 // pins it (see canonical's `.flow/bin/flow-review.mjs`); the CLI default is cwd-relative for
@@ -145,6 +164,47 @@ function checkModel(value, key) {
   return value;
 }
 
+// A diff limit is a number this file does arithmetic with, and the arithmetic fails QUIETLY when
+// the value is not one: `Number("lots")` is NaN, `full <= NaN` is false, and `boundDiff` then
+// "truncates" every diff to zero bytes while reporting a cap of NaN. A typo in config.yml must
+// fail the plan loudly instead, naming the key and the value, which is the whole reason this is
+// checked here rather than coerced at the point of use.
+const POSITIVE_INT_RE = /^[0-9]+$/;
+function checkMaxDiffBytes(raw, key) {
+  const s = String(raw).trim();
+  const n = POSITIVE_INT_RE.test(s) ? Number(s) : NaN;
+  if (!Number.isSafeInteger(n) || n <= 0 || n > MAX_DIFF_BYTES_CEILING) {
+    throw new ReviewError(
+      `${key} = ${JSON.stringify(s)} is not a usable diff limit. It is a size in BYTES, so it ` +
+      `must be a positive whole number no greater than ${MAX_DIFF_BYTES_CEILING} ` +
+      `(MAX_DIFF_BYTES_CEILING) — e.g. 900000. Omit the key entirely to use the default of ` +
+      `${DEFAULT_MAX_DIFF_BYTES}.`);
+  }
+  return n;
+}
+
+// The effective limit, and WHICH of the three sources produced it. The precedence is env, then
+// config, then the default: the environment is the operator's escape hatch on a single run, the
+// config is the repo's standing decision, and the default is what an unconfigured repo gets.
+//
+// The source is returned rather than inferred by the caller because the run summary has to state
+// it (flow-0100). A limit with no provenance is the thing that made this hard to diagnose in the
+// first place: the summary reported the bytes handed over and the truncation, and left a human to
+// guess whether 300 000 was a choice anyone had made.
+//
+// `configured` is `cfg.maxDiffBytes` — already validated by `parseReviewConfig`, and `null` when
+// the key is absent. The env value has not been through anything yet, so it is checked here.
+export function resolveMaxDiffBytes({ env = {}, configured = null } = {}) {
+  const fromEnv = String(env.REVIEW_DIFF_MAX_BYTES ?? "").trim();
+  if (fromEnv) {
+    return { bytes: checkMaxDiffBytes(fromEnv, "REVIEW_DIFF_MAX_BYTES"), source: "env" };
+  }
+  if (configured !== null && configured !== undefined) {
+    return { bytes: configured, source: "config" };
+  }
+  return { bytes: DEFAULT_MAX_DIFF_BYTES, source: "default" };
+}
+
 // ── config ────────────────────────────────────────────────────────────────────────────────
 // Pull the `review:` block out of config.yml without a YAML dependency. Handles the two shapes
 // the file actually uses — inline arrays and `-` lists — and treats anything it does not
@@ -215,11 +275,17 @@ export function parseReviewConfig(src) {
   if (!model) warnings.push(`review.model is not set — falling back to "${DEFAULT_MODEL}".`);
   const securityModel = stringAt(b, "security_model");
   const securityPaths = listAt(b, "security_paths");
+  // `null`, not the default, when the key is absent. The two facts are different — "this repo
+  // chose 300000" and "this repo chose nothing" — and only `resolveMaxDiffBytes` may collapse
+  // them, because it is the thing that has to name which happened.
+  const maxDiffRaw = stringAt(b, "max_diff_bytes");
+  const maxDiffBytes = maxDiffRaw ? checkMaxDiffBytes(maxDiffRaw, "review.max_diff_bytes") : null;
   return {
     model: checkModel(model || DEFAULT_MODEL, "model"),
     // A repo that wants a deeper model on security diffs says so; otherwise one model, one knob.
     securityModel: checkModel(securityModel || model || DEFAULT_MODEL, "security_model"),
     securityPaths,
+    maxDiffBytes,
     configured: block !== null,
     warnings,
   };
@@ -604,7 +670,9 @@ export function runReviewCli(argv, {
         configPath: env.FLOW_CONFIG || configPath,
         outDir: env.REVIEW_OUT_DIR || outDir,
         baseRef: env.BASE_REF || "origin/main",
-        maxBytes: Number(env.REVIEW_DIFF_MAX_BYTES || DEFAULT_MAX_DIFF_BYTES),
+        // REVIEW_DIFF_MAX_BYTES is resolved inside `runPlan`, against config.yml (flow-0100),
+        // so the whole environment goes over rather than one value read out of it here.
+        env,
         // GITHUB_HEAD_REF is set natively by GitHub on every pull_request event, so an older
         // caller that passes no HEAD_REF still gets the branch. It cannot recover the PR title
         // (GitHub exposes no env for it), which is why the skew case above still has to be
@@ -669,7 +737,14 @@ export function runPlan({
   configPath = ".flow/config.yml",
   outDir = ".flow-review",
   baseRef = process.env.BASE_REF || "origin/main",
-  maxBytes = Number(process.env.REVIEW_DIFF_MAX_BYTES || DEFAULT_MAX_DIFF_BYTES),
+  // NOT pre-collapsed to a number (flow-0100). It used to default to
+  // `Number(REVIEW_DIFF_MAX_BYTES || DEFAULT_MAX_DIFF_BYTES)`, which decided the limit BEFORE
+  // config.yml had been read and left nothing able to tell an env override from the default. The
+  // limit is now resolved below, after `parseReviewConfig`, from all three sources at once.
+  //
+  // `env` is the environment the limit is resolved against — a parameter so a test does not have
+  // to mutate `process.env`, and so the CLI can hand over the `env` it was given.
+  env = process.env,
   headRef = process.env.HEAD_REF || "",
   prTitle = process.env.PR_TITLE || "",
   callerSupplied,
@@ -684,10 +759,15 @@ export function runPlan({
       `security triggers from the repo's own config, and will not invent them`);
   }
   const cfg = parseReviewConfig(read(configPath));
+  // `configPath` is BASE's copy of config.yml — `_flow-review.yml` materialises it outside the
+  // working tree and points FLOW_CONFIG at it (flow-0079). So `review.max_diff_bytes` is read
+  // from base for the same reason `security_paths` is: a PR must not be able to raise the limit
+  // on its own diff, any more than it can delete the glob that would have reviewed it.
+  const limit = resolveMaxDiffBytes({ env, configured: cfg.maxDiffBytes });
   const changedFiles = git(["diff", "--name-only", `${baseRef}...HEAD`])
     .split("\n").map((s) => s.trim()).filter(Boolean);
   const security = securityDecision({ changedFiles, securityPaths: cfg.securityPaths, bootstrap });
-  const diff = boundDiff(git(["diff", `${baseRef}...HEAD`]), { maxBytes });
+  const diff = boundDiff(git(["diff", `${baseRef}...HEAD`]), { maxBytes: limit.bytes });
   const task = taskContext({
     headRef, prTitle, tasksDir, ls, read,
     ...(callerSupplied === undefined ? {} : { callerSupplied }),
@@ -698,10 +778,21 @@ export function runPlan({
   writeFileSync(join(outDir, "diff.patch"), diff.text);
   writeFileSync(join(outDir, "task.md"), task.text);
 
-  return { cfg, changedFiles, security, diff, task, outDir, bootstrap: Boolean(bootstrap) };
+  return { cfg, changedFiles, security, diff, task, limit, outDir, bootstrap: Boolean(bootstrap) };
 }
 
-export function planSummary({ cfg, changedFiles, security, diff, task, bootstrap = false }) {
+const LIMIT_SOURCE = {
+  env: "from the `REVIEW_DIFF_MAX_BYTES` environment override",
+  config: "from `review.max_diff_bytes` in .flow/config.yml",
+  default: "the built-in default — set `review.max_diff_bytes` in .flow/config.yml to change it",
+};
+
+export function planSummary({
+  cfg, changedFiles, security, diff, task, bootstrap = false,
+  // Defaulted so a caller holding an older plan object still renders. The line then reports the
+  // default, which is what such a plan actually used.
+  limit = { bytes: DEFAULT_MAX_DIFF_BYTES, source: "default" },
+}) {
   const out = [
     "### Flow review gate — plan",
     "",
@@ -709,6 +800,10 @@ export function planSummary({ cfg, changedFiles, security, diff, task, bootstrap
     `- security reviewer model: \`${cfg.securityModel}\``,
     `- changed files: ${changedFiles.length}`,
     `- diff handed to the reviewers: ${diff.bytes} bytes${diff.truncated ? ` **(truncated from ${diff.fullBytes})**` : ""}`,
+    // The limit AND where it came from. Without the provenance a red gate reads as a mystery
+    // number: the run that prompted flow-0100 reported the truncation perfectly well and left a
+    // human unable to tell whether 300000 was anyone's decision.
+    `- diff limit: ${limit.bytes} bytes — ${LIMIT_SOURCE[limit.source] ?? limit.source}`,
     `- security review: **${security.run ? "RUNNING" : "SKIPPED"}** — ${security.reason}`,
     task.found
       ? `- task under review: \`${task.id}\` (${task.reason}) — \`${task.path}\``
