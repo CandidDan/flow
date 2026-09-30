@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0100"
 title: "A repo sets its review diff limit in config.yml as review.max_diff_bytes"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0100"
 created: "2026-09-30"
-started: ""
+started: "2026-09-30T05:27:46Z"
 branch: ""
 pr: ""
 issue: ""
