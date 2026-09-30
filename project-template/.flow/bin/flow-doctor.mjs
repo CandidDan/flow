@@ -84,8 +84,9 @@
 // gate ran only in app/, a parse error took down inbound for ~7 days). This check makes the
 // floor a *declared, ratcheting* contract and catches it drifting as the repo grows: a new
 // top-level source tree that no calibrated `source_root` covers FAILS the gate until it's
-// declared (or explicitly ignored). It can't prove a command truly parses a tree — it makes
-// coverage explicit and reviewed, not magically complete.
+// declared (or explicitly ignored — `source_roots_ignore:` in config.yml, flow-0102, which is how
+// a repo extends the ignore set without patching this file). It can't prove a command truly
+// parses a tree — it makes coverage explicit and reviewed, not magically complete.
 //
 // UNCALIBRATED VS STALE (flow-0017). A fresh scaffold still holds the shipped `REPLACE-ME`
 // sentinel in `path` and/or `check` — that is "hasn't been calibrated yet", not "drifted", and
@@ -96,7 +97,7 @@
 // below (an uncalibrated entry proves nothing, so it must not appear to satisfy coverage). A
 // non-placeholder `path` absent from disk is still stale drift and still a PROBLEM.
 
-import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -128,6 +129,95 @@ const ROOT_IGNORE = new Set([
   "node_modules", ".git", ".github", ".flow", ".claude", "dist", "build", "out", ".next",
   "coverage", "vendor", ".venv", "venv", "target", ".turbo", ".cache", "tmp", ".vercel",
 ]);
+
+// ── source_roots_ignore (flow-0102) ──
+// ROOT_IGNORE above is CANONICAL's list, and it is the whole escape hatch from the
+// undeclared-tree FAIL below. A repo whose top-level `docs/` or `holding/` holds source-extension
+// files but deliberately isn't gated therefore had no move that the protocol allows: declaring it
+// as a `source_root` invents a check for a tree nobody wanted checked, and the only alternative
+// was editing this file — a local patch to Flow's own code, which the next `flow-sync` overwrites.
+// `source_roots_ignore:` in `.flow/config.yml` is the repo's half of the set: each entry is
+// treated exactly as a ROOT_IGNORE entry, everywhere this file consults it.
+//
+// BARE TOP-LEVEL FOLDER NAMES ONLY — no `/`, no globs — because that is what ROOT_IGNORE holds,
+// and a set matched by `.has(name)` cannot honour a pattern. A malformed entry, or one naming a
+// folder that isn't there, is a WARNING naming the entry and exempts NOTHING: silently accepting
+// `holding/` or `hold*` would leave a repo believing a tree is exempt while the gate still fails
+// on it, and silently dropping it would leave a typo undiagnosed. It is never fatal — an
+// unreadable escape hatch must not be able to fail a gate all by itself.
+const IGNORE_GLOB_CHARS = /[*?[\]{}!]/;
+
+// Strip a trailing `# comment`, whitespace and one layer of quotes from one scalar entry.
+function unquoteEntry(v) {
+  return v.split("#")[0].trim().replace(/^["'](.*)["']$/, "$1");
+}
+
+/**
+ * The raw `source_roots_ignore:` entries from config.yml, exactly as written — unvalidated, so
+ * the caller can report what the author typed. Both YAML list forms, like `touches:` in a task:
+ *   source_roots_ignore: ["docs", "holding"]
+ *   source_roots_ignore:
+ *     - "docs"
+ *
+ * Line-scanned rather than YAML-parsed, for the reason `source-roots.mjs` gives: these helpers
+ * run in gate jobs with no install step, so `yaml` is not importable. Unquoted inline entries
+ * are read too (`[docs, holding]` is valid YAML), because a dropped entry reads as an escape
+ * hatch that silently did nothing.
+ */
+export function parseSourceRootsIgnore(configPath) {
+  if (!existsSync(configPath)) return [];
+  const lines = readFileSync(configPath, "utf8").split("\n");
+  const i = lines.findIndex((l) => /^source_roots_ignore:/.test(l));
+  if (i === -1) return [];
+  const inline = lines[i].replace(/^source_roots_ignore:\s*/, "").split("#")[0].trim();
+  if (inline.startsWith("[")) {
+    const body = inline.replace(/^\[/, "").replace(/\]\s*$/, "").trim();
+    return body === "" ? [] : body.split(",").map(unquoteEntry);   // `[]` is an empty list, not one empty entry
+  }
+  const out = [];
+  for (let j = i + 1; j < lines.length; j++) {
+    if (/^\S/.test(lines[j])) break;                 // dedent to the next top-level key → block done
+    const t = lines[j].trim();
+    if (t === "" || t.startsWith("#")) continue;
+    const m = t.match(/^-\s*(.*)$/);
+    if (!m) break;
+    out.push(unquoteEntry(m[1]));
+  }
+  return out;
+}
+
+/**
+ * Validate raw entries against `repoRoot`. Returns `{ ignore, warnings }` — `ignore` holds only
+ * the entries that earned their exemption (a bare name that is a real directory), so a warned
+ * entry exempts nothing, and `warnings` names every entry that was rejected and why.
+ */
+export function sourceRootsIgnoreFindings(entries, repoRoot) {
+  const ignore = new Set();
+  const warnings = [];
+  const why = "it exempts nothing, so an undeclared tree is still reported";
+  for (const entry of entries) {
+    if (entry === "") {
+      warnings.push("source_roots_ignore has an empty entry — give it a bare top-level folder " +
+        `name, or remove it; ${why}.`);
+    } else if (entry.includes("/") || IGNORE_GLOB_CHARS.test(entry)) {
+      warnings.push(`source_roots_ignore entry "${entry}" is not a bare top-level folder name — ` +
+        `it must hold no "/" and no glob characters (the ignore set is matched by name, ` +
+        `not by pattern); ${why}.`);
+    } else if (!isDirectory(join(repoRoot, entry))) {
+      warnings.push(`source_roots_ignore entry "${entry}" names no folder at the repo root — ` +
+        `stale declaration, or a typo; ${why}.`);
+    } else {
+      ignore.add(entry);
+    }
+  }
+  return { ignore, warnings };
+}
+
+// `path` exists AND is a directory. A file named `docs` is not a folder to ignore, and a broken
+// symlink must read as absent rather than throw.
+function isDirectory(path) {
+  try { return statSync(path).isDirectory(); } catch { return false; }
+}
 const SOURCE_EXT = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".rs", ".go", ".rb", ".java", ".kt",
   ".cs", ".php", ".ex", ".exs", ".swift", ".scala", ".dart",
@@ -149,7 +239,11 @@ const SOURCE_EXT = new Set([
 const sourceRootsMod = await import("./source-roots.mjs").then((m) => m, () => null);
 
 // Does any directory at or beneath `dir` (bounded depth, ignoring junk) hold a source file?
-function containsSource(dir, depth = 0) {
+// `ignore` is ROOT_IGNORE plus the repo's `source_roots_ignore` entries — the same set, at every
+// depth, because an entry is "treated exactly as a ROOT_IGNORE entry" and ROOT_IGNORE applies at
+// every depth. So a repo ignoring `docs` also stops a nested `src/docs` from making `src/` look
+// like a source tree, which is the behaviour it asked for.
+function containsSource(dir, depth = 0, ignore = ROOT_IGNORE) {
   if (depth > 4) return false;
   let entries;
   try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return false; }
@@ -157,21 +251,21 @@ function containsSource(dir, depth = 0) {
     if (e.isFile() && SOURCE_EXT.has(e.name.slice(e.name.lastIndexOf(".")))) return true;
   }
   for (const e of entries) {
-    if (e.isDirectory() && !ROOT_IGNORE.has(e.name) && !e.name.startsWith(".")) {
-      if (containsSource(join(dir, e.name), depth + 1)) return true;
+    if (e.isDirectory() && !ignore.has(e.name) && !e.name.startsWith(".")) {
+      if (containsSource(join(dir, e.name), depth + 1, ignore)) return true;
     }
   }
   return false;
 }
 
 // Top-level dirs (depth 1 from repo root) that hold source and aren't ignored.
-function topLevelSourceDirs(repoRoot) {
+function topLevelSourceDirs(repoRoot, ignore = ROOT_IGNORE) {
   let entries;
   try { entries = readdirSync(repoRoot, { withFileTypes: true }); } catch { return []; }
   return entries
-    .filter((e) => e.isDirectory() && !ROOT_IGNORE.has(e.name) && !e.name.startsWith("."))
+    .filter((e) => e.isDirectory() && !ignore.has(e.name) && !e.name.startsWith("."))
     .map((e) => e.name)
-    .filter((name) => containsSource(join(repoRoot, name)));
+    .filter((name) => containsSource(join(repoRoot, name), 0, ignore));
 }
 
 // A top-level dir is covered if a declared root path equals it, sits inside it, or contains it.
@@ -331,12 +425,12 @@ export function readinessFindings(task) {
 // that burns a worker's entire turn budget without producing a PR. A WARNING, never a
 // problem — greenfield work is legitimate and no checker can tell the two apart. Globs with
 // no directory component (a file at the repo root) and ROOT_IGNORE dirs are exempt.
-function newSubsystemRoots(touchesList, repoRoot) {
+function newSubsystemRoots(touchesList, repoRoot, ignore = ROOT_IGNORE) {
   const out = [];
   for (const glob of touchesList ?? []) {
     if (!glob.includes("/")) continue;                       // a bare file at the repo root
     const root = staticPrefix(glob).split("/")[0];
-    if (!root || ROOT_IGNORE.has(root)) continue;
+    if (!root || ignore.has(root)) continue;
     if (existsSync(join(repoRoot, root))) continue;
     if (!out.some((o) => o.root === root)) out.push({ root, glob });
   }
@@ -736,6 +830,15 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
   const problems = [], warnings = [], notes = [];
   const repoRoot = dirname(flowDir);
   const tasksDir = join(flowDir, "tasks");
+  const configPath = join(flowDir, "config.yml");
+
+  // The repo's own additions to ROOT_IGNORE, resolved BEFORE the task loop: the new-subsystem
+  // tell inside that loop consults the same set, so parsing it later would exempt the
+  // undeclared-tree scan and silently not the tell.
+  const { ignore: extraIgnore, warnings: ignoreWarnings } =
+    sourceRootsIgnoreFindings(parseSourceRootsIgnore(configPath), repoRoot);
+  warnings.push(...ignoreWarnings);
+  const rootIgnore = extraIgnore.size ? new Set([...ROOT_IGNORE, ...extraIgnore]) : ROOT_IGNORE;
   // Every id the store declares, with the path that declared it — gathered for the duplicate
   // scan below. Collected BEFORE the field/status guards below `continue`, on purpose: a
   // collision must not be able to hide behind an unrelated missing field in one of its halves.
@@ -777,7 +880,7 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
     // New-subsystem tell: every status, because the signal is about the shape of the work and
     // not about when it was written. A warning either way, so a legitimate greenfield task
     // reports and ships.
-    for (const { root, glob } of newSubsystemRoots(t.touchesList, repoRoot)) {
+    for (const { root, glob } of newSubsystemRoots(t.touchesList, repoRoot, rootIgnore)) {
       warnings.push(`${t.id}: touches "${glob}" but "${root}/" does not exist in this repo — ` +
         "a task that stands up a whole new subsystem is usually more than one task; " +
         "split it into outcomes that can each merge alone, or confirm the greenfield is intended");
@@ -832,7 +935,7 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
   // source_roots yet only gets a warning (so dropping this check into an existing project
   // doesn't fail its gate before it's calibrated).
   const { exists: configExists, declared, roots } = sourceRootsMod
-    ? sourceRootsMod.parseSourceRoots(join(flowDir, "config.yml"))
+    ? sourceRootsMod.parseSourceRoots(configPath)
     : { exists: false, declared: false, roots: [] };
   if (!sourceRootsMod) {
     notes.push("gate-coverage floor skipped — source-roots.mjs is not present beside flow-doctor.mjs; " +
@@ -852,10 +955,11 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
       if (!r.check) problems.push(`source_root "${r.path}" has no check — declare the command that parses/lints it`);
       if (!existsSync(join(repoRoot, r.path))) problems.push(`source_root "${r.path}" does not exist on disk — stale declaration`);
     }
-    for (const dir of topLevelSourceDirs(repoRoot)) {
+    for (const dir of topLevelSourceDirs(repoRoot, rootIgnore)) {
       if (!roots.some((r) => r.path && !sourceRootsMod.isPlaceholder(r.path) && rootCovers(r.path, dir))) {
         problems.push(`source tree "${dir}/" is not covered by any source_root — declare it (with a check) ` +
-          `or it's never parsed before production. If it shouldn't be gated, add it to ROOT_IGNORE.`);
+          `or it's never parsed before production. If it shouldn't be gated, list it in ` +
+          `source_roots_ignore in .flow/config.yml — ignoring a tree is a decision, not a default.`);
       }
     }
   }

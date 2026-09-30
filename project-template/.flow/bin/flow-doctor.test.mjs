@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync, lstatSync,
 import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runDoctor, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES } from "./flow-doctor.mjs";
+import { runDoctor, parseSourceRootsIgnore, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES } from "./flow-doctor.mjs";
 
 // The vision every fixture gets unless it asks for none: two live goals, one non-goal, one
 // retired goal. Written in the shape flow-doctor's line regex reads, deliberately mixing the
@@ -360,6 +360,141 @@ test("source_roots: an entry with an empty path is the existing PROBLEM, not rec
   assert.ok(r.problems.some((p) => p === "source_root with no path in config.yml"));
   assert.ok(!r.warnings.some((w) => /uncalibrated/i.test(w)), "an empty path is malformed config, not a placeholder");
   rmSync(repo, { recursive: true, force: true });
+});
+
+// ── source_roots_ignore: the repo's half of the ignore set (flow-0102) ──
+// ROOT_IGNORE is canonical's, hard-coded, and it is the ONLY escape hatch from the
+// undeclared-tree FAIL above — so a repo whose `docs/` or `holding/` holds source-extension
+// files but is deliberately ungated could only get green by patching flow-doctor.mjs, which the
+// next flow-sync overwrites. These tests hold the config-side hatch open, and hold shut the two
+// ways it could rot: an entry that looks like it exempts something and doesn't, and an entry
+// that is wrong and says nothing.
+
+// `source_roots:` declaring app/ (present in every fixture below) plus a raw ignore block.
+const cfgIgnore = (ignoreYaml) => cfg([{ path: "app/", check: "npm run lint" }]) + ignoreYaml;
+const undeclared = (r, dir) => r.problems.filter((p) => p.includes(`"${dir}/"`) && p.includes("not covered"));
+
+test("source_roots_ignore: an ignored top-level tree produces no undeclared-tree failure", () => {
+  const { repo, flowDir } = repoFixture({
+    config: cfgIgnore('source_roots_ignore: ["holding"]\n'),
+    trees: { "app/src": "index.ts", holding: "scratch.ts" },
+  });
+  const r = runDoctor({ flowDir });
+  assert.deepEqual(undeclared(r, "holding"), [],
+    "a folder the repo declared ignorable must not fail the gate-coverage floor");
+  assert.deepEqual(r.problems, [], `an ignored tree is not a problem of any other kind: ${JSON.stringify(r.problems)}`);
+  assert.deepEqual(r.warnings.filter((w) => w.includes("source_roots_ignore")), [],
+    "a well-formed entry naming a real folder must be silent");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("source_roots_ignore: without the key the same tree still FAILS, and the message names the key", () => {
+  const { repo, flowDir } = repoFixture({
+    config: cfg([{ path: "app/", check: "npm run lint" }]),
+    trees: { "app/src": "index.ts", holding: "scratch.ts" },
+  });
+  const r = runDoctor({ flowDir });
+  assert.equal(undeclared(r, "holding").length, 1, "existing behaviour: an undeclared tree fails");
+  assert.match(undeclared(r, "holding")[0], /source_roots_ignore/,
+    "the FAIL must name the config key, not ROOT_IGNORE — a fix a repo cannot apply is not a fix");
+  assert.doesNotMatch(undeclared(r, "holding")[0], /ROOT_IGNORE/,
+    "pointing an adopter at flow-doctor's own constant is what flow-0102 removed");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("source_roots_ignore: an entry with a path separator WARNS naming it and exempts nothing", () => {
+  const { repo, flowDir } = repoFixture({
+    config: cfgIgnore('source_roots_ignore: ["docs/api"]\n'),
+    trees: { "app/src": "index.ts", "docs/api": "sample.ts" },
+  });
+  const r = runDoctor({ flowDir });
+  const w = r.warnings.filter((x) => x.includes('"docs/api"'));
+  assert.equal(w.length, 1, `expected one warning naming the entry, got ${JSON.stringify(r.warnings)}`);
+  assert.match(w[0], /bare top-level folder name/);
+  assert.equal(undeclared(r, "docs").length, 1, "a malformed entry must exempt nothing");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("source_roots_ignore: a glob entry WARNS naming it and exempts nothing", () => {
+  const { repo, flowDir } = repoFixture({
+    config: cfgIgnore('source_roots_ignore: ["hold*"]\n'),
+    trees: { "app/src": "index.ts", holding: "scratch.ts" },
+  });
+  const r = runDoctor({ flowDir });
+  assert.ok(r.warnings.some((x) => x.includes('"hold*"') && /glob/.test(x)),
+    `expected a warning naming the glob entry, got ${JSON.stringify(r.warnings)}`);
+  assert.equal(undeclared(r, "holding").length, 1,
+    "the ignore set is matched by name — a pattern must not appear to work");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("source_roots_ignore: an entry naming no folder WARNS naming it, and is never fatal", () => {
+  const { repo, flowDir } = repoFixture({
+    config: cfgIgnore('source_roots_ignore: ["ghost"]\n'),
+    trees: { "app/src": "index.ts" },
+  });
+  const r = runDoctor({ flowDir });
+  assert.ok(r.warnings.some((x) => x.includes('"ghost"') && /names no folder/.test(x)),
+    `expected a stale-entry warning naming it, got ${JSON.stringify(r.warnings)}`);
+  assert.deepEqual(r.problems, [], "an unreadable escape hatch must not be able to fail a gate by itself");
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("source_roots_ignore: an empty entry WARNS rather than being silently dropped", () => {
+  const { repo, flowDir } = repoFixture({
+    config: cfgIgnore('source_roots_ignore:\n  - ""\n'),
+    trees: { "app/src": "index.ts" },
+  });
+  const r = runDoctor({ flowDir });
+  assert.ok(r.warnings.some((x) => /source_roots_ignore has an empty entry/.test(x)),
+    `expected an empty-entry warning, got ${JSON.stringify(r.warnings)}`);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("source_roots_ignore: the multi-line list form is read, like touches", () => {
+  const { repo, flowDir } = repoFixture({
+    config: cfgIgnore('source_roots_ignore:\n  - "docs"    # prose, nothing to check\n  - holding\n'),
+    trees: { "app/src": "index.ts", docs: "sample.ts", holding: "scratch.ts" },
+  });
+  const r = runDoctor({ flowDir });
+  assert.deepEqual(r.problems, [],
+    `both list entries must be honoured, quoted or not: ${JSON.stringify(r.problems)}`);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("source_roots_ignore: an entry is ignored at every depth, exactly as a ROOT_IGNORE entry is", () => {
+  const { repo, flowDir } = repoFixture({
+    config: cfgIgnore('source_roots_ignore: ["docs"]\n'),
+    trees: { "app/src": "index.ts", docs: "sample.ts", "wrapper/docs": "sample.ts" },
+  });
+  const r = runDoctor({ flowDir });
+  assert.deepEqual(r.problems, [],
+    `"wrapper/" holds source only under an ignored name, so it is not a source tree: ${JSON.stringify(r.problems)}`);
+  rmSync(repo, { recursive: true, force: true });
+});
+
+test("source_roots_ignore: an empty list, and no key at all, both warn about nothing", () => {
+  for (const config of [cfgIgnore("source_roots_ignore: []\n"), cfg([{ path: "app/", check: "npm run lint" }])]) {
+    const { repo, flowDir } = repoFixture({ config, trees: { "app/src": "index.ts" } });
+    const r = runDoctor({ flowDir });
+    assert.deepEqual(r.problems, []);
+    assert.deepEqual(r.warnings.filter((w) => w.includes("source_roots_ignore")), [],
+      `an unused escape hatch must be silent: ${JSON.stringify(r.warnings)}`);
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("parseSourceRootsIgnore: both list forms, comments stripped, and an absent file is no entries", () => {
+  const dir = mkdtempSync(join(tmpdir(), "flow-ign-"));
+  const at = (body) => { const p = join(dir, "config.yml"); writeFileSync(p, body); return p; };
+  assert.deepEqual(parseSourceRootsIgnore(join(dir, "nope.yml")), []);
+  assert.deepEqual(parseSourceRootsIgnore(at("source_roots:\n  - path: \"app/\"\n")), [],
+    "`source_roots:` must not be mistaken for `source_roots_ignore:`");
+  assert.deepEqual(parseSourceRootsIgnore(at('source_roots_ignore: ["docs", holding]   # two\n')), ["docs", "holding"]);
+  assert.deepEqual(parseSourceRootsIgnore(at("source_roots_ignore: []\n")), []);
+  assert.deepEqual(parseSourceRootsIgnore(at('source_roots_ignore:\n  # a comment\n  - "docs"\n  - holding\ncoverage_min: 80\n')),
+    ["docs", "holding"]);
+  rmSync(dir, { recursive: true, force: true });
 });
 
 // ── version drift (Flow infra is authored in canonical; repos adopt — the guard) ──
@@ -1257,6 +1392,23 @@ test("canonical's own .flow/intents/_TEMPLATE.md is byte-identical to the publis
     const published = readFileSync(join(import.meta.dirname, "..", "intents", "_TEMPLATE.md"), "utf8");
     const own = readFileSync(join(canonicalRoot, ".flow", "intents", "_TEMPLATE.md"), "utf8");
     assert.equal(own, published, "canonical's copy has drifted from the published artefact");
+  });
+
+// The shipped config is the only place an adopter learns the key exists (flow-0102). A hatch
+// nobody can find is the patched-flow-doctor.mjs they had before — and one shipped WITH an entry
+// would silently exempt a tree in every fresh adoption, which is the failure the key exists to
+// make visible. So: present, documented, and empty.
+test("the published template config documents source_roots_ignore, empty, as a decision",
+  { skip: inCanonical ? false : "not canonical" }, () => {
+    const configPath = join(import.meta.dirname, "..", "config.yml");
+    const text = readFileSync(configPath, "utf8");
+    assert.match(text, /^source_roots_ignore: \[\]/m, "the key must ship, uncommented and empty");
+    assert.deepEqual(parseSourceRootsIgnore(configPath), [],
+      "a shipped entry would exempt a tree in every repo that adopts Flow");
+    // The DECLARATION, not the earlier prose mention of the key inside the source_roots comment.
+    const comment = text.slice(0, text.indexOf("\nsource_roots_ignore:")).split(/\n\s*\n/).pop();
+    assert.match(comment, /never gated/i, "the comment must say an ignored folder is never gated");
+    assert.match(comment, /decision/i, "…and that ignoring one is therefore a decision, not a default");
   });
 
 test("ADR-0007 records the grandfathering, teeth and triage decisions, each as a decision",
