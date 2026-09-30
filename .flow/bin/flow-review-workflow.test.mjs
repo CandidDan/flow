@@ -44,6 +44,20 @@ const allSteps = () => Object.values(wf.jobs ?? {}).flatMap((j) => j.steps ?? []
 const materialiseStep = (job) =>
   stepsOf(job).find((s) => /Materialise the review gate from the BASE branch/.test(String(s.name ?? "")));
 
+// flow-0085: the materialise step's script has three branches — base carries the gate, BOOTSTRAP,
+// neither — then an unconditional block. These cut it into the pieces the criteria talk about.
+const baseBranch = (run) => run.slice(run.indexOf("git worktree add"), run.indexOf("elif [ -f .flow/bin/flow-review.mjs ]"));
+const bootstrapBranch = (run) => run.slice(run.indexOf("elif [ -f .flow/bin/flow-review.mjs ]"), run.search(/\n\s*else\n/));
+const finalBlock = (run) => {
+  // The parsed block scalar is dedented, so `fi` closing the if/elif/else sits at column 0.
+  const at = run.lastIndexOf("\nfi\n");
+  assert.ok(at > 0, "the materialise step's if/elif/else must close with `fi` before the shared block");
+  return run.slice(at);
+};
+// Every job that materialises the gate, found by its step rather than listed: a job added later
+// without the base-side task directory fails the base-branch test below instead of escaping it.
+const materialisingJobs = () => Object.keys(wf.jobs ?? {}).filter((job) => materialiseStep(job));
+
 // Every `uses: anthropics/claude-code-action@…` step in a job — the reviewer invocation itself.
 const reviewerSteps = (job) =>
   (wf.jobs[job]?.steps ?? []).filter((s) => String(s.uses ?? "").startsWith("anthropics/claude-code-action"));
@@ -398,7 +412,9 @@ test("the materialised helper and config are the BASE branch's, in a scratch tre
       "diffs base against itself and hands three reviewers an empty patch");
     assert.match(run, /REVIEW_OUT_DIR=\$GITHUB_WORKSPACE\/\.flow-review/,
       "the bounded context has to land where the reviewer prompts say it is");
-    assert.match(run, /REVIEW_TASKS_DIR=\$GITHUB_WORKSPACE\/\.flow\/tasks/);
+    // flow-0085: REVIEW_TASKS_DIR is no longer a PR-side variable. See the base/bootstrap tests.
+    assert.doesNotMatch(finalBlock(run), /REVIEW_TASKS_DIR=/,
+      "the unconditional block must not set REVIEW_TASKS_DIR; each branch chooses its own source");
 
     assert.equal(materialiseStep(job).env?.BASE_BRANCH, "${{ github.base_ref }}",
       "the ref name reaches the shell through env, never ${{ }} — same rule as the PR title");
@@ -568,4 +584,106 @@ test("criterion 8 (flow-0100): its changelog entry exists, says no caller action
   assert.ok(text, "the changelog entry for flow-0100 is missing");
   assert.match(text, /No caller action/i, "a repo opts in by setting the key; nothing is required");
   assert.match(text, /max_diff_bytes/, "and the entry has to name the key a repo would set");
+});
+
+// ── flow-0085: the task file, and so the acceptance criteria, are read from BASE ──
+
+test("flow-0085: with a gate on base, every materialising job reads the task from the base worktree", { skip }, () => {
+  const jobs = materialisingJobs();
+  assert.deepEqual([...jobs].sort(), [...HELPER_JOBS].sort(),
+    "the set of jobs that materialise the gate changed — each one must carry the base-side task dir");
+  for (const job of jobs) {
+    const run = String(materialiseStep(job).run);
+    assert.match(baseBranch(run), /echo "REVIEW_TASKS_DIR=\$base_dir\/\.flow\/tasks"/,
+      `${job}: a PR must not choose the criteria it is judged against — read the task from base`);
+  }
+});
+
+test("flow-0085: in BOOTSTRAP the task comes from the PR, since base has no independent copy", { skip }, () => {
+  for (const job of materialisingJobs()) {
+    const run = String(materialiseStep(job).run);
+    assert.match(bootstrapBranch(run), /echo "REVIEW_TASKS_DIR=\$GITHUB_WORKSPACE\/\.flow\/tasks"/, job);
+    assert.doesNotMatch(bootstrapBranch(run), /\$base_dir/, `${job}: bootstrap has no base worktree`);
+  }
+});
+
+test("flow-0085: the diff and the output still come from, and go to, the PR checkout", { skip }, () => {
+  for (const job of materialisingJobs()) {
+    const tail = finalBlock(String(materialiseStep(job).run));
+    assert.match(tail, /echo "REVIEW_REPO_DIR=\$GITHUB_WORKSPACE"/, job);
+    assert.match(tail, /echo "REVIEW_OUT_DIR=\$GITHUB_WORKSPACE\/\.flow-review"/, job);
+  }
+});
+
+test("flow-0085: the step's header comment names the task file as read from base", { skip }, () => {
+  for (const job of materialisingJobs()) {
+    // Comments are stripped by the YAML parser, so read the source between this job's step name
+    // and its `run:` key.
+    const at = reusableSrc.indexOf("Materialise the review gate from the BASE branch",
+      reusableSrc.indexOf(`\n  ${job}:\n`));
+    const header = reusableSrc.slice(at, reusableSrc.indexOf("run: |", at)).replace(/\s+#?\s*/g, " ");
+    assert.match(header, /`REVIEW_TASKS_DIR` \(the task file and its acceptance criteria, flow-0085\) point at base/, job);
+  }
+});
+
+// End to end over the real helper, no workflow run: a base branch holds criterion A, the PR branch
+// rewrites it to B, and `runPlan` pointed at a worktree of base (what the workflow now does) must
+// hand the reviewers A.
+async function taskPlanFixture(t, { taskOnBase }) {
+  const { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { execFileSync } = await import("node:child_process");
+  const { runPlan, NO_TASK_SENTINEL } = await import(join(TEMPLATE, ".flow/bin/flow-review.mjs"));
+  const root = mkdtempSync(join(tmpdir(), "flow-0085-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const repo = join(root, "repo");
+  mkdirSync(join(repo, ".flow/tasks"), { recursive: true });
+  const git = (args, cwd = repo) => execFileSync("git", args, { cwd, encoding: "utf8",
+    env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+  const task = (criterion) => `---\nid: "flow-9999"\ntitle: "x"\nstatus: "in_progress"\n---\n\n## Acceptance criteria\n\n- [ ] ${criterion}\n`;
+  const taskPath = join(repo, ".flow/tasks/flow-9999-x.md");
+  copyFileSync(join(REPO, ".flow/config.yml"), join(repo, ".flow/config.yml"));
+  git(["init", "-q", "-b", "main"]);
+  if (taskOnBase) writeFileSync(taskPath, task("CRITERION-A from base"));
+  writeFileSync(join(repo, "README.md"), "base\n");
+  git(["add", "-A"]); git(["commit", "-q", "-m", "base"]);
+  git(["checkout", "-q", "-b", "flow/flow-9999-x"]);
+  writeFileSync(taskPath, task("CRITERION-B chosen by the PR"));
+  writeFileSync(join(repo, "README.md"), "pr\n");
+  git(["add", "-A"]); git(["commit", "-q", "-m", "pr"]);
+  const baseDir = join(root, "flow-review-base");
+  git(["worktree", "add", "-q", "--detach", baseDir, "main"]);
+  const plan = runPlan({
+    configPath: join(baseDir, ".flow/config.yml"),
+    outDir: join(root, "out"),
+    baseRef: "main",
+    env: {},
+    headRef: "flow/flow-9999-x",
+    prTitle: "[flow-9999] x",
+    callerSupplied: true,
+    tasksDir: join(baseDir, ".flow/tasks"),
+    git: (args) => git(args),
+  });
+  const { readFileSync: rf } = await import("node:fs");
+  return { plan, text: rf(join(root, "out", "task.md"), "utf8"), NO_TASK_SENTINEL };
+}
+
+test("flow-0085: a task edited on the PR branch reaches the reviewers as BASE's copy", async (t) => {
+  const { plan, text } = await taskPlanFixture(t, { taskOnBase: true });
+  assert.equal(plan.task.found, true);
+  assert.match(text, /CRITERION-A from base/);
+  assert.doesNotMatch(text, /CRITERION-B/, "the PR's own edit to its criteria must not reach the reviewers");
+});
+
+test("flow-0085: a task that exists only on the PR branch resolves to the existing NO TASK sentinel", async (t) => {
+  const { plan, text, NO_TASK_SENTINEL } = await taskPlanFixture(t, { taskOnBase: false });
+  assert.equal(plan.task.found, false);
+  assert.ok(text.startsWith(NO_TASK_SENTINEL), "no new sentinel: the same one as any unresolved task");
+  assert.doesNotMatch(text, /CRITERION-B/);
+});
+
+test("flow-0085 has a changelog fragment that says the caller does nothing", () => {
+  const text = changelogEntry(REPO, "flow-0085");
+  assert.ok(text, "the changelog entry for flow-0085 is missing");
+  assert.match(text, /Caller action: none/);
 });

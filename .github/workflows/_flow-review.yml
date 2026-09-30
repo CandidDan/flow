@@ -138,9 +138,10 @@ jobs:
           node-version: ${{ inputs.node_version }}
       - name: Materialise the review gate from the BASE branch
         # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
-        # comes from the PR. The four env vars written below are what keeps those two apart —
-        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` /
-        # `REVIEW_TASKS_DIR` point back at the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
+        # comes from the PR. The env vars written below are what keeps those two apart —
+        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` + `REVIEW_TASKS_DIR` (the task file and its acceptance
+        # criteria, flow-0085) point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` point back at
+        # the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
         # a repo whose `.flow/bin/flow-review.mjs` is an ADAPTER (canonical's is): an adapter pins
         # its git to its own realpath, which inside the base worktree would diff base against
         # itself and hand the reviewers an empty patch.
@@ -162,6 +163,10 @@ jobs:
             {
               echo "FLOW_REVIEW_DIR=$base_dir/.flow/bin"
               echo "FLOW_CONFIG=$base_dir/.flow/config.yml"
+              # flow-0085: the task file is the STANDARD the PR is judged against, so it comes
+              # from base too. A PR that edits its own acceptance criteria must not hand the
+              # reviewers the edited copy.
+              echo "REVIEW_TASKS_DIR=$base_dir/.flow/tasks"
             } >> "$GITHUB_ENV"
           elif [ -f .flow/bin/flow-review.mjs ]; then
             # BOOTSTRAP — this PR is the one adopting the gate. The helper below forces the
@@ -169,6 +174,8 @@ jobs:
             {
               echo "FLOW_REVIEW_DIR=$GITHUB_WORKSPACE/.flow/bin"
               echo "REVIEW_BOOTSTRAP=1"
+              # No independent copy exists on base, so the task file can only come from the PR.
+              echo "REVIEW_TASKS_DIR=$GITHUB_WORKSPACE/.flow/tasks"
             } >> "$GITHUB_ENV"
             echo "::warning::BOOTSTRAP: the base branch carries no review gate, so this PR's own" \
                  "copy is planning the review of this PR. The security review is forced on."
@@ -186,7 +193,6 @@ jobs:
           {
             echo "REVIEW_REPO_DIR=$GITHUB_WORKSPACE"
             echo "REVIEW_OUT_DIR=$GITHUB_WORKSPACE/.flow-review"
-            echo "REVIEW_TASKS_DIR=$GITHUB_WORKSPACE/.flow/tasks"
           } >> "$GITHUB_ENV"
       - name: Plan the review — model, security trigger, bounded context
         id: plan
@@ -224,9 +230,10 @@ jobs:
           node-version: ${{ inputs.node_version }}
       - name: Materialise the review gate from the BASE branch
         # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
-        # comes from the PR. The four env vars written below are what keeps those two apart —
-        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` /
-        # `REVIEW_TASKS_DIR` point back at the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
+        # comes from the PR. The env vars written below are what keeps those two apart —
+        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` + `REVIEW_TASKS_DIR` (the task file and its acceptance
+        # criteria, flow-0085) point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` point back at
+        # the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
         # a repo whose `.flow/bin/flow-review.mjs` is an ADAPTER (canonical's is): an adapter pins
         # its git to its own realpath, which inside the base worktree would diff base against
         # itself and hand the reviewers an empty patch.
@@ -248,6 +255,10 @@ jobs:
             {
               echo "FLOW_REVIEW_DIR=$base_dir/.flow/bin"
               echo "FLOW_CONFIG=$base_dir/.flow/config.yml"
+              # flow-0085: the task file is the STANDARD the PR is judged against, so it comes
+              # from base too. A PR that edits its own acceptance criteria must not hand the
+              # reviewers the edited copy.
+              echo "REVIEW_TASKS_DIR=$base_dir/.flow/tasks"
             } >> "$GITHUB_ENV"
           elif [ -f .flow/bin/flow-review.mjs ]; then
             # BOOTSTRAP — this PR is the one adopting the gate. The helper below forces the
@@ -255,6 +266,8 @@ jobs:
             {
               echo "FLOW_REVIEW_DIR=$GITHUB_WORKSPACE/.flow/bin"
               echo "REVIEW_BOOTSTRAP=1"
+              # No independent copy exists on base, so the task file can only come from the PR.
+              echo "REVIEW_TASKS_DIR=$GITHUB_WORKSPACE/.flow/tasks"
             } >> "$GITHUB_ENV"
             echo "::warning::BOOTSTRAP: the base branch carries no review gate, so this PR's own" \
                  "copy is planning the review of this PR. The security review is forced on."
@@ -272,7 +285,6 @@ jobs:
           {
             echo "REVIEW_REPO_DIR=$GITHUB_WORKSPACE"
             echo "REVIEW_OUT_DIR=$GITHUB_WORKSPACE/.flow-review"
-            echo "REVIEW_TASKS_DIR=$GITHUB_WORKSPACE/.flow/tasks"
           } >> "$GITHUB_ENV"
       - name: Bounded context — the diff and the files it changes
         env:
@@ -372,9 +384,10 @@ jobs:
           node-version: ${{ inputs.node_version }}
       - name: Materialise the review gate from the BASE branch
         # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
-        # comes from the PR. The four env vars written below are what keeps those two apart —
-        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` /
-        # `REVIEW_TASKS_DIR` point back at the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
+        # comes from the PR. The env vars written below are what keeps those two apart —
+        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` + `REVIEW_TASKS_DIR` (the task file and its acceptance
+        # criteria, flow-0085) point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` point back at
+        # the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
         # a repo whose `.flow/bin/flow-review.mjs` is an ADAPTER (canonical's is): an adapter pins
         # its git to its own realpath, which inside the base worktree would diff base against
         # itself and hand the reviewers an empty patch.
@@ -396,6 +409,10 @@ jobs:
             {
               echo "FLOW_REVIEW_DIR=$base_dir/.flow/bin"
               echo "FLOW_CONFIG=$base_dir/.flow/config.yml"
+              # flow-0085: the task file is the STANDARD the PR is judged against, so it comes
+              # from base too. A PR that edits its own acceptance criteria must not hand the
+              # reviewers the edited copy.
+              echo "REVIEW_TASKS_DIR=$base_dir/.flow/tasks"
             } >> "$GITHUB_ENV"
           elif [ -f .flow/bin/flow-review.mjs ]; then
             # BOOTSTRAP — this PR is the one adopting the gate. The helper below forces the
@@ -403,6 +420,8 @@ jobs:
             {
               echo "FLOW_REVIEW_DIR=$GITHUB_WORKSPACE/.flow/bin"
               echo "REVIEW_BOOTSTRAP=1"
+              # No independent copy exists on base, so the task file can only come from the PR.
+              echo "REVIEW_TASKS_DIR=$GITHUB_WORKSPACE/.flow/tasks"
             } >> "$GITHUB_ENV"
             echo "::warning::BOOTSTRAP: the base branch carries no review gate, so this PR's own" \
                  "copy is planning the review of this PR. The security review is forced on."
@@ -420,7 +439,6 @@ jobs:
           {
             echo "REVIEW_REPO_DIR=$GITHUB_WORKSPACE"
             echo "REVIEW_OUT_DIR=$GITHUB_WORKSPACE/.flow-review"
-            echo "REVIEW_TASKS_DIR=$GITHUB_WORKSPACE/.flow/tasks"
           } >> "$GITHUB_ENV"
       - name: Bounded context — the diff and the files it changes
         env:
@@ -532,9 +550,10 @@ jobs:
       - name: Materialise the review gate from the BASE branch
         if: ${{ needs.plan.outputs.security_run == 'true' }}
         # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
-        # comes from the PR. The four env vars written below are what keeps those two apart —
-        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` /
-        # `REVIEW_TASKS_DIR` point back at the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
+        # comes from the PR. The env vars written below are what keeps those two apart —
+        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` + `REVIEW_TASKS_DIR` (the task file and its acceptance
+        # criteria, flow-0085) point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` point back at
+        # the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
         # a repo whose `.flow/bin/flow-review.mjs` is an ADAPTER (canonical's is): an adapter pins
         # its git to its own realpath, which inside the base worktree would diff base against
         # itself and hand the reviewers an empty patch.
@@ -556,6 +575,10 @@ jobs:
             {
               echo "FLOW_REVIEW_DIR=$base_dir/.flow/bin"
               echo "FLOW_CONFIG=$base_dir/.flow/config.yml"
+              # flow-0085: the task file is the STANDARD the PR is judged against, so it comes
+              # from base too. A PR that edits its own acceptance criteria must not hand the
+              # reviewers the edited copy.
+              echo "REVIEW_TASKS_DIR=$base_dir/.flow/tasks"
             } >> "$GITHUB_ENV"
           elif [ -f .flow/bin/flow-review.mjs ]; then
             # BOOTSTRAP — this PR is the one adopting the gate. The helper below forces the
@@ -563,6 +586,8 @@ jobs:
             {
               echo "FLOW_REVIEW_DIR=$GITHUB_WORKSPACE/.flow/bin"
               echo "REVIEW_BOOTSTRAP=1"
+              # No independent copy exists on base, so the task file can only come from the PR.
+              echo "REVIEW_TASKS_DIR=$GITHUB_WORKSPACE/.flow/tasks"
             } >> "$GITHUB_ENV"
             echo "::warning::BOOTSTRAP: the base branch carries no review gate, so this PR's own" \
                  "copy is planning the review of this PR. The security review is forced on."
@@ -580,7 +605,6 @@ jobs:
           {
             echo "REVIEW_REPO_DIR=$GITHUB_WORKSPACE"
             echo "REVIEW_OUT_DIR=$GITHUB_WORKSPACE/.flow-review"
-            echo "REVIEW_TASKS_DIR=$GITHUB_WORKSPACE/.flow/tasks"
           } >> "$GITHUB_ENV"
       - name: Bounded context — the diff and the files it changes
         if: ${{ needs.plan.outputs.security_run == 'true' }}
