@@ -3,124 +3,392 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Flow — autonomous software delivery you can trust</title>
+<meta name="description" content="Flow: a git-native protocol for trustworthy, parallel, agent-driven software delivery.">
+<title>Flow — delegate the work, not the watching</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
+  /* Layout: one 920px reading column; sections separated by hairlines; the task file is the recurring visual motif. */
   :root{
     --bg:#faf7f2; --ink:#1c1a17; --muted:#6b6358; --line:#e7ddcd; --card:#fff;
-    --accent:#c2410c; --accent-soft:#fff1e9; --ok:#15803d; --code:#3a3023;
+    --accent:#c2410c; --accent-soft:#fff1e9; --accent-line:#f3d8c6; --ok:#15803d; --code:#3a3023;
+    --now:#c2410c; --next:#9a6a1a; --later:#6b6358;
+    --sans:ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+    --bg:#171411; --ink:#f1ebe2; --muted:#a89d8f; --line:#332c25; --card:#1f1b17;
+    --accent:#f0773f; --accent-soft:#2b1c13; --accent-line:#4a2c1c; --ok:#4ade80; --code:#f3d9c4;
+    --now:#f0773f; --next:#d9a54a; --later:#a89d8f; color-scheme:dark; } }
+  :root[data-theme="dark"]{
+    --bg:#171411; --ink:#f1ebe2; --muted:#a89d8f; --line:#332c25; --card:#1f1b17;
+    --accent:#f0773f; --accent-soft:#2b1c13; --accent-line:#4a2c1c; --ok:#4ade80; --code:#f3d9c4;
+    --now:#f0773f; --next:#d9a54a; --later:#a89d8f; color-scheme:dark; }
+
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-    font:17px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    -webkit-font-smoothing:antialiased;}
-  .wrap{max-width:920px;margin:0 auto;padding:0 22px;}
+  body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 var(--sans);-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:920px;margin:0 auto;padding-inline:22px;}
   a{color:var(--accent);}
-  h1,h2,h3{letter-spacing:-.02em;line-height:1.15;}
-  code{background:var(--accent-soft);color:var(--code);padding:1px 6px;border-radius:5px;font-size:.86em;}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px;}
+  h1,h2,h3{letter-spacing:-.02em;line-height:1.15;text-wrap:balance;}
+  code,.mono{font-family:var(--mono);}
+  code{background:var(--accent-soft);color:var(--code);padding:1px 6px;border-radius:5px;font-size:.84em;}
+  p{max-width:68ch;}
 
-  /* hero */
-  header{padding:74px 0 50px;border-bottom:1px solid var(--line);}
-  .kicker{font-size:13px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 14px;}
+  header{padding-block:70px 48px;border-bottom:1px solid var(--line);}
+  .kicker{font:600 12.5px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 18px;display:flex;flex-wrap:wrap;gap:6px 14px;}
+  .kicker span{color:var(--muted);}
   h1{font-size:clamp(34px,6vw,56px);margin:0 0 18px;}
-  .lede{font-size:clamp(18px,2.4vw,22px);color:var(--muted);max-width:660px;margin:0 0 26px;}
+  .lede{font-size:clamp(18px,2.4vw,22px);color:var(--muted);max-width:680px;margin:0 0 28px;}
   .lede b{color:var(--ink);}
-  .cta{display:inline-block;background:var(--accent);color:#fff;font-weight:600;text-decoration:none;
-    padding:12px 22px;border-radius:10px;}
-  .cta.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent);margin-left:10px;}
+  .ctas{display:flex;flex-wrap:wrap;gap:10px;}
+  .cta{display:inline-block;background:var(--accent);color:var(--bg);font-weight:600;text-decoration:none;padding:12px 22px;border-radius:10px;}
+  .cta.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent);}
 
-  section{padding:52px 0;border-bottom:1px solid var(--line);}
+  section{padding-block:54px;border-bottom:1px solid var(--line);}
   section h2{font-size:clamp(24px,3.4vw,32px);margin:0 0 8px;}
-  section .sub{color:var(--muted);margin:0 0 30px;max-width:640px;}
+  .sub{color:var(--muted);margin:0 0 30px;max-width:660px;}
+  .eyebrow{font:600 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin:0 0 12px;}
 
-  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
-  .step{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;}
-  .step .n{font-size:13px;font-weight:700;color:var(--accent);letter-spacing:.08em;}
-  .step h3{font-size:18px;margin:8px 0 6px;}
-  .step p{margin:0;color:var(--muted);font-size:15px;}
-
-  .feat{display:grid;grid-template-columns:repeat(2,1fr);gap:16px 28px;}
-  .feat .f h3{font-size:17px;margin:0 0 4px;display:flex;gap:8px;align-items:baseline;}
-  .feat .f h3::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block;flex:none;transform:translateY(-1px);}
-  .feat .f p{margin:0;color:var(--muted);font-size:15px;}
-
-  .quote{font-size:clamp(20px,3vw,26px);line-height:1.4;font-weight:500;max-width:720px;}
+  .quote{font-size:clamp(20px,3vw,26px);line-height:1.4;font-weight:500;max-width:720px;margin:0;}
   .quote .em{color:var(--accent);}
 
-  .scars{display:grid;grid-template-columns:1fr;gap:14px;}
-  .scar{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;background:var(--card);
-    border:1px solid var(--line);border-radius:12px;padding:16px 18px;}
-  .scar .bad{color:var(--muted);font-size:15px;}
-  .scar .fix{font-size:15px;}
-  .scar .fix b{color:var(--ok);}
-  .scar .arrow{display:none;}
+  /* how it works */
+  .flowrow{display:grid;grid-template-columns:1.05fr .95fr;gap:28px;align-items:start;}
+  .steps{display:grid;gap:14px;margin:0;padding:0;list-style:none;counter-reset:s;}
+  .steps li{display:grid;grid-template-columns:34px 1fr;gap:12px;}
+  .steps li::before{counter-increment:s;content:counter(s);font:600 14px/34px var(--mono);text-align:center;width:34px;height:34px;border-radius:50%;border:1px solid var(--accent-line);background:var(--accent-soft);color:var(--accent);}
+  .steps h3{font-size:17px;margin:5px 0 3px;}
+  .steps p{margin:0;color:var(--muted);font-size:15px;}
+  .steps .who{font:500 11.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-left:6px;}
+  .taskfile{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0;}
+  .taskfile .bar{font:500 12px/1 var(--mono);color:var(--muted);padding:11px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+  .taskfile pre{margin:0;padding:14px 16px;font:13px/1.65 var(--mono);color:var(--code);overflow-x:auto;}
+  .taskfile .k{color:var(--accent);}
+  .taskfile .c{color:var(--muted);}
+  .taskfile .cap{font-size:13.5px;color:var(--muted);padding:12px 16px;border-top:1px solid var(--line);margin:0;}
 
-  footer{padding:46px 0 70px;color:var(--muted);font-size:14px;}
-  .who{background:var(--accent-soft);border:1px solid #f3d8c6;border-radius:14px;padding:22px 24px;}
-  .who b{color:var(--ink);}
-  @media(max-width:680px){ .steps,.feat,.scar{grid-template-columns:1fr;} }
+  /* enforced */
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card);}
+  table{border-collapse:collapse;width:100%;font-size:15px;min-width:560px;}
+  th,td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--line);vertical-align:top;}
+  tr:last-child td{border-bottom:none;}
+  th{font:600 11.5px/1.2 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);}
+  td:first-child{font-family:var(--mono);font-size:13.5px;white-space:nowrap;color:var(--ink);}
+  td{color:var(--muted);}
+  .new{font:600 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent-line);background:var(--accent-soft);padding:3px 6px;border-radius:5px;margin-left:8px;vertical-align:1px;}
+
+  /* features */
+  .feat{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:26px 32px;}
+  .f h3{font-size:18px;margin:0 0 6px;}
+  .f p{margin:0 0 8px;color:var(--muted);font-size:15px;}
+  .f ul{margin:0;padding-left:18px;color:var(--muted);font-size:15px;display:grid;gap:4px;}
+  .f ul b{color:var(--ink);font-weight:600;}
+
+  /* scars */
+  .scars{display:grid;gap:12px;}
+  .scar{display:grid;grid-template-columns:1fr 1fr;gap:18px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;}
+  .scar > div{min-width:0;font-size:15px;}
+  .scar .bad{color:var(--muted);}
+  .scar .fix b{color:var(--ok);}
+
+  /* roadmap */
+  .lanes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;}
+  .lane{border-top:3px solid var(--lc);padding-top:14px;min-width:0;}
+  .lane.now{--lc:var(--now)} .lane.next{--lc:var(--next)} .lane.later{--lc:var(--later)}
+  .lane h3{font-size:18px;margin:0 0 2px;color:var(--ink);}
+  .lane .when{font:500 12px/1.4 var(--mono);color:var(--muted);margin:0 0 14px;}
+  .lane ul{list-style:none;margin:0;padding:0;display:grid;gap:12px;}
+  .lane li{font-size:14.5px;color:var(--muted);line-height:1.5;}
+  .lane li b{display:block;color:var(--ink);font-weight:600;font-size:15px;}
+  .lane li .id{font:500 11.5px/1 var(--mono);color:var(--lc);}
+  .open{margin-top:30px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;}
+  .open h3{font-size:16px;margin:0 0 8px;}
+  .open ul{margin:0;padding-left:18px;color:var(--muted);font-size:15px;display:grid;gap:4px;}
+
+  /* start */
+  .start{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:26px;}
+  .prompt{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+  .prompt .bar{display:flex;justify-content:space-between;align-items:center;padding:8px 10px 8px 14px;border-bottom:1px solid var(--line);font:500 12px/1 var(--mono);color:var(--muted);}
+  .prompt button{font:600 12px/1 var(--mono);background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent-line);border-radius:7px;padding:7px 10px;cursor:pointer;}
+  .prompt pre{margin:0;padding:14px 16px;font:13px/1.6 var(--mono);color:var(--code);white-space:pre-wrap;}
+  .start ol{margin:0;padding-left:20px;display:grid;gap:10px;font-size:15px;color:var(--muted);}
+  .start ol b{color:var(--ink);}
+  .start h3{font-size:17px;margin:0 0 10px;}
+
+  .fit{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  .fit > div{background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:14px;padding:20px 22px;}
+  .fit > div.poor{background:var(--card);border-color:var(--line);}
+  .fit h3{margin:0 0 8px;font-size:17px;}
+  .fit p{margin:0;color:var(--muted);font-size:15px;}
+  .fit b{color:var(--ink);}
+
+  footer{padding-block:44px 70px;color:var(--muted);font-size:14px;}
+  footer p{margin:0 0 6px;}
+
+  @media(max-width:760px){
+    .flowrow,.feat,.scar,.lanes,.start,.fit{grid-template-columns:1fr;}
+  }
+  @media (prefers-reduced-motion:no-preference){ .cta{transition:transform .15s ease;} .cta:hover{transform:translateY(-1px);} }
 </style>
 </head>
 <body>
+
 <div class="wrap">
 
   <header>
-    <p class="kicker">Flow</p>
+    <p class="kicker">Flow <span>v2.2.0 · released 30 Sep 2026 · Apache-2.0</span></p>
     <h1>Delegate the work, not the watching.</h1>
-    <p class="lede">Flow turns Claude into a software team you supervise at exactly two points — the <b>spec</b> going in and the <b>pull request</b> coming out. Everything in between runs itself, and nothing reaches you until it’s genuinely done.</p>
-    <a class="cta" href="#how">How it works</a>
-    <a class="cta ghost" href="#why">Why it’s different</a>
+    <p class="lede">Flow turns coding agents into a delivery team you supervise at two points: the <b>intent</b> going in and the <b>merge</b> coming out. Everything in between is enforced by CI, and nothing reaches you until it’s actually done.</p>
+    <div class="ctas">
+      <a class="cta" href="#start">Get started</a>
+      <a class="cta ghost" href="#new">What’s new in v2</a>
+      <a class="cta ghost" href="#roadmap">Roadmap</a>
+    </div>
   </header>
 
   <section>
-    <h2>AI can write code. It can’t be trusted to ship it — yet.</h2>
-    <p class="sub">So you babysit: re-reading every diff, re-running every check, re-feeding context. The bottleneck was never the model’s ability. It’s the missing system that makes “done” actually mean done — and without it, autonomy quietly collapses back into supervision.</p>
-    <p class="quote">Flow is that system. <span class="em">You approve the spec and the PR.</span> The rest is the machine’s job.</p>
+    <h2>AI can write code. You still can’t trust it to ship.</h2>
+    <p class="sub">So you babysit it. You re-read every diff, re-run every check and re-feed context. The model was never the bottleneck. What’s missing is a system that makes “done” mean done, and without one, autonomy quietly collapses back into supervision.</p>
+    <p class="quote">Flow is that system. <span class="em">You approve the intent and the merge.</span> CI holds the line in between.</p>
   </section>
 
   <section id="how">
-    <h2>How it works</h2>
-    <p class="sub">A thin protocol that lives inside your repo — not another platform to log into.</p>
-    <div class="steps">
-      <div class="step"><div class="n">01 — SPEC</div><h3>Write the task as a contract</h3><p>You and Claude turn direction into a real spec: observable acceptance criteria, the exact files it may touch, and the boundary. Vague isn’t allowed — a task is only “ready” when a fresh session could finish it with no further questions.</p></div>
-      <div class="step"><div class="n">02 — BUILD</div><h3>A worker builds behind a hard gate</h3><p>A fresh Claude Code worker claims it, builds on a branch, and <b>cannot open a PR</b> until every criterion has a passing test that proves it — plus security review, code review, and the full build / lint / test / coverage.</p></div>
-      <div class="step"><div class="n">03 — MERGE</div><h3>You review and merge</h3><p>You read the PR — criteria ticked, each with the test that proves it — and merge. Two touchpoints, start to finish. Several workers run in parallel without colliding, coordinated by nothing but git.</p></div>
+    <p class="eyebrow">How it works</p>
+    <h2>A protocol that lives in your repo</h2>
+    <p class="sub">There’s no service to log into and no database. Tasks are Markdown files on <code>main</code>, coordination is git, and enforcement is GitHub Actions.</p>
+    <div class="flowrow">
+      <ol class="steps">
+        <li><div><h3>Approve the intent <span class="who">you</span></h3><p>State what you want and why, in your own words, in the repo. Approving it is your first touchpoint, and every task that follows points back to it.</p></div></li>
+        <li><div><h3>Scope it into tasks <span class="who">orchestrator</span></h3><p>Each task is a contract: acceptance criteria you can observe, the exact paths it may touch, and the goal it serves. A task is only <code>ready</code> when a fresh session could finish it without asking anything.</p></div></li>
+        <li><div><h3>A worker builds it <span class="who">agent</span></h3><p>A fresh session claims the task with a first-push-wins commit, builds on a branch, and a workflow opens the PR as a draft. Workers run in parallel, and scope lists keep them out of each other’s files.</p></div></li>
+        <li><div><h3>CI and independent reviewers judge it <span class="who">ci</span></h3><p>Build, lint, test, coverage and scope run as the gate. QA, code-review and security then review the PR as separate checks, outside the worker’s session, so nothing certifies its own work.</p></div></li>
+        <li><div><h3>You merge <span class="who">you</span></h3><p>Criteria ticked, each with the test that proves it. The merge stays human by design.</p></div></li>
+      </ol>
+      <div class="taskfile" aria-label="Example task file">
+        <div class="bar"><span>.flow/tasks/flow-0100-review-diff-limit.md</span><span>on main</span></div>
+<pre><span class="c">---</span>
+<span class="k">id:</span> "flow-0100"
+<span class="k">status:</span> "done"
+<span class="k">serves:</span> ["G10"]  <span class="c"># the gate tells the truth</span>
+<span class="k">touches:</span>
+  - "project-template/.flow/bin/flow-review.mjs"
+  - "project-template/.flow/bin/flow-review.test.mjs"
+  - "project-template/.flow/config.yml"
+<span class="k">pr:</span> ".../CandidDan/flow/pull/136"
+<span class="c">---</span>
+
+<span class="k">## Acceptance criteria</span>
+
+- [x] Given review.max_diff_bytes: 900000 and
+      no env override, then a 789 000-byte
+      diff is not truncated.
+- [x] Given no key and no env override,
+      then the limit is 300 000.</pre>
+        <p class="cap">A real task from Flow’s own store, trimmed. The diff must stay inside <code>touches</code>, and each criterion needs a test that proves it.</p>
+      </div>
     </div>
   </section>
 
-  <section id="why">
-    <h2>Why it’s different</h2>
-    <p class="sub">Most tools help an agent write code faster. Flow is about making its “finished” trustworthy.</p>
+  <section id="enforced">
+    <p class="eyebrow">The gate</p>
+    <h2>What’s enforced, not requested</h2>
+    <p class="sub">Every row is a CI failure, not a convention. The gate doesn’t care who wrote the code: a human and an agent are held to the same bar.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Check</th><th>What it stops</th></tr></thead>
+        <tbody>
+          <tr><td>touches-guard</td><td>Scope creep. A diff that strays outside the task’s declared paths fails. Needing more room is a reason to re-scope.</td></tr>
+          <tr><td>Independent review<span class="new">v2</span></td><td>Self-certification. QA, code-review and security run on the PR, reading their config and helpers from the base branch, so a PR can’t narrow its own review.</td></tr>
+          <tr><td>Truncated-diff rule<span class="new">v2.2</span></td><td>A review that didn’t read the whole change. If the diff is over the repo’s limit, all three review checks fail, whatever the reviewers said.</td></tr>
+          <tr><td>Store and plane guards</td><td>Task state being clobbered. Task files change only on <code>main</code>, and anything that reaches <code>main</code> without a PR is caught.</td></tr>
+          <tr><td>source_roots<span class="new">v2</span></td><td>Unchecked code. Every declared source tree gets its own check as a matrix job, and an undeclared tree fails the gate.</td></tr>
+          <tr><td>Coverage floor</td><td>Coverage quietly falling. The floor is measured from your repo, never a round number.</td></tr>
+          <tr><td>CLAUDE.md ceiling<span class="new">v2</span></td><td>Instruction bloat. It measures everything a session actually loads, imports included, against a per-repo limit.</td></tr>
+          <tr><td>flow-doctor</td><td>Store drift: duplicate task ids, half-finished claims, a task in review with no PR, a goal that doesn’t exist.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="new">
+    <p class="eyebrow">What’s new in v2</p>
+    <h2>Six releases in sixteen days</h2>
+    <p class="sub">v2.0.0 through v2.2.0 shipped between 14 and 30 September 2026. 77 tasks have now gone through Flow’s own gate, because Flow is built with Flow.</p>
     <div class="feat">
-      <div class="f"><h3>Done means done</h3><p>No PR opens on “looks good to me.” Every acceptance criterion is mapped to a test that proves it, checked by name before the gate lets the PR through.</p></div>
-      <div class="f"><h3>The model refuses to guess</h3><p>Hit an under-specified spot or a real decision, and the worker <em>blocks and asks</em> instead of fabricating. A block is integrity, not failure.</p></div>
-      <div class="f"><h3>Plain files, not a platform</h3><p>Your tasks are Markdown in your own repo, on <code>main</code>. Nothing to log into, nothing to migrate off, no lock-in. The board is just a generated view.</p></div>
-      <div class="f"><h3>Coordinated by git alone</h3><p>Many workers at once. Claiming a task is an atomic first-push-wins commit; a <code>touches</code> list keeps two of them out of the same files. No daemon, no lock server.</p></div>
-      <div class="f"><h3>It hardens itself</h3><p>Every incident becomes a permanent guardrail. The system gets safer the more it’s used — failures turn into checks, not folklore.</p></div>
-      <div class="f"><h3>Stack-agnostic</h3><p>The same protocol runs a static site and a full app. Only a small per-project config and the project’s own context file differ.</p></div>
+      <div class="f">
+        <h3>Review moved out of the worker’s session</h3>
+        <p>The worker no longer reviews its own output.</p>
+        <ul>
+          <li><b>Three PR checks</b> (qa, code-review, security), each with its model and trigger paths set in config</li>
+          <li><b>Base-branch planning</b>, so a PR can’t switch off its own security review</li>
+          <li><b>Fails closed</b> on a truncated diff, with a per-repo <code>review.max_diff_bytes</code></li>
+        </ul>
+      </div>
+      <div class="f">
+        <h3>Direction that survives the work</h3>
+        <p>Every task traces back to something a human said they wanted.</p>
+        <ul>
+          <li><b>VISION.md</b> as the drift anchor, with goals and non-goals in the operator’s words</li>
+          <li><b><code>serves:</code></b> on every task, checked against live goals</li>
+          <li><b>Intent store and template</b> recording whose words an intent holds</li>
+          <li><b>flow-compass</b>, a scheduled read-only drift audit</li>
+        </ul>
+      </div>
+      <div class="f">
+        <h3>Runs while you’re away</h3>
+        <p>Opt-in automation, off by default until you trust the loop.</p>
+        <ul>
+          <li><b>Queue runner</b> dispatches workers on a schedule and fails loudly when a run produces nothing verifiable</li>
+          <li><b>Triage</b> turns issues into tasks, trusting only people who can already direct the repo</li>
+          <li><b>Recover</b> and <b>status</b> keep task state in step with PRs, and retry lost races on <code>main</code></li>
+          <li><b>Watchdog</b> files an issue when scheduled automation stops running</li>
+        </ul>
+      </div>
+      <div class="f">
+        <h3>Adoption and updates you don’t hand-edit</h3>
+        <p>One protocol across many repos, and fixes that reach all of them.</p>
+        <ul>
+          <li><b>flow-init</b> makes adoption a command instead of a runbook to improvise</li>
+          <li><b>flow-sync</b> delivers protocol and caller updates as a PR, and keeps your customised jobs</li>
+          <li><b>Public release repo</b> with immutable tags and a <code>v2</code> alias that moves only after a canary passes</li>
+          <li><b>Helpers ship with the workflow</b> that calls them, so an alias move can’t break a repo that hasn’t synced</li>
+        </ul>
+      </div>
+      <div class="f">
+        <h3>Bigger, messier repos</h3>
+        <p>An admin app and a customer app in one repo, without special-casing.</p>
+        <ul>
+          <li><b>source_roots matrix</b> with dependency install and no duplicate runs</li>
+          <li><b><code>source_roots_ignore</code></b> for folders that aren’t source</li>
+          <li><b>Per-repo limits</b> for review size and context size</li>
+        </ul>
+      </div>
+      <div class="f">
+        <h3>Agent-neutral</h3>
+        <p>Flow is developed with Claude Code, but the protocol isn’t tied to it.</p>
+        <ul>
+          <li><b>AGENTS.md</b> points any coding agent at the same orchestrator skills</li>
+          <li><b>Third-party actions pinned to commit SHAs</b>, so a moved tag can’t change what runs</li>
+          <li><b>Secrets passed by name</b>, never inherited wholesale</li>
+        </ul>
+      </div>
     </div>
   </section>
 
   <section>
+    <p class="eyebrow">Hardened in use</p>
     <h2>Every failure becomes a guardrail</h2>
-    <p class="sub">Flow wasn’t designed on a whiteboard — it was hardened by getting burned, and each scar became a rule the system now enforces for you.</p>
+    <p class="sub">Flow wasn’t designed on a whiteboard. Each of these happened in a real repo, and each is now a check.</p>
     <div class="scars">
-      <div class="scar"><div class="bad">A parse error in an unchecked file silently dropped messages for ~7 days.</div><div class="fix"><b>→</b> The gate now refuses to merge any source tree it doesn’t actually parse.</div></div>
-      <div class="scar"><div class="bad">A worker did all the work, then ended its turn without opening the PR.</div><div class="fix"><b>→</b> PR creation moved off the model and onto a workflow — a stall can’t strand the work.</div></div>
-      <div class="scar"><div class="bad">A task was written but never pushed, so a cloud worker couldn’t see it.</div><div class="fix"><b>→</b> A store check fails loudly the moment a task exists on disk but not on <code>main</code>.</div></div>
+      <div class="scar"><div class="bad">A parse error in an unchecked folder silently dropped messages for about 7 days.</div><div class="fix"><b>→</b> The gate refuses to merge any source tree it doesn’t parse.</div></div>
+      <div class="scar"><div class="bad">A worker did all the work, then ended its turn without opening the PR.</div><div class="fix"><b>→</b> PR creation moved off the model and onto a workflow.</div></div>
+      <div class="scar"><div class="bad">On a 789 KB diff cut to 300 KB, QA refused to pass it while code-review and security passed it anyway.</div><div class="fix"><b>→</b> A truncated diff now fails all three checks in code, not just in a prompt.</div></div>
+      <div class="scar"><div class="bad">Moving the <code>v2</code> alias turned every pinned repo red until it synced a new helper.</div><div class="fix"><b>→</b> Workflows fetch their helpers from their own commit, so they ship as one unit.</div></div>
+      <div class="scar"><div class="bad">The watchdog reported a nine-day outage that never happened, because it trusted the first result GitHub returned.</div><div class="fix"><b>→</b> It now reads 100 runs and takes the newest success.</div></div>
+    </div>
+  </section>
+
+  <section id="roadmap">
+    <p class="eyebrow">Roadmap</p>
+    <h2>Where Flow is going</h2>
+    <p class="sub">Drawn from Flow’s own task store as of 1 October 2026. “Now” tasks are specced and ready to work. “Next” tasks are specced but wait on something else landing first. “Later” is direction without a committed task yet.</p>
+    <div class="lanes">
+      <div class="lane now">
+        <h3>Now</h3>
+        <p class="when">ready in the queue</p>
+        <ul>
+          <li><span class="id">flow-0084</span><b>A review guide on every PR</b>One comment after the reviews finish: a TL;DR, the hotspots to read, the assumptions made, a smoke test and the verdicts.</li>
+          <li><span class="id">flow-0085</span><b>Reviewers read criteria from the base branch</b>So a PR can’t choose the criteria it’s judged against.</li>
+          <li><span class="id">flow-0072 · 0074 · 0092</span><b>Intents end to end</b>A skill that interviews you into an intent, tasks that name their intent, and the template delivered to every repo.</li>
+          <li><span class="id">flow-0080 · 0070</span><b>Queue runner controls</b>A pause switch that leaves review running, a schedule in your local time, and a cap on queue size.</li>
+          <li><span class="id">flow-0108 · 0109</span><b>Cleaner state and questions</b>A <code>cancelled</code> status, and triage questions that @mention you once instead of repeating.</li>
+        </ul>
+      </div>
+      <div class="lane next">
+        <h3>Next</h3>
+        <p class="when">specced, waiting on dependencies</p>
+        <ul>
+          <li><span class="id">flow-0082</span><b>Auto-fix on a failed review</b>A failed qa or code-review check sends a bounded fix worker back to the same PR, and it can’t pass by weakening tests.</li>
+          <li><span class="id">flow-0083</span><b>Model and effort per task</b>Mechanical work runs on cheaper models and the hardest work on the strongest.</li>
+          <li><span class="id">flow-0041</span><b>Unblock sweep</b>Blocked tasks free themselves when their dependency lands.</li>
+          <li><span class="id">G12</span><b>One decision, from your phone</b>Anything Flow needs from you arrives as one decision with a recommendation, answerable in under a minute.</li>
+        </ul>
+      </div>
+      <div class="lane later">
+        <h3>Later</h3>
+        <p class="when">direction, not yet committed</p>
+        <ul>
+          <li><b>Mission control</b>A single view of what’s in flight across every repo, living in its own repo and replacing the current flightdeck.</li>
+          <li><b>Self-enrolling repos</b>Adopting Flow makes a repo visible to the fleet views automatically.</li>
+          <li><b>Real services in the gate</b>Postgres today and Docker next, so the gate can verify what the work actually needs.</li>
+          <li><b>Cost you can see</b>What each task spent in tokens and CI minutes, including scheduled sweeps.</li>
+          <li><b>Catching a gate that lied</b>A way to detect green checks on wrong work. Today that’s still found by hand.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="open">
+      <h3>Open questions</h3>
+      <ul>
+        <li>Where feedback from readers who aren’t the operator (clients, contracted teams) should land.</li>
+        <li>What shape the cross-project view should take.</li>
+        <li>Whether task state should always live in git. It does today, but that isn’t a commitment.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="start">
+    <p class="eyebrow">Get started</p>
+    <h2>Adopt Flow in one session</h2>
+    <p class="sub">The adoption runbooks are written for an agent to follow top to bottom. It stops where a human decision or a GitHub setting is needed. Use <code>INIT.md</code> for a new repo or <code>RETROFIT.md</code> for one with history.</p>
+    <div class="start">
+      <div class="prompt">
+        <div class="bar"><span>Paste into a coding-agent session</span><button type="button" id="copy-prompt">Copy</button></div>
+<pre id="prompt-text">Set this repo up on the Flow protocol. The runbook is project-template/INIT.md in github.com/CandidDan/flow-protocol. Clone that repo at tag v2.2.0 and read it first, then follow it exactly. Don't invent any value in .flow/config.yml: propose the commands from what's actually in this repo and ask me to confirm. Stop and give me the human-only list when you reach it.</pre>
+      </div>
+      <div>
+        <h3>What you’ll need</h3>
+        <ol>
+          <li><b>A GitHub repo with Actions.</b> Flow’s enforcement runs there.</li>
+          <li><b>Five commands:</b> install, build, lint, test and coverage. They’re the only per-stack part.</li>
+          <li><b>Default workflow permissions set to “Read and write”.</b> Without it the state workflows fail loudly.</li>
+          <li><b>A fine-grained <code>FLOW_PAT</code> secret.</b> Without it, auto-opened PRs don’t trigger the gate and can merge unchecked. This is the one to get right.</li>
+        </ol>
+      </div>
     </div>
   </section>
 
   <section>
-    <div class="who">
-      <h2 style="margin-top:0">Who it’s for</h2>
-      <p style="margin:0;color:var(--muted)"><b>Solo builders and small teams running several projects at once</b> who want to hand real work to AI without losing the thread — and want the safety to come from the system, not from their own vigilance. If you already use Git and CI, you already have everything Flow needs.</p>
+    <div class="fit">
+      <div>
+        <h3>A good fit if</h3>
+        <p>You’re <b>solo or a small team running several projects</b> on GitHub, handing real implementation work to coding agents, and you’d rather put effort into a gate that can’t be skipped than review everything by hand.</p>
+      </div>
+      <div class="poor">
+        <h3>Know before you start</h3>
+        <p>Flow has been built and validated by <b>one operator across a handful of projects</b>. Parallel workers are designed for, but no multi-person team has used it yet. It assumes small tasks with mostly separate file scopes. If you want a hosted tool with a UI, or you’re not on GitHub Actions, it isn’t for you yet.</p>
+      </div>
     </div>
   </section>
 
   <footer>
-    Flow — a git-native protocol for trustworthy, parallel, AI-driven delivery. Built on Claude Code. Your work stays in your repo.
+    <p>Flow is a git-native protocol for trustworthy, parallel, agent-driven delivery. Your work stays in your repo.</p>
+    <p>Published artefact: <a href="https://github.com/CandidDan/flow-protocol">github.com/CandidDan/flow-protocol</a> · Licence: Apache-2.0</p>
   </footer>
 
 </div>
+
+<script>
+  (function(){
+    var btn=document.getElementById('copy-prompt'), pre=document.getElementById('prompt-text');
+    if(!btn||!pre) return;
+    btn.addEventListener('click',function(){
+      var done=function(){btn.textContent='Copied';setTimeout(function(){btn.textContent='Copy';},1600);};
+      var fallback=function(){var r=document.createRange();r.selectNodeContents(pre);var s=getSelection();s.removeAllRanges();s.addRange(r);btn.textContent='Selected';};
+      try{ navigator.clipboard.writeText(pre.textContent).then(done,fallback); }catch(e){ fallback(); }
+    });
+  })();
+</script>
 </body>
 </html>
