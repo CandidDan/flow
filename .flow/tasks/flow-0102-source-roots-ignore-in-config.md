@@ -23,6 +23,7 @@ labels: [flow-doctor, source-roots, config]
 notes:
   - "2026-09-30 (orchestrator): Reported from tanplan-platform. flow-doctor fails when a top-level folder holding source-extension files is not declared in `source_roots` and not in `ROOT_IGNORE`. `ROOT_IGNORE` is hard-coded in flow-doctor.mjs (around line 127), so tanplan's `docs/` and `holding/` (deliberately not gated) can only be exempted by patching a copied Flow file, which the next flow-sync overwrites. Declaring them as source_roots was rejected: docs/ has no check to run, and gating holding/ reverses a decision the human already made."
   - "2026-09-30 (orchestrator): Overlaps flow-0100 on project-template/.flow/config.yml; sequence."
+  - "2026-09-30 (worker): Implementation done on branch flow/flow-0102-source-roots-ignore-in-config (pushed). flow-doctor parses `source_roots_ignore:` (both YAML list forms), validates entries against disk, and merges the valid ones into ROOT_IGNORE at all three consult sites; undeclared-tree FAIL now names the config key. Template config ships the key empty, documented. 10 new tests + the published-config test pass (127 total in flow-doctor.test.mjs). Next: run the full five-command gate, then open the PR. Out of scope and left undone: `flow-init.mjs` still GENERATES a config comment pointing at ROOT_IGNORE (line ~398) — not in this task's touches, needs its own task."
 ---
 
 ## Context
