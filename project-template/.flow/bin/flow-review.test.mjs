@@ -329,6 +329,70 @@ test("findTaskFile matches <id>-<slug>.md and a bare <id>.md, and never a longer
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// flow-0099: a store whose filenames do not carry the project prefix (tanplan's `0021-<slug>.md`,
+// with `id: "tanplan-0021"` only in frontmatter). `touches-guard` resolves these by frontmatter id;
+// the review gate must agree with it about the same store.
+function frontmatterStore(dir, files) {
+  const tasksDir = join(dir, "tasks");
+  mkdirSync(tasksDir, { recursive: true });
+  for (const [name, id] of Object.entries(files)) {
+    writeFileSync(join(tasksDir, name), `---\nid: "${id}"\ntitle: "t"\n---\n\nbody of ${name}\n`);
+  }
+  return tasksDir;
+}
+
+test("findTaskFile falls back to the frontmatter id when no filename carries it (flow-0099)", () => {
+  const dir = tmp("find-fm");
+  try {
+    const tasksDir = frontmatterStore(dir, { "0021-some-slug.md": "tanplan-0021", "0025-other.md": "tanplan-0025" });
+    assert.equal(findTaskFile("tanplan-0021", { tasksDir }).path, join(tasksDir, "0021-some-slug.md"));
+    assert.equal(findTaskFile("TANPLAN-0025", { tasksDir }).path, join(tasksDir, "0025-other.md"),
+      "cased however the branch or title cased it, like the filename match");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("taskContext resolves a frontmatter-only id from the PR title and hands over its body (flow-0099)", () => {
+  const dir = tmp("ctx-fm");
+  try {
+    const tasksDir = frontmatterStore(dir, { "0021-some-slug.md": "tanplan-0021" });
+    const t = taskContext({ headRef: "claude/x", prTitle: "[tanplan-0021] ship it", tasksDir });
+    assert.equal(t.found, true);
+    assert.match(t.text, /body of 0021-some-slug\.md/);
+    assert.doesNotMatch(t.text, new RegExp(NO_TASK_SENTINEL));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a filename match wins over a frontmatter match for the same id (flow-0099)", () => {
+  const dir = tmp("find-fm-order");
+  try {
+    const tasksDir = frontmatterStore(dir, { "0068-elsewhere.md": "flow-0068", "flow-0068-a-slug.md": "flow-0068" });
+    const r = findTaskFile("flow-0068", { tasksDir });
+    assert.equal(r.path, join(tasksDir, "flow-0068-a-slug.md"));
+    assert.deepEqual(r.matches, ["flow-0068-a-slug.md"], "the fallback does not run when a filename matched");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("the frontmatter fallback never matches a longer id or the template (flow-0099)", () => {
+  const dir = tmp("find-fm-strict");
+  try {
+    const tasksDir = frontmatterStore(dir, { "00211-x.md": "tanplan-00211", "_TEMPLATE.md": "tanplan-0021" });
+    assert.equal(findTaskFile("tanplan-0021", { tasksDir }).path, null,
+      "an id prefix is not an id, and _TEMPLATE.md is never a task");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("the frontmatter fallback misses cleanly on an unknown id and skips an unreadable file (flow-0099)", () => {
+  const dir = tmp("find-fm-miss");
+  try {
+    const tasksDir = frontmatterStore(dir, { "0021-some-slug.md": "tanplan-0021" });
+    assert.deepEqual(findTaskFile("tanplan-0099", { tasksDir }), { path: null, matches: [] });
+    const read = (p) => { if (p.endsWith("broken.md")) throw new Error("EACCES"); return readFileSync(p, "utf8"); };
+    const ls = () => ["broken.md", "0021-some-slug.md"];
+    assert.equal(findTaskFile("tanplan-0021", { tasksDir, ls, read }).path, join(tasksDir, "0021-some-slug.md"),
+      "an unreadable file is skipped, never a throw — the plan still has to complete");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("taskContext resolves from the PR TITLE when the branch is a platform-imposed one (CAN-52)", () => {
   const dir = tmp("ctx-title");
   try {

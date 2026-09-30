@@ -358,17 +358,36 @@ export function securityDecision({ changedFiles = [], securityPaths = [], bootst
 // arrives from a branch or a title, which humans and harnesses case as they please. Returns every
 // match, so a caller can say something about a store that holds two files for one id (flow-0052)
 // rather than silently picking one.
-export function findTaskFile(id, { tasksDir = DEFAULT_TASKS_DIR, ls = readdirSync } = {}) {
+//
+// flow-0099: a filename carrying the id is canonical's convention, not the protocol's — a repo may
+// name its files `0021-<slug>.md` and keep `id: "tanplan-0021"` only in frontmatter. When no
+// filename matches, fall back to the frontmatter `id`, which is what `touches-guard` has always
+// read. Without it the two gates disagree about one store, and qa goes red on correct work.
+const FRONTMATTER_ID = /^id:\s*["']?([^"'\n]+?)["']?\s*$/m;
+
+export function findTaskFile(id, {
+  tasksDir = DEFAULT_TASKS_DIR,
+  ls = readdirSync,
+  read = (p) => readFileSync(p, "utf8"),
+} = {}) {
   if (!id) return { path: null, matches: [] };
   let names;
   try { names = ls(tasksDir); } catch { return { path: null, matches: [] }; }
   const lower = String(id).toLowerCase();
-  const matches = [...names].map(String)
-    .filter((n) => {
-      const l = n.toLowerCase();
-      return l.endsWith(".md") && (l === `${lower}.md` || l.startsWith(`${lower}-`));
-    })
-    .sort();
+  const tasks = [...names].map(String).filter((n) => n.toLowerCase().endsWith(".md")).sort();
+  let matches = tasks.filter((n) => {
+    const l = n.toLowerCase();
+    return l === `${lower}.md` || l.startsWith(`${lower}-`);
+  });
+  if (!matches.length) {
+    matches = tasks.filter((n) => {
+      if (n === "_TEMPLATE.md") return false;
+      let src;
+      try { src = read(join(tasksDir, n)); } catch { return false; }
+      const m = String(src).match(FRONTMATTER_ID);
+      return Boolean(m) && m[1].trim().toLowerCase() === lower;
+    });
+  }
   return { path: matches.length ? join(tasksDir, matches[0]) : null, matches };
 }
 
@@ -446,7 +465,7 @@ export function taskContext({
   }
 
   const source = idFromBranch(headRef) === id ? "the branch" : "the PR title";
-  const { path, matches } = findTaskFile(id, { tasksDir, ls });
+  const { path, matches } = findTaskFile(id, { tasksDir, ls, read });
   if (!path) {
     return {
       ...miss(`Task id \`${id}\` resolved from ${source}, but no file matching it exists in ` +
