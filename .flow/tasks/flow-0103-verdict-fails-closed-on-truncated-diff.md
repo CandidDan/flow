@@ -26,6 +26,7 @@ notes:
   - "2026-09-30 (orchestrator): Decided by the human, resolving the open question recorded on flow-0101. On a tanplan-platform PR the diff was 789 KB, cut at 300 KB; qa refused, code-review and security passed, and the two greens were read as a full review. flow-0101 makes the three prompts consistent; this task makes the rule hold in code, the same way a missing verdict already fails closed."
   - "2026-09-30 (orchestrator): SEQUENCE AFTER flow-0100 AND flow-0101. flow-0100 (review.max_diff_bytes) must ship first or a repo that routinely opens large PRs goes permanently red with no setting to change; flow-0101 touches the same workflow file. Priority 3 so pick-task takes those first."
   - "2026-09-30 (orchestrator): No new override mechanism (no label, no config switch to disable this). The human override is merging past the red check, which is a visible human decision; the durable fix for a repo is raising review.max_diff_bytes."
+  - "2026-09-30 (orchestrator): Changelog criterion now says HOW to prove it. flow-0101 (#134) and flow-0102 (#135) both failed qa on exactly this criterion."
 ---
 
 ## Context
@@ -71,7 +72,10 @@ override label or switch (see notes); how the diff is truncated.
 - [ ] In `_flow-review.yml`, each of the three verdict steps passes `--diff-truncated` from the
       plan's output expression, not from a workspace file, and a test asserts all three do.
 - [ ] `changes/flow-0103.md` exists, says no caller action is needed, and names `review.max_diff_bytes`
-      for repos with large PRs.
+      for repos with large PRs
+      Prove it with a test in a canonical `.flow/bin/*.test.mjs` (never in `project-template/`,
+      which adopting repos receive) that reads the entry through `changelogEntry` from
+      `.flow/bin/changelog-entry.mjs`, so it still passes after a release assembles the fragment.
 
 ## Definition of done (inherited — do not edit)
 

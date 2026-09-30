@@ -25,6 +25,7 @@ notes:
   - "2026-09-30 (orchestrator): Overlaps flow-0089 on flow-review.mjs and flow-0102 on project-template/.flow/config.yml; sequence, do not run in parallel."
   - "2026-09-30 (worker): Branch `flow/flow-0100-review-diff-limit-in-config` pushed, all 8 criteria implemented with proving tests (65/65 pass in project-template/.flow/bin/flow-review.test.mjs). Done: MAX_DIFF_BYTES_CEILING + checkMaxDiffBytes + resolveMaxDiffBytes in the template helper; runPlan resolves the limit AFTER parseReviewConfig (its `maxBytes` parameter is replaced by an `env` parameter, since the old default pre-collapsed env/default before config was read); planSummary names the limit and its source; the key documented commented-out in project-template/.flow/config.yml; changes/flow-0100.md. Decision not to re-litigate: the ceiling binds REVIEW_DIFF_MAX_BYTES too (a bound one source can step over is not a bound), and an invalid env value now throws rather than becoming NaN. Canonical's .flow/bin/flow-review.mjs adapter is deliberately NOT touched (outside `touches`) — it re-exports a hand-kept list that now omits MAX_DIFF_BYTES_CEILING/resolveMaxDiffBytes; no test asserts export parity, so this is cosmetic, but it is worth a follow-up task. Next action: run the remaining gate commands (build, lint, coverage) and open the PR titled `[flow-0100] A repo sets its review diff limit in config.yml as review.max_diff_bytes`."
   - "2026-09-30 (worker): COMPLETE. PR #136 marked ready for review; the four local gate commands are green (build 34 workflows, lint 101 .mjs, test 1448 pass / 1 pre-existing skip, coverage 95.85% vs a floor of 83.5). Every criterion is ticked in the PR body with its proving test named. Nothing is left to do on the branch; the qa, security and code-review checks now run on the PR. Follow-up worth a task, deliberately left undone as out of `touches`: canonical's .flow/bin/flow-review.mjs adapter re-exports a hand-kept name list that now omits MAX_DIFF_BYTES_CEILING and resolveMaxDiffBytes — nothing is broken (no test asserts export parity) but the list is the flow-0008 shape and will drift again."
+  - "2026-09-30 (orchestrator): Changelog criterion now says HOW to prove it. flow-0101 (#134) and flow-0102 (#135) both failed qa on exactly this criterion."
 ---
 
 ## Context
@@ -65,7 +66,10 @@ truncated (that is flow-0101's).
       limit applies.
 - [ ] The run summary names the effective limit and its source (env, config or default).
 - [ ] `project-template/.flow/config.yml` documents the key, commented out.
-- [ ] `changes/flow-0100.md` exists and says no caller action is needed.
+- [ ] `changes/flow-0100.md` exists and says no caller action is needed
+      Prove it with a test in a canonical `.flow/bin/*.test.mjs` (never in `project-template/`,
+      which adopting repos receive) that reads the entry through `changelogEntry` from
+      `.flow/bin/changelog-entry.mjs`, so it still passes after a release assembles the fragment.
 
 ## Definition of done (inherited — do not edit)
 
