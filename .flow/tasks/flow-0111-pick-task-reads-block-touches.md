@@ -9,7 +9,7 @@ owner: "claude-cowork-orchestrator"
 created: "2026-10-01"
 started: "2026-09-30T23:49:29Z"
 branch: "flow/flow-0111-pick-task-reads-block-touches"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/145"
 issue: ""
 blocked_reason: ""
 blocked_by: []
