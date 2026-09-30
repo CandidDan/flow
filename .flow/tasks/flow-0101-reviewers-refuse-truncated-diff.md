@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0101"
 title: "code-review and security refuse to pass a truncated diff, as qa already does"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0101"
