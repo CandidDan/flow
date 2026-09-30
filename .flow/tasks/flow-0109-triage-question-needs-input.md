@@ -22,9 +22,10 @@ touches:
   - "project-template/.claude/skills/task-writer/SKILL.md"
   - "flightdeck/bin/mission-control.mjs"
   - "flightdeck/bin/mission-control.test.mjs"
-  - "changes/flow-0105.md"
+  - "changes/flow-0109.md"
 labels: [flow-infra, triage]
-notes: []
+notes:
+  - "2026-09-30 (orchestrator): Renumbered from flow-0105: the triage run allocated that id a minute after a local session had already taken it (duplicate id). Changelog fragment path updated to match; content otherwise unchanged."
 ---
 
 ## Context
@@ -71,7 +72,7 @@ Full issue: https://github.com/CandidDan/flow/issues/49
   `deriveNeeds`'s parameters with `needsInputIssues` and push one `needs-input-issue` entry per
   issue (mirroring the existing `proposed-issue` / `compass-finding` entry shapes: `type`,
   `title`, `url`).
-- Changelog fragment `changes/flow-0105.md`.
+- Changelog fragment `changes/flow-0109.md`.
 
 **Does not touch:**
 
@@ -103,7 +104,7 @@ Full issue: https://github.com/CandidDan/flow/issues/49
 - [ ] `mission-control.mjs`'s repo-summarizing function fetches `labels=needs-input` open
       issues the same way it fetches `labels=proposed`/`labels=compass`, and passes them into
       `deriveNeeds` (test on the fetch call / the assembled needs list for a mocked repo).
-- [ ] `changes/flow-0105.md` exists and summarizes the new label and mention.
+- [ ] `changes/flow-0109.md` exists and summarizes the new label and mention.
 
 ## Definition of done (inherited — do not edit)
 

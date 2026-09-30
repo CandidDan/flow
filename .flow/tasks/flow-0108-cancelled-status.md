@@ -29,9 +29,10 @@ touches:
   - "project-template/.claude/skills/board-builder/SKILL.md"
   - "project-template/.flow/tasks/_TEMPLATE.md"
   - "project-template/.flow/PROTOCOL.md"
-  - "changes/flow-0104.md"
+  - "changes/flow-0108.md"
 labels: [flow-infra, protocol]
-notes: []
+notes:
+  - "2026-09-30 (orchestrator): Renumbered from flow-0104: the triage run allocated that id a minute after a local session had already taken it (duplicate id). Changelog fragment path updated to match; content otherwise unchanged."
 ---
 
 ## Context
@@ -89,7 +90,7 @@ Full issue: https://github.com/CandidDan/flow/issues/73
     lifecycle* section documents it (hand-writable, orchestrator-only, requires
     `cancelled_reason`); the *Hard rules* sentence "you hand-write exactly two transitions"
     becomes three.
-  - Changelog fragment `changes/flow-0104.md`.
+  - Changelog fragment `changes/flow-0108.md`.
 
 **Does not touch:**
 
@@ -121,7 +122,7 @@ Full issue: https://github.com/CandidDan/flow/issues/73
 - [ ] `PROTOCOL.md`'s lifecycle diagram and *Status lifecycle* section document `cancelled` as
       a third hand-written, orchestrator-only transition.
 - [ ] `board-builder/SKILL.md` documents where `cancelled` tasks render.
-- [ ] `changes/flow-0104.md` exists and summarizes the new status.
+- [ ] `changes/flow-0108.md` exists and summarizes the new status.
 
 ## Definition of done (inherited — do not edit)
 
