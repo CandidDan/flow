@@ -16,6 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { changelogEntry } from "./changelog-entry.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
@@ -473,4 +474,14 @@ test("the security verdict rule does not contradict the truncation instruction",
   assert.match(sec, /a truncated diff is its own FAIL/,
     "the security prompt tells the reviewer to FAIL iff High/Critical; without this clause the " +
     "truncation instruction above it is a second, contradicting rule");
+});
+
+test("changes/flow-0101.md exists and states that no caller action is needed", () => {
+  // Fragment while pending; assembled CHANGELOG entry after a release (flow-0098).
+  const text = changelogEntry(REPO, "flow-0101");
+  assert.ok(text, "a change to what every adopting repo's reviewers are told owes the changelog an entry");
+  assert.match(text, /No caller action/,
+    "the caller-action line is what a reader of the release notes scans for");
+  assert.ok(!/^#/m.test(text),
+    "a fragment is assembled verbatim under `## Unreleased` — it carries no heading of its own");
 });
