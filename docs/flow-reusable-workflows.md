@@ -36,7 +36,7 @@ them. They are:
 | `_flow-triage.yml` | Scheduled issue triage (off unless `FLOW_AI=true`) | secret `CLAUDE_CODE_OAUTH_TOKEN` |
 | `_flow-review.yml` | The three Definition-of-Done review checks on a PR — qa, code-review and a conditional security review (flow-0007). **Skipped entirely while the PR is a draft** (flow-0039) — the `plan` job carries the condition and the other three `needs: plan` — so the reviewers run once, when the worker marks the PR ready, not on every work-in-progress push. Runs for **any** PR author, not just `flow/` branches; model and security-trigger paths come from the caller's `.flow/config.yml` `review:` block, and `.flow/bin/flow-review.mjs` turns each written verdict into an exit code (fail-closed). Off unless `FLOW_AI=true` | input `node_version`; secret `CLAUDE_CODE_OAUTH_TOKEN` |
 | `_flow-queue-runner.yml` | Picks a ready task → dispatches a fresh worker (off unless `FLOW_AI=true`) | input `task_id`; secrets `CLAUDE_CODE_OAUTH_TOKEN` + `FLOW_PAT` (CAN-58 — so the worker's own push fires `flow-open-pr`; both are forwarded by **both** thin callers since flow-0095) |
-| `_flow-sync.yml` | The adopt mechanism (Phase 4): when the repo's `.flow/VERSION` is behind canonical, copies the updated `.flow/bin/*` + thin callers in, bumps the stamp, and opens a **reviewed PR**. Safe to run anytime (only opens a PR; no `FLOW_AI` gate) | input `canonical_ref` (default `v1`); secret `FLOW_PAT` (optional) |
+| `_flow-sync.yml` | The adopt mechanism (Phase 4): when the repo's `.flow/VERSION` is behind canonical, copies the updated `.flow/bin/*` + thin callers in, bumps the stamp, and opens a **reviewed PR**. Safe to run anytime (only opens a PR; no `FLOW_AI` gate). The ref it adopts from is **read off the caller's own `uses:` pin** when `canonical_ref` is empty — which is every scheduled run (flow-0105) | input `canonical_ref` (overrides the pin; empty ⇒ resolved from the caller, `v2` only if no caller pins one); secret `FLOW_PAT` (optional) |
 
 **`FLOW_PAT` (CAN-58).** A PR opened with the Actions `GITHUB_TOKEN` does *not* trigger downstream
 workflows, so `flow-gates` would never fire on an auto-opened PR — the gate silently bypassed.
@@ -206,7 +206,10 @@ jobs:
   forward different names.
 - **Inputs:** `flow-queue-runner` forwards its `workflow_dispatch` `task_id` via `with:`.
 - **Pinning:** callers pin `@v1` for stability (the plan's choice over `@main`). Bump the tag to
-  adopt a new Flow version.
+  adopt a new Flow version. Repinning is **one** change, not two: `_flow-sync.yml` resolves the ref a
+  scheduled sync adopts from by reading the `@<ref>` off the repo's own `flow-sync.yml` caller, so
+  sweeping the `uses:` lines carries the adopt source with it (flow-0105). Two callers left pinned at
+  different refs fails the sync with an error naming both, rather than picking one.
 - **Permissions:** consuming repos need *default workflow permissions = read+write* (the status/done
   workflows push state to `main`). The reusable workflows declare their own `permissions:`; the
   effective token is the intersection, so the repo setting must allow write.

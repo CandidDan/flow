@@ -43,34 +43,45 @@ sed -i '' "s|\(_flow-[a-z-]*\.yml\)@$FROM$|\1@$TO|" .github/workflows/flow-*.yml
 grep -h "uses:" .github/workflows/flow-*.yml | sort -u          # eyeball every line
 ```
 
-Then **the step that is easy to miss** — see *The flow-sync trap* below:
+That `sed` is the whole edit. Commit, open a PR, let the gate run, merge. On Linux `sed -i ''`
+becomes `sed -i`.
+
+---
+
+## The flow-sync trap (closed since flow-0105)
+
+**You no longer have a second change to make here.** This section is kept because the trap is still
+worth recognising, and because a repo pinned at an older `_flow-sync.yml` still has it.
+
+`_flow-sync.yml` used to adopt from `${{ inputs.canonical_ref || 'v1' }}`, independently of what the
+callers pinned. The thin caller forwards an empty `canonical_ref`, and the weekly `schedule` has no
+way to fill it in, so a repo repinned to `@v1-edge` ran **edge workflows** while `flow-sync` kept
+pulling `.flow/bin/*` from **stable** — a split brain where the tooling and the workflows came from
+different releases. It failed quietly, because both halves work; they just disagreed about which
+version the repo was on. Escaping it meant a second, easily-missed edit:
 
 ```yaml
-# .github/workflows/flow-sync.yml
+# .github/workflows/flow-sync.yml — no longer needed
     with:
       canonical_ref: ${{ inputs.canonical_ref || 'v1-edge' }}
 ```
 
-Commit, open a PR, let the gate run, merge. On Linux `sed -i ''` becomes `sed -i`.
+`_flow-sync.yml` now **reads the pin instead of defaulting**. When `canonical_ref` is empty it scans
+this repo's `.github/workflows/*.yml` for a `uses:` line calling `_flow-sync.yml@<ref>` (any
+owner/repo) and adopts from that ref, logging the file it came from. So the `sed` over the `uses:`
+lines moves the adopt source too, and repinning is **one change, not two**.
 
----
+Three things follow:
 
-## The flow-sync trap
+- **A leftover `canonical_ref: ${{ inputs.canonical_ref || '…' }}` in your caller still wins**, and
+  is now the only way to get the old split brain back. It is safe to delete; the template caller no
+  longer carries one.
+- **Two callers pinned at different refs fail the sync**, with an error naming each file and its ref.
+  That is the state a half-finished repin leaves behind, and it is now loud instead of silent.
+- **No flow-sync caller at all** falls back to `v2` with a warning saying so.
 
-`_flow-sync.yml` defaults its `canonical_ref` input to `'v1'`, independently of what your callers
-pin:
-
-```yaml
-ref: ${{ inputs.canonical_ref || 'v1' }}
-```
-
-So a repo repinned to `@v1-edge` will run **edge workflows** while `flow-sync` keeps pulling
-`.flow/bin/*` from **stable** — a split brain where the tooling and the workflows are from different
-releases. It fails quietly, because both halves work; they just disagree about which version this
-repo is on.
-
-Repinning is therefore **two changes, not one**: the `uses:` lines *and* the `flow-sync` caller's
-`canonical_ref`.
+A `workflow_dispatch` run with the input filled in still overrides everything above — that is how you
+adopt from a canary ref once without repinning.
 
 ---
 
