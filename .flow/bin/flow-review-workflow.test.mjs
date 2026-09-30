@@ -476,6 +476,81 @@ test("the security verdict rule does not contradict the truncation instruction",
     "truncation instruction above it is a second, contradicting rule");
 });
 
+// ── flow-0103: the truncation fact reaches all three verdict steps, from the plan's output ──
+// flow-0101 put the rule in the three prompts; this is the same rule in code, and the wiring is
+// the half the helper cannot test. Two properties matter and neither is behavioural: the fact must
+// come from the PLAN's output expression (the reviewer writes into the workspace, so a file there
+// is not a fact), and all THREE steps must pass it — the failure mode this whole pair of tasks
+// exists for is two checks going green on a diff nobody fully read.
+
+test("the plan job publishes diff_truncated, so the verdict steps read one shared fact", { skip }, () => {
+  assert.equal(wf.jobs.plan.outputs?.diff_truncated, "${{ steps.plan.outputs.diff_truncated }}",
+    "without the job output there is nothing for the three verdict steps to read, and each would " +
+    "have to trust its own workspace");
+  for (const key of ["diff_bytes", "diff_full_bytes"]) {
+    assert.equal(wf.jobs.plan.outputs?.[key], `\${{ steps.plan.outputs.${key} }}`,
+      `${key} is what makes the failure message name a number instead of just "too big"`);
+  }
+});
+
+test("all three verdict steps pass --diff-truncated from the plan's output, never from a file", { skip }, () => {
+  const steps = REVIEW_JOBS.map((job) => {
+    const found = stepsOf(job).filter((s) => VERDICT_RUN.test(String(s.run ?? "")));
+    assert.equal(found.length, 1, `${job} must enforce exactly one verdict`);
+    return [job, found[0]];
+  });
+  assert.equal(steps.length, 3, "qa, code-review and security — a rule two of them follow is not a gate");
+
+  for (const [job, step] of steps) {
+    const run = String(step.run);
+    assert.match(run, /--diff-truncated "\$DIFF_TRUNCATED"/,
+      `${job}'s verdict step does not pass the truncation fact. The helper requires the flag, so ` +
+      `this would fail the check for the wrong reason — and a gate that fails opaquely gets ` +
+      `merged past as noise.`);
+    assert.equal(step.env?.DIFF_TRUNCATED, "${{ needs.plan.outputs.diff_truncated }}",
+      `${job} must take the fact from the PLAN JOB's output. \`.flow-review/\` is written by the ` +
+      `reviewer itself, so a truncation fact read from the workspace is one the reviewer can edit.`);
+    // Reporting only, but the message is the whole reason a red check is actionable.
+    assert.equal(step.env?.DIFF_BYTES, "${{ needs.plan.outputs.diff_bytes }}");
+    assert.equal(step.env?.DIFF_FULL_BYTES, "${{ needs.plan.outputs.diff_full_bytes }}");
+    assert.match(run, /--diff-bytes "\$DIFF_BYTES" --diff-full-bytes "\$DIFF_FULL_BYTES"/);
+  }
+});
+
+test("no verdict step reads the truncation fact out of the workspace the reviewer writes to", { skip }, () => {
+  for (const s of allSteps()) {
+    const run = String(s.run ?? "");
+    if (!VERDICT_RUN.test(run)) continue;
+    assert.doesNotMatch(run, /--diff-truncated[^\n]*\.flow-review/,
+      "the fact must not be read back out of the bounded context — the reviewer writes there");
+    // `${{ }}` in a run block is script, not data: the same rule the PR title and security_reason
+    // follow. The value is a boolean from our own helper, but the rule is cheaper to keep whole.
+    assert.doesNotMatch(run, /\$\{\{/,
+      "a verdict step's script must stay free of ${{ }} interpolation — values arrive via env:");
+  }
+});
+
+test("the helper the workflow calls actually REQUIRES the flag — the two cannot drift apart", { skip: false }, () => {
+  const helper = readFileSync(join(TEMPLATE, ".flow/bin/flow-review.mjs"), "utf8");
+  assert.match(helper, /export const TRUNCATION_FLAG = "--diff-truncated";/,
+    "the flag name is a contract between this workflow and the helper, so it is pinned in code");
+  assert.match(helper, /is required and must be exactly "true" or "false"/,
+    "a flag the helper defaulted would let a workflow that stopped passing it go quietly green — " +
+    "the two ship from the same commit, so there is no skew for a default to absorb");
+});
+
+test("changes/flow-0103.md exists, says no caller action, and names review.max_diff_bytes", () => {
+  const text = changelogEntry(REPO, "flow-0103");
+  assert.ok(text, "every review check on the fleet can now go red on a large PR — that owes an entry");
+  assert.match(text, /No caller action/,
+    "the caller-action line is what a reader of the release notes scans for");
+  assert.match(text, /review\.max_diff_bytes/,
+    "a repo that routinely opens PRs over the limit has to be told which setting to raise BEFORE " +
+    "it takes this release, or it adopts a permanently red gate");
+  assert.ok(!/^#/m.test(text),
+    "a fragment is assembled verbatim under `## Unreleased` — it carries no heading of its own");
+});
+
 test("changes/flow-0101.md exists and states that no caller action is needed", () => {
   // Fragment while pending; assembled CHANGELOG entry after a release (flow-0098).
   const text = changelogEntry(REPO, "flow-0101");

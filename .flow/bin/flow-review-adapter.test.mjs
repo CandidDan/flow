@@ -129,9 +129,34 @@ test("`plan` resolves a task from CANONICAL's store from ANY cwd — the `tasksD
 });
 
 test("`verdict` FAILS CLOSED through the adapter — a missing verdict is never an approval", () => {
-  const r = run(["verdict", join(tmpdir(), "flow-review-ad-no-such.json"), "--check", "qa"]);
+  const r = run(["verdict", join(tmpdir(), "flow-review-ad-no-such.json"), "--check", "qa",
+    "--diff-truncated", "false"]);
   assert.equal(r.status, 1, "a reviewer that died mid-run must not read as an approval");
   assert.match(r.stderr, /no verdict at/);
+});
+
+// flow-0103. The truncation rule lives in the template's `verdictOutcome`, and the adapter's whole
+// contract is that it runs the template's own shell rather than a second copy of it — so what is
+// left to prove HERE is that the rule survives the trip through the adapter, which is the copy
+// `_flow-review.yml` actually invokes on canonical's own PRs.
+test("a truncated diff fails the check THROUGH THE ADAPTER, and the flag is required there too", () => {
+  const dir = tmp("verdict-trunc");
+  try {
+    const f = join(dir, "code-review.json");
+    writeFileSync(f, JSON.stringify({ verdict: "PASS", summary: "looks fine" }));
+
+    const truncated = run(["verdict", f, "--check", "code-review", "--diff-truncated", "true",
+      "--diff-bytes", "300000", "--diff-full-bytes", "789123"]);
+    assert.equal(truncated.status, 1,
+      "an adapter that dropped the flag on the floor would let every truncated PR go green here " +
+      "while the fleet's own repos went red — the drift a copy of the CLI shell would cause");
+    assert.match(truncated.stderr, /TRUNCATED/);
+    assert.match(truncated.stderr, /review\.max_diff_bytes/);
+
+    const missing = run(["verdict", f, "--check", "code-review"]);
+    assert.equal(missing.status, 1, "the flag is required through the adapter, not only in CI");
+    assert.match(missing.stderr, /--diff-truncated/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("a clean verdict clears the check, and an unknown command never exits 0", () => {
@@ -139,7 +164,7 @@ test("a clean verdict clears the check, and an unknown command never exits 0", (
   try {
     const f = join(dir, "qa.json");
     writeFileSync(f, JSON.stringify({ verdict: "PASS", summary: "in scope, tested" }));
-    const r = run(["verdict", f, "--check", "qa"]);
+    const r = run(["verdict", f, "--check", "qa", "--diff-truncated", "false"]);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /qa: PASS/);
 
