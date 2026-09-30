@@ -16,7 +16,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -26,6 +26,7 @@ import {
   DEFAULT_MAX_DIFF_BYTES,
   DEFAULT_MODEL,
   LINE_BREAKS,
+  MAX_DIFF_BYTES_CEILING,
   NO_SOURCES_SENTINEL,
   NO_TASK_SENTINEL,
   ReviewError,
@@ -35,6 +36,8 @@ import {
   findTaskFile,
   parseReviewConfig,
   parseVerdict,
+  planSummary,
+  resolveMaxDiffBytes,
   reviewBlock,
   runPlan,
   runReviewCli,
@@ -1097,4 +1100,264 @@ test("REVIEW_BOOTSTRAP forces the security review on and warns in the step summa
     assert.equal(runReviewCli(["plan"], { env: { GITHUB_OUTPUT: clean }, ...pinned }), 0);
     assert.match(readFileSync(clean, "utf8"), /^bootstrap=false$/m);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── flow-0100: the diff limit is a repo's to set, in config.yml ────────────────────────────
+// The limit used to be fixed fleet-wide in everything but name: `REVIEW_DIFF_MAX_BYTES` existed,
+// but no reusable workflow passes it, so 300 000 was the only value a consuming repo could have.
+// Reported from tanplan-platform — a 789 KB diff cut at 300 KB, qa correctly refusing to pass what
+// it could not read, and nothing to change. These tests pin the three-source resolution, its
+// validation, and the two properties that make it safe: the limit is read from BASE, and the run
+// says where it came from.
+
+// The reported diff, to the byte. Used as the fixture size throughout so the numbers in these
+// tests are the numbers from the incident rather than round ones chosen for the test.
+const REPORTED_DIFF_BYTES = 789_000;
+const bigDiff = "d".repeat(REPORTED_DIFF_BYTES);
+
+/** A config.yml with the given `review:` body lines (already indented two spaces). */
+const configWith = (...lines) => `project:
+  name: "demo"
+
+review:
+  model: "haiku"
+  security_paths:
+    - "src/auth/**"
+${lines.map((l) => `  ${l}`).join("\n")}${lines.length ? "\n" : ""}
+git:
+  base_branch: "main"
+`;
+
+/** runPlan against a config text and an environment, with the 789 000-byte diff. */
+function planWith(configText, env = {}, name = "limit") {
+  const dir = tmp(name);
+  try {
+    writeFileSync(join(dir, "config.yml"), configText);
+    return runPlan({
+      configPath: join(dir, "config.yml"),
+      outDir: join(dir, "out"),
+      env,
+      git: (args) => (args.includes("--name-only") ? "src/auth/session.ts\n" : bigDiff),
+    });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+// Criterion 1.
+test("criterion 1: review.max_diff_bytes 900000 and no env override — a 789 000-byte diff survives whole", () => {
+  const plan = planWith(configWith("max_diff_bytes: 900000"));
+  assert.equal(plan.cfg.maxDiffBytes, 900_000, "the key is parsed as a number, not a string");
+  assert.deepEqual(plan.limit, { bytes: 900_000, source: "config" });
+  assert.equal(plan.diff.truncated, false,
+    "this is the incident: 789 000 bytes was cut at 300 000 and qa refused to pass a partial read");
+  assert.equal(plan.diff.bytes, REPORTED_DIFF_BYTES);
+  assert.equal(plan.diff.text, bigDiff, "and the reviewers get the diff itself, marker-free");
+});
+
+// Criterion 2.
+test("criterion 2: no key and no env override — the limit is still 300 000, and the diff still truncates", () => {
+  const plan = planWith(configWith());
+  assert.equal(plan.cfg.maxDiffBytes, null,
+    "absent is null, NOT the default — only the resolver may collapse those two facts");
+  assert.deepEqual(plan.limit, { bytes: 300_000, source: "default" });
+  assert.equal(DEFAULT_MAX_DIFF_BYTES, 300_000, "the documented default, pinned");
+  assert.equal(plan.diff.truncated, true, "existing behaviour is kept for every unconfigured repo");
+  assert.match(plan.diff.text, /DIFF TRUNCATED at 300000 bytes \(full diff is 789000 bytes\)/);
+});
+
+// Criterion 3.
+test("criterion 3: with both the key and REVIEW_DIFF_MAX_BYTES set, the env value wins", () => {
+  const plan = planWith(configWith("max_diff_bytes: 900000"), { REVIEW_DIFF_MAX_BYTES: "400000" });
+  assert.equal(plan.cfg.maxDiffBytes, 900_000, "the config was read, and then overridden");
+  assert.deepEqual(plan.limit, { bytes: 400_000, source: "env" });
+  assert.equal(plan.diff.truncated, true, "400 000 is what bounded the diff, not 900 000");
+  assert.match(plan.diff.text, /DIFF TRUNCATED at 400000 bytes/);
+});
+
+test("criterion 3: the precedence is env, then config, then default — asserted at the resolver", () => {
+  assert.deepEqual(resolveMaxDiffBytes({ env: { REVIEW_DIFF_MAX_BYTES: "1000" }, configured: 900_000 }),
+    { bytes: 1000, source: "env" });
+  assert.deepEqual(resolveMaxDiffBytes({ configured: 900_000 }), { bytes: 900_000, source: "config" });
+  assert.deepEqual(resolveMaxDiffBytes({ env: {}, configured: null }),
+    { bytes: DEFAULT_MAX_DIFF_BYTES, source: "default" });
+  assert.deepEqual(resolveMaxDiffBytes(), { bytes: DEFAULT_MAX_DIFF_BYTES, source: "default" },
+    "called with nothing at all it still lands on the documented default");
+  assert.deepEqual(resolveMaxDiffBytes({ env: { REVIEW_DIFF_MAX_BYTES: "  " }, configured: 900_000 }),
+    { bytes: 900_000, source: "config" },
+    "an env var set to blank is not a value — CI sets empty strings constantly");
+});
+
+// Criterion 4.
+test("criterion 4: 0, -5, \"lots\" and 2000001 each fail the plan, naming review.max_diff_bytes", () => {
+  for (const bad of ["0", "-5", '"lots"', "2000001", "1.5", "9e5", "1_000_000", "900000 bytes"]) {
+    const text = configWith(`max_diff_bytes: ${bad}`);
+    assert.throws(() => parseReviewConfig(text),
+      (e) => e instanceof ReviewError &&
+        /review\.max_diff_bytes/.test(e.message) &&
+        e.message.includes(JSON.stringify(bad.replace(/"/g, ""))),
+      `max_diff_bytes: ${bad} must fail loudly, naming the key AND the value`);
+    // "the plan fails" is the criterion — the throw has to reach runPlan, not be swallowed into
+    // a fallback. A bad limit that quietly becomes 300 000 is the silent mode this replaces.
+    assert.throws(() => planWith(text), (e) => e instanceof ReviewError);
+  }
+  // And the whole CLI turns it into a non-zero exit, because a plan that failed must not let the
+  // reviewers run against a context nobody bounded.
+  const dir = tmp("bad-limit-cli");
+  try {
+    writeFileSync(join(dir, "config.yml"), configWith("max_diff_bytes: lots"));
+    const code = runReviewCli(["plan"], {
+      env: { FLOW_CONFIG: join(dir, "config.yml"), REVIEW_OUT_DIR: join(dir, "out") },
+      git: () => "",
+    });
+    assert.equal(code, 1, "fail-closed: an unbounded context is not a context");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("criterion 4: the ceiling binds the env override too — a knob that can step over it is not a bound", () => {
+  assert.equal(MAX_DIFF_BYTES_CEILING, 2_000_000);
+  assert.deepEqual(resolveMaxDiffBytes({ env: { REVIEW_DIFF_MAX_BYTES: String(MAX_DIFF_BYTES_CEILING) } }),
+    { bytes: MAX_DIFF_BYTES_CEILING, source: "env" }, "the ceiling itself is allowed");
+  assert.throws(
+    () => resolveMaxDiffBytes({ env: { REVIEW_DIFF_MAX_BYTES: "2000001" } }),
+    (e) => e instanceof ReviewError && /REVIEW_DIFF_MAX_BYTES/.test(e.message),
+    "and the env error names the env var, not the config key it did not come from");
+  // The value most worth rejecting: `Number("lots")` is NaN, `full <= NaN` is false, and the old
+  // code would have "truncated" every diff to zero bytes while reporting a cap of NaN.
+  assert.throws(() => resolveMaxDiffBytes({ env: { REVIEW_DIFF_MAX_BYTES: "lots" } }),
+    (e) => e instanceof ReviewError);
+  assert.equal(parseReviewConfig(configWith(`max_diff_bytes: ${MAX_DIFF_BYTES_CEILING}`)).maxDiffBytes,
+    MAX_DIFF_BYTES_CEILING);
+});
+
+// Criterion 5 — the limit is read from BASE, for the same reason the trigger list is (flow-0079).
+test("criterion 5: a PR that raises its own limit is bounded by BASE's, not by its own", () => {
+  const base = configWith();                                  // no key — the default applies
+  const head = configWith("max_diff_bytes: 900000");          // the PR asking for more
+  const fromBase = planWith(base, {}, "base-limit");
+  assert.deepEqual(fromBase.limit, { bytes: 300_000, source: "default" });
+  assert.equal(fromBase.diff.truncated, true, "base did not raise the limit, so the diff is cut");
+
+  const fromHead = planWith(head, {}, "head-limit");
+  assert.equal(fromHead.diff.truncated, false,
+    "read from the PR's own copy the same diff sails through — that difference IS why it is read " +
+    "from base");
+});
+
+test("criterion 5, end to end: FLOW_CONFIG points at base, and base's limit is the one that bounds", () => {
+  const dir = tmp("base-limit-e2e");
+  const g = (...args) => spawnSync("git", args, { cwd: dir, encoding: "utf8" });
+  try {
+    g("init", "-q", "-b", "main");
+    g("config", "user.email", "t@example.com");
+    g("config", "user.name", "t");
+    mkdirSync(join(dir, ".flow"), { recursive: true });
+    writeFileSync(join(dir, ".flow", "config.yml"), configWith());
+    writeFileSync(join(dir, "big.txt"), "seed\n");
+    g("add", "-A");
+    g("commit", "-qm", "base");
+
+    g("checkout", "-qb", "feature");
+    // The move: raise your own limit in the same diff you need the raise for.
+    writeFileSync(join(dir, ".flow", "config.yml"), configWith("max_diff_bytes: 900000"));
+    writeFileSync(join(dir, "big.txt"), `seed\n${"y".repeat(350_000)}\n`);
+    g("commit", "-aqm", "raise the limit and add 350 KB, together");
+
+    // What `_flow-review.yml` does before invoking the helper: materialise BASE's copy of the
+    // config outside the working tree and point FLOW_CONFIG at it.
+    const baseCfg = join(dir, "base-config.yml");
+    writeFileSync(baseCfg, g("show", "main:.flow/config.yml").stdout);
+
+    const plan = (extraEnv) => {
+      const out = join(dir, `gh-${Math.random().toString(36).slice(2)}`);
+      writeFileSync(out, "");
+      const r = run(["plan"], {
+        cwd: dir,
+        env: { ...process.env, BASE_REF: "main", GITHUB_OUTPUT: out, REVIEW_DIFF_MAX_BYTES: "", ...extraEnv },
+      });
+      assert.equal(r.status, 0, r.stderr);
+      return { out: readFileSync(out, "utf8"), stdout: r.stdout };
+    };
+
+    const fromBase = plan({ FLOW_CONFIG: baseCfg });
+    assert.match(fromBase.out, /^diff_truncated=true$/m,
+      "base's config carries no raise, so the 350 KB diff is cut at the default");
+    assert.match(fromBase.stdout, /diff limit: 300000 bytes/);
+
+    const fromPr = plan({});
+    assert.match(fromPr.out, /^diff_truncated=false$/m,
+      "read from the PR's own config the raise takes effect — the hole this criterion closes");
+    assert.match(fromPr.stdout, /diff limit: 900000 bytes/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Criterion 6.
+test("criterion 6: the run summary names the effective limit AND which of the three produced it", () => {
+  const summaryFor = (configText, env) => planSummary(planWith(configText, env, "summary"));
+
+  const fromConfig = summaryFor(configWith("max_diff_bytes: 900000"), {});
+  assert.match(fromConfig, /- diff limit: 900000 bytes — from `review\.max_diff_bytes` in \.flow\/config\.yml/);
+
+  const fromEnv = summaryFor(configWith("max_diff_bytes: 900000"), { REVIEW_DIFF_MAX_BYTES: "400000" });
+  assert.match(fromEnv, /- diff limit: 400000 bytes — from the `REVIEW_DIFF_MAX_BYTES` environment override/);
+
+  const fromDefault = summaryFor(configWith(), {});
+  assert.match(fromDefault, /- diff limit: 300000 bytes — the built-in default/);
+  assert.match(fromDefault, /set `review\.max_diff_bytes` in \.flow\/config\.yml to change it/,
+    "the default's line has to say what to do about it — a bare number is the thing that made " +
+    "this hard to diagnose");
+
+  // The line sits with the byte counts it explains, not in a section of its own.
+  const lines = fromDefault.split("\n");
+  const handed = lines.findIndex((l) => /^- diff handed to the reviewers:/.test(l));
+  const limit = lines.findIndex((l) => /^- diff limit:/.test(l));
+  assert.ok(handed > -1 && limit === handed + 1,
+    "the limit is read immediately after the bytes it bounded");
+});
+
+// ── canonical-only: the artefact an adopting repo receives ────────────────────────────────
+// Guarded by CANON for the same reason check-claude-md.test.mjs guards its template assertions:
+// synced into an adopting repo, `../config.yml` is THAT repo's calibrated config and `changes/`
+// does not exist at all. Asserting on them there would fail correct repos.
+const CANON = (() => {
+  const root = resolve(BIN, "..", "..", "..");
+  const isCanon = existsSync(join(root, "project-template", ".flow", "bin", "flow-review.mjs")) &&
+    existsSync(join(root, ".flow", "bin", "flow-review.mjs"));
+  return isCanon ? root : null;
+})();
+const notCanonical = "canonical-only: this repo has no project-template/ beside its own .flow/, " +
+  "so there is no shipped template config or changes/ fragment here to assert on.";
+
+// Criterion 7.
+test("criterion 7: the template's config.yml documents max_diff_bytes under review:, commented out", (t) => {
+  if (!CANON) return t.skip(notCanonical);
+  const text = readFileSync(join(CANON, "project-template", ".flow", "config.yml"), "utf8");
+
+  const block = reviewBlock(text);
+  assert.ok(block, "sanity: the template ships a review: block");
+  const commented = block.split("\n").filter((l) => /^\s*#\s*max_diff_bytes:\s*\d+\s*$/.test(l));
+  assert.equal(commented.length, 1,
+    "exactly one commented-out example, inside review: — a repo opts in by uncommenting it");
+
+  assert.equal(parseReviewConfig(text).maxDiffBytes, null,
+    "and it must be INERT as shipped: an active key would silently raise every adopting repo's " +
+    "per-PR review cost, which is the opposite of opting in");
+
+  // Uncommenting it is all a repo has to do, so the example has to be a value that parses.
+  const live = text.replace(/^(\s*)#\s*(max_diff_bytes:\s*\d+)\s*$/m, "$1$2");
+  assert.notEqual(live, text, "sanity: the replacement fired");
+  assert.ok(parseReviewConfig(live).maxDiffBytes > DEFAULT_MAX_DIFF_BYTES,
+    "the shipped example must be a RAISE — an example at or below the default documents nothing");
+
+  const comment = block.slice(0, block.indexOf("max_diff_bytes:"));
+  assert.match(comment, /cost/i, "the comment must say what raising it costs");
+  assert.match(comment, new RegExp(String(MAX_DIFF_BYTES_CEILING)), "and must name the ceiling");
+});
+
+// Criterion 8.
+test("criterion 8: changes/flow-0100.md exists and says no caller action is needed", (t) => {
+  if (!CANON) return t.skip(notCanonical);
+  const path = join(CANON, "changes", "flow-0100.md");
+  assert.ok(existsSync(path), `the changelog fragment for this task is missing: ${path}`);
+  const text = readFileSync(path, "utf8");
+  assert.match(text, /No caller action/i, "a repo opts in by setting the key; nothing is required");
+  assert.match(text, /max_diff_bytes/, "and the fragment has to name the key a repo would set");
 });
