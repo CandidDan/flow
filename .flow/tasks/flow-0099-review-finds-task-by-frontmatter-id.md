@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0099"
 title: "The review gate finds a task by its frontmatter id when no filename matches, as touches-guard already does"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-code-e6eba4e8"
