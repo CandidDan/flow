@@ -2,13 +2,13 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0085"
 title: "The reviewers read the task and its acceptance criteria from the base branch, so a PR cannot choose the criteria it is judged against"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-cowork-orchestrator"
 created: "2026-09-27"
-started: ""
-branch: ""
+started: "2026-09-30T23:34:51Z"
+branch: "flow/flow-0085-review-reads-task-from-base"
 pr: ""
 issue: ""
 blocked_reason: ""
