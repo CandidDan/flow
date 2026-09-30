@@ -1512,7 +1512,6 @@ test("criterion 7: the template's config.yml documents max_diff_bytes under revi
   assert.match(comment, new RegExp(String(MAX_DIFF_BYTES_CEILING)), "and must name the ceiling");
 });
 
-// Criterion 8.
 // ── flow-0103: the numbers the verdict step quotes back ────────────────────────────────────
 // `diff_truncated` is the fact that decides the check; these two are what turn "too big" into a
 // number, and they only reach `verdict` because `plan` publishes them as step outputs. Asserted
