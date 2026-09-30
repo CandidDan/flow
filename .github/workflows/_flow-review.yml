@@ -303,8 +303,10 @@ jobs:
                 here; do not go hunting for the file in .flow/tasks/ yourself.
               · .flow/config.yml for this project's commands
               · the specific test files the diff adds or changes
-            Do NOT read the repository at large. If the diff says it was truncated, say so in
-            your verdict rather than approving what you could not read.
+            Do NOT read the repository at large.
+            If the diff carries the DIFF TRUNCATED marker, do NOT return a PASS verdict: name
+            the truncation in your verdict and in its summary, because passing a partial read
+            certifies what you could not read.
 
             Your verdict turns on ONE thing above all: does every acceptance criterion in the
             task have a test that proves its OUTCOME? Coverage is a backstop — a green coverage
@@ -433,6 +435,10 @@ jobs:
             RESOLVED" there is no declared scope to judge creep against — say so. If it begins
             "TASK CONTEXT UNAVAILABLE" the scope was never handed to you rather than being
             absent: say that instead, and do not report a missing task.
+
+            If the diff carries the DIFF TRUNCATED marker, do NOT return a PASS verdict: name
+            the truncation in your verdict and in its summary, because passing a partial read
+            certifies what you could not read.
 
             Review for:
             1. Correctness — does it satisfy each acceptance criterion? Logic errors, off-by-one,
@@ -585,6 +591,10 @@ jobs:
             `dependency_audit`, `focus[]`), and the specific files the diff touches. Do NOT read
             the repository at large.
 
+            If the diff carries the DIFF TRUNCATED marker, do NOT return a PASS verdict: name
+            the truncation in your verdict and in its summary, because passing a partial read
+            certifies what you could not read.
+
             Always check:
             1. Secrets — no keys, tokens, passwords, connection strings or private certs in the
                diff, including in tests and fixtures.
@@ -608,7 +618,8 @@ jobs:
                {"verdict":"PASS"|"FAIL",
                 "blocking":[{"file":"…","line":0,"issue":"…","fix":"…"}],
                 "summary":"<one line>"}
-               FAIL iff there is a High or Critical finding, and `blocking` holds exactly those.
+               FAIL iff there is a High or Critical finding, and `blocking` holds exactly those;
+               a truncated diff is its own FAIL, per the bounded-context rule above.
                Medium/Low go in the comment; they do not block.
 
             You review only. Never push commits, never edit source files, never change labels or

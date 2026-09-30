@@ -16,6 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { changelogEntry } from "./changelog-entry.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
@@ -422,4 +423,65 @@ test("a base branch with no gate BOOTSTRAPS: the PR's helper, forced security, a
       "rather than dying on `node: not found`");
     assert.match(run, /exit 1/, "…and the job must fail, not carry on with an unset helper path");
   }
+});
+
+// ── flow-0101: none of the three reviewers may PASS a diff it only partly read ─────────────
+// The bounded context is capped in bytes, and `boundDiff` stamps a DIFF TRUNCATED marker into
+// the patch when it clips one. Only the qa prompt used to react to that marker, so an oversized
+// PR could collect two green checks from reviewers that had read part of the change — and a green
+// check is read as a full review. The instruction is pinned as ONE string shared by all three
+// prompts: three paraphrases drift, and the one that drifts is the one that stops saying "do not
+// PASS". Collapsed whitespace, because a block scalar wraps it differently in each prompt.
+
+const TRUNCATION_RULE =
+  "If the diff carries the DIFF TRUNCATED marker, do NOT return a PASS verdict: name " +
+  "the truncation in your verdict and in its summary, because passing a partial read " +
+  "certifies what you could not read.";
+
+test("qa, code-review and security all carry the same truncation instruction", { skip }, () => {
+  const found = prompts();
+  assert.equal(found.length, REVIEW_JOBS.length, "one reviewer invocation per check");
+  for (const [i, p] of found.entries()) {
+    assert.ok(p.includes(TRUNCATION_RULE),
+      `the ${REVIEW_JOBS[i]} prompt does not carry the shared truncation instruction verbatim. ` +
+      `All three read the same bounded diff; a reviewer that is not told to refuse a partial ` +
+      `read will PASS one, and the PR will look fully reviewed.`);
+  }
+});
+
+test("the shared truncation instruction forbids PASS and demands the verdict name it", { skip }, () => {
+  // Criterion-level, and deliberately about the WORDS rather than their placement: the previous
+  // qa wording ("say so in your verdict rather than approving what you could not read") named the
+  // truncation but never forbade a PASS verdict outright.
+  assert.match(TRUNCATION_RULE, /do NOT return a PASS verdict/,
+    "the instruction must forbid PASS, not merely ask the reviewer to mention the truncation");
+  assert.match(TRUNCATION_RULE, /name the truncation in your verdict/,
+    "…and the verdict must say WHY it failed, or the worker cannot tell a truncation from a bug");
+  assert.match(TRUNCATION_RULE, /DIFF TRUNCATED/,
+    "it must name the marker `boundDiff` actually writes, so the reviewer knows what to look for");
+  // The marker the prompts key off is produced by the helper. If that string ever changes, the
+  // three prompts point at something that no longer appears in the patch.
+  const helper = readFileSync(join(TEMPLATE, ".flow/bin/flow-review.mjs"), "utf8");
+  assert.match(helper, /\*\*\* DIFF TRUNCATED at /,
+    "flow-review.mjs must still stamp the DIFF TRUNCATED marker the three prompts name");
+});
+
+test("the security verdict rule does not contradict the truncation instruction", { skip }, () => {
+  // `FAIL iff there is a High or Critical finding` is the only one of the three verdict
+  // contracts that enumerates its failure causes, so it is the only one that could read as
+  // permission to PASS a truncated diff with no High/Critical finding in the part it saw.
+  const sec = String(reviewerSteps("security")[0].with.prompt).replace(/\s+/g, " ");
+  assert.match(sec, /a truncated diff is its own FAIL/,
+    "the security prompt tells the reviewer to FAIL iff High/Critical; without this clause the " +
+    "truncation instruction above it is a second, contradicting rule");
+});
+
+test("changes/flow-0101.md exists and states that no caller action is needed", () => {
+  // Fragment while pending; assembled CHANGELOG entry after a release (flow-0098).
+  const text = changelogEntry(REPO, "flow-0101");
+  assert.ok(text, "a change to what every adopting repo's reviewers are told owes the changelog an entry");
+  assert.match(text, /No caller action/,
+    "the caller-action line is what a reader of the release notes scans for");
+  assert.ok(!/^#/m.test(text),
+    "a fragment is assembled verbatim under `## Unreleased` — it carries no heading of its own");
 });
