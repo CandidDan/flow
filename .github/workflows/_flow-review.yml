@@ -740,3 +740,218 @@ jobs:
           node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/security.json --check security
           --diff-truncated "$DIFF_TRUNCATED"
           --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
+
+  # ── guide ──────────────────────────────────────────────────────────────────────────────
+  # ONE comment that tells the human where to look (flow-0084). It runs AFTER the three checks,
+  # whatever each of them concluded, and it is the only job here that never blocks anything.
+  #
+  # WHY A FOURTH JOB AND NOT A BETTER PR DESCRIPTION. The PR description is written by the context
+  # that produced the work, which is the wrong author for "here is what to check" — it steers away
+  # from its own weak spots without meaning to. The three reviewers already run outside that
+  # session, but three comments plus a long description is not a touchpoint, it is reading. This
+  # job combines their results with facts computed from the diff into one short comment, in a fixed
+  # order, that a human can act on from a phone.
+  #
+  # FACTS FROM CODE, PROSE FROM A MODEL, IN SEPARATE SECTIONS. `review-guide.mjs` computes the
+  # hotspots (a security-trigger path in the diff, a deleted or weakened test, a file outside the
+  # task's `touches`), quotes the PR description's `## Assumptions` verbatim, and renders the
+  # verdicts row. The model writes the TL;DR and the smoke test, and may REORDER the hotspots by
+  # naming their ids — it cannot add, drop or reword one, because every fact's text is produced by
+  # the helper and the model only ever returns ids. If the model call fails the comment still
+  # posts, with a line saying the summary is unavailable: fail-open for prose, never for facts.
+  #
+  # IT NEVER BLOCKS, AND THAT IS ASSERTED RATHER THAN ASSUMED. `continue-on-error: true` sits on
+  # the JOB, so a broken guide cannot fail the workflow run, and no other job declares
+  # `needs: guide`, so it cannot hold one up either. An advisory comment that could turn a PR red
+  # is the thing this must never become.
+  #
+  # THE DRAFT AND FORK FENCES ARE INHERITED, NOT RECOPIED. `needs.plan.result == 'success'` is the
+  # whole gate: `plan` carries the opt-in, the draft clause and the head-repo comparison, so a
+  # draft or a fork PR skips it and this job's `if` is false. `always()` is what lets the guide run
+  # when a REVIEWER failed — which is exactly when a human most needs to know where to look — and
+  # the `plan` clause is what stops `always()` from also defeating those two fences.
+  guide:
+    needs: [plan, qa, code-review, security]
+    if: ${{ always() && needs.plan.result == 'success' }}
+    # The guide is advisory. Nothing it does may turn this PR red.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node_version }}
+      - name: Materialise the review gate from the BASE branch
+        # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
+        # comes from the PR. The env vars written below are what keeps those two apart —
+        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` + `REVIEW_TASKS_DIR` (the task file and its acceptance
+        # criteria, flow-0085) point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` point back at
+        # the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
+        # a repo whose `.flow/bin/flow-review.mjs` is an ADAPTER (canonical's is): an adapter pins
+        # its git to its own realpath, which inside the base worktree would diff base against
+        # itself and hand the reviewers an empty patch.
+        #
+        # The branch name reaches the shell through `env:`, not `${{ }}` — same rule as the PR
+        # title and `security_reason`. A ref name is less attacker-chosen than a title, but the
+        # rule is cheaper to keep than to reason about case by case.
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+        run: |
+          set -eu
+          git fetch -q origin "$BASE_BRANCH"
+          base_dir="$RUNNER_TEMP/flow-review-base"
+          rm -rf "$base_dir"
+          git worktree prune
+          if git cat-file -e "origin/$BASE_BRANCH:.flow/bin/flow-review.mjs" 2>/dev/null \
+             && git cat-file -e "origin/$BASE_BRANCH:.flow/config.yml" 2>/dev/null; then
+            git worktree add -q --detach "$base_dir" "origin/$BASE_BRANCH"
+            {
+              echo "FLOW_REVIEW_DIR=$base_dir/.flow/bin"
+              echo "FLOW_CONFIG=$base_dir/.flow/config.yml"
+              # flow-0085: the task file is the STANDARD the PR is judged against, so it comes
+              # from base too. A PR that edits its own acceptance criteria must not hand the
+              # reviewers the edited copy.
+              echo "REVIEW_TASKS_DIR=$base_dir/.flow/tasks"
+            } >> "$GITHUB_ENV"
+          elif [ -f .flow/bin/flow-review.mjs ]; then
+            # BOOTSTRAP — this PR is the one adopting the gate. The helper below forces the
+            # security review on (REVIEW_BOOTSTRAP) and repeats this warning in the plan summary.
+            {
+              echo "FLOW_REVIEW_DIR=$GITHUB_WORKSPACE/.flow/bin"
+              echo "REVIEW_BOOTSTRAP=1"
+              # No independent copy exists on base, so the task file can only come from the PR.
+              echo "REVIEW_TASKS_DIR=$GITHUB_WORKSPACE/.flow/tasks"
+            } >> "$GITHUB_ENV"
+            echo "::warning::BOOTSTRAP: the base branch carries no review gate, so this PR's own" \
+                 "copy is planning the review of this PR. The security review is forced on."
+            printf '### Flow review gate — :warning: BOOTSTRAP\n\n%s\n\n' \
+              'The base branch carries no `.flow/bin/flow-review.mjs` and/or no `.flow/config.yml`, so the gate was planned from THIS PR rather than from an independent copy. The security review is forced on. Expected exactly once, on the PR that adopts the review gate.' \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            # Neither base nor this PR has the helper: an adopting repo that bumped the workflow
+            # tag but has not run flow-sync. Say so, instead of failing on "node: not found".
+            echo "::error::.flow/bin/flow-review.mjs is missing from this PR and from the base" \
+                 "branch. This repo adopted a newer _flow-review.yml than its .flow/bin/ — run" \
+                 "the flow-sync workflow to adopt the helper, then re-run these checks."
+            exit 1
+          fi
+          {
+            echo "REVIEW_REPO_DIR=$GITHUB_WORKSPACE"
+            echo "REVIEW_OUT_DIR=$GITHUB_WORKSPACE/.flow-review"
+          } >> "$GITHUB_ENV"
+      - name: Bounded context — the diff and the files it changes
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          # CAN-52: the task id has two sources and the helper resolves both in code. The branch
+          # arrives as `github.head_ref` — the underscore form, deliberately. The dotted
+          # `pull_request` spelling of the same value is forbidden ANYWHERE in this file by
+          # `flow-review-workflow.test.mjs`, so that a real branch fence cannot be smuggled in
+          # behind an id lookup; that test refuses prose too, which is why this comment does not
+          # spell it either. A branch NAME here is an id source, never a gate. The PR title is
+          # attacker-controlled text: it travels through `env`, where it is data, and is never
+          # interpolated into the shell.
+          HEAD_REF: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node "$FLOW_REVIEW_DIR"/flow-review.mjs plan
+      - name: Compute the guide's facts — hotspots, assumptions, no model involved
+        # The PR BODY is the third piece of attacker-chosen text this workflow handles, after the
+        # branch name and the PR title, and it is quoted into a comment and shown to a model. Same
+        # rule as the other two: it reaches the helper through `env`, where it is data, and is
+        # never interpolated into the shell. The helper fences it inside the model's brief.
+        #
+        # `security_paths` is read from BASE's config.yml via $FLOW_CONFIG, for the same reason the
+        # security decision is: the guide's hotspots must agree with the check the human is reading
+        # the verdict of, and a PR must not be able to delete the glob that names its own hotspot.
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          TASK_ID: ${{ needs.plan.outputs.task_id }}
+        run: node "$FLOW_REVIEW_DIR"/review-guide.mjs facts
+      - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+        continue-on-error: true          # prose is fail-open; the comment posts without it
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_bots: "*"
+          # The model comes from the repo's .flow/config.yml, like every other call here. The turn
+          # budget is the effort bound: this reads ONE file and writes ONE small JSON object, so a
+          # run that needs more turns than this has misunderstood the job.
+          claude_args: "--max-turns 6 --model ${{ needs.plan.outputs.model }} --permission-mode bypassPermissions"
+          prompt: |
+            You write the two prose lines of this pull request's review guide. You are not a
+            reviewer: three reviewers have already run and their verdicts are not yours to revisit.
+
+            YOUR CONTEXT IS ONE FILE. Read .flow-review/guide-facts.md and nothing else. Do not
+            read the diff, the task, or the repository. Everything you are allowed to talk about is
+            in that file, which lists the computed hotspots and their ids.
+
+            THE FACTS ARE NOT YOURS TO EDIT. They are computed in code and rendered in code. You do
+            not restate them, summarise them, reword them, add one, or leave one out. The only
+            thing you may say about them is which of them a human should look at FIRST, and you say
+            that by naming their ids.
+
+            Write .flow-review/guide-prose.json and nothing else:
+              {"tldr":"<one line: what this PR changes, in plain English, for someone who has not
+                        read it. No praise, no verdict, no hedging.>",
+               "look_here":["<hotspot id>", "…"],
+               "smoke_test":"<one concrete thing to try by hand to see this working, or to see it
+                             broken. A command or a two-step click-path, not 'test thoroughly'.>"}
+
+            `look_here` holds ids copied EXACTLY from guide-facts.md, most important first. Name
+            only ids that appear there; an id you invent is discarded. Naming none is fine — the
+            computed order is then used — and so is naming all of them. You are choosing an order,
+            not a subset: nothing you leave out is removed from the comment.
+
+            If guide-facts.md lists no hotspots, return an empty `look_here` and still write the
+            TL;DR and the smoke test.
+
+            Do NOT post a pull-request comment. The workflow posts one comment and updates it in
+            place; a second comment from you is the noise this whole job exists to remove. Never
+            push commits, never edit source files, never change labels or task state. The only file
+            you write is .flow-review/guide-prose.json.
+      - name: Render the guide comment — facts and verdicts, with or without the prose
+        # always(), because the model step is `continue-on-error` and this is the step that makes
+        # the fail-open real: the three verdicts and every computed fact render whether or not the
+        # prose arrived.
+        #
+        # The three results come from the JOBS, not from each reviewer's verdict file: those are
+        # written into each job's own workspace and nothing downstream can read them. SECURITY_RUN
+        # is what keeps the row honest — the security job always runs so the check is never
+        # silently absent, so a skipped REVIEW still reports a successful JOB, and rendering that
+        # as "pass" is the one wrong answer this row can give.
+        if: always()
+        env:
+          QA_RESULT: ${{ needs.qa.result }}
+          CODE_REVIEW_RESULT: ${{ needs['code-review'].result }}
+          SECURITY_RESULT: ${{ needs.security.result }}
+          SECURITY_RUN: ${{ needs.plan.outputs.security_run }}
+          SECURITY_REASON: ${{ needs.plan.outputs.security_reason }}
+        run: node "$FLOW_REVIEW_DIR"/review-guide.mjs comment
+      - name: Post or update the ONE guide comment
+        # One comment per PR, found by the hidden marker in its body and updated in place. The
+        # review workflow runs again on every hand-off, and a guide that appended would bury the
+        # reviewers' own comments under its own history — the opposite of the problem it solves.
+        #
+        # The marker lookup is the helper's, not a `--jq` expression here: it is a decision, it has
+        # a proving test, and a shell one-liner in a reusable workflow is the one piece of this
+        # gate nobody can test. `--slurp` merges the pages; the helper flattens either shape, so a
+        # gh version that nests them cannot cause a duplicate comment.
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -eu
+          body="$GITHUB_WORKSPACE/.flow-review/guide-comment.md"
+          if [ ! -f "$body" ]; then
+            echo "::warning::review-guide: no comment body was rendered, so there is nothing to post."
+            exit 0
+          fi
+          comments="$RUNNER_TEMP/guide-comments.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" > "$comments"
+          id="$(node "$FLOW_REVIEW_DIR"/review-guide.mjs comment-id "$comments")"
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@"$body" --jq .html_url
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@"$body" --jq .html_url
+          fi
