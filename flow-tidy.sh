@@ -66,7 +66,7 @@ fi
 
 say "5. What stays, and why"
 cat <<'EOF'
-    docs/landing.html, docs/flow-map.html, docs/blog-two-touchpoints.md
+    docs/site/, docs/flow-map.html, docs/blog-two-touchpoints.md
       -> site content. Keep; these become the public site.
     docs/flow-reusable-workflows.md, docs/flow-versioning-policy.md,
     docs/repinning-a-consuming-repo.md, docs/adr/*
