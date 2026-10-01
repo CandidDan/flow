@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0117"
 title: "Agents show, don't tell: a terse response rule in the protocol plus a show-me skill, with a visual-first PR description"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-code-worker"
 created: "2026-10-01"
 started: "2026-10-01T05:58:11Z"
 branch: "flow/flow-0117-show-dont-tell"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/150"
 issue: ""
 blocked_reason: ""
 blocked_by: []
