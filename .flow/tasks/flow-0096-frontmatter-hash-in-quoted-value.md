@@ -21,6 +21,7 @@ touches:
 labels: [flow-state, parsing]
 notes:
   - "2026-09-29 (orchestrator): Found by the flow-0095 worker. `parseTask` in `project-template/.flow/bin/flow-state.mjs` (around line 62) strips a whitespace-preceded hash as a YAML comment from every frontmatter scalar, including double-quoted ones. A blocked_reason mentioning a PR reference (PR, space, hash, number) is cut at that point, so flow-doctor and the flightdeck read a truncated reason, and a task that ends its reason with 'not machine-checkable' still gets the empty-blocked_by warning."
+  - "2026-10-01 (worker): Fix + tests done on branch `flow/flow-0096-frontmatter-hash-in-quoted-value`, pushed. `scalarValue` exported from flow-state.mjs reads quoted scalars whole, strips ` # comment` from unquoted ones only; 8 new tests cover criteria 1-5 plus single quotes and unterminated quotes. SCOPE NOTE for the orchestrator: criterion 5 is proven by composing flow-state `parseTask` output into flow-doctor's exported `blockedByFindings`, because flow-doctor has its OWN scalar reader (`scalarReader`, ~line 810) with the same defect in a worse form (`split('#')[0]`, so it also breaks a hash-leading value). `pick-task.mjs` (~line 56) and `flightdeck/bin/mission-control.mjs` (~line 103) carry identical copies. All three are outside this task's `touches` and need a follow-up task. Next action: run the gate, open the PR."
 ---
 
 ## Context
