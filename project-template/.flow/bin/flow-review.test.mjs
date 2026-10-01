@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { DEFAULT_CANONICAL_REPO } from "./flow-init.mjs";
 import {
   CHECKS,
   DEFAULT_MAX_DIFF_BYTES,
@@ -1931,7 +1932,10 @@ test("flow-0115: the path mapping and the trailer reader are the ones the sync a
     "project-template/.flow/bin/flow-doctor.mjs");
   assert.equal(canonicalPathFor(".github/workflows/flow-gates.yml"),
     "project-template/.github/workflows/flow-gates.yml");
-  assert.equal(CANONICAL_REPO_URL, "https://github.com/CandidDan/flow.git");
+  assert.equal(CANONICAL_REPO_URL, `https://github.com/${DEFAULT_CANONICAL_REPO}.git`,
+    "canonical's location has ONE definition — flow-init's — and this derives from it rather " +
+    "than typing it again; a second literal is the flow-0058 hazard, the constant left pointing " +
+    "at the old place after everything else moved");
 
   const asked = [];
   canonicalShaTrailers((args) => { asked.push(args); return `${CANON_SHA}\n\n`; }, "origin/main");

@@ -36,6 +36,8 @@ import { realpathSync as __realpathSync } from "node:fs";
 import { fileURLToPath as __fileURLToPath } from "node:url";
 import { globToRegExp } from "./touches-guard.mjs";
 import { idFromBranch, parseTaskId } from "./parse-task-id.mjs";
+// One constant, for the one fact both files need: WHERE canonical is. See CANONICAL_REPO_URL.
+import { DEFAULT_CANONICAL_REPO } from "./flow-init.mjs";
 import {
   FRAGMENT_DIR,
   ROOT_VERSION_PATH,
@@ -500,7 +502,7 @@ export function classifyPr({ headRef = "", changedFiles = [] } = {}) {
 // copied surface. It does not prove WHERE THEY CAME FROM, and those are not the same claim.
 // Anyone with write access can name a branch `flow-sync/9.9.9` and put whatever they like under
 // `.flow/bin/**`, which is the most sensitive directory in an adopting repo: every file in it
-// executes in that repo's CI. Raised as a security FAIL on CandidDan/flow#146, which answered the
+// executes in that repo's CI. Raised as a security FAIL on canonical's PR #146, which answered the
 // PROMPT half — every reviewer still READS a sync PR, and fails one that widens `permissions:`,
 // introduces `pull_request_target`, repoints a `uses:` or changes secret handling. This is the
 // code half the same review asked for.
@@ -518,10 +520,15 @@ export function classifyPr({ headRef = "", changedFiles = [] } = {}) {
 // fixed PASS line on code nobody read. So every uncertainty resolves to "not classified",
 // including the uncertainties that are far more likely to be infrastructure than attack.
 
-// Where canonical lives — the same URL `_flow-sync.yml` clones. Deliberately a constant and not a
-// config key: a repo able to point this at its own fork could satisfy the check against a tree it
-// controls, which is the check deleting itself.
-export const CANONICAL_REPO_URL = "https://github.com/CandidDan/flow.git";
+// Where canonical lives — the same repository `_flow-sync.yml` clones. Two decisions here:
+//
+//   NOT A CONFIG KEY. A repo able to point this at its own fork could satisfy the check against a
+//   tree it controls, which is the check deleting itself.
+//   NOT A SECOND LITERAL. `flow-init` already defines the canonical repository, and that is the
+//   definition; this derives the clone URL from it. A typed copy is the flow-0058 hazard — the
+//   one constant left pointing at the old place after everything else moved, indistinguishable
+//   from a correct one because it still resolves.
+export const CANONICAL_REPO_URL = `https://github.com/${DEFAULT_CANONICAL_REPO}.git`;
 
 export const CANONICAL_SHA_TRAILER = "Canonical-SHA";
 
