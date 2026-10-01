@@ -15,8 +15,13 @@ name: _flow-sync (reusable)
 #                            kept whole and reported, never overwritten (flow-0076)
 #   - .flow/PROTOCOL.md      the protocol itself (flow-0048) — identical in every Flow repo, so a
 #                            protocol fix reaches the fleet by sync instead of by hand-patch
+#   - .claude/skills/<name>/ every CANONICAL-NAMED skill directory (flow-0081) — the procedures
+#                            AGENTS.md and PROTOCOL.md tell agents to read by path. Each is
+#                            mirrored wholesale; a skill directory the adopter invented is left
+#                            alone, because only canonical's names are canonical's to replace
 #   - .flow/VERSION          bumped to canonical's stamp
-# It never touches .flow/config.yml, .flow/tasks/, or the project's CLAUDE.md and AGENTS.md — those
+# It never touches .flow/config.yml, .flow/tasks/, .claude/settings.json, .claude/settings.local.json,
+# or the project's CLAUDE.md and AGENTS.md — those
 # are intentionally per-repo. The two host files stay a manual adopt because each carries a
 # `## Project notes` section below its pointer at the protocol; auto-rewriting them would destroy
 # repo-specific content. The protocol has no such section, which is why it can be mirrored and they
@@ -502,6 +507,39 @@ jobs:
             cp "$CANON_TPL/.flow/PROTOCOL.md" .flow/PROTOCOL.md
           else
             echo "::warning title=No protocol to adopt::canonical@${CANONICAL_REF} has no project-template/.flow/PROTOCOL.md, so this sync cannot refresh .flow/PROTOCOL.md. That file was split out of CLAUDE.md after v1.1.1; pin canonical_ref at v1.2.0 or later to adopt the protocol."
+          fi
+          # THE SKILLS (flow-0081). The same defect as the protocol one above, one directory across.
+          # The template ships `.claude/skills/<name>/SKILL.md`; AGENTS.md and PROTOCOL.md instruct
+          # agents to read them BY PATH; `flow-init` copied them once, at adoption, and no sync ever
+          # touched them again. Two consequences, both observed during a 1.x → 2.0.0 migration: a
+          # repo adopted before a skill existed has an AGENTS.md pointing at a file that is not
+          # there (`vision-writer`), and a fix made to a skill in canonical — the task-writer
+          # changelog-fragment rule — never reaches the fleet at all.
+          #
+          # CANONICAL-NAMED DIRECTORIES ONLY, each mirrored WHOLESALE. The loop iterates
+          # CANONICAL's directories, so a skill the adopting repo wrote itself is never visited: a
+          # project's own skills are its own. `--delete` is scoped to the single directory being
+          # replaced, which is what makes a file canonical deleted from a skill go away downstream
+          # too. That is the `.flow/bin/` contract, and it has the `.flow/bin/` consequence: a local
+          # edit to a canonical-named skill is overwritten by the next sync, so fix it in canonical.
+          #
+          # `.claude/settings.json` and `.claude/settings.local.json` are untouched by construction
+          # — nothing here writes outside `.claude/skills/<canonical name>/`. Permissions and hooks
+          # are the project's own decision, never canonical's.
+          #
+          # Guarded, exactly like the protocol and for the same reason: `canonical_ref` may be
+          # pinned at a release whose template has no `.claude/skills/`, and the glob would then
+          # expand to a literal unmatched path. Reported rather than silently skipped — a silent
+          # skip is the defect this step exists to fix.
+          if [ -d "$CANON_TPL/.claude/skills" ]; then
+            for d in "$CANON_TPL"/.claude/skills/*/; do
+              [ -d "$d" ] || continue
+              SKILL="$(basename "$d")"
+              mkdir -p ".claude/skills/$SKILL"
+              rsync -a --delete "$d" ".claude/skills/$SKILL/"
+            done
+          else
+            echo "::warning title=No skills to adopt::canonical@${CANONICAL_REF} has no project-template/.claude/skills/, so this sync cannot refresh the skill procedures AGENTS.md and PROTOCOL.md point at by path. Pin canonical_ref at a release that ships them."
           fi
           #
           # AGENTS.md and CLAUDE.md are DELIBERATELY EXCLUDED, and this comment is the reason
