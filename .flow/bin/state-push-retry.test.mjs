@@ -92,20 +92,35 @@ const git = (cwd, args, opts = {}) => {
   return r;
 };
 
-const taskFile = (id, status) => `---\nid: "${id}"\nstatus: "${status}"\npriority: 1\nowner: ""\n---\n\nbody\n`;
+const taskFile = (id, status) =>
+  `---\nid: "${id}"\nstatus: "${status}"\npriority: 1\nowner: ""\nbranch: ""\npr: ""\n---\n\nbody\n`;
 
-// A minimal stand-in for apply-board-edits.mjs: patches the `status:` line of the task whose
-// frontmatter id matches, and CONSUMES the edits file exactly as the real one does — that
-// consumption is why the retry has to keep `$EDITS` and rewrite the file on every attempt.
+// A minimal stand-in for apply-board-edits.mjs. It patches NAMED frontmatter fields only —
+// quoting strings, replacing a field in place or appending it when absent — and leaves the body
+// and every other frontmatter key (`notes:`, `touches:`) exactly as it found them. That last part
+// is not incidental fidelity: flow-0114's whole claim is that an edit to a field this run does not
+// write composes with this one, and a stub that rewrote the file wholesale would make the claim
+// untestable. It also CONSUMES the edits file exactly as the real one does — that consumption is
+// why the retry has to keep `$EDITS` and rewrite the file on every attempt.
 const APPLY_STUB = `import { readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+const STRINGS = new Set(["status", "owner", "branch", "pr"]);
 const edits = JSON.parse(readFileSync(".flow/board-edits.json", "utf8")).updates;
 for (const u of edits) {
   for (const name of readdirSync(".flow/tasks")) {
     const file = join(".flow/tasks", name);
     const text = readFileSync(file, "utf8");
     if (!new RegExp('^id: "' + u.id + '"$', "m").test(text)) continue;
-    writeFileSync(file, text.replace(/^status:.*$/m, 'status: "' + u.status + '"'));
+    const end = text.indexOf("\\n---", 3);
+    let head = text.slice(0, end);
+    const body = text.slice(end);
+    for (const [k, v] of Object.entries(u)) {
+      if (k === "id") continue;
+      const rendered = k + ": " + (STRINGS.has(k) ? JSON.stringify(String(v)) : String(v));
+      const re = new RegExp("^" + k + ":.*$", "m");
+      head = re.test(head) ? head.replace(re, rendered) : head + "\\n" + rendered;
+    }
+    writeFileSync(file, head + body);
   }
 }
 unlinkSync(".flow/board-edits.json");
@@ -166,6 +181,40 @@ function contenderPushes(sb, { file, status }) {
   git(sb.other, ["commit", "-q", "-m", `contender: ${id} -> ${status}`]);
   git(sb.other, ["push", "-q", "origin", "main"]);
 }
+
+// A contender that edits `main` surgically rather than rewriting the file — the realistic shape,
+// and the only one that can tell a field-level guard from a blob-level one. `edit` receives the
+// task file's text and returns the new text.
+function contenderEdits(sb, { file, edit, message }) {
+  git(sb.other, ["pull", "-q", "--rebase", "origin", "main"]);
+  const path = join(sb.other, ".flow", "tasks", file);
+  writeFileSync(path, edit(readFileSync(path, "utf8")));
+  git(sb.other, ["add", "-A"]);
+  git(sb.other, ["commit", "-q", "-m", `contender: ${message}`]);
+  git(sb.other, ["push", "-q", "origin", "main"]);
+}
+
+// The interleaving flow-0114 is about, and the commonest one in the fleet: a worker's last act is a
+// handoff `notes:` entry on its own task file on `main`, seconds before `gh pr ready` fires
+// flow-status on the same file. Touches no field either workflow writes.
+const NOTE_BLOCK = 'notes:\n  - "2026-10-01 (worker): handing off — branch pushed, gate green."';
+const contenderAppendsNote = (sb, file) =>
+  contenderEdits(sb, {
+    file,
+    message: "worker handoff note",
+    edit: (text) => {
+      const end = text.indexOf("\n---", 3);
+      return `${text.slice(0, end)}\n${NOTE_BLOCK}${text.slice(end)}`;
+    },
+  });
+
+// A contender that moves ONE named frontmatter field, leaving the rest alone.
+const contenderSetsField = (sb, file, field, value) =>
+  contenderEdits(sb, {
+    file,
+    message: `${field} -> ${value}`,
+    edit: (text) => text.replace(new RegExp(`^${field}:.*$`, "m"), `${field}: "${value}"`),
+  });
 
 // Run the extracted tail in the runner's checkout, with the edits file already written — which
 // is what the `case` block (flow-status) or the `printf` (flow-done) does immediately above the
@@ -307,6 +356,10 @@ test("a conflicting edit to the SAME task file fails loudly instead of overwriti
       assert.match(r.out, new RegExp(TASK_ID));
       assert.match(onMain(sb, TASK_FILE), /^status: "blocked"$/m,
         "the other actor's change must still be on main");
+      // flow-0114: now that the refusal is per-field it can say WHICH field, and a reader who has
+      // only the log should not have to diff two commits to find out what collided.
+      assert.match(r.out, /status was "in_progress", is now "blocked", this run would write "in_review"/,
+        "the message must name the field and both values");
     });
   });
 
@@ -323,6 +376,92 @@ test("a duplicate transition someone else already landed is a clean no-op, not a
       assert.equal(r.status, 0, `an already-correct main must not go red:\n${r.out}`);
       assert.match(r.out, /already at 'in_review' on main/);
       assert.match(onMain(sb, TASK_FILE), /^status: "in_review"$/m);
+    });
+  });
+
+// ── an edit to a field this run does NOT write composes (flow-0114) ───────────────────────────
+// The blob comparison this replaced called every one of these a conflict. The commonest, a worker's
+// handoff note followed seconds later by flow-status on `ready_for_review`, is on the normal path of
+// almost every task — so the guard fired as often as it was right, and dropped the transition each
+// time. Observed on CandidDan/tanplan-platform#25, where a human set `in_review` by hand.
+
+test("_flow-status.yml: a contender's `notes:` entry composes with the transition instead of blocking it",
+  { skip }, () => {
+    withSandbox({}, (sb) => {
+      contenderAppendsNote(sb, TASK_FILE);
+
+      const r = runTail(sb, tail(STATUS_STEP()), {
+        edits: { id: TASK_ID, status: "in_review" },
+        env: STATUS_ENV,
+      });
+
+      assert.equal(r.status, 0, `a note is not a conflict, but the run went red:\n${r.out}`);
+      assert.doesNotMatch(r.out, /CONFLICTING EDIT/);
+      const after = onMain(sb, TASK_FILE);
+      assert.match(after, /^status: "in_review"$/m, "the transition must land, not be dropped");
+      assert.ok(after.includes(NOTE_BLOCK),
+        `the contender's note must survive byte for byte — got:\n${after}`);
+      assert.match(r.out, /landed on main \(attempt 2 of 5\)/,
+        "it must get there by re-deriving on a retry, not by winning the first push");
+    });
+  });
+
+test("_flow-done.yml: the same note composes with `-> done`, the transition nothing re-fires",
+  { skip }, () => {
+    withSandbox({ startStatus: "in_review" }, (sb) => {
+      contenderAppendsNote(sb, TASK_FILE);
+
+      const r = runTail(sb, tail(DONE_STEP()), {
+        edits: { id: TASK_ID, status: "done" },
+        env: DONE_ENV,
+      });
+
+      assert.equal(r.status, 0, `a note is not a conflict, but the run went red:\n${r.out}`);
+      assert.doesNotMatch(r.out, /CONFLICTING EDIT/);
+      const after = onMain(sb, TASK_FILE);
+      assert.match(after, /^status: "done"$/m);
+      assert.ok(after.includes(NOTE_BLOCK), `the contender's note must survive — got:\n${after}`);
+    });
+  });
+
+test("the guarded set is derived from the edits: `owner` moving is no conflict for a status-only edit",
+  { skip }, () => {
+    withSandbox({ startStatus: "in_review" }, (sb) => {
+      // flow-done writes `status` and nothing else, so a claim's `owner` is not its business.
+      contenderSetsField(sb, TASK_FILE, "owner", "someone-else");
+
+      const r = runTail(sb, tail(DONE_STEP()), {
+        edits: { id: TASK_ID, status: "done" },
+        env: DONE_ENV,
+      });
+
+      assert.equal(r.status, 0, r.out);
+      assert.match(onMain(sb, TASK_FILE), /^status: "done"$/m);
+      assert.match(onMain(sb, TASK_FILE), /^owner: "someone-else"$/m,
+        "the contender's owner must be preserved, not reverted to the starting value");
+    });
+  });
+
+test("a contender moving `pr` IS a conflict for the closed-unmerged edit, which clears it",
+  { skip }, () => {
+    withSandbox({}, (sb) => {
+      // flow-status's `closed` arm writes status + owner + branch + pr. `pr` is in its set, so a
+      // contender that set it to something real is a change this run would erase.
+      contenderSetsField(sb, TASK_FILE, "pr", "https://github.com/o/r/pull/99");
+
+      const r = runTail(sb, tail(STATUS_STEP()), {
+        edits: { id: TASK_ID, status: "ready", owner: "", branch: "", pr: "" },
+        env: { ...STATUS_ENV, ACTION: "closed", TRANSITION: "ready" },
+      });
+
+      assert.notEqual(r.status, 0, "clearing a `pr` someone else just set is a silent overwrite");
+      assert.match(r.out, /CONFLICTING EDIT/);
+      assert.match(r.out, /pr was "", is now "https:\/\/github\.com\/o\/r\/pull\/99", this run would write ""/,
+        "the message must name `pr` and both values");
+      assert.match(onMain(sb, TASK_FILE), /^pr: "https:\/\/github\.com\/o\/r\/pull\/99"$/m,
+        "the contender's value must still be on main");
+      assert.match(onMain(sb, TASK_FILE), /^status: "in_progress"$/m,
+        "and the refused transition must not have been half-applied");
     });
   });
 
