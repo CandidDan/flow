@@ -290,7 +290,7 @@ test("criterion 5: the remainder count is singular when one is left over", () =>
   const spots = ["a", "b", "c", "d"].map((id) => ({ id, kind: "tests", text: id }));
   assert.equal(selectLookHere(spots).remaining, 1);
   assert.match(guideComment({ facts: facts(), hotspots: spots, prose: null, verdicts: [] }),
-    /…and 1 more computed hotspot —/);
+    /…and 1 more computed hotspot,/);
 });
 
 test("criterion 5: no hotspots renders a sentence, not an empty list", () => {

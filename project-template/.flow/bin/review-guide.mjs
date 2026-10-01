@@ -370,7 +370,7 @@ export function guideComment({ facts, hotspots, prose = null, verdicts = [] } = 
   out.push("### Look here", "");
   if (shown.length) {
     for (const h of shown) out.push(`1. ${h.text}`);
-    if (remaining) out.push("", `*…and ${remaining} more computed hotspot${remaining === 1 ? "" : "s"} — see the \`guide\` job's summary for the full list.*`);
+    if (remaining) out.push("", `*…and ${remaining} more computed hotspot${remaining === 1 ? "" : "s"}, not shown here.*`);
   } else {
     out.push("*Nothing computed stands out: no security-trigger path in the diff, no test deleted " +
       "or weakened, nothing outside the task's declared `touches`.*");
