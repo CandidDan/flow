@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0117"
 title: "Agents show, don't tell: a terse response rule in the protocol plus a show-me skill, with a visual-first PR description"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude-code-worker"
