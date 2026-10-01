@@ -2,10 +2,10 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0110"
 title: "flow-triage allocates task ids through allocate-task-id.mjs, so it can never duplicate one"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-cowork-orchestrator"
 created: "2026-09-30"
 started: ""
 branch: "flow/flow-0110-triage-allocates-ids-via-helper"
@@ -27,6 +27,7 @@ notes:
   - "2026-09-30 (worker): Branch flow/flow-0110-triage-allocates-ids-via-helper pushed. DONE: _flow-triage.yml rewritten — step 3 of the prompt now creates task files only via `node \"$FLOW_BIN\"/allocate-task-id.mjs --write`, with a flow-0094-style `Materialise canonical helpers` step (lifted verbatim from _flow-gates.yml, only the `for helper in` line differs) and a new optional `flow_ref` workflow_call input for GHES. `npm run build` green. NOT DONE YET: .flow/bin/triage-allocate-id.test.mjs, changes/flow-0110.md, full gate, PR. NEXT: write the test file then run lint/test/coverage."
   - "2026-09-30 (worker): BLOCKED, work complete and pushed on flow/flow-0110-triage-allocates-ids-via-helper (2 commits). GENUINELY DONE: _flow-triage.yml step 3 now creates task files only via `node \"$FLOW_BIN\"/allocate-task-id.mjs --write` with --repo-root/--prefix/--content-file/--slug, forbids hand-picking an id or writing/committing a task file any other way (including as a fallback when the allocator fails), and uses the id the allocator prints; a flow-0094-style materialise step lifted verbatim from _flow-gates.yml (only the `for helper in` line differs, which the new test pins byte-for-byte) plus an optional `flow_ref` input for GHES; `.flow/bin/triage-allocate-id.test.mjs` with 15 passing tests covering AC1-AC6; `changes/flow-0110.md`. LOOKS DONE BUT IS NOT: the gate. `npm test` is 1473/1476 — the two failures are `workflow-prompt-paths.test.mjs` AC2 (flow-0018 froze _flow-triage.yml`s `on:` block) and `adr-split-authoring.test.mjs` (the ADR-0005 amendment`s 47-file count is now 48). Both live outside this task`s `touches`, so they were left alone. Coverage not run. NEXT ACTION: orchestrator picks reading A or B in `blocked_reason`; then the worker either widens `touches` by those two files and makes two one-line edits, or swaps the materialise step + `flow_ref` input for the paired `project-template/` citation."
   - "2026-09-30 (orchestrator, human-approved): Reading A decided. Keep the Materialise-canonical-helpers step and the optional flow_ref input already on flow/flow-0110-triage-allocates-ids-via-helper (PR #138): a repo that has never run flow-sync must still get the allocator, which is why flow-0094 exists. touches widened by the two files the worker named. NEXT ACTION: on that branch, bump the ADR-0005 amendment count from 47 to 48 files, widen flow-0018's TRIAGE_STRUCTURE_BEFORE snapshot in workflow-prompt-paths.test.mjs to allow the new optional flow_ref input (only that; the rest of the on: block stays frozen), rerun the gate, then gh pr ready 138."
+  - "2026-10-01 (orchestrator): NEXT ACTION done on the branch: rebased onto main, ADR-0005 count 47 -> 48, TRIAGE_STRUCTURE_BEFORE admits flow_ref only. Gate green locally apart from the two Mac-only flow-validation/ findings. PR 138 marked ready."
 ---
 
 ## Context
