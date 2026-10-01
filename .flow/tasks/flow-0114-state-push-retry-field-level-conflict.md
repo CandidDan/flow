@@ -54,17 +54,17 @@ worker's final note followed by flow-status on ready_for_review, happens on almo
 
 ## Acceptance criteria
 
-1. A contender that appends a `notes:` entry to the same task file between checkout and push no
-   longer fails the run: the transition lands, and the contender's note is still on main,
-   byte for byte. Proved against real git repos in `state-push-retry.test.mjs`, for flow-status
-   AND flow-done.
-2. A contender that sets `status` to a different value (the existing flow-recover `blocked`
-   case) still fails with `CONFLICTING EDIT`, still leaves the contender's value on main, and the
-   message names `status` and both values.
-3. A contender that changes `pr` or `branch` (a field the closed-unmerged edit clears) is a
-   conflict for that edit, proved by one test.
-4. The existing duplicate-transition no-op, exhaustion and byte-identical tests pass unchanged.
-5. `changes/flow-0114.md` describes the behaviour change for adopters.
+- [ ] A contender that appends a `notes:` entry to the same task file between checkout and push no
+      longer fails the run: the transition lands, and the contender's note is still on main,
+      byte for byte. Proved against real git repos in `state-push-retry.test.mjs`, for flow-status
+      AND flow-done.
+- [ ] A contender that sets `status` to a different value (the existing flow-recover `blocked`
+      case) still fails with `CONFLICTING EDIT`, still leaves the contender's value on main, and the
+      message names `status` and both values.
+- [ ] A contender that changes `pr` or `branch` (a field the closed-unmerged edit clears) is a
+      conflict for that edit, proved by one test.
+- [ ] The existing duplicate-transition no-op, exhaustion and byte-identical tests pass unchanged.
+- [ ] `changes/flow-0114.md` describes the behaviour change for adopters.
 
 ## Definition of done (inherited — do not edit)
 
