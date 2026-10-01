@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Flow lets AI coding agents build, test and open pull requests on their own, with CI and independent reviewers deciding when the work is done. You approve the intent and the merge.">
+<link rel="canonical" href="https://getflow.now/">
 <meta property="og:type" content="website">
+<meta property="og:url" content="https://getflow.now/">
 <meta property="og:title" content="Flow: delegate the work, not the watching">
 <meta property="og:description" content="Flow lets AI coding agents build, test and open pull requests on their own, with CI and independent reviewers deciding when the work is done. You approve the intent and the merge.">
 <meta name="twitter:card" content="summary">
@@ -264,6 +266,14 @@
   .trace b{font-size:15.5px;}
   .trace .d{font-size:13.5px;color:var(--muted);}
 
+  .oneliner{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px;align-items:center;max-width:760px;}
+  .oneliner pre{font-size:clamp(16px,2.4vw,20px)!important;font-weight:500;}
+  .qrbox{margin:0;display:grid;gap:8px;justify-items:center;background:#fff;color:#111;padding:12px;border-radius:14px;}
+  .qrbox .qr{width:112px;height:112px;display:block;}
+  .qrbox figcaption{font:500 11px/1 var(--mono);color:#555;}
+  .final .fine{font-size:14px!important;}
+  .final .fine a{color:var(--bg);}
+
   @media(max-width:860px){
     .vision{grid-template-columns:1fr;}
     .pains,.steps,.benefits,.scars,.lanes,.fit,.runners,.agents{grid-template-columns:1fr;}
@@ -271,6 +281,7 @@
     .stats{grid-template-columns:1fr;}
     .stat + .stat{border-left:0;padding-left:0;border-top:1px solid var(--line);}
     section{padding-block:64px;}
+    .oneliner{grid-template-columns:1fr;justify-items:start;}
     .navbar nav{flex-wrap:wrap;row-gap:8px;padding-block:10px;}
     .navbar .btn.sm{margin-left:auto;}
     .navbar .links{order:3;width:100%;margin-left:0;gap:18px;overflow-x:auto;white-space:nowrap;scrollbar-width:none;padding-bottom:2px;font-size:14px;}
@@ -606,7 +617,7 @@
     <h2>Flow is built with Flow.</h2>
     <p class="intro">Every change to Flow goes through the same gate it gives you. Here’s what that looks like as of v2.2.</p>
     <div class="stats">
-      <div class="stat"><b>77</b><span>tasks shipped through its own gate</span></div>
+      <div class="stat"><b>79</b><span>tasks shipped through its own gate</span></div>
       <div class="stat"><b>1,400+</b><span>automated tests on Flow itself</span></div>
       <div class="stat"><b>96%</b><span>line coverage, with a floor CI enforces</span></div>
     </div>
@@ -706,12 +717,16 @@
 <section id="start" style="padding-top:0">
   <div class="wrap">
     <div class="final">
-      <h2>Set up Flow in one agent session.</h2>
-      <p>Paste this into Claude Code or another coding agent inside your repo. It follows the setup runbook, proposes your config and stops when it needs you. That’s usually two GitHub settings.</p>
-      <div class="prompt">
-        <div class="bar"><span>Setup prompt</span><button type="button" id="copy-prompt" aria-live="polite">Copy</button></div>
-<pre id="prompt-text">Set this repo up on the Flow protocol. The runbook is project-template/INIT.md in github.com/CandidDan/flow-protocol. Clone that repo at tag v2.2.0 and read it first, then follow it exactly. Don't invent any value in .flow/config.yml: propose the commands from what's actually in this repo and ask me to confirm. Stop and give me the human-only list when you reach it.</pre>
+      <h2>Tell your agent one line.</h2>
+      <p>In Claude Code, Codex, Cursor or any coding agent that can read a web page, inside your repo. It fetches the setup steps, tells you what it’s about to do, proposes your config and stops when it needs you. That’s usually two GitHub settings.</p>
+      <div class="oneliner">
+        <div class="prompt">
+          <div class="bar"><span>Say this to your agent</span><button type="button" id="copy-prompt" aria-live="polite">Copy</button></div>
+<pre id="prompt-text">Set up Flow: getflow.now/start</pre>
+        </div>
+        <figure class="qrbox"><svg class="qr" viewBox="0 0 25 25" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="QR code for getflow.now/start" shape-rendering="crispEdges"><path fill="currentColor" d="M0 0h7v1h-7zM8 0h1v1h-1zM10 0h3v1h-3zM14 0h1v1h-1zM18 0h7v1h-7zM0 1h1v1h-1zM6 1h1v1h-1zM8 1h1v1h-1zM18 1h1v1h-1zM24 1h1v1h-1zM0 2h1v1h-1zM2 2h3v1h-3zM6 2h1v1h-1zM8 2h1v1h-1zM10 2h5v1h-5zM18 2h1v1h-1zM20 2h3v1h-3zM24 2h1v1h-1zM0 3h1v1h-1zM2 3h3v1h-3zM6 3h1v1h-1zM9 3h1v1h-1zM11 3h1v1h-1zM13 3h1v1h-1zM15 3h2v1h-2zM18 3h1v1h-1zM20 3h3v1h-3zM24 3h1v1h-1zM0 4h1v1h-1zM2 4h3v1h-3zM6 4h1v1h-1zM8 4h2v1h-2zM11 4h1v1h-1zM16 4h1v1h-1zM18 4h1v1h-1zM20 4h3v1h-3zM24 4h1v1h-1zM0 5h1v1h-1zM6 5h1v1h-1zM10 5h2v1h-2zM13 5h2v1h-2zM16 5h1v1h-1zM18 5h1v1h-1zM24 5h1v1h-1zM0 6h7v1h-7zM8 6h1v1h-1zM10 6h1v1h-1zM12 6h1v1h-1zM14 6h1v1h-1zM16 6h1v1h-1zM18 6h7v1h-7zM10 7h1v1h-1zM13 7h1v1h-1zM15 7h2v1h-2zM0 8h1v1h-1zM3 8h6v1h-6zM16 8h2v1h-2zM20 8h1v1h-1zM22 8h3v1h-3zM2 9h4v1h-4zM7 9h1v1h-1zM10 9h1v1h-1zM12 9h5v1h-5zM19 9h5v1h-5zM2 10h1v1h-1zM6 10h1v1h-1zM10 10h2v1h-2zM13 10h1v1h-1zM15 10h2v1h-2zM18 10h2v1h-2zM21 10h1v1h-1zM24 10h1v1h-1zM8 11h1v1h-1zM11 11h2v1h-2zM14 11h2v1h-2zM18 11h2v1h-2zM21 11h4v1h-4zM1 12h2v1h-2zM4 12h1v1h-1zM6 12h1v1h-1zM10 12h3v1h-3zM15 12h1v1h-1zM18 12h2v1h-2zM24 12h1v1h-1zM0 13h1v1h-1zM5 13h1v1h-1zM8 13h3v1h-3zM13 13h1v1h-1zM15 13h3v1h-3zM20 13h1v1h-1zM23 13h1v1h-1zM0 14h3v1h-3zM4 14h1v1h-1zM6 14h3v1h-3zM10 14h3v1h-3zM15 14h1v1h-1zM17 14h2v1h-2zM20 14h5v1h-5zM0 15h1v1h-1zM3 15h1v1h-1zM7 15h3v1h-3zM11 15h1v1h-1zM15 15h1v1h-1zM18 15h2v1h-2zM21 15h2v1h-2zM24 15h1v1h-1zM0 16h1v1h-1zM5 16h3v1h-3zM9 16h1v1h-1zM12 16h2v1h-2zM16 16h5v1h-5zM22 16h2v1h-2zM8 17h1v1h-1zM10 17h3v1h-3zM14 17h1v1h-1zM16 17h1v1h-1zM20 17h1v1h-1zM22 17h2v1h-2zM0 18h7v1h-7zM8 18h2v1h-2zM11 18h3v1h-3zM16 18h1v1h-1zM18 18h1v1h-1zM20 18h1v1h-1zM24 18h1v1h-1zM0 19h1v1h-1zM6 19h1v1h-1zM8 19h1v1h-1zM13 19h4v1h-4zM20 19h1v1h-1zM23 19h2v1h-2zM0 20h1v1h-1zM2 20h3v1h-3zM6 20h1v1h-1zM8 20h1v1h-1zM14 20h7v1h-7zM0 21h1v1h-1zM2 21h3v1h-3zM6 21h1v1h-1zM8 21h2v1h-2zM11 21h1v1h-1zM14 21h1v1h-1zM16 21h3v1h-3zM23 21h2v1h-2zM0 22h1v1h-1zM2 22h3v1h-3zM6 22h1v1h-1zM9 22h1v1h-1zM11 22h2v1h-2zM14 22h1v1h-1zM16 22h2v1h-2zM20 22h5v1h-5zM0 23h1v1h-1zM6 23h1v1h-1zM9 23h2v1h-2zM12 23h1v1h-1zM14 23h1v1h-1zM18 23h3v1h-3zM22 23h3v1h-3zM0 24h7v1h-7zM8 24h1v1h-1zM10 24h2v1h-2zM16 24h2v1h-2zM21 24h1v1h-1zM24 24h1v1h-1z"/></svg><figcaption>getflow.now/start</figcaption></figure>
       </div>
+      <p class="fine">The steps are plain text you can read first, pinned to v2.2.0: <a href="/start">getflow.now/start</a>.</p>
       <div class="ctas" style="margin-top:4px">
         <a class="btn" href="https://github.com/CandidDan/flow-protocol">Get Flow on GitHub</a>
         <a class="btn ghost" href="#how">How it works</a>

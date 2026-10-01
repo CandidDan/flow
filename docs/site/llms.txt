@@ -1,0 +1,20 @@
+# Flow
+
+> Flow is an open protocol (Apache-2.0) that lets AI coding agents build, test and open pull requests on their own, with GitHub Actions and independent AI review deciding when the work is done. Tasks are Markdown files in the repo; the person approves the intent and the merge.
+
+To set Flow up in a repository, fetch the agent instructions below and follow them.
+
+## Start
+
+- [Set up Flow](https://getflow.now/start): step-by-step instructions written for a coding agent, pinned to the current release (v2.2.0)
+
+## Docs
+
+- [Published release (README, runbooks, template)](https://github.com/CandidDan/flow-protocol): the files a repo adopts
+- [New-repo runbook](https://github.com/CandidDan/flow-protocol/blob/v2.2.0/project-template/INIT.md): what /start runs for a new repository
+- [Existing-repo runbook](https://github.com/CandidDan/flow-protocol/blob/v2.2.0/project-template/RETROFIT.md): what /start runs for a repository with history
+- [Agent instructions (AGENTS.md)](https://github.com/CandidDan/flow-protocol/blob/v2.2.0/project-template/AGENTS.md): how any coding agent works a Flow task
+
+## Optional
+
+- [Overview for people](https://getflow.now): what Flow is, how it works, example pull requests, roadmap
