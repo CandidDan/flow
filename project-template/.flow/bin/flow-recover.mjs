@@ -15,10 +15,15 @@
 //
 //   node .flow/bin/flow-recover.mjs classify --status in_progress \
 //        --branch-exists 1 --ahead 1 --has-open-pr 0 --age 90 --threshold 75   -> "reopen-pr"
+//   node .flow/bin/flow-recover.mjs classify --status in_progress \
+//        --has-open-pr 1 --open-pr-ready 1 --age 90   -> "promote-in-review"
 //   node .flow/bin/flow-recover.mjs list-in-progress    # prints "<id>\t<started>\t<branch>" per task
 //   node .flow/bin/flow-recover.mjs branch-candidates CAN-51 claude/foo-x   # ls-remote patterns
 //   gh pr list --state open --json title | node .flow/bin/flow-recover.mjs count-task-prs CAN-51
+//   gh pr list --state open --json number,title,isDraft,url \
+//     | node .flow/bin/flow-recover.mjs ready-pr CAN-51  # "<number>\t<url>" of the non-draft PR
 //   node .flow/bin/flow-recover.mjs reset CAN-51        # prints the board-edits JSON to reset it
+//   node .flow/bin/flow-recover.mjs promote CAN-51 <pr-url> <branch>   # the in_review board edit
 //
 // Zero dependencies (Node >= 18).
 
@@ -52,18 +57,33 @@ const __isMain = (() => {
 export const DEFAULT_THRESHOLD_MINUTES = 75;
 
 // Pure classifier. Given a task and the observed git/gh facts, return exactly one of:
-//   "ok"             — leave it alone (not in_progress, has a PR, or too young to judge)
-//   "reopen-pr"      — work was pushed (branch exists, ahead of base) but no PR opened
-//   "reset-to-ready" — no branch / no commits to recover; clear the claim so it's re-pickable
-// Conservative by construction: only `in_progress` is ever swept, an open PR is never
+//   "ok"                — leave it alone (not in_progress, a draft PR is open, or too young)
+//   "reopen-pr"         — work was pushed (branch exists, ahead of base) but no PR opened
+//   "reset-to-ready"    — no branch / no commits to recover; clear the claim so it's re-pickable
+//   "promote-in-review" — the PR is open AND out of draft, but the task never left in_progress
+// Conservative by construction: only `in_progress` is ever swept, an open PR's *code* is never
 // disturbed, and nothing happens before the staleness threshold.
 export function classifyStranded(task, state, thresholdMinutes = DEFAULT_THRESHOLD_MINUTES) {
   const {
     branchExists = false, hasOpenPr = false, aheadOfBase = false, ageMinutes = 0,
-    prStateKnown = true,
+    prStateKnown = true, openPrReady = false,
   } = state || {};
   if (!task || task.status !== "in_progress") return "ok"; // only in_progress is swept
-  if (hasOpenPr) return "ok";                              // progressing — never disturbed
+  if (hasOpenPr) {
+    // An open PR still means "progressing", and the sweep never touches the PR itself. But
+    // `in_progress` + an open PR that is NOT a draft is a state the event stream cannot leave
+    // (flow-0104/#91): since flow-0039 the task reaches `in_review` on `ready_for_review`, and
+    // that event cannot fire again on a PR that is already out of draft. A task hand-returned to
+    // `ready` and re-claimed while its PR was non-draft therefore stays `in_progress` for good,
+    // and the board is wrong about what is in flight. The store is what gets corrected here.
+    //
+    // The same age and threshold as every other outcome, for the same reason: a worker who is
+    // still pushing to a non-draft PR (one opened with `gh pr create`, no --draft) must never be
+    // flipped mid-work. An unknown PR state never promotes — if we could not read whether the PR
+    // is a draft, `openPrReady` arrives false and this is `ok`, exactly as before.
+    if (prStateKnown && openPrReady && ageMinutes >= thresholdMinutes) return "promote-in-review";
+    return "ok";
+  }
   // "We could not find a PR" and "we could not ASK about PRs" are different facts, and only the
   // first is evidence. `gh pr list` failing — a 5xx, a rate limit, an expired token — used to
   // reduce to the same `0` as a genuine absence, and with the branch glob also missing that gave
@@ -122,6 +142,52 @@ export function isTaskPrTitle(title, id) {
 // which we DO clear). Applied via apply-board-edits.mjs as a commit to main — never hand-edited.
 export function buildResetEdit(id) {
   return { id, status: "ready", owner: "", branch: "", pr: "" };
+}
+
+// ── The non-draft open PR: the one fact `promote-in-review` turns on ─────────────────────
+//
+// Reads `gh pr list --state open --json number,title,isDraft,url` output and returns the first
+// PR that belongs to this task AND is out of draft, as `{ number, url }` — or null. Same single
+// call the sweep already makes per task (it only gained two fields), so this costs no extra API
+// request, and the `[<id>] …` title rule stays in ONE place rather than being re-expressed as a
+// jq filter in the workflow.
+//
+// Null is returned for anything doubtful: a draft PR, a PR whose `isDraft` is absent or
+// non-boolean, a title that does not match, unparseable input. Every one of those reaches
+// classifyStranded as `openPrReady=false`, which is `ok` — the sweep's existing behaviour. The
+// asymmetry is deliberate: "I could not tell" must look like "do not promote".
+export function readyOpenPr(prs, id) {
+  if (!Array.isArray(prs)) return null;
+  for (const pr of prs) {
+    if (!pr || typeof pr !== "object") continue;
+    if (!isTaskPrTitle(pr.title, id)) continue;
+    if (pr.isDraft !== false) continue;          // true, undefined and non-boolean all mean "no"
+    const number = Number(pr.number);
+    const url = typeof pr.url === "string" ? pr.url.trim() : "";
+    if (!Number.isInteger(number) || number <= 0) continue;
+    if (!/^https:\/\/[^\s"]+$/.test(url)) continue;   // it is written into a task file; see below
+    return { number, url };
+  }
+  return null;
+}
+
+// The board-edit that moves a stuck `in_progress` task to `in_review`, recording the PR it was
+// already waiting on. The counterpart of buildResetEdit, and applied the same way: through
+// apply-board-edits.mjs, as a commit to main, never a hand-edit.
+//
+// `pr` and `branch` are OMITTED when blank rather than written as "": apply-board-edits patches
+// exactly the fields present, so an empty string would clobber a branch the store already knows
+// (the title match finds a PR even when the branch glob missed, which is precisely the case where
+// `branch` here is empty). Both are also shape-checked, because apply-board-edits rejects a value
+// containing a quote or newline as a *problem* and exits non-zero — which would fail the whole
+// sweep over one malformed field instead of leaving one task uncorrected.
+export function buildPromoteEdit(id, prUrl = "", branch = "") {
+  const edit = { id, status: "in_review" };
+  const pr = String(prUrl || "").trim();
+  if (/^https:\/\/[^\s"]+$/.test(pr)) edit.pr = pr;
+  const b = String(branch || "").trim();
+  if (/^[A-Za-z0-9._\/-]+$/.test(b)) edit.branch = b;
+  return edit;
 }
 
 // Whole minutes elapsed between a timestamp (ISO datetime, or a date-only `started` like
@@ -195,6 +261,9 @@ if (__isMain) {
         ageMinutes: Number(f.age || 0),
         // Defaults to known, so a caller that never learned to pass it behaves exactly as before.
         prStateKnown: f["pr-state-known"] === undefined || Number(f["pr-state-known"]) > 0,
+        // Defaults to 0 — i.e. "not a ready PR" — for the same reason: an older workflow that
+        // never passes it gets today's answers, and an unreadable draft state never promotes.
+        openPrReady: Number(f["open-pr-ready"] || 0) > 0,
       },
       f.threshold ? Number(f.threshold) : DEFAULT_THRESHOLD_MINUTES,
     );
@@ -231,12 +300,28 @@ if (__isMain) {
       if (Array.isArray(prs)) n = prs.filter((p) => isTaskPrTitle(p && p.title, id)).length;
     } catch { n = 0; }
     process.stdout.write(String(n) + "\n");
+  } else if (cmd === "ready-pr") {
+    // Same stdin as count-task-prs (one `gh pr list` call, two questions asked of it). Prints
+    // "<number>\t<url>" for the task's open non-draft PR, or NOTHING at all — the shell reads an
+    // empty result as "no ready PR" and passes --open-pr-ready 0.
+    let raw = "";
+    try { raw = readFileSync(0, "utf8"); } catch { raw = ""; }
+    let prs = [];
+    try { prs = JSON.parse(raw || "[]"); } catch { prs = []; }
+    const hit = readyOpenPr(prs, rest[0]);
+    if (hit) process.stdout.write(`${hit.number}\t${hit.url}\n`);
   } else if (cmd === "reset") {
     const id = rest[0];
     if (id) process.stdout.write(JSON.stringify({ updates: [buildResetEdit(id)] }) + "\n");
+  } else if (cmd === "promote") {
+    const [id, prUrl, branch] = rest;
+    if (id) {
+      process.stdout.write(JSON.stringify({ updates: [buildPromoteEdit(id, prUrl, branch)] }) + "\n");
+    }
   } else {
     process.stderr.write(
-      "usage: flow-recover.mjs <classify|list-in-progress|branch-candidates|count-task-prs|reset> …\n",
+      "usage: flow-recover.mjs " +
+        "<classify|list-in-progress|branch-candidates|count-task-prs|ready-pr|reset|promote> …\n",
     );
   }
   process.exit(0);
