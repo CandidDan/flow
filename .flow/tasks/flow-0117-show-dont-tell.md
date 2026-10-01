@@ -25,6 +25,8 @@ touches:
 labels: [protocol, skills]
 notes:
   - "2026-10-01 (orchestrator): human direction — agent output is wordy (over-dramatic + terse at once); adopt something like humanlayer's show-me skill (https://www.humanlayer.com/blog/show-me-skill), especially in PRs. Fewer words; anything better as a visual, visual."
+  - "2026-10-01 (human, via chat): the complaint names two failures, over-dramatic wordiness AND unnecessary terseness. Fixing the first must not cause the second: terse is not cryptic. Plain words, full sentences, no unexplained jargon, no arrow-chains standing in for sentences."
+  - "2026-10-01 (human, via chat): open decision, not in scope until answered: make TL;DR conditional (only when output runs past ~15 lines) rather than always. Recommendation: yes, a TL;DR on a five-line reply is padding."
 ---
 
 ## Context
@@ -37,11 +39,13 @@ visuals — tables, trees, call stacks, mermaid, diffs, pseudocode, type signatu
 
 - Rewrite PROTOCOL.md `## Response style — always TL;DR` (keep the heading) to add: fewest words
   that carry the point; no preamble, recap or hedging; anything with structure (comparison, flow,
-  hierarchy, before/after, state) is a visual, not a paragraph; point at the show-me skill.
+  hierarchy, before/after, state) is a visual, not a paragraph; terse is not cryptic (plain words,
+  full sentences, no unexplained jargon); point at the show-me skill.
 - Define the PR description shape in that section: TL;DR line → one visual of the change →
   criteria checklist with proving tests → human to-dos. Prose only where a visual can't carry it.
 - New skill `project-template/.claude/skills/show-me/SKILL.md`: when to use which format, each
-  with a short example; a word budget; anti-patterns (dramatic framing, restating the question).
+  with a short example; a word budget; anti-patterns on both sides — too much (dramatic framing, restating the question,
+  recap) and too little (dropped articles, unexplained jargon, arrows or fragments in place of sentences).
 - AGENTS.md names the skill path (agents without skill discovery).
 - Root CLAUDE.md "Response style" line points at the rule rather than restating it.
 - Out of scope: the review workflows' own comment format; flightdeck.
@@ -54,6 +58,8 @@ visuals — tables, trees, call stacks, mermaid, diffs, pseudocode, type signatu
       (show-me.test.mjs)
 - [ ] The show-me skill exists with valid frontmatter (`name: show-me`, a description) and
       covers at least: table, tree, mermaid, diff, call stack. (show-me.test.mjs)
+- [ ] PROTOCOL.md's response-style section and the show-me skill both state that terse is not
+      cryptic, and the skill lists over-terse anti-patterns alongside wordy ones. (show-me.test.mjs)
 - [ ] AGENTS.md names the show-me skill path. (show-me.test.mjs)
 - [ ] The protocol-portability digest for the response-style section is updated with a comment
       naming this task; heading order unchanged.
