@@ -23,6 +23,7 @@ labels: [infra, sync]
 notes:
   - "2026-09-24 (orchestrator): Reported during a 1.x → 2.0.0 migration as 'AGENTS.md points at a skill that doesn't exist'. The skill does exist, at project-template/.claude/skills/vision-writer/; the defect is that flow-sync's surface (bin + callers + PROTOCOL.md + VERSION) never carries .claude/skills/. Fix it in sync; the AGENTS.md pointer is correct and stays."
   - "2026-09-24 (orchestrator): Overlaps flow-0075 (in_progress) and flow-0076 on _flow-sync.yml; pick-task sequences them. Rebase onto whichever lands first."
+  - "2026-10-01 (worker): Branch flow/flow-0081-sync-ships-skills pushed with the implementation and all 17 proving tests green (.flow/bin/sync-skills.test.mjs). _flow-sync.yml now mirrors each canonical-NAMED directory under project-template/.claude/skills/ one at a time (rsync -a --delete per directory, never over the parent), guarded + warning when canonical_ref predates the skills. Header inventory updated. changes/flow-0081.md written. Next: run the remaining gate commands (build, lint, coverage) and open the PR; nothing else to build."
 ---
 
 ## Context
