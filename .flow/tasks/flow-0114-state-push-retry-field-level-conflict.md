@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0114"
 title: "State-push retry re-applies over an unrelated edit to the same task file, and refuses only when a field it writes was changed"
-status: "ready"
+status: "in_review"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker"
 created: "2026-10-01"
-started: ""
-branch: ""
-pr: ""
+started: "2026-10-01T04:56:36Z"
+branch: "flow/flow-0114-state-push-retry-field-conflict"
+pr: "https://github.com/CandidDan/flow/pull/147"
 issue: ""
 blocked_reason: ""
 blocked_by: []
@@ -23,6 +23,9 @@ labels: [flow-status, flow-done, concurrency, flow-infra]
 notes:
   - "2026-10-01 (orchestrator): EVIDENCE. CandidDan/tanplan-platform#25 (tanplan-0033). flow-status's ready_for_review run lost the race, re-fetched, and found the task file changed: the worker had pushed a handoff NOTE to the same file. Re-applying the edit still changed the file (status in_progress -> in_review), the blob differed from base, so the loop exited with CONFLICTING EDIT and the transition was dropped. A human set in_review by hand and re-ran the check. The worker's note and flow-status's status write touch different fields and compose cleanly; nothing would have been overwritten."
   - "2026-10-01 (orchestrator): WHY THIS IS COMMON, not bad luck. The worker's last act is a note on its own task file on main, and marking the draft ready fires flow-status seconds later on the same file. Every queue-runner task walks into this window."
+  - "2026-10-01 (worker): PROGRESS. Branch flow/flow-0114-state-push-retry-field-conflict pushed. The shared flow-0059 block in _flow-status.yml and _flow-done.yml now derives the written-field list from $EDITS, snapshots those fields at the starting tip, and on retry compares them against the new tip: unchanged -> push, already-our-value -> the existing no-op, anything else -> CONFLICTING EDIT naming the field and both values. Byte-identical in both files; all 11 pre-existing state-push-retry tests pass unchanged, build green. NOT done: the four new tests (note-contender for status AND done, pr/branch contender, message names status + both values) and changes/flow-0114.md. Next: extend APPLY_STUB in state-push-retry.test.mjs to patch owner/branch/pr (it only handles status today) and add a contender that APPENDS a notes entry instead of rewriting the file."
+  - "2026-10-01 (worker): HANDED OFF. PR #147, branch flow/flow-0114-state-push-retry-field-conflict, marked ready for review. All five acceptance criteria met with named proving tests in .flow/bin/state-push-retry.test.mjs (15 tests, all green); negative-checked against the pre-change block, where exactly the four new tests plus the extended status-message assertion fail and the ten pre-existing ones pass. Gate: build green (34 workflows), lint green (103 .mjs), coverage 95.89% lines vs the 83.5 floor. npm test is 1532/1533: the one failure is PRE-EXISTING on main and unrelated — changelog-fragments.test.mjs reports flow-0089 declaring changes/flow-0089.md with no fragment on main, because that fragment is on PR #146's branch; reproduced on a clean main worktree at d3cc6a3, and changes/flow-0089.md is outside this task's touches so it was deliberately not fixed here. It clears when #146 merges. Nothing left to do on flow-0114 but review."
+  - "2026-10-01 (worker): CI RESULT on PR #147. flow-review/qa, flow-review/code-review and flow-review/security all PASS. flow-gates/gate and flow-gates/flow-tooling are red on exactly one assertion — 'not ok 197 - every claimed task that declares a changelog fragment has an entry stating its caller action', reporting flow-0089, which is red on main for the same reason and is not reachable from this diff. changes/flow-0089.md is outside flow-0114's touches, so it was deliberately not fixed here; merging PR #146 clears both gate checks. No action left on flow-0114 itself."
 ---
 
 ## Context
