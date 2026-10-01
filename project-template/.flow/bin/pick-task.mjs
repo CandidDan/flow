@@ -21,6 +21,9 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// flow-0111: the same list parser flow-doctor uses. Both YAML list forms, so block-form
+// `touches` (what every real task file uses) is not silently read as empty.
+import { parseListField } from "./flow-doctor.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -41,8 +44,8 @@ const __isMain = (() => {
   } catch { return false; }
 })();
 // ---------------------------------------------------------------------------------------
-// Parse the YAML frontmatter we care about from a task file's text. Tolerant of the
-// inline-array `touches` form and `#` trailing comments — same shape flow-doctor and
+// Parse the YAML frontmatter we care about from a task file's text. Tolerant of both
+// `touches` list forms (inline array and block sequence) and `#` trailing comments — same shape flow-doctor and
 // touches-guard read. Returns null when there's no frontmatter block.
 export function parseTask(text) {
   if (!text.startsWith("---")) return null;
@@ -53,9 +56,10 @@ export function parseTask(text) {
     const m = head.match(new RegExp(`^${k}:\\s*(.*)$`, "m"));
     return m ? m[1].split("#")[0].trim().replace(/^"(.*)"$/, "$1") : "";
   };
-  const touchesRaw = (head.match(/^touches:\s*\[(.*?)\]/m) || [, ""])[1];
-  const touches = [...touchesRaw.matchAll(/"([^"]*)"|'([^']*)'/g)]
-    .map((x) => x[1] ?? x[2]).filter(Boolean);
+  // flow-0111: this used to be an inline-array-only regex, which read every block-form
+  // `touches:` as [] and made the overlap filter below inert — the queue runner dispatched
+  // straight into collisions, in every repo.
+  const touches = parseListField(head, "touches");
   const id = get("id");
   if (!id) return null;
   return { id, status: get("status"), priority: parseInt(get("priority"), 10), touches };
