@@ -3,124 +3,760 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Flow — autonomous software delivery you can trust</title>
+<meta name="description" content="Flow lets AI coding agents build, test and open pull requests on their own, with CI and independent reviewers deciding when the work is done. You approve the intent and the merge.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Flow: delegate the work, not the watching">
+<meta property="og:description" content="Flow lets AI coding agents build, test and open pull requests on their own, with CI and independent reviewers deciding when the work is done. You approve the intent and the merge.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect x=%272%27 y=%2711%27 width=%2728%27 height=%2710%27 rx=%275%27 fill=%27%233f6f73%27/%3E%3Crect x=%272%27 y=%2711%27 width=%278%27 height=%2710%27 rx=%275%27 fill=%27%23c2410c%27/%3E%3Crect x=%2722%27 y=%2711%27 width=%278%27 height=%2710%27 rx=%275%27 fill=%27%23c2410c%27/%3E%3C/svg%3E">
+<title>Flow — delegate the work, not the watching</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
 <style>
+  /* Layout: marketing single page — full-bleed bands, 1080px content column, hero carries the two-touchpoint pipeline as its signature visual. */
   :root{
-    --bg:#faf7f2; --ink:#1c1a17; --muted:#6b6358; --line:#e7ddcd; --card:#fff;
-    --accent:#c2410c; --accent-soft:#fff1e9; --ok:#15803d; --code:#3a3023;
+    --bg:#f6f4f0; --band:#ece8e1; --ink:#17140f; --muted:#5f584e; --line:#dcd4c7; --card:#fffdf9;
+    --accent:#c2410c; --accent-ink:#fff; --accent-soft:#fbe7db; --agent:#3f6f73; --agent-soft:#dbe9e8; --ok:#15803d;
+    --display:"Bricolage Grotesque","Avenir Next",ui-sans-serif,system-ui,sans-serif;
+    --body:"Figtree",ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
   }
+  @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+    --bg:#13110e; --band:#1b1814; --ink:#f3eee6; --muted:#aaa196; --line:#342e27; --card:#1f1b16;
+    --accent:#f0773f; --accent-ink:#1a0e07; --accent-soft:#34200f; --agent:#7fb5b8; --agent-soft:#1c2c2d; --ok:#4ade80; color-scheme:dark; } }
+  :root[data-theme="dark"]{
+    --bg:#13110e; --band:#1b1814; --ink:#f3eee6; --muted:#aaa196; --line:#342e27; --card:#1f1b16;
+    --accent:#f0773f; --accent-ink:#1a0e07; --accent-soft:#34200f; --agent:#7fb5b8; --agent-soft:#1c2c2d; --ok:#4ade80; color-scheme:dark; }
+
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-    font:17px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    -webkit-font-smoothing:antialiased;}
-  .wrap{max-width:920px;margin:0 auto;padding:0 22px;}
+  body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 var(--body);-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:1080px;margin:0 auto;padding-inline:24px;}
   a{color:var(--accent);}
-  h1,h2,h3{letter-spacing:-.02em;line-height:1.15;}
-  code{background:var(--accent-soft);color:var(--code);padding:1px 6px;border-radius:5px;font-size:.86em;}
+  a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px;}
+  h1,h2,h3{font-family:var(--display);letter-spacing:-.025em;line-height:1.05;text-wrap:balance;margin:0;}
+  p{margin:0;}
+
+  .navbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--bg) 94%,transparent);-webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid transparent;transition:border-color .2s;}
+  .navbar.scrolled{border-bottom-color:var(--line);}
+  .navbar nav{display:flex;align-items:center;gap:16px 24px;padding-block:14px;}
+  .navbar .links{margin-left:auto;}
+  .links a.active{color:var(--ink);}
+  section,header{scroll-margin-top:76px;}
+  .logo{font:800 24px/1 var(--display);letter-spacing:-.04em;color:var(--ink);text-decoration:none;display:flex;align-items:center;gap:9px;}
+  .logo i{width:22px;height:10px;border-radius:5px;background:linear-gradient(90deg,var(--accent) 0 26%,var(--agent) 26% 74%,var(--accent) 74%);display:inline-block;}
+  .links{display:flex;gap:22px;align-items:center;font-size:15px;}
+  .links a{color:var(--muted);text-decoration:none;}
+  .links a:hover{color:var(--ink);}
+  .btn{display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:var(--accent-ink)!important;font-weight:600;text-decoration:none;padding:13px 22px;border-radius:999px;font-size:16px;}
+  .btn.sm{padding:9px 16px;font-size:14.5px;}
+  .btn.ghost{background:transparent;color:var(--ink)!important;border:1.5px solid var(--line);}
+  .btn.ghost:hover{border-color:var(--ink);}
 
   /* hero */
-  header{padding:74px 0 50px;border-bottom:1px solid var(--line);}
-  .kicker{font-size:13px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 14px;}
-  h1{font-size:clamp(34px,6vw,56px);margin:0 0 18px;}
-  .lede{font-size:clamp(18px,2.4vw,22px);color:var(--muted);max-width:660px;margin:0 0 26px;}
-  .lede b{color:var(--ink);}
-  .cta{display:inline-block;background:var(--accent);color:#fff;font-weight:600;text-decoration:none;
-    padding:12px 22px;border-radius:10px;}
-  .cta.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent);margin-left:10px;}
+  .hero{padding-block:56px 30px;}
+  .pill{display:inline-flex;gap:8px;align-items:center;font:500 13px/1 var(--mono);color:var(--muted);border:1px solid var(--line);background:var(--card);padding:8px 12px;border-radius:999px;margin-bottom:26px;}
+  .pill b{color:var(--accent);font-weight:500;}
+  .hero h1{font-size:clamp(44px,8.4vw,96px);font-weight:800;max-width:11ch;}
+  .hero h1 em{font-style:normal;color:var(--accent);}
+  .hero .lede{font-size:clamp(18px,2.2vw,22px);color:var(--muted);max-width:620px;margin-top:24px;line-height:1.5;}
+  .hero .lede b{color:var(--ink);font-weight:600;}
+  .ctas{display:flex;gap:12px;flex-wrap:wrap;margin-top:32px;}
+  .facts{display:flex;flex-wrap:wrap;gap:8px 22px;margin-top:26px;font-size:14px;color:var(--muted);}
+  .facts span::before{content:"✓";color:var(--ok);margin-right:7px;font-weight:700;}
 
-  section{padding:52px 0;border-bottom:1px solid var(--line);}
-  section h2{font-size:clamp(24px,3.4vw,32px);margin:0 0 8px;}
-  section .sub{color:var(--muted);margin:0 0 30px;max-width:640px;}
+  /* pipeline visual */
+  .pipe{margin-top:54px;background:var(--card);border:1px solid var(--line);border-radius:22px;padding:26px 26px 20px;overflow-x:auto;}
+  .pipe svg{display:block;width:100%;min-width:640px;height:auto;}
+  .pipe .t{font:600 13px var(--body);fill:var(--ink);}
+  .pipe .s{font:500 11px var(--mono);fill:var(--muted);letter-spacing:.04em;}
+  .pipe .you{fill:var(--accent);}
+  .pipe .youtxt{font:700 12px var(--mono);fill:var(--accent-ink);letter-spacing:.08em;}
+  .pipe .track{stroke:var(--line);stroke-width:2;}
+  .pipe .run{stroke:var(--agent);stroke-width:3;stroke-dasharray:6 8;}
+  .pipe .node{fill:var(--agent-soft);stroke:var(--agent);stroke-width:1.5;}
+  .pipe .nodetxt{font:600 11.5px var(--body);fill:var(--agent);}
+  .pipe .band{fill:var(--agent-soft);opacity:.55;}
+  .pipe .bandtxt{font:600 11px var(--mono);fill:var(--agent);letter-spacing:.12em;}
+  @media (prefers-reduced-motion:no-preference){ .pipe .run{animation:march 1.4s linear infinite;} }
+  @keyframes march{to{stroke-dashoffset:-28;}}
 
-  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
-  .step{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;}
-  .step .n{font-size:13px;font-weight:700;color:var(--accent);letter-spacing:.08em;}
-  .step h3{font-size:18px;margin:8px 0 6px;}
-  .step p{margin:0;color:var(--muted);font-size:15px;}
+  section{padding-block:88px;}
+  .band-bg{background:var(--band);}
+  .eyebrow{font:500 13px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-bottom:16px;}
+  h2{font-size:clamp(32px,5vw,54px);font-weight:700;max-width:18ch;}
+  .intro{color:var(--muted);font-size:19px;max-width:620px;margin-top:18px;line-height:1.55;}
 
-  .feat{display:grid;grid-template-columns:repeat(2,1fr);gap:16px 28px;}
-  .feat .f h3{font-size:17px;margin:0 0 4px;display:flex;gap:8px;align-items:baseline;}
-  .feat .f h3::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block;flex:none;transform:translateY(-1px);}
-  .feat .f p{margin:0;color:var(--muted);font-size:15px;}
+  /* pain */
+  .pains{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:40px;}
+  .pain{border-top:2px solid var(--ink);padding-top:16px;}
+  .pain h3{font-size:22px;font-weight:700;margin-bottom:8px;}
+  .pain p{color:var(--muted);font-size:16px;}
 
-  .quote{font-size:clamp(20px,3vw,26px);line-height:1.4;font-weight:500;max-width:720px;}
-  .quote .em{color:var(--accent);}
+  /* steps */
+  .steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:44px;}
+  .step{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:26px;display:flex;flex-direction:column;gap:10px;}
+  .step .who{align-self:flex-start;font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:6px 10px;border-radius:999px;}
+  .step .who.you{background:var(--accent-soft);color:var(--accent);}
+  .step .who.agents{background:var(--agent-soft);color:var(--agent);}
+  .step h3{font-size:25px;font-weight:700;}
+  .step p{color:var(--muted);font-size:16px;}
+  .step ul{margin:4px 0 0;padding-left:18px;color:var(--muted);font-size:15px;display:grid;gap:4px;}
 
-  .scars{display:grid;grid-template-columns:1fr;gap:14px;}
-  .scar{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center;background:var(--card);
-    border:1px solid var(--line);border-radius:12px;padding:16px 18px;}
-  .scar .bad{color:var(--muted);font-size:15px;}
-  .scar .fix{font-size:15px;}
-  .scar .fix b{color:var(--ok);}
-  .scar .arrow{display:none;}
+  /* benefits */
+  .benefits{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:40px 34px;margin-top:48px;}
+  .benefit h3{font-size:22px;font-weight:700;margin-bottom:8px;}
+  .benefit p{color:var(--muted);font-size:16px;}
+  .benefit .k{font:500 12px/1 var(--mono);color:var(--agent);letter-spacing:.06em;margin-bottom:12px;display:block;}
 
-  footer{padding:46px 0 70px;color:var(--muted);font-size:14px;}
-  .who{background:var(--accent-soft);border:1px solid #f3d8c6;border-radius:14px;padding:22px 24px;}
-  .who b{color:var(--ink);}
-  @media(max-width:680px){ .steps,.feat,.scar{grid-template-columns:1fr;} }
+  /* proof */
+  .stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;margin-top:44px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);}
+  .stat{padding:26px 20px 24px 0;}
+  .stat + .stat{padding-left:20px;border-left:1px solid var(--line);}
+  .stat b{display:block;font:800 clamp(38px,5vw,56px)/1 var(--display);letter-spacing:-.03em;font-variant-numeric:tabular-nums;}
+  .stat span{display:block;color:var(--muted);font-size:14.5px;margin-top:10px;max-width:22ch;}
+  .scars{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:40px;}
+  .scar{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px;display:flex;flex-direction:column;gap:12px;}
+  .scar .was{color:var(--muted);font-size:15px;}
+  .scar .now{font-size:15px;font-weight:500;}
+  .scar .now::before{content:"Now: ";color:var(--ok);font-weight:700;}
+
+  /* compare */
+  .tablewrap{overflow-x:auto;margin-top:40px;border-radius:18px;border:1px solid var(--line);background:var(--card);}
+  table{width:100%;border-collapse:collapse;min-width:620px;font-size:15.5px;}
+  th,td{text-align:left;padding:16px 20px;border-bottom:1px solid var(--line);vertical-align:top;}
+  tr:last-child td{border-bottom:0;}
+  thead th{font:500 12px/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+  thead th.flow{color:var(--accent);}
+  td:first-child{font-weight:600;color:var(--ink);width:26%;}
+  td{color:var(--muted);}
+  td.flow{color:var(--ink);background:var(--accent-soft);}
+
+  /* roadmap */
+  .lanes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:44px;}
+  .lane{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px;}
+  .lane .tag{font:500 12px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;display:inline-block;padding:6px 10px;border-radius:999px;margin-bottom:16px;}
+  .lane.now .tag{background:var(--accent-soft);color:var(--accent);}
+  .lane.next .tag{background:var(--agent-soft);color:var(--agent);}
+  .lane.later .tag{background:var(--band);color:var(--muted);}
+  .lane ul{list-style:none;margin:0;padding:0;display:grid;gap:16px;}
+  .lane li b{display:block;font-weight:600;font-size:16px;}
+  .lane li span{color:var(--muted);font-size:14.5px;}
+
+  /* fit */
+  .fit{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin-top:40px;}
+  .fit > div{border-radius:18px;padding:28px;border:1px solid var(--line);background:var(--card);}
+  .fit h3{font-size:22px;margin-bottom:14px;}
+  .fit ul{margin:0;padding:0;list-style:none;display:grid;gap:10px;font-size:16px;color:var(--muted);}
+  .fit .yes li::before{content:"✓";color:var(--ok);font-weight:700;margin-right:10px;}
+  .fit .no li::before{content:"–";color:var(--muted);font-weight:700;margin-right:12px;}
+
+  /* final cta */
+  .final{background:var(--ink);color:var(--bg);border-radius:28px;padding:clamp(34px,6vw,72px);display:grid;gap:22px;}
+  .final h2{color:var(--bg);max-width:16ch;}
+  .final p{color:color-mix(in srgb,var(--bg) 72%,transparent);font-size:18px;max-width:560px;}
+  .final .btn.ghost{color:var(--bg)!important;border-color:color-mix(in srgb,var(--bg) 35%,transparent);}
+  .prompt{background:color-mix(in srgb,var(--bg) 8%,var(--ink));border:1px solid color-mix(in srgb,var(--bg) 18%,transparent);border-radius:14px;overflow:hidden;max-width:760px;}
+  .prompt .bar{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 10px 9px 16px;font:500 12px/1 var(--mono);color:color-mix(in srgb,var(--bg) 65%,transparent);border-bottom:1px solid color-mix(in srgb,var(--bg) 14%,transparent);}
+  .prompt button{font:500 12px/1 var(--mono);background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:8px 12px;cursor:pointer;}
+  .prompt pre{margin:0;padding:16px;font:13px/1.65 var(--mono);white-space:pre-wrap;color:var(--bg);}
+
+  footer{padding-block:40px 64px;color:var(--muted);font-size:14px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+
+
+  /* PR example (a GitHub-style pull request, drawn in the site's own tokens) */
+  .prtabs{display:flex;gap:8px;flex-wrap:wrap;margin-top:40px;}
+  .prtabs button{font:600 14.5px/1 var(--body);background:var(--card);color:var(--muted);border:1.5px solid var(--line);border-radius:999px;padding:11px 16px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;}
+  .prtabs button[aria-selected="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink);}
+  .prtabs .dot{width:9px;height:9px;border-radius:50%;background:var(--c);}
+  .pr{margin-top:18px;background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;}
+  .pr-head{padding:22px 24px 18px;border-bottom:1px solid var(--line);}
+  .pr-title{font:600 clamp(19px,2.4vw,24px)/1.3 var(--body);margin:0;}
+  .pr-title .num{color:var(--muted);font-weight:400;}
+  .pr-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin-top:12px;font-size:14px;color:var(--muted);}
+  .state{display:inline-flex;align-items:center;gap:6px;font:600 13.5px/1 var(--body);color:#fff;padding:7px 12px;border-radius:999px;}
+  .state.merged{background:#8250df;} .state.open{background:#1f883d;} .state.draft{background:#6e7781;}
+  .branch{font:500 12.5px/1 var(--mono);background:var(--agent-soft);color:var(--agent);padding:4px 7px;border-radius:6px;overflow-wrap:anywhere;}
+  .pr-body{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:0;}
+  .pr-main{padding:20px 24px 24px;display:grid;gap:16px;min-width:0;border-right:1px solid var(--line);}
+  .pr-side{padding:20px;font-size:13.5px;color:var(--muted);display:grid;gap:16px;align-content:start;}
+  .pr-side h4{font:600 12.5px/1 var(--body);color:var(--ink);margin:0 0 8px;}
+  .pr-side .lbls{display:flex;flex-wrap:wrap;gap:5px;}
+  .lbl{font:600 11.5px/1 var(--body);padding:4px 8px;border-radius:999px;border:1px solid var(--line);color:var(--ink);background:var(--bg);}
+  .cmt{border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0;}
+  .cmt-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;background:var(--band);border-bottom:1px solid var(--line);font-size:13.5px;color:var(--muted);}
+  .cmt-h b{color:var(--ink);}
+  .av{width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;font:700 10px/1 var(--mono);color:#fff;flex:none;}
+  .av.w{background:var(--agent);} .av.bot{background:var(--muted);} .av.you{background:var(--accent);}
+  .bot-tag{font:600 11px/1 var(--body);border:1px solid var(--line);border-radius:999px;padding:3px 6px;}
+  .cmt-b{padding:14px 16px;font-size:14.5px;color:var(--ink);display:grid;gap:10px;min-width:0;}
+  .cmt-b p{color:var(--muted);}
+  .cmt-b h5{font:700 15px/1.3 var(--body);margin:0;}
+  .cmt-b h5 .pass{color:var(--ok);} .cmt-b h5 .fail{color:#cf222e;}
+  .crit{list-style:none;margin:0;padding:0;display:grid;gap:8px;}
+  .crit li{display:grid;grid-template-columns:18px minmax(0,1fr);gap:8px;font-size:14px;}
+  .crit li::before{content:"✓";width:16px;height:16px;border-radius:4px;margin-top:2px;background:var(--ok);color:var(--card);font:800 11px/16px var(--body);text-align:center;}
+  .crit code,.cmt-b code{font:500 12px/1.4 var(--mono);background:var(--band);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere;}
+  .crit small{display:block;color:var(--muted);font-size:13px;}
+  .mini{overflow-x:auto;}
+  .mini table{min-width:460px;font-size:13.5px;}
+  .mini th,.mini td{padding:8px 10px;}
+  .mini td:first-child{width:auto;font-weight:500;}
+  .tag-ok{color:var(--ok);font-weight:700;} .tag-bad{color:#cf222e;font-weight:700;}
+  .event{display:flex;gap:10px;align-items:center;font-size:13.5px;color:var(--muted);padding-left:6px;flex-wrap:wrap;}
+  .event::before{content:"";width:10px;height:10px;border-radius:50%;background:var(--line);flex:none;}
+  .event b{color:var(--ink);font-weight:600;}
+  .checks{border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+  .checks-h{display:flex;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid var(--line);}
+  .checks-h .ic{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:800;flex:none;}
+  .checks-h b{display:block;font-size:15px;} .checks-h span{font-size:13px;color:var(--muted);}
+  .checks ul{list-style:none;margin:0;padding:6px 0;max-height:none;}
+  .checks li{display:flex;gap:10px;align-items:center;padding:6px 16px;font-size:13.5px;color:var(--muted);}
+  .checks li b{color:var(--ink);font-weight:600;}
+  .ck{width:16px;text-align:center;font-weight:800;flex:none;}
+  .ck.ok{color:var(--ok);} .ck.bad{color:#cf222e;} .ck.skip{color:var(--muted);}
+  .merge{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:14px 16px;border-top:1px solid var(--line);background:var(--band);}
+  .merge p{font-size:14px;color:var(--muted);} .merge p b{color:var(--ink);}
+  .merge .mbtn{font:600 14px/1 var(--body);color:#fff;background:#1f883d;border-radius:8px;padding:10px 14px;}
+  .merge .mbtn.off{background:var(--line);color:var(--muted);}
+  .pr-note{font-size:13.5px;color:var(--muted);margin-top:12px;}
+
+  /* runners */
+  .runners{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:40px;}
+  .runner{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px;display:flex;flex-direction:column;gap:8px;min-width:0;}
+  .runner .when{align-self:flex-start;font:500 11.5px/1 var(--mono);letter-spacing:.04em;color:var(--agent);background:var(--agent-soft);padding:5px 8px;border-radius:6px;}
+  .runner h3{font-size:20px;font-weight:700;}
+  .runner p{color:var(--muted);font-size:15px;}
+  .runner.core{border-color:var(--accent);}
+  .runner.core .when{color:var(--accent);background:var(--accent-soft);}
+  .groupnote{display:flex;gap:18px;flex-wrap:wrap;margin-top:18px;font-size:14px;color:var(--muted);}
+  .groupnote span{display:inline-flex;gap:8px;align-items:center;}
+  .groupnote i{width:14px;height:14px;border-radius:4px;border:1.5px solid var(--c);display:inline-block;}
+
+  /* agents */
+  .agents{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:40px;margin-top:44px;align-items:start;}
+  .agentpts{display:grid;gap:26px;}
+  .agentpts h3{font-size:22px;font-weight:700;margin-bottom:6px;}
+  .agentpts p{color:var(--muted);font-size:16px;}
+  .soon{font:600 11px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--agent);background:var(--agent-soft);padding:4px 7px;border-radius:5px;vertical-align:3px;margin-left:6px;}
+  .split{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;display:grid;gap:12px;}
+  .split .row{display:grid;grid-template-columns:96px minmax(0,1fr);gap:12px;align-items:center;}
+  .split .role{font:500 12px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;}
+  .chip{font:600 13px/1 var(--body);padding:8px 11px;border-radius:999px;border:1.5px solid var(--line);color:var(--ink);background:var(--bg);}
+  .chip.b{border-color:var(--agent);color:var(--agent);background:var(--agent-soft);}
+  .chip.r{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);}
+  .chip.ghost{border-style:dashed;color:var(--muted);}
+  .split hr{border:0;border-top:1px dashed var(--line);margin:4px 0;}
+  .split .cap{font-size:13.5px;color:var(--muted);}
+
+  /* vision trace */
+  .vision{margin-top:22px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:28px;}
+  .vision h3{font-size:clamp(22px,2.6vw,28px);font-weight:700;margin-bottom:10px;}
+  .vision-copy p{color:var(--muted);font-size:16px;}
+  .vision-copy p.eyebrow{color:var(--accent);font-size:13px;}
+  .vision code{font:500 13px var(--mono);background:var(--band);padding:1px 6px;border-radius:5px;color:var(--ink);}
+  .trace{list-style:none;margin:0;padding:0;display:grid;gap:10px;position:relative;}
+  .trace li{position:relative;display:grid;gap:2px;padding:12px 14px 12px 16px;border:1px solid var(--line);border-left:3px solid var(--agent);border-radius:10px;background:var(--bg);}
+  .trace li:first-child{border-left-color:var(--accent);}
+  .trace li + li::before{content:"↑";position:absolute;top:-16px;left:22px;font:700 13px/1 var(--body);color:var(--muted);background:var(--card);padding:0 3px;}
+  .trace .k{font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+  .trace b{font-size:15.5px;}
+  .trace .d{font-size:13.5px;color:var(--muted);}
+
+  @media(max-width:860px){
+    .vision{grid-template-columns:1fr;}
+    .pains,.steps,.benefits,.scars,.lanes,.fit,.runners,.agents{grid-template-columns:1fr;}
+    .pr-body{grid-template-columns:1fr;} .pr-main{border-right:0;border-bottom:1px solid var(--line);}
+    .stats{grid-template-columns:1fr;}
+    .stat + .stat{border-left:0;padding-left:0;border-top:1px solid var(--line);}
+    section{padding-block:64px;}
+    .navbar nav{flex-wrap:wrap;row-gap:8px;padding-block:10px;}
+    .navbar .btn.sm{margin-left:auto;}
+    .navbar .links{order:3;width:100%;margin-left:0;gap:18px;overflow-x:auto;white-space:nowrap;scrollbar-width:none;padding-bottom:2px;font-size:14px;}
+    .navbar .links::-webkit-scrollbar{display:none;}
+    section,header{scroll-margin-top:96px;}
+  }
 </style>
 </head>
 <body>
+
+<div class="navbar" id="navbar">
+  <nav class="wrap" aria-label="Main">
+    <a class="logo" href="#top"><i aria-hidden="true"></i>Flow</a>
+    <div class="links">
+      <a href="#how">How it works</a>
+      <a href="#pr">See a PR</a>
+      <a href="#runners">Automation</a>
+      <a href="#agents">Any agent</a>
+      <a href="#roadmap">Roadmap</a>
+    </div>
+    <a class="btn sm" href="https://github.com/CandidDan/flow-protocol">View on GitHub</a>
+  </nav>
+</div>
+
 <div class="wrap">
 
-  <header>
-    <p class="kicker">Flow</p>
-    <h1>Delegate the work, not the watching.</h1>
-    <p class="lede">Flow turns Claude into a software team you supervise at exactly two points — the <b>spec</b> going in and the <b>pull request</b> coming out. Everything in between runs itself, and nothing reaches you until it’s genuinely done.</p>
-    <a class="cta" href="#how">How it works</a>
-    <a class="cta ghost" href="#why">Why it’s different</a>
+  <header class="hero" id="top">
+    <div class="pill"><b>v2.2</b> Independent AI review on every pull request</div>
+    <h1>Delegate the work, <em>not the watching.</em></h1>
+    <p class="lede">Flow lets AI coding agents take tasks off your backlog, build them, test them and open the pull request on their own. <b>You say what you want, and you approve the merge.</b> Everything in between is checked by CI, not by you staring at diffs.</p>
+    <div class="ctas">
+      <a class="btn" href="#start">Get started free</a>
+      <a class="btn ghost" href="#how">See how it works</a>
+    </div>
+    <div class="facts"><span>Open source, Apache-2.0</span><span>Runs on GitHub Actions</span><span>Works with Claude Code and other agents</span><span>Nothing to host</span></div>
+
+    <div class="pipe" role="img" aria-label="Diagram: you approve the intent, agents write the spec, build, test and get reviewed, then you approve the merge.">
+      <svg viewBox="0 0 1000 170" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+        <rect class="band" x="150" y="18" width="700" height="134" rx="18"/>
+        <text class="bandtxt" x="500" y="42" text-anchor="middle">AGENTS + CI · NO HUMAN NEEDED</text>
+        <line class="track" x1="80" y1="96" x2="920" y2="96"/>
+        <line class="run" x1="150" y1="96" x2="850" y2="96"/>
+        <circle class="you" cx="80" cy="96" r="34"/>
+        <text class="youtxt" x="80" y="100" text-anchor="middle">YOU</text>
+        <text class="t" x="80" y="152" text-anchor="middle">Approve the intent</text>
+        <g>
+          <rect class="node" x="190" y="78" width="112" height="36" rx="18"/><text class="nodetxt" x="246" y="100" text-anchor="middle">Scope tasks</text>
+          <rect class="node" x="322" y="78" width="112" height="36" rx="18"/><text class="nodetxt" x="378" y="100" text-anchor="middle">Build</text>
+          <rect class="node" x="454" y="78" width="112" height="36" rx="18"/><text class="nodetxt" x="510" y="100" text-anchor="middle">Prove with tests</text>
+          <rect class="node" x="586" y="78" width="112" height="36" rx="18"/><text class="nodetxt" x="642" y="100" text-anchor="middle">Gate in CI</text>
+          <rect class="node" x="718" y="78" width="112" height="36" rx="18"/><text class="nodetxt" x="774" y="100" text-anchor="middle">AI review ×3</text>
+        </g>
+        <text class="s" x="500" y="140" text-anchor="middle">runs in parallel, overnight, across repos</text>
+        <circle class="you" cx="920" cy="96" r="34"/>
+        <text class="youtxt" x="920" y="100" text-anchor="middle">YOU</text>
+        <text class="t" x="920" y="152" text-anchor="middle">Approve the merge</text>
+      </svg>
+    </div>
   </header>
-
-  <section>
-    <h2>AI can write code. It can’t be trusted to ship it — yet.</h2>
-    <p class="sub">So you babysit: re-reading every diff, re-running every check, re-feeding context. The bottleneck was never the model’s ability. It’s the missing system that makes “done” actually mean done — and without it, autonomy quietly collapses back into supervision.</p>
-    <p class="quote">Flow is that system. <span class="em">You approve the spec and the PR.</span> The rest is the machine’s job.</p>
-  </section>
-
-  <section id="how">
-    <h2>How it works</h2>
-    <p class="sub">A thin protocol that lives inside your repo — not another platform to log into.</p>
-    <div class="steps">
-      <div class="step"><div class="n">01 — SPEC</div><h3>Write the task as a contract</h3><p>You and Claude turn direction into a real spec: observable acceptance criteria, the exact files it may touch, and the boundary. Vague isn’t allowed — a task is only “ready” when a fresh session could finish it with no further questions.</p></div>
-      <div class="step"><div class="n">02 — BUILD</div><h3>A worker builds behind a hard gate</h3><p>A fresh Claude Code worker claims it, builds on a branch, and <b>cannot open a PR</b> until every criterion has a passing test that proves it — plus security review, code review, and the full build / lint / test / coverage.</p></div>
-      <div class="step"><div class="n">03 — MERGE</div><h3>You review and merge</h3><p>You read the PR — criteria ticked, each with the test that proves it — and merge. Two touchpoints, start to finish. Several workers run in parallel without colliding, coordinated by nothing but git.</p></div>
-    </div>
-  </section>
-
-  <section id="why">
-    <h2>Why it’s different</h2>
-    <p class="sub">Most tools help an agent write code faster. Flow is about making its “finished” trustworthy.</p>
-    <div class="feat">
-      <div class="f"><h3>Done means done</h3><p>No PR opens on “looks good to me.” Every acceptance criterion is mapped to a test that proves it, checked by name before the gate lets the PR through.</p></div>
-      <div class="f"><h3>The model refuses to guess</h3><p>Hit an under-specified spot or a real decision, and the worker <em>blocks and asks</em> instead of fabricating. A block is integrity, not failure.</p></div>
-      <div class="f"><h3>Plain files, not a platform</h3><p>Your tasks are Markdown in your own repo, on <code>main</code>. Nothing to log into, nothing to migrate off, no lock-in. The board is just a generated view.</p></div>
-      <div class="f"><h3>Coordinated by git alone</h3><p>Many workers at once. Claiming a task is an atomic first-push-wins commit; a <code>touches</code> list keeps two of them out of the same files. No daemon, no lock server.</p></div>
-      <div class="f"><h3>It hardens itself</h3><p>Every incident becomes a permanent guardrail. The system gets safer the more it’s used — failures turn into checks, not folklore.</p></div>
-      <div class="f"><h3>Stack-agnostic</h3><p>The same protocol runs a static site and a full app. Only a small per-project config and the project’s own context file differ.</p></div>
-    </div>
-  </section>
-
-  <section>
-    <h2>Every failure becomes a guardrail</h2>
-    <p class="sub">Flow wasn’t designed on a whiteboard — it was hardened by getting burned, and each scar became a rule the system now enforces for you.</p>
-    <div class="scars">
-      <div class="scar"><div class="bad">A parse error in an unchecked file silently dropped messages for ~7 days.</div><div class="fix"><b>→</b> The gate now refuses to merge any source tree it doesn’t actually parse.</div></div>
-      <div class="scar"><div class="bad">A worker did all the work, then ended its turn without opening the PR.</div><div class="fix"><b>→</b> PR creation moved off the model and onto a workflow — a stall can’t strand the work.</div></div>
-      <div class="scar"><div class="bad">A task was written but never pushed, so a cloud worker couldn’t see it.</div><div class="fix"><b>→</b> A store check fails loudly the moment a task exists on disk but not on <code>main</code>.</div></div>
-    </div>
-  </section>
-
-  <section>
-    <div class="who">
-      <h2 style="margin-top:0">Who it’s for</h2>
-      <p style="margin:0;color:var(--muted)"><b>Solo builders and small teams running several projects at once</b> who want to hand real work to AI without losing the thread — and want the safety to come from the system, not from their own vigilance. If you already use Git and CI, you already have everything Flow needs.</p>
-    </div>
-  </section>
-
-  <footer>
-    Flow — a git-native protocol for trustworthy, parallel, AI-driven delivery. Built on Claude Code. Your work stays in your repo.
-  </footer>
-
 </div>
+
+<section id="problem">
+  <div class="wrap">
+    <p class="eyebrow">The problem</p>
+    <h2>AI can write the code. You still end up babysitting it.</h2>
+    <div class="pains">
+      <div class="pain"><h3>“Done” isn’t done</h3><p>The agent says it’s finished. Then you find the test it skipped, the file it shouldn’t have touched, the edge case it waved through.</p></div>
+      <div class="pain"><h3>You become the reviewer</h3><p>Every diff lands on you, so the time you saved writing code goes straight into reading it. Two projects in, you’re the bottleneck.</p></div>
+      <div class="pain"><h3>Nothing runs without you</h3><p>Context lives in chat windows. Sessions end with a list of questions. Close the laptop and the work stops.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="how" class="band-bg">
+  <div class="wrap">
+    <p class="eyebrow">How it works</p>
+    <h2>Two touchpoints. The rest runs itself.</h2>
+    <p class="intro">Flow is a protocol that lives inside your repo. Tasks are plain files, coordination happens in git, and the rules are enforced by GitHub Actions, where a prompt can’t talk its way past them.</p>
+    <div class="steps">
+      <div class="step">
+        <span class="who you">You</span>
+        <h3>Say what you want, or what’s broken</h3>
+        <p>Write down the outcome and why it matters, or just file an issue. Agents turn it into small tasks for you to approve. Each one has checkable acceptance criteria, a list of the files it’s allowed to change, and the goal from your vision that it serves.</p>
+      </div>
+      <div class="step">
+        <span class="who agents">Agents + CI</span>
+        <h3>Agents build it, CI checks it</h3>
+        <p>A fresh agent picks up each task, builds it on a branch and opens a pull request. Then the gate takes over:</p>
+        <ul><li>Every criterion needs a passing test</li><li>Changes outside the task’s scope fail</li><li>Build, lint, tests and coverage must pass</li><li>Three independent AI reviewers check QA, code quality and security</li></ul>
+      </div>
+      <div class="step">
+        <span class="who you">You</span>
+        <h3>Approve the merge</h3>
+        <p>You get a PR where every criterion is ticked and linked to the test that proves it. Read it, merge it, move on. The merge always stays with a human.</p>
+      </div>
+    </div>
+    <div class="vision">
+      <div class="vision-copy">
+        <p class="eyebrow" style="margin-bottom:10px">It starts with a vision</p>
+        <h3>Every change traces back to why you wanted it.</h3>
+        <p>You write a short <code>VISION.md</code> once: your goals and your non-goals, in your own words. Every task has to name the goal it serves, a task pointing at a goal that doesn’t exist is flagged, and a weekly audit reports when the work starts drifting from what you said you wanted. Agents work fast. The vision keeps them going somewhere.</p>
+      </div>
+      <ol class="trace" aria-label="A real trace from a merged pull request back to the vision">
+        <li><span class="k">VISION.md</span><b>G10: The gate tells the truth</b><span class="d">When CI says green, the work is actually right.</span></li>
+        <li><span class="k">Task</span><b>flow-0100 · serves G10</b><span class="d">A repo sets its own review size limit.</span></li>
+        <li><span class="k">Pull request</span><b>#136 · 8 of 8 criteria proved</b><span class="d">Three reviewers passed. Merged by a human.</span></li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+
+<section id="pr">
+  <div class="wrap">
+    <p class="eyebrow">What lands on your desk</p>
+    <h2>This is what you review.</h2>
+    <p class="intro">By the time a PR reaches you, the agent has linked every acceptance criterion to the test that proves it, and three independent reviewers have posted their verdicts. These three examples are real pull requests from Flow’s own repo, shortened.</p>
+
+    <div class="prtabs" role="tablist" aria-label="Example pull requests">
+      <button type="button" role="tab" id="tab-pass" aria-controls="pr-pass" aria-selected="true" style="--c:#1f883d"><span class="dot"></span>Ready to merge</button>
+      <button type="button" role="tab" id="tab-fail" aria-controls="pr-fail" aria-selected="false" tabindex="-1" style="--c:#cf222e"><span class="dot"></span>Review caught a gap</button>
+      <button type="button" role="tab" id="tab-block" aria-controls="pr-block" aria-selected="false" tabindex="-1" style="--c:#6e7781"><span class="dot"></span>Agent stopped to ask</button>
+    </div>
+
+    <!-- 1: PASS (PR #136) -->
+    <div class="pr" role="tabpanel" id="pr-pass" aria-labelledby="tab-pass">
+      <div class="pr-head">
+        <p class="pr-title">[flow-0100] A repo sets its review diff limit in config.yml <span class="num">#136</span></p>
+        <div class="pr-meta"><span class="state open">● Open</span><span>Worker session wants to merge 1 commit into</span><span class="branch">main</span><span>from</span><span class="branch">flow/flow-0100-review-diff-limit-in-config</span></div>
+      </div>
+      <div class="pr-body">
+        <div class="pr-main">
+          <div class="event"><b>flow-open-pr</b> opened this as a draft when the agent pushed its branch</div>
+          <div class="cmt">
+            <div class="cmt-h"><span class="av w">AI</span><b>worker</b> wrote the description</div>
+            <div class="cmt-b">
+              <p>Task: <code>.flow/tasks/flow-0100-review-diff-limit-in-config.md</code></p>
+              <p>Repos that legitimately open large PRs went red because the review limit was fixed at 300&nbsp;KB. It’s now a per-repo setting, read from the base branch so a PR can’t raise its own limit.</p>
+              <h5>Acceptance criteria <span style="font-weight:400;color:var(--muted)">· 8 of 8</span></h5>
+              <ul class="crit">
+                <li><span>A 789&nbsp;000-byte diff is not cut when the limit is set to 900&nbsp;000<small>proved by <code>criterion 1: … a 789 000-byte diff survives whole</code></small></span></li>
+                <li><span>With no setting, the limit stays at 300&nbsp;000<small>proved by <code>criterion 2: no key and no env override — the limit is still 300 000</code></small></span></li>
+                <li><span>An invalid or too-large value fails loudly, naming the setting<small>proved by <code>criterion 4: …</code> and 4 more</small></span></li>
+              </ul>
+              <p>65/65 pass in <code>flow-review.test.mjs</code>. 1,448 pass in the full suite.</p>
+            </div>
+          </div>
+          <div class="event"><b>Worker</b> marked this ready for review</div>
+          <div class="cmt">
+            <div class="cmt-h"><span class="av bot">QA</span><b>qa</b><span class="bot-tag">bot</span> reviewed in a separate session</div>
+            <div class="cmt-b">
+              <h5>QA verdict: <span class="pass">PASS</span></h5>
+              <p>All 8 acceptance criteria have a proving test that asserts the actual outcome, not just that nothing threw. I re-ran the suite with no ambient environment variables: 65/65 pass.</p>
+            </div>
+          </div>
+          <div class="cmt">
+            <div class="cmt-h"><span class="av bot">CR</span><b>code-review</b><span class="bot-tag">bot</span></div>
+            <div class="cmt-b"><h5>code-review: <span class="pass">PASS</span></h5><p>The precedence is implemented as specified, and the ceiling applies to all three sources. A bad value fails loudly, naming the key.</p></div>
+          </div>
+          <div class="cmt">
+            <div class="cmt-h"><span class="av bot">SEC</span><b>security</b><span class="bot-tag">bot</span></div>
+            <div class="cmt-b"><h5>Security review: <span class="pass">PASS</span></h5><p>No High or Critical findings. I checked that a PR can’t raise its own limit: the reviewer reads the base branch’s config, not the PR’s.</p></div>
+          </div>
+          <div class="checks">
+            <div class="checks-h"><span class="ic" style="background:#1f883d">✓</span><div><b>All checks have passed</b><span>9 successful, 1 skipped</span></div></div>
+            <ul>
+              <li><span class="ck ok">✓</span><b>flow-gates / gate</b> build, lint, test, coverage</li>
+              <li><span class="ck ok">✓</span><b>flow-gates / touches</b> diff stays inside the task’s declared files</li>
+              <li><span class="ck ok">✓</span><b>flow-gates / flow-tooling</b></li>
+              <li><span class="ck ok">✓</span><b>flow-gates / source-roots-plan</b></li>
+              <li><span class="ck skip">–</span><b>flow-gates / source-root</b> skipped, already covered by the gate</li>
+              <li><span class="ck ok">✓</span><b>flow-review / plan</b></li>
+              <li><span class="ck ok">✓</span><b>flow-review / qa</b></li>
+              <li><span class="ck ok">✓</span><b>flow-review / code-review</b></li>
+              <li><span class="ck ok">✓</span><b>flow-review / security</b></li>
+              <li><span class="ck ok">✓</span><b>flow-status / sync-status</b> task moved to in_review</li>
+            </ul>
+            <div class="merge"><p><b>Your turn.</b> One read, one click. Merging closes the task automatically.</p><span class="mbtn">Merge pull request</span></div>
+          </div>
+        </div>
+        <aside class="pr-side">
+          <div><h4>Reviewers</h4>qa · code-review · security</div>
+          <div><h4>Task</h4>flow-0100 · serves G10 “the gate tells the truth”</div>
+          <div><h4>Files changed</h4>4 files, all inside the task’s declared scope</div>
+          <div><h4>Labels</h4><div class="lbls"><span class="lbl">review-gate</span><span class="lbl">config</span></div></div>
+        </aside>
+      </div>
+    </div>
+
+    <!-- 2: FAIL then fixed (PR #134) -->
+    <div class="pr" role="tabpanel" id="pr-fail" aria-labelledby="tab-fail" hidden>
+      <div class="pr-head">
+        <p class="pr-title">[flow-0101] code-review and security refuse to pass a truncated diff <span class="num">#134</span></p>
+        <div class="pr-meta"><span class="state open">● Open</span><span>Worker session wants to merge into</span><span class="branch">main</span><span>from</span><span class="branch">flow/flow-0101-reviewers-refuse-truncated-diff</span></div>
+      </div>
+      <div class="pr-body">
+        <div class="pr-main">
+          <div class="cmt">
+            <div class="cmt-h"><span class="av bot">QA</span><b>qa</b><span class="bot-tag">bot</span> · 04:50</div>
+            <div class="cmt-b">
+              <h5>QA verdict: <span class="fail">FAIL</span></h5>
+              <div class="mini"><table>
+                <thead><tr><th>#</th><th>Criterion</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td>1</td><td>All three reviewer prompts carry the same truncation rule</td><td class="tag-ok">PROVEN</td></tr>
+                  <tr><td>2</td><td>The rule forbids PASS and makes the verdict name the truncation</td><td class="tag-ok">PROVEN</td></tr>
+                  <tr><td>3</td><td>The changelog entry exists and says no caller action is needed</td><td class="tag-bad">UNPROVEN</td></tr>
+                </tbody>
+              </table></div>
+              <p>The changelog file does exist and is correct. But no test proves it, and a criterion without a proving test doesn’t pass.</p>
+            </div>
+          </div>
+          <div class="event"><b>Worker</b> pushed 1 commit adding the missing test</div>
+          <div class="cmt">
+            <div class="cmt-h"><span class="av bot">QA</span><b>qa</b><span class="bot-tag">bot</span> · 05:09, 19 minutes later</div>
+            <div class="cmt-b"><h5>QA verdict: <span class="pass">PASS</span></h5><p>Criterion 3 is now proved by <code>changes/flow-0101.md exists and states that no caller action is needed</code>. I verified it independently rather than taking the test on trust.</p></div>
+          </div>
+          <div class="checks">
+            <div class="checks-h"><span class="ic" style="background:#1f883d">✓</span><div><b>All checks have passed</b><span>after the fix</span></div></div>
+            <div class="merge"><p><b>You never saw the red.</b> The gap was caught and fixed before the PR needed you.</p><span class="mbtn">Merge pull request</span></div>
+          </div>
+        </div>
+        <aside class="pr-side">
+          <div><h4>What happened</h4>The agent’s work was right, but one claim had no test behind it. The reviewer refused to take it on trust.</div>
+          <div><h4>Coming next</h4>Failed reviews trigger an automatic fix on the same PR, so this loop needs no human at all.</div>
+        </aside>
+      </div>
+    </div>
+
+    <!-- 3: Blocked (PR #139) -->
+    <div class="pr" role="tabpanel" id="pr-block" aria-labelledby="tab-block" hidden>
+      <div class="pr-head">
+        <p class="pr-title">[flow-0107] One test proves every task’s changelog entry <span class="num">#139</span></p>
+        <div class="pr-meta"><span class="state draft">◌ Draft</span><span>Task status:</span><span class="branch">blocked</span></div>
+      </div>
+      <div class="pr-body">
+        <div class="pr-main">
+          <div class="cmt">
+            <div class="cmt-h"><span class="av w">AI</span><b>worker</b> wrote the description</div>
+            <div class="cmt-b">
+              <p><b style="color:var(--ink)">This PR is a draft and the task is blocked.</b> The build is complete, but one acceptance criterion can’t be met inside the task’s declared scope.</p>
+              <h5>Why this is blocked</h5>
+              <p>The new test found a real defect in an older task: a changelog file that was declared but never written. The fix is one file, but that file isn’t in this task’s scope. Widening the scope is the orchestrator’s call, not the worker’s, so the task is blocked with both ways out written on it.</p>
+              <div class="mini"><table>
+                <thead><tr><th>Gate</th><th>Result</th></tr></thead>
+                <tbody>
+                  <tr><td>build</td><td class="tag-ok">green</td></tr>
+                  <tr><td>lint</td><td class="tag-ok">green</td></tr>
+                  <tr><td>test</td><td>1,482 pass, <span class="tag-bad">1 fail</span>: the defect the new test exists to find</td></tr>
+                  <tr><td>coverage</td><td class="tag-ok">95.89%</td></tr>
+                </tbody>
+              </table></div>
+            </div>
+          </div>
+          <div class="checks">
+            <div class="checks-h"><span class="ic" style="background:#6e7781">?</span><div><b>Waiting on a decision from you</b><span>Nothing is merged, and nothing outside the task’s scope was touched</span></div></div>
+            <div class="merge"><p><b>One decision:</b> widen the scope, or split the fix into its own task.</p><span class="mbtn off">Merge blocked</span></div>
+          </div>
+        </div>
+        <aside class="pr-side">
+          <div><h4>What happened</h4>The agent hit something outside its lane. Instead of quietly widening the change, it stopped, explained why, and handed you the choice.</div>
+          <div><h4>Coming next</h4>Every blocked task arrives as one decision card with a recommendation, answerable from your phone.</div>
+        </aside>
+      </div>
+    </div>
+    <p class="pr-note">Shortened from pull requests #136, #134 and #139 in Flow’s repo. Wording is condensed; verdicts, criteria, counts and timings are as they happened.</p>
+  </div>
+</section>
+
+<section id="runners" class="band-bg">
+  <div class="wrap">
+    <p class="eyebrow">Automation</p>
+    <h2>Runners that keep the work moving without you.</h2>
+    <p class="intro">Flow ships as a set of small GitHub Actions workflows. The gate and task tracking are the core. The rest are optional, and the unattended ones (queue runner, triage and review) stay off until you switch them on.</p>
+    <div class="runners">
+      <div class="runner core"><span class="when">every pull request</span><h3>Gate</h3><p>Build, lint, tests, coverage and scope on every PR. It fails loudly, and a failure can’t be talked around.</p></div>
+      <div class="runner core"><span class="when">PR opened, ready, merged</span><h3>Status and done</h3><p>The task file follows the PR: in progress, in review, done. Your backlog is always accurate without anyone updating it.</p></div>
+      <div class="runner"><span class="when">every push to a task branch</span><h3>Open PR</h3><p>Opens the pull request as a draft the moment an agent pushes, so a stalled session can’t strand finished work.</p></div>
+      <div class="runner"><span class="when">weekday mornings</span><h3>Queue runner</h3><p>Picks the top ready task, starts a fresh agent, and lets it build and open the PR. If a run produces nothing it can verify, it fails loudly instead of claiming success.</p></div>
+      <div class="runner"><span class="when">PR ready or updated</span><h3>Review</h3><p>Three independent reviewers on every PR: QA, code review, and security when the change touches sensitive paths. Each runs in a clean session that never saw the code being written.</p></div>
+      <div class="runner"><span class="when">weekday mornings</span><h3>Triage</h3><p>Reads new issues and posts a proposed task spec on each one. Add an “approved” label, even from your phone, and it becomes a ready task. It only listens to people who can already direct the repo.</p></div>
+      <div class="runner"><span class="when">every 3 hours</span><h3>Recover</h3><p>Finds tasks stuck mid-flight, such as a crashed session or a PR with no status, and puts them back where they belong.</p></div>
+      <div class="runner"><span class="when">weekly</span><h3>Compass</h3><p>A read-only audit of recent work against your stated goals. It flags drift before it becomes a direction.</p></div>
+      <div class="runner"><span class="when">weekly</span><h3>Sync</h3><p>When a new Flow version is out, it opens a PR with the update. You review it like any other change.</p></div>
+    </div>
+    <div class="groupnote"><span><i style="--c:var(--accent)"></i>Core, installed by default</span><span><i style="--c:var(--line)"></i>Optional, add when you want it</span><span>A watchdog also opens an issue if any scheduled runner stops running.</span></div>
+  </div>
+</section>
+
+<section id="agents">
+  <div class="wrap">
+    <p class="eyebrow">Agent-agnostic</p>
+    <h2>Bring your own agent. Let a different one check it.</h2>
+    <div class="agents">
+      <div class="agentpts">
+        <div><h3>A protocol, not a plugin</h3><p>Flow’s rules live in one plain Markdown file in your repo. <code style="font:500 13px var(--mono)">CLAUDE.md</code> and <code style="font:500 13px var(--mono)">AGENTS.md</code> both point at it, so any coding agent that reads them can pick up a task and follow the same loop.</p></div>
+        <div><h3>The gate doesn’t care who wrote it</h3><p>A human, Claude Code or any other agent meets exactly the same checks. The trust lives in CI, not in which model you picked.</p></div>
+        <div><h3>The builder never grades its own work</h3><p>Every review runs in a fresh session that never saw the code being written. You choose the review models per repo, and a separate model can handle security.</p></div>
+        <div><h3>Review by a different vendor <span class="soon">Coming</span></h3><p>Next, the reviewers can run on a different agent from the builder, such as Codex reviewing work Claude built. The builder and the reviewer then come from different vendors.</p></div>
+      </div>
+      <div class="split" aria-label="Diagram of which agents build and which review">
+        <div class="row"><span class="role">Builds</span><div class="chips"><span class="chip b">Claude Code</span><span class="chip b">Codex</span><span class="chip b">Cursor</span><span class="chip b">You</span><span class="chip ghost">any AGENTS.md agent</span></div></div>
+        <hr>
+        <div class="row"><span class="role">Gate</span><div class="chips"><span class="chip">GitHub Actions, the same for everyone</span></div></div>
+        <hr>
+        <div class="row"><span class="role">Reviews</span><div class="chips"><span class="chip r">Claude, fresh session</span><span class="chip ghost">Codex · coming</span></div></div>
+        <hr>
+        <div class="row"><span class="role">Merges</span><div class="chips"><span class="chip r">You</span></div></div>
+        <p class="cap">The runners that work unattended (queue runner, triage, review) run on Claude Code today. Any agent can work tasks in your own sessions.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="wrap">
+    <p class="eyebrow">Why Flow</p>
+    <h2>Built so you can trust a green tick.</h2>
+    <div class="benefits">
+      <div class="benefit"><span class="k">TRUSTWORTHY</span><h3>Done means done</h3><p>A PR can’t go green on “looks good to me”. Each acceptance criterion maps to a named test, and the reviewers run outside the agent that wrote the code.</p></div>
+      <div class="benefit"><span class="k">CONTAINED</span><h3>Agents stay in their lane</h3><p>Every task declares the files it may touch. Stray outside them and the PR fails, so there are no surprise refactors.</p></div>
+      <div class="benefit"><span class="k">UNATTENDED</span><h3>Work while you sleep</h3><p>An optional scheduled runner picks up ready tasks overnight. A watchdog tells you if any automation stops running.</p></div>
+      <div class="benefit"><span class="k">NO LOCK-IN</span><h3>Nothing new to log into</h3><p>Tasks are Markdown files in your repo. There’s no service, database or dashboard. Stop using Flow and you keep everything.</p></div>
+      <div class="benefit"><span class="k">PORTFOLIO</span><h3>One process, every project</h3><p>The same protocol runs a static site and a full app. Updates reach every repo as a pull request you review.</p></div>
+      <div class="benefit"><span class="k">HONEST</span><h3>Agents ask instead of guessing</h3><p>When a task is unclear or a real decision comes up, the agent stops and asks. It doesn’t invent an answer to keep going.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="proof" class="band-bg">
+  <div class="wrap">
+    <p class="eyebrow">Proof</p>
+    <h2>Flow is built with Flow.</h2>
+    <p class="intro">Every change to Flow goes through the same gate it gives you. Here’s what that looks like as of v2.2.</p>
+    <div class="stats">
+      <div class="stat"><b>77</b><span>tasks shipped through its own gate</span></div>
+      <div class="stat"><b>1,400+</b><span>automated tests on Flow itself</span></div>
+      <div class="stat"><b>96%</b><span>line coverage, with a floor CI enforces</span></div>
+    </div>
+    <p class="intro" style="margin-top:44px">It was hardened by real failures. Each one is now a rule the system enforces for you.</p>
+    <div class="scars">
+      <div class="scar"><p class="was">A parse error in an unchecked folder silently dropped messages for a week.</p><p class="now">CI refuses any source folder it can’t check.</p></div>
+      <div class="scar"><p class="was">An agent finished the work, then never opened the pull request.</p><p class="now">A workflow opens the PR, so a stalled agent can’t strand the work.</p></div>
+      <div class="scar"><p class="was">On an oversized change, two AI reviewers passed code they hadn’t fully read.</p><p class="now">If a reviewer couldn’t see the whole diff, the check fails.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="compare">
+  <div class="wrap">
+    <p class="eyebrow">Compared</p>
+    <h2>Flow vs. prompting harder</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th></th><th>An agent on its own</th><th class="flow">An agent on Flow</th></tr></thead>
+        <tbody>
+          <tr><td>Who decides it’s done</td><td>The agent, in its own words</td><td class="flow">CI, criterion by criterion, with a test for each</td></tr>
+          <tr><td>Scope</td><td>Whatever the agent decides to touch</td><td class="flow">Declared up front and enforced on every PR</td></tr>
+          <tr><td>Review</td><td>You, reading every line</td><td class="flow">Three independent AI checks first, then you merge</td></tr>
+          <tr><td>Parallel work</td><td>Agents collide in the same files</td><td class="flow">Tasks claimed in git, scopes kept apart</td></tr>
+          <tr><td>When you step away</td><td>Work stops</td><td class="flow">Ready tasks keep moving on a schedule</td></tr>
+          <tr><td>Direction</td><td>Drifts a little with every session</td><td class="flow">Every task names a goal from your vision, and a weekly audit flags drift</td></tr>
+          <tr><td>Bug reports</td><td>Sit in a list until you get to them</td><td class="flow">Get a proposed task spec every weekday morning, and one label from you makes it ready</td></tr>
+          <tr><td>Where it lives</td><td>Chat history</td><td class="flow">Plain files in your repo that you own</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="roadmap" class="band-bg">
+  <div class="wrap">
+    <p class="eyebrow">Roadmap</p>
+    <h2>What’s coming</h2>
+    <p class="intro">Flow ships weekly. This is the current plan, and it changes as early users tell us what matters.</p>
+    <div class="lanes">
+      <div class="lane now">
+        <span class="tag">Now</span>
+        <ul>
+          <li><b>A reading guide on every PR</b><span>One comment telling you where to look: summary, riskiest spots, assumptions made and a quick smoke test.</span></li>
+          <li><b>Intents, end to end</b><span>An interview that turns “here’s what I want” into a written intent every task traces back to.</span></li>
+          <li><b>Runner controls</b><span>Pause the overnight runner without pausing review, and schedule it in your own timezone.</span></li>
+        </ul>
+      </div>
+      <div class="lane next">
+        <span class="tag">Next</span>
+        <ul>
+          <li><b>Self-fixing PRs</b><span>When a review fails, an agent fixes the findings on the same PR, without weakening a test to do it.</span></li>
+          <li><b>A plan your client can read</b><span>Intents rendered as a shareable page, grouped into workstreams, with each outcome marked done, in progress or not started and linked to the PR that delivered it.</span></li>
+          <li><b>Review by a different vendor</b><span>Run the reviewers on a different agent from the builder, so no model marks its own homework.</span></li>
+          <li><b>Right model for the job</b><span>Cheaper models for routine work and the strongest ones for the hard parts, set per task.</span></li>
+          <li><b>Decisions from your phone</b><span>Anything Flow needs from you arrives as one question with a recommendation, answerable in under a minute.</span></li>
+        </ul>
+      </div>
+      <div class="lane later">
+        <span class="tag">Later</span>
+        <ul>
+          <li><b>Mission control</b><span>One view of what’s in flight across all your repos.</span></li>
+          <li><b>Real services in the gate</b><span>Databases and containers stood up in CI, so the gate can verify what your work needs.</span></li>
+          <li><b>Cost per task</b><span>See what each task spent in AI tokens and CI minutes.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="fit">
+  <div class="wrap">
+    <p class="eyebrow">Is it for you?</p>
+    <h2>Made for builders running more than they can watch.</h2>
+    <div class="fit">
+      <div class="yes">
+        <h3>A great fit if you</h3>
+        <ul>
+          <li>Are a solo builder or small team with several projects on the go</li>
+          <li>Already use GitHub and GitHub Actions</li>
+          <li>Want to hand real work to AI agents, not just autocomplete</li>
+          <li>Would rather trust a gate than read every diff</li>
+        </ul>
+      </div>
+      <div class="no">
+        <h3>Good to know</h3>
+        <ul>
+          <li>Flow is early. It runs across its creator’s own products, and you’d be among the first outside teams</li>
+          <li>It needs GitHub Actions and has no hosted UI</li>
+          <li>It works best when work splits into small, well-scoped tasks</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="start" style="padding-top:0">
+  <div class="wrap">
+    <div class="final">
+      <h2>Set up Flow in one agent session.</h2>
+      <p>Paste this into Claude Code or another coding agent inside your repo. It follows the setup runbook, proposes your config and stops when it needs you. That’s usually two GitHub settings.</p>
+      <div class="prompt">
+        <div class="bar"><span>Setup prompt</span><button type="button" id="copy-prompt" aria-live="polite">Copy</button></div>
+<pre id="prompt-text">Set this repo up on the Flow protocol. The runbook is project-template/INIT.md in github.com/CandidDan/flow-protocol. Clone that repo at tag v2.2.0 and read it first, then follow it exactly. Don't invent any value in .flow/config.yml: propose the commands from what's actually in this repo and ask me to confirm. Stop and give me the human-only list when you reach it.</pre>
+      </div>
+      <div class="ctas" style="margin-top:4px">
+        <a class="btn" href="https://github.com/CandidDan/flow-protocol">Get Flow on GitHub</a>
+        <a class="btn ghost" href="#how">How it works</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap">
+  <footer>
+    <span>Flow · open source under Apache-2.0 · your work stays in your repo</span>
+    <span>v2.2.0 · September 2026</span>
+  </footer>
+</div>
+
+<script>
+  (function(){
+    var bar=document.getElementById('navbar'); if(!bar) return;
+    var links=[].slice.call(bar.querySelectorAll('.links a'));
+    var secs=links.map(function(a){return document.querySelector(a.getAttribute('href'));});
+    function onScroll(){
+      bar.classList.toggle('scrolled', window.scrollY>8);
+      var y=window.scrollY+120, cur=-1;
+      secs.forEach(function(s,i){ if(s && s.offsetTop<=y) cur=i; });
+      links.forEach(function(a,i){ a.classList.toggle('active', i===cur); if(i===cur) a.setAttribute('aria-current','true'); else a.removeAttribute('aria-current'); });
+    }
+    window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+  })();
+  (function(){
+    var tabs=[].slice.call(document.querySelectorAll('.prtabs [role="tab"]'));
+    function show(t){tabs.forEach(function(x){var on=x===t;x.setAttribute('aria-selected',on?'true':'false');x.tabIndex=on?0:-1;document.getElementById(x.getAttribute('aria-controls')).hidden=!on;});}
+    tabs.forEach(function(t,i){
+      t.addEventListener('click',function(){show(t);});
+      t.addEventListener('keydown',function(e){var d=e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0;if(!d)return;var n=tabs[(i+d+tabs.length)%tabs.length];show(n);n.focus();});
+    });
+  })();
+  (function(){
+    var btn=document.getElementById('copy-prompt'), pre=document.getElementById('prompt-text');
+    if(!btn||!pre) return;
+    btn.addEventListener('click',function(){
+      var done=function(){btn.textContent='Copied';setTimeout(function(){btn.textContent='Copy';},1600);};
+      var fallback=function(){var r=document.createRange();r.selectNodeContents(pre);var s=getSelection();s.removeAllRanges();s.addRange(r);btn.textContent='Selected';setTimeout(function(){btn.textContent='Copy';},1600);};
+      try{ navigator.clipboard.writeText(pre.textContent).then(done,fallback); }catch(e){ fallback(); }
+    });
+  })();
+</script>
 </body>
 </html>
