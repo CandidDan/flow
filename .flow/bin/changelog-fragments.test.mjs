@@ -40,6 +40,7 @@ import {
   UNRELEASED,
 } from "./changelog-fragments.mjs";
 import { changelogEntry } from "./changelog-entry.mjs";
+import { idFromBranch } from "./parse-task-id.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
@@ -393,12 +394,12 @@ const CALLER_ACTION = /caller action/i;
 const IN_FLIGHT_STATUSES = new Set(["in_progress", "in_review"]);
 const DONE_STATUS = "done";
 
-// The task this checkout belongs to, from the `flow/<id>-<slug>` branch convention. The PR head
-// branch first (a pull_request checkout is a detached merge commit), then the local branch.
+// The task this checkout belongs to, read by the same `idFromBranch` every Flow workflow uses.
+// The PR head branch first (a pull_request checkout is a detached merge commit), then the
+// local branch.
 // Neither, or a branch that names no task: "" — and only `done` tasks are checked.
 function ownTaskId({ headRef = process.env.GITHUB_HEAD_REF, localBranch } = {}) {
-  const fromBranch = (b) => (b || "").match(/^flow\/([a-z][a-z0-9]*-\d{4})(?:-|$)/)?.[1] ?? "";
-  if (headRef) return fromBranch(headRef);
+  if (headRef) return idFromBranch(headRef) ?? "";
   if (localBranch === undefined) {
     try {
       localBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"],
@@ -407,7 +408,7 @@ function ownTaskId({ headRef = process.env.GITHUB_HEAD_REF, localBranch } = {}) 
       localBranch = "";
     }
   }
-  return fromBranch(localBranch);
+  return idFromBranch(localBranch) ?? "";
 }
 
 // ── the store reader (local on purpose) ───────────────────────────────────────────────
