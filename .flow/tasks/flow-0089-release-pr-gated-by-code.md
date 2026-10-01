@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0089"
 title: "Release and sync PRs are classified by code, so the reviewers stop guessing about task-less PRs"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-code-5470b933"
 created: "2026-09-28"
-started: ""
+started: "2026-10-01T04:35:35Z"
 branch: ""
 pr: ""
 issue: ""
