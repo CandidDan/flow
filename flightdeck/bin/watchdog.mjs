@@ -32,7 +32,7 @@
 import { realpathSync as __realpathSync } from "node:fs";
 import { fileURLToPath as __fileURLToPath } from "node:url";
 
-import { classifyWorkflowTrigger, eventLiveness, scheduledLiveness } from "./liveness.mjs";
+import { classifyWorkflowTrigger, eventLiveness, isCompletedRun, scheduledLiveness } from "./liveness.mjs";
 import { buildDiscoveryQuery } from "./mission-control.mjs";
 
 // --- main-module detection (do not simplify back to a string compare) -------------------
@@ -310,7 +310,8 @@ export function startupFailure(entry) {
 // ── pure: workflow files + run history -> liveness verdicts ──────────────────────────────────
 //
 // `entries` is what the IO layer assembled, one per workflow FILE that GitHub also knows as a
-// registered workflow: `{ path, name, text, disabled, lastSuccessAt, lastSuccessUrl, latestRun }`.
+// registered workflow: `{ path, name, text, disabled, lastSuccessAt, lastSuccessUrl, latestRun,
+// recentRuns }`.
 // Manual (`workflow_dispatch`-only) workflows carry no cadence expectation and are dropped here,
 // the same call `mission-control.mjs` makes — a manual workflow that has not run is not dead.
 export function evaluateWorkflows(entries, now) {
@@ -359,7 +360,9 @@ export function evaluateWorkflows(entries, now) {
         kind: "event",
         lastSuccessAt: e.lastSuccessAt ?? null,
         runUrl: e.latestRun?.html_url ?? null,
-        ...eventLiveness({ disabled: e.disabled, latestRun: e.latestRun }),
+        // `recentRuns` is passed straight through, undefined included: `eventLiveness` reads its
+        // absence as "only the latest run is known" and answers as it always did (flow-0106).
+        ...eventLiveness({ disabled: e.disabled, latestRun: e.latestRun, recentRuns: e.recentRuns }),
       });
     }
   }
@@ -493,16 +496,41 @@ export const RUN_PAGE = 100;
 // That is what keeps absence reported as absence: an empty list, or a list of nothing but
 // unusable entries, returns null rather than a zero or a 1970 epoch date that every downstream
 // age calculation would read as a catastrophic outage.
+const runAt = (run) => Date.parse(run?.created_at ?? run?.run_started_at ?? "");
+
 export function newestRun(runs) {
   let best = null;
   let bestAt = -Infinity;
   for (const run of Array.isArray(runs) ? runs : []) {
     if (!run) continue;
-    const at = Date.parse(run.created_at ?? run.run_started_at ?? "");
+    const at = runAt(run);
     if (!Number.isFinite(at)) continue;
     if (at > bestAt) { best = run; bestAt = at; }
   }
   return best;
+}
+
+// The same page `newestRun` picks from, reduced to the fields the failure-streak rule needs, newest
+// first (flow-0106). ZERO EXTRA API CALLS is the whole point: the page of up to `RUN_PAGE` runs was
+// already requested to find the latest run, and the runs it discarded are exactly what tells a
+// pull-request verdict from a broken workflow.
+//
+// Sorted here rather than trusted, for flow-0065's reason — the documented `created_at` ordering
+// has been observed wrong, and "newest first" is the entire meaning of a streak. A run with no
+// parseable timestamp cannot be placed in that order and is dropped rather than coerced, the way
+// `newestRun` skips it. In-progress runs are dropped too: they have not concluded, so they carry no
+// verdict for the streak to read.
+export function recentRunSummaries(runs) {
+  return (Array.isArray(runs) ? runs : [])
+    .filter((run) => isCompletedRun(run) && Number.isFinite(runAt(run)))
+    .sort((a, b) => runAt(b) - runAt(a))
+    .map((run) => ({
+      conclusion: run.conclusion ?? null,
+      event: run.event ?? null,
+      head_branch: run.head_branch ?? null,
+      head_sha: run.head_sha ?? null,
+      created_at: run.created_at ?? null,
+    }));
 }
 
 export async function collectRepoEntries({ io, fullName }) {
@@ -524,6 +552,9 @@ export async function collectRepoEntries({ io, fullName }) {
       lastSuccessAt: null,
       lastSuccessUrl: null,
       latestRun: null,
+      // `null`, not `[]`: absence of history is not an empty history. If the run read below fails,
+      // `eventLiveness` must fall back to its latest-run rule rather than read a streak of zero.
+      recentRuns: null,
     };
 
     try {
@@ -546,6 +577,8 @@ export async function collectRepoEntries({ io, fullName }) {
         createdAt: run.created_at ?? null,
         updatedAt: run.updated_at ?? null,
       };
+      // Same response, no second request — see `recentRunSummaries`.
+      entry.recentRuns = recentRunSummaries(latest.workflow_runs);
     } catch { /* eventLiveness treats a missing latest run as "no runs yet", which is `good` */ }
 
     entries.push(entry);

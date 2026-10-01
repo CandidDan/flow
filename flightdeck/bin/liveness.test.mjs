@@ -11,7 +11,10 @@ import {
   cronCadence,
   cronIntervalHours,
   cronMaxGapHours,
+  EVENT_FAILURE_STREAK,
   eventLiveness,
+  isCompletedRun,
+  PR_STREAK_DISTINCT_BRANCHES,
   extractCronExpressions,
   parseCronExpr,
   repoSeverity,
@@ -260,6 +263,152 @@ test("eventLiveness: never run is good (nothing has failed), not a blank", () =>
   const r = eventLiveness({ disabled: false, latestRun: null });
   assert.equal(r.state, "good");
   assert.ok(r.reason);
+});
+
+// ── flow-0106: a failing pull-request check is a verdict, not "automation down" ──────────────
+//
+// Every test below hands `eventLiveness` a run history and asks one question: does a failing
+// EVENT workflow spread across pull requests (machinery) or sit on one (a verdict)? The fixture
+// shape is the summary `collectRepoEntries` builds — `{ conclusion, event, head_branch, head_sha,
+// created_at }`, newest first — so these tests and the IO layer cannot disagree about the input.
+
+// Newest first, one minute apart, so a reader can see the order the rule walks.
+const runPage = (specs) => specs.map((s, i) => ({
+  conclusion: s.conclusion ?? "failure",
+  event: s.event ?? "pull_request",
+  head_branch: s.branch ?? "flow/one",
+  head_sha: s.sha ?? `sha${i}`,
+  created_at: new Date(Date.parse("2026-09-29T12:00:00Z") - i * 60000).toISOString(),
+  ...(s.status ? { status: s.status } : {}),
+}));
+
+test("flow-0106 criterion 1: no recentRuns and a failed latest run -> crit, unchanged for existing callers", () => {
+  // mission-control.mjs asks only for the latest run and must keep the answer it always had.
+  const r = eventLiveness({ disabled: false, latestRun: { conclusion: "failure" } });
+  assert.equal(r.state, "crit");
+  assert.equal(r.reason, "latest run failed");
+  assert.equal(eventLiveness({ disabled: false, latestRun: { conclusion: "failure" }, recentRuns: null }).state, "crit",
+    "an explicit null is absence too, not an empty history");
+});
+
+test("flow-0106 criterion 2: newest run is a failed pull_request run and the one before it succeeded -> good", () => {
+  const r = eventLiveness({
+    disabled: false,
+    latestRun: { conclusion: "failure" },
+    recentRuns: runPage([{ branch: "flow/a" }, { conclusion: "success", branch: "main", event: "push" }]),
+  });
+  assert.equal(r.state, "good", "one rejected PR is not automation down");
+  assert.equal(r.streak, 1);
+});
+
+test("flow-0106 criterion 3: five consecutive failed pull_request runs on ONE head_branch -> good (one PR rejected repeatedly is a verdict)", () => {
+  const r = eventLiveness({
+    disabled: false,
+    latestRun: { conclusion: "failure" },
+    recentRuns: runPage(Array.from({ length: 5 }, () => ({ branch: "flow/flow-0106-x" }))),
+  });
+  assert.equal(r.state, "good");
+  assert.equal(r.streak, 5, "the streak is seen in full — it is the SPREAD that is one");
+  assert.equal(r.pullRequests, 1);
+  assert.match(r.reason, /verdict, not a breakage/);
+});
+
+test("flow-0106 criterion 4: three consecutive failed pull_request runs on three head_branches -> crit naming 3 runs across 3 pull requests", () => {
+  const r = eventLiveness({
+    disabled: false,
+    latestRun: { conclusion: "failure" },
+    recentRuns: runPage([{ branch: "flow/a" }, { branch: "flow/b" }, { branch: "flow/c" }]),
+  });
+  assert.equal(r.state, "crit");
+  assert.equal(r.reason, "last 3 runs failed across 3 pull requests");
+  assert.equal(r.streak, 3);
+  assert.equal(r.pullRequests, 3);
+
+  // Two PRs is not three, however long the streak: a rebase loop on two branches still is not a
+  // repo-wide breakage, and the threshold is the named constant, not a literal repeated here.
+  const two = eventLiveness({
+    disabled: false,
+    latestRun: { conclusion: "failure" },
+    recentRuns: runPage([{ branch: "flow/a" }, { branch: "flow/b" }, { branch: "flow/a" }, { branch: "flow/b" }]),
+  });
+  assert.equal(two.state, "good");
+  assert.equal(PR_STREAK_DISTINCT_BRANCHES, 3);
+});
+
+test("flow-0106 criterion 5: three consecutive failed push runs -> crit; two -> good", () => {
+  const three = eventLiveness({
+    disabled: false,
+    latestRun: { conclusion: "failure" },
+    recentRuns: runPage([{ event: "push", branch: "main" }, { event: "push", branch: "main" }, { event: "push", branch: "main" }]),
+  });
+  assert.equal(three.state, "crit", "a push run verdicts on nobody's PR — length alone decides");
+  assert.equal(three.reason, "last 3 runs failed (push)");
+
+  const two = eventLiveness({
+    disabled: false,
+    latestRun: { conclusion: "failure" },
+    recentRuns: runPage([{ event: "push", branch: "main" }, { event: "push", branch: "main" }]),
+  });
+  assert.equal(two.state, "good");
+  assert.equal(two.streak, 2);
+  assert.equal(EVENT_FAILURE_STREAK, 3);
+
+  // A streak that is not ALL pull-request runs is judged by length too, even when most of it is:
+  // one workflow_run failure next to two PR failures is machinery failing on its own trigger.
+  const mixed = eventLiveness({
+    disabled: false,
+    latestRun: { conclusion: "failure" },
+    recentRuns: runPage([{ branch: "flow/a" }, { branch: "flow/a" }, { event: "workflow_run", branch: "main" }]),
+  });
+  assert.equal(mixed.state, "crit");
+  assert.match(mixed.reason, /^last 3 runs failed \(pull_request, workflow_run\)$/);
+});
+
+test("flow-0106 criterion 6: in-progress runs in recentRuns are ignored when finding the streak", () => {
+  // A queued run between two failures must not split the streak, and must not count toward it.
+  const r = eventLiveness({
+    disabled: false,
+    latestRun: { conclusion: "failure" },
+    recentRuns: runPage([
+      { event: "push", branch: "main", conclusion: null, status: "in_progress" },
+      { event: "push", branch: "main" },
+      { event: "push", branch: "main", conclusion: null, status: "queued" },
+      { event: "push", branch: "main" },
+      { event: "push", branch: "main" },
+    ]),
+  });
+  assert.equal(r.state, "crit");
+  assert.equal(r.streak, 3, "three completed failures, the two unfinished runs neither counted nor breaking it");
+
+  // And the predicate on its own, including the fallback that keeps a payload without `status`
+  // readable — requiring `status` would empty every streak and silence the watchdog.
+  assert.equal(isCompletedRun({ status: "completed", conclusion: "failure" }), true);
+  assert.equal(isCompletedRun({ status: "in_progress", conclusion: null }), false);
+  assert.equal(isCompletedRun({ conclusion: null }), false);
+  assert.equal(isCompletedRun({ conclusion: "failure" }), true, "no status, but it concluded");
+  assert.equal(isCompletedRun(null), false);
+});
+
+test("flow-0106: a pull-request streak with no head_branch at all collapses to one PR, never three", () => {
+  // Missing data must not manufacture the spread that triggers the alarm.
+  const r = eventLiveness({
+    disabled: false,
+    latestRun: { conclusion: "failure" },
+    recentRuns: [
+      { conclusion: "failure", event: "pull_request", head_branch: null, head_sha: "a" },
+      { conclusion: "failure", event: "pull_request", head_branch: null, head_sha: "b" },
+      { conclusion: "failure", event: "pull_request", head_branch: null, head_sha: "c" },
+    ],
+  });
+  assert.equal(r.state, "good");
+  assert.equal(r.pullRequests, 1);
+});
+
+test("flow-0106: disabled and never-run still answer first, whatever recentRuns holds", () => {
+  const streak = runPage([{ branch: "flow/a" }, { branch: "flow/b" }, { branch: "flow/c" }]);
+  assert.equal(eventLiveness({ disabled: true, latestRun: { conclusion: "failure" }, recentRuns: streak }).state, "off");
+  assert.equal(eventLiveness({ disabled: false, latestRun: null, recentRuns: streak }).state, "good");
+  assert.equal(eventLiveness({ disabled: false, latestRun: { conclusion: "success" }, recentRuns: [] }).state, "good");
 });
 
 // ── ungatedMergesLiveness — the named silent killer ────────────────────────────────────────

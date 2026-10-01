@@ -248,11 +248,102 @@ export function scheduledLiveness({ crons, lastSuccessAt, now, disabled }) {
   return { state: "good", intervalHours, maxGapHours, ageHours };
 }
 
-export function eventLiveness({ disabled, latestRun }) {
+// ── event-workflow liveness: a verdict is not a breakage ────────────────────────────────────
+//
+// THE DEFECT (flow-0106). A failed latest run used to be enough to call an event workflow down,
+// and for a workflow whose whole job is to VERDICT on a pull request — flow-review, flow-gates,
+// plane-guard, an adopter's own CI — the latest run fails every time a PR is rejected. So every
+// rejected PR filed an `automation-down` issue (CandidDan/flow#130, 2026-09-29, and #115 before
+// it, both closed by the next passing PR) in the one channel that must not cry wolf.
+//
+// WHY THE RULE IS A STREAK AND NOT "IGNORE pull_request". flow-status, flow-done and flow-open-pr
+// also run on `pull_request`, and a failure there IS broken machinery; keying on the event type
+// would blind the watchdog to exactly those. What separates a verdict from a breakage is SPREAD: a
+// broken workflow fails every run, on every PR; a verdict fails one PR. So the rule reads the
+// streak of consecutive failures from the newest run, and asks how far it spreads.
+//
+// WHAT IT COSTS. An event workflow that genuinely breaks is reported on its third failure instead
+// of its first — one or two runs later, not never. The startup-failure check (flow-0061) still
+// fires on the FIRST failed run, so the one shape that can never self-correct is unaffected.
+
+// Consecutive failures before a non-pull-request event workflow counts as down. Three, not two: a
+// flake next to one real failure is two, and that pair is the commonest honest red.
+export const EVENT_FAILURE_STREAK = 3;
+// Distinct `head_branch` values a pull-request-only failing streak must span to count as down —
+// three different PRs failing in a row is machinery; one PR failing repeatedly is a verdict.
+export const PR_STREAK_DISTINCT_BRANCHES = 3;
+
+const PULL_REQUEST_EVENTS = new Set(["pull_request", "pull_request_target"]);
+
+// A run that has concluded. GitHub's list-runs payload carries `status` ("completed",
+// "in_progress", "queued") and a run still executing has `conclusion: null`; either tell is
+// enough, and both are read because the FALLBACK direction matters. If a payload omits `status`,
+// requiring it would make every run look unfinished, empty every streak, and leave this watchdog
+// permanently silent on event workflows — a missed alarm is the one failure worse than a false one
+// here. A present `conclusion` is a run that voted, whatever the shape of the payload around it.
+export function isCompletedRun(run) {
+  if (!run) return false;
+  if (run.status != null && run.status !== "completed") return false;
+  return run.conclusion != null;
+}
+
+// The run of consecutive `failure` runs from the newest, in `recentRuns` order (newest first).
+// In-progress runs are SKIPPED rather than breaking the streak — a run that has not concluded has
+// not voted either way, and letting a queued run split a failing streak in two would hand the
+// watchdog a different answer depending on when in the minute it swept.
+function failureStreak(recentRuns) {
+  const out = [];
+  for (const run of Array.isArray(recentRuns) ? recentRuns : []) {
+    if (!isCompletedRun(run)) continue;
+    if (run.conclusion !== "failure") break;
+    out.push(run);
+  }
+  return out;
+}
+
+// `recentRuns` is OPTIONAL and its absence is not a default — it is a different question.
+// Absent (as from `mission-control.mjs`, which asks only for the latest run): the latest run is
+// the only fact available, so the answer is exactly what it has always been. Present: the streak
+// rule above decides, and `{ streak }` is returned alongside so a caller can show the count.
+export function eventLiveness({ disabled, latestRun, recentRuns }) {
   if (disabled) return { state: "off", reason: "workflow disabled" };
   if (!latestRun) return { state: "good", reason: "no runs recorded yet" };
-  if (latestRun.conclusion === "failure") return { state: "crit", reason: "latest run failed" };
-  return { state: "good" };
+
+  if (recentRuns == null) {
+    if (latestRun.conclusion === "failure") return { state: "crit", reason: "latest run failed" };
+    return { state: "good" };
+  }
+
+  const streak = failureStreak(recentRuns);
+  if (streak.length === 0) return { state: "good", streak: 0 };
+
+  const runs = `last ${streak.length} run${streak.length === 1 ? "" : "s"} failed`;
+
+  // All pull-request runs: spread across PRs decides. `head_branch` is the PR identity available
+  // on a run payload; a null branch collapses into one bucket rather than counting as its own PR,
+  // so missing data can never manufacture the spread that triggers the alarm.
+  if (streak.every((r) => PULL_REQUEST_EVENTS.has(r?.event))) {
+    const pullRequests = new Set(streak.map((r) => String(r?.head_branch ?? ""))).size;
+    const spread = `across ${pullRequests} pull request${pullRequests === 1 ? "" : "s"}`;
+    if (pullRequests >= PR_STREAK_DISTINCT_BRANCHES) {
+      return { state: "crit", streak: streak.length, pullRequests, reason: `${runs} ${spread}` };
+    }
+    return {
+      state: "good", streak: streak.length, pullRequests,
+      reason: `${runs} ${spread} — a rejected pull request is a verdict, not a breakage`,
+    };
+  }
+
+  // Anything else in the streak (push, workflow_run, a mix): length alone decides, because such a
+  // run is not a verdict on anyone's branch.
+  const events = [...new Set(streak.map((r) => r?.event ?? "unknown"))].join(", ");
+  if (streak.length >= EVENT_FAILURE_STREAK) {
+    return { state: "crit", streak: streak.length, reason: `${runs} (${events})` };
+  }
+  return {
+    state: "good", streak: streak.length,
+    reason: `${runs} (${events}) — under the ${EVENT_FAILURE_STREAK}-failure streak that means down`,
+  };
 }
 
 // The known silent killer: a PR merges to main but the gate workflow never ran against its head
