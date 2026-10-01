@@ -39,6 +39,7 @@ import {
   runCheck,
   UNRELEASED,
 } from "./changelog-fragments.mjs";
+import { changelogEntry } from "./changelog-entry.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
@@ -348,4 +349,242 @@ test("canonical dogfoods its own convention: this change's entry is a fragment",
     "flow-0069's own changelog entry must be a fragment (or an assembled one), or the convention starts with an exception");
   assert.ok(existsSync(join(REPO, FRAGMENT_DIR, "README.md")), "the convention must be documented where it lives");
   assert.equal(UNRELEASED, "## Unreleased");
+});
+
+// ── flow-0107: ONE test proves every task's changelog entry ────────────────────────────
+//
+// WHY THIS IS ONE TEST AND NOT ONE PER TASK. Almost every canonical task that ships something
+// user-visible carries the same criterion — "`changes/<id>.md` exists and states the caller
+// action" — and qa, rightly, wants a proving test for it. Nothing told the worker a test was
+// owed, so flow-0098 (#129), flow-0101 (#134) and flow-0102 (#135) each failed qa on it and each
+// fix was a near-identical hand-written one-off (they stay where they are; removing them is
+// churn). The per-task copy IS the bug: the criterion is a property of the STORE, so it is
+// provable once, for every task at once. The task-writer skill now names this test, by file and
+// by the exact name below, as the proof — so a task declares the criterion and owes no new test.
+//
+// Entries are read through `changelogEntry` rather than by opening the fragment, because a
+// release runs `--assemble`, which folds the fragment into `CHANGELOG.md` and DELETES it. A check
+// that stats the file is green until the next release and red on the release's own PR.
+
+const TASKS_DIR = join(REPO, ".flow", "tasks");
+
+// The exact name the task-writer skill cites. Held as a constant and used as the test's name
+// below, so the citation cannot drift from the test it names — the skill assertion compares
+// against this same string.
+const STORE_WIDE_TEST = "every claimed task that declares a changelog fragment has an entry stating its caller action";
+
+// What a fragment has to say. Every entry in `changes/README.md`'s format states the caller
+// action — "**No caller action**", or exactly what a caller must do — because that line is what
+// a reader of the release notes scans for. An entry without it is an entry nobody can act on.
+const CALLER_ACTION = /caller action/i;
+
+// The statuses this check applies to, and the two it does not:
+//   `ready`   — nothing has been written yet; the fragment is the worker's to write.
+//   `blocked` — the work stopped before it shipped anything, and `blocked_reason` is its record.
+// Everything else has been claimed and has either shipped or is about to. On a feature branch the
+// task file is the frozen `in_progress` snapshot, which is exactly the state that makes the check
+// apply: the PR that forgets its fragment is the one this catches.
+const CHECKED_STATUSES = new Set(["in_progress", "in_review", "done"]);
+
+// ── the store reader (local on purpose) ───────────────────────────────────────────────
+// flow-doctor's `parseListField` is module-private and this task's `touches` do not include it,
+// so the two tolerant readers below are deliberately duplicated rather than exported from there.
+// Same two YAML forms, same `#`-comment and quote handling.
+
+function frontmatter(text) {
+  if (!text.startsWith("---")) return "";
+  const end = text.indexOf("\n---", 3);
+  return end === -1 ? "" : text.slice(3, end);
+}
+
+function scalarField(head, key) {
+  const m = head.match(new RegExp(`^${key}:\\s*(.*)$`, "m"));
+  return m ? m[1].replace(/\s+#.*$/, "").trim().replace(/^["'](.*)["']$/, "$1") : "";
+}
+
+// Both list forms: `touches: ["a", "b"]` and a `- ` block under `touches:`.
+function listField(head, key) {
+  const lines = head.split("\n");
+  const i = lines.findIndex((l) => new RegExp(`^\\s*${key}:`).test(l));
+  if (i === -1) return [];
+  const inline = lines[i].replace(new RegExp(`^\\s*${key}:\\s*`), "").split("#")[0].trim();
+  if (inline.startsWith("[")) return [...inline.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]);
+  const out = [];
+  for (let j = i + 1; j < lines.length; j++) {
+    const t = lines[j].trim();
+    if (t === "" || t.startsWith("#")) continue;
+    const m = t.match(/^-\s*(.+)$/);
+    if (!m) break; // dedent to the next key → the list is done
+    out.push(m[1].split("#")[0].trim().replace(/^["'](.*)["']$/, "$1"));
+  }
+  return out.filter(Boolean);
+}
+
+// Every finding, one line each, NAMING THE TASK ID — a failure that says "some task is missing a
+// changelog entry" sends the reader back through the whole store to find out which.
+// `tasksDir` and `repo` are arguments rather than constants so the criteria below can be proved
+// against a fixture store, not only against the checkout the test happens to run in.
+function changelogEntryFindings(tasksDir, repo) {
+  const findings = [];
+  const names = readdirSync(tasksDir).filter((n) => n.endsWith(".md") && n !== "_TEMPLATE.md").sort();
+
+  for (const name of names) {
+    const head = frontmatter(readFileSync(join(tasksDir, name), "utf8"));
+    const id = scalarField(head, "id");
+    if (!id) continue;
+    if (!CHECKED_STATUSES.has(scalarField(head, "status"))) continue;
+    if (!listField(head, "touches").includes(`${FRAGMENT_DIR}/${id}.md`)) continue;
+
+    const entry = changelogEntry(repo, id);
+    if (!entry.trim()) {
+      findings.push(
+        `${id}: declares ${FRAGMENT_DIR}/${id}.md in touches but has no changelog entry — ` +
+        `neither the fragment nor an assembled entry in ${CHANGELOG_FILE}`,
+      );
+    } else if (!CALLER_ACTION.test(entry)) {
+      findings.push(
+        `${id}: has a changelog entry that never states a caller action — write ` +
+        `"**No caller action**", or exactly what a caller must do`,
+      );
+    }
+  }
+  return findings;
+}
+
+// ── fixtures: a store and a repo that are not this checkout ───────────────────────────
+
+function taskFileText({ id, status, touches = [] }) {
+  return [
+    "---",
+    `id: "${id}"`,
+    `title: "a task"`,
+    `status: "${status}"`,
+    "touches:",
+    ...touches.map((t) => `  - "${t}"`),
+    // A key AFTER the list: the reader must stop at the dedent, not swallow the rest of the block.
+    "labels: [changelog]",
+    "---",
+    "",
+    "## Context",
+    "",
+  ].join("\n");
+}
+
+// A tree with a `.flow/tasks/` store beside the `changes/` + CHANGELOG.md that `makeTree` builds.
+// The `_TEMPLATE.md` it always writes is shaped to FAIL if it were ever read as a task, so
+// "skip the template" is proved by every fixture rather than by one test.
+function makeStore({ tasks = [], ...tree } = {}) {
+  const root = makeTree(tree);
+  const dir = join(root, ".flow", "tasks");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "_TEMPLATE.md"), taskFileText({
+    id: "PROJ-0000", status: "in_progress", touches: ["changes/PROJ-0000.md"],
+  }));
+  for (const t of tasks) writeFileSync(join(dir, `${t.id}-slug.md`), taskFileText(t));
+  return { root, tasksDir: dir };
+}
+
+test("a claimed task that declares a fragment and has no entry at all fails, naming the task id", () => {
+  const { root, tasksDir } = makeStore({
+    changelog: changelogText({ unreleased: "" }),
+    tasks: [{ id: "flow-0500", status: "in_progress", touches: ["src/a.mjs", "changes/flow-0500.md"] }],
+  });
+
+  const findings = changelogEntryFindings(tasksDir, root);
+  assert.equal(findings.length, 1, `expected exactly one finding, got: ${findings.join(" | ")}`);
+  assert.match(findings[0], /flow-0500/, "a finding that does not name the id sends the reader back through the store");
+  assert.match(findings[0], /changes\/flow-0500\.md/);
+  assert.match(findings[0], /no changelog entry/);
+
+  // And it is the assertion the live test makes, not just a list someone could ignore.
+  assert.throws(() => assert.deepEqual(findings, []), /flow-0500/);
+});
+
+test("a claimed task whose entry exists but never mentions a caller action fails", () => {
+  const { root, tasksDir } = makeStore({
+    tasks: [{ id: "flow-0501", status: "in_review", touches: ["changes/flow-0501.md"] }],
+    fragments: { "flow-0501.md": "- **Something shipped** (`src/a.mjs`, flow-0501).\n\n  What it does.\n" },
+  });
+
+  const findings = changelogEntryFindings(tasksDir, root);
+  assert.equal(findings.length, 1, `expected exactly one finding, got: ${findings.join(" | ")}`);
+  assert.match(findings[0], /flow-0501/);
+  assert.match(findings[0], /never states a caller action/,
+    "an entry with no caller-action line is an entry a reader of the release notes cannot act on");
+});
+
+test("a `ready` task declaring a fragment that does not exist yet passes — nothing is written yet", () => {
+  const { root, tasksDir } = makeStore({
+    tasks: [{ id: "flow-0502", status: "ready", touches: ["changes/flow-0502.md"] }],
+  });
+  assert.deepEqual(changelogEntryFindings(tasksDir, root), [],
+    "the fragment is the worker's to write; demanding it of a `ready` task would fail every task in the queue");
+});
+
+test("a task whose fragment a release already assembled into CHANGELOG.md passes", () => {
+  // The release deleted `changes/flow-0503.md`; the entry now lives under a numbered section.
+  // This is the case that makes a fragment-stat check red on the release's own PR, and it is why
+  // the findings go through `changelogEntry`.
+  const assembled =
+    `${HEAD}## Unreleased\n${EXISTING}\n## 2.1.0 — 2026-09-20\n\n` +
+    `- **Shipped and folded in** (\`src/a.mjs\`, flow-0503). **No caller action**.\n`;
+  const { root, tasksDir } = makeStore({
+    changelog: assembled,
+    tasks: [{ id: "flow-0503", status: "done", touches: ["changes/flow-0503.md"] }],
+  });
+
+  assert.equal(existsSync(join(root, FRAGMENT_DIR, "flow-0503.md")), false, "the fixture must have no fragment left");
+  assert.deepEqual(changelogEntryFindings(tasksDir, root), [],
+    "an assembled entry is the convention working, not a missing one");
+});
+
+test("`_TEMPLATE.md` and a task with no id are skipped, and a task that declares no fragment is not asked for one", () => {
+  // Every fixture's `_TEMPLATE.md` is in_progress and declares `changes/PROJ-0000.md`, so reading
+  // it as a task would produce a finding for a file that is not a task.
+  const { root, tasksDir } = makeStore({
+    tasks: [{ id: "flow-0504", status: "done", touches: ["src/a.mjs"] }],
+  });
+  writeFileSync(join(tasksDir, "notes.md"), "no frontmatter here\n");
+  writeFileSync(join(tasksDir, "headless.md"), "---\nstatus: \"done\"\ntouches:\n  - \"changes/x.md\"\n---\n");
+
+  assert.deepEqual(changelogEntryFindings(tasksDir, root), [],
+    "the template, an un-parseable file, and a task that ships nothing user-visible owe no entry");
+});
+
+test("the tolerant reader sees an inline `touches` array as well as a block list", () => {
+  const { root, tasksDir } = makeStore({ tasks: [] });
+  writeFileSync(join(tasksDir, "flow-0505-slug.md"),
+    `---\nid: "flow-0505"\nstatus: "done"   # shipped\ntouches: ["src/a.mjs", "changes/flow-0505.md"]\nlabels: [x]\n---\n`);
+
+  const findings = changelogEntryFindings(tasksDir, root);
+  assert.equal(findings.length, 1, "the inline form is legal YAML and flow-doctor reads it; so must this");
+  assert.match(findings[0], /flow-0505/);
+});
+
+// ── the criterion itself, against canonical's live store ──────────────────────────────
+
+test(STORE_WIDE_TEST, () => {
+  const findings = changelogEntryFindings(TASKS_DIR, REPO);
+  assert.deepEqual(findings, [],
+    `${findings.length} task(s) declare a changelog fragment they never wrote, or wrote without a ` +
+    `caller action:\n  ${findings.join("\n  ")}\n` +
+    `Write ${FRAGMENT_DIR}/<id>.md (see ${FRAGMENT_DIR}/README.md for the format) — one bullet, ` +
+    `naming the files and the task id, ending in "**No caller action**" or exactly what a caller must do.`);
+});
+
+test("the task-writer skill names this test, by file and by exact name, as the changelog proof", () => {
+  const skill = readFileSync(join(REPO, "project-template/.claude/skills/task-writer/SKILL.md"), "utf8");
+
+  assert.ok(skill.includes(".flow/bin/changelog-fragments.test.mjs"),
+    "the skill must name the FILE — an orchestrator that cannot find the test writes a criterion with no proof");
+  assert.ok(skill.includes(STORE_WIDE_TEST),
+    `the skill must cite the test's exact name ("${STORE_WIDE_TEST}") — qa maps a criterion to its ` +
+    `proving test BY NAME, so a paraphrase is the same miss this task exists to close`);
+
+  // Stated conditionally, and about canonical specifically: an adopting repo has no `changes/`
+  // directory and no such test, so an unconditional claim would be false for the whole fleet.
+  assert.match(skill, /where the repo keeps a `changes\/` directory/i,
+    "the instruction has to stay true in a repo with no changes/ directory");
+  assert.ok(!/every repo has this test|this test exists in your repo/i.test(skill),
+    "the skill must not claim the test exists in an adopting repo");
 });
