@@ -168,6 +168,13 @@ export function readyOpenPr(prs, id, branch = "") {
       (!!head && typeof pr.headRefName === "string" && pr.headRefName.trim() === head);
     if (!mine) continue;
     if (pr.isDraft !== false) continue;          // true, undefined and non-boolean all mean "no"
+    // Only a PR from a branch IN THIS REPO may promote. Matching is by title or branch name,
+    // and on a public repo anyone can fork and open a non-draft PR titled `[<id>] …`; letting
+    // that write `in_review` and its url onto `main` would let a stranger hijack which PR the
+    // store treats as the task's implementation. Workers push to this repo, never a fork, and
+    // anyone who can push here is already trusted. Absent or non-boolean is an unknown, and an
+    // unknown never promotes (the same rule as isDraft).
+    if (pr.isCrossRepository !== false) continue;
     const number = Number(pr.number);
     const url = typeof pr.url === "string" ? pr.url.trim() : "";
     if (!Number.isInteger(number) || number <= 0) continue;

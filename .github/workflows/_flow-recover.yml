@@ -132,7 +132,7 @@ jobs:
             # variable outlives one loop iteration, and reading a stale list as this task's facts
             # is the same class of mistake as reading a failed query as an empty one.
             pr_state_known=1
-            if prs_json="$(gh pr list --state open --limit 200 --json number,title,headRefName,isDraft,url </dev/null 2>/dev/null)"; then
+            if prs_json="$(gh pr list --state open --limit 200 --json number,title,headRefName,isDraft,isCrossRepository,url </dev/null 2>/dev/null)"; then
               by_title="$(printf '%s' "$prs_json" | node .flow/bin/flow-recover.mjs count-task-prs "$id")"
             else
               echo "::warning::gh pr list failed for $id — PR state unknown, leaving the task alone."

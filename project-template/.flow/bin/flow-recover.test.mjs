@@ -396,7 +396,7 @@ test("openPrReady defaults to false, so every pre-flow-0104 call is unchanged", 
 test("readyOpenPr returns the task's open non-draft PR, by the leading-[id] rule", () => {
   const prs = [
     { number: 4, title: "[CAN-52] someone else", isDraft: false, url: "https://x/4" },
-    { number: 5, title: "[CAN-51] mine", isDraft: false, url: "https://github.com/o/r/pull/5" },
+    { number: 5, title: "[CAN-51] mine", isDraft: false, isCrossRepository: false, url: "https://github.com/o/r/pull/5" },
   ];
   assert.deepEqual(readyOpenPr(prs, "CAN-51"), { number: 5, url: "https://github.com/o/r/pull/5" });
 });
@@ -405,7 +405,7 @@ test("readyOpenPr returns the task's open non-draft PR, by the leading-[id] rule
 // this task whatever it is titled — the case a platform-assigned `claude/…` branch produces.
 test("readyOpenPr also matches on the task's branch, so an unconventional title still promotes", () => {
   const prs = [
-    { number: 6, title: "wip: no id here", headRefName: "claude/foo-x", isDraft: false, url: "https://x/6" },
+    { number: 6, title: "wip: no id here", headRefName: "claude/foo-x", isDraft: false, isCrossRepository: false, url: "https://x/6" },
   ];
   assert.deepEqual(readyOpenPr(prs, "CAN-51", "claude/foo-x"), { number: 6, url: "https://x/6" });
   assert.equal(readyOpenPr(prs, "CAN-51", "claude/other"), null, "another branch is not this one");
@@ -442,6 +442,26 @@ test("readyOpenPr refuses a PR it could not name safely, and bad input", () => {
   assert.equal(readyOpenPr(null, "CAN-51"), null);
   assert.equal(readyOpenPr([null, "nope"], "CAN-51"), null);
   assert.equal(readyOpenPr([{ number: 5, title: "[CAN-51] x", isDraft: false, url: "https://x/5" }]), null);
+});
+
+// Security review on #156: matching is by title or branch name, so on a public repo a fork PR
+// titled `[<id>] …` must never promote. Only a same-repo PR may.
+test("readyOpenPr never promotes a fork PR, or one whose origin is unknown", () => {
+  const url = "https://github.com/o/r/pull/7";
+  const fork = { number: 7, title: "[CAN-51] totally legit", isDraft: false, isCrossRepository: true, url };
+  assert.equal(readyOpenPr([fork], "CAN-51"), null, "a fork PR spoofing the task id is ignored");
+  assert.equal(
+    readyOpenPr([{ ...fork, headRefName: "claude/foo-x" }], "CAN-51", "claude/foo-x"), null,
+    "and a fork whose branch happens to share the task branch's name is ignored too",
+  );
+  const { isCrossRepository: _omit, ...unknown } = fork;
+  assert.equal(readyOpenPr([unknown], "CAN-51"), null, "absent isCrossRepository is an unknown");
+  assert.equal(readyOpenPr([{ ...fork, isCrossRepository: "false" }], "CAN-51"), null);
+  // The real one, from this repo, still wins even when a spoof sits beside it.
+  assert.deepEqual(
+    readyOpenPr([fork, { ...fork, number: 8, isCrossRepository: false, url: "https://github.com/o/r/pull/8" }], "CAN-51"),
+    { number: 8, url: "https://github.com/o/r/pull/8" },
+  );
 });
 
 // ── buildPromoteEdit: the in_review board edit ───────────────────────────────────────────
@@ -502,12 +522,12 @@ test("`classify --open-pr-ready 1` reaches the new outcome through the CLI", () 
 
 test("`ready-pr` prints <number>\\t<url>, and prints NOTHING when there is no ready PR", () => {
   const prs = JSON.stringify([
-    { number: 9, title: "[CAN-51] mine", isDraft: false, url: "https://github.com/o/r/pull/9" },
+    { number: 9, title: "[CAN-51] mine", isDraft: false, isCrossRepository: false, url: "https://github.com/o/r/pull/9" },
   ]);
   assert.equal(cli(["ready-pr", "CAN-51"], prs), "9\thttps://github.com/o/r/pull/9");
   assert.equal(cli(["ready-pr", "CAN-52"], prs), "", "another task's PR is not this task's");
   const byHead = JSON.stringify([
-    { number: 9, title: "wip", headRefName: "claude/foo-x", isDraft: false, url: "https://x/9" },
+    { number: 9, title: "wip", headRefName: "claude/foo-x", isDraft: false, isCrossRepository: false, url: "https://x/9" },
   ]);
   assert.equal(cli(["ready-pr", "CAN-51", "claude/foo-x"], byHead), "9\thttps://x/9",
     "the branch argument is the second, title-independent source");
