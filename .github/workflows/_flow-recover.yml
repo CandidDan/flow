@@ -125,42 +125,24 @@ jobs:
             # also could not be found, that is what produces `reset-to-ready`. A bad minute at
             # GitHub was enough to clear a live claim. `--pr-state-known 0` makes the sweep leave
             # the task alone instead; the next run, three hours later, asks again.
-            # `isDraft` and `url` ride along on this same call — no extra request per task. They
-            # answer the one question `promote-in-review` turns on: is this task's open PR already
-            # OUT of draft, in which case `ready_for_review` can never fire again and the task is
-            # stuck `in_progress` for good (flow-0104/#91). The `[<id>] …` rule stays in the helper;
-            # `ready-pr` reads the same JSON count-task-prs just read and prints "<number>\t<url>"
-            # for the non-draft match, or nothing.
+            # `headRefName`, `isDraft` and `url` ride along on this same call — no extra request
+            # per task. They answer the one question `promote-in-review` turns on, below.
+            #
+            # On failure `prs_json` is CLEARED, not left holding the previous task's list: the
+            # variable outlives one loop iteration, and reading a stale list as this task's facts
+            # is the same class of mistake as reading a failed query as an empty one.
             pr_state_known=1
-            open_pr_ready=0; open_pr_number=""; open_pr_url=""
-            if prs_json="$(gh pr list --state open --limit 200 --json number,title,isDraft,url </dev/null 2>/dev/null)"; then
+            if prs_json="$(gh pr list --state open --limit 200 --json number,title,headRefName,isDraft,url </dev/null 2>/dev/null)"; then
               by_title="$(printf '%s' "$prs_json" | node .flow/bin/flow-recover.mjs count-task-prs "$id")"
-              ready_facts="$(printf '%s' "$prs_json" | node .flow/bin/flow-recover.mjs ready-pr "$id")"
-              if [ -n "$ready_facts" ]; then
-                open_pr_ready=1
-                open_pr_number="$(printf '%s' "$ready_facts" | cut -f1)"
-                open_pr_url="$(printf '%s' "$ready_facts" | cut -f2)"
-              fi
             else
               echo "::warning::gh pr list failed for $id — PR state unknown, leaving the task alone."
-              pr_state_known=0; by_title=0
+              pr_state_known=0; by_title=0; prs_json=""
             fi
 
-            # The head source answers the same two questions in one call: how many open PRs are on
-            # this branch (unchanged — `length`), and the number/url of the first that is NOT a
-            # draft. Field selection only, so the `[<id>] …` convention is not re-expressed here;
-            # a PR on the task's own branch belongs to the task whatever it is titled.
             by_head=0
             if [ -n "$branch" ]; then
-              if head_facts="$(gh pr list --head "$branch" --state open --json number,isDraft,url --jq '[length, (map(select(.isDraft == false))[0].number // ""), (map(select(.isDraft == false))[0].url // "")] | @tsv' </dev/null 2>/dev/null)"; then
-                by_head="$(printf '%s' "$head_facts" | cut -f1)"
-                if [ "$open_pr_ready" -eq 0 ]; then
-                  head_number="$(printf '%s' "$head_facts" | cut -f2)"
-                  head_url="$(printf '%s' "$head_facts" | cut -f3)"
-                  if [ -n "$head_number" ] && [ -n "$head_url" ]; then
-                    open_pr_ready=1; open_pr_number="$head_number"; open_pr_url="$head_url"
-                  fi
-                fi
+              if head_count="$(gh pr list --head "$branch" --state open --json number --jq 'length' </dev/null 2>/dev/null)"; then
+                by_head="$head_count"
               else
                 echo "::warning::gh pr list --head failed for $branch — PR state unknown."
                 pr_state_known=0
@@ -170,6 +152,21 @@ jobs:
             has_open_pr=0
             [ "${by_title:-0}" -gt 0 ] && has_open_pr=1
             [ "${by_head:-0}" -gt 0 ] && has_open_pr=1
+
+            # Is that open PR already OUT of draft? If it is, `ready_for_review` can never fire
+            # again, so flow-status can never move this task on and it is stuck `in_progress` for
+            # good (flow-0104/#91). Read from `$prs_json` — the list fetched above, no second
+            # request — and matched by the SAME two sources used for has_open_pr: the `[<id>] …`
+            # title, or the PR's head being this task's branch. Both live in the helper, so the
+            # title convention is not re-expressed as a jq filter here. A failed query left
+            # `prs_json` empty, which prints nothing and passes 0: an unknown never promotes.
+            open_pr_ready=0; open_pr_number=""; open_pr_url=""
+            ready_facts="$(printf '%s' "$prs_json" | node .flow/bin/flow-recover.mjs ready-pr "$id" "$branch")"
+            if [ -n "$ready_facts" ]; then
+              open_pr_ready=1
+              open_pr_number="$(printf '%s' "$ready_facts" | cut -f1)"
+              open_pr_url="$(printf '%s' "$ready_facts" | cut -f2)"
+            fi
 
             if [ -n "$branch" ]; then
               branch_exists=1

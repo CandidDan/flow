@@ -20,8 +20,8 @@
 //   node .flow/bin/flow-recover.mjs list-in-progress    # prints "<id>\t<started>\t<branch>" per task
 //   node .flow/bin/flow-recover.mjs branch-candidates CAN-51 claude/foo-x   # ls-remote patterns
 //   gh pr list --state open --json title | node .flow/bin/flow-recover.mjs count-task-prs CAN-51
-//   gh pr list --state open --json number,title,isDraft,url \
-//     | node .flow/bin/flow-recover.mjs ready-pr CAN-51  # "<number>\t<url>" of the non-draft PR
+//   gh pr list --state open --json number,title,headRefName,isDraft,url \
+//     | node .flow/bin/flow-recover.mjs ready-pr CAN-51 <branch>   # "<number>\t<url>", non-draft
 //   node .flow/bin/flow-recover.mjs reset CAN-51        # prints the board-edits JSON to reset it
 //   node .flow/bin/flow-recover.mjs promote CAN-51 <pr-url> <branch>   # the in_review board edit
 //
@@ -146,21 +146,27 @@ export function buildResetEdit(id) {
 
 // ── The non-draft open PR: the one fact `promote-in-review` turns on ─────────────────────
 //
-// Reads `gh pr list --state open --json number,title,isDraft,url` output and returns the first
-// PR that belongs to this task AND is out of draft, as `{ number, url }` — or null. Same single
-// call the sweep already makes per task (it only gained two fields), so this costs no extra API
-// request, and the `[<id>] …` title rule stays in ONE place rather than being re-expressed as a
-// jq filter in the workflow.
+// Reads `gh pr list --state open --json number,title,headRefName,isDraft,url` output and returns
+// the first PR that belongs to this task AND is out of draft, as `{ number, url }` — or null.
+//
+// "Belongs to this task" is the sweep's existing pair of sources, unchanged and in the same
+// precedence: the `[<id>] …` PR title, or the PR's head being the task's branch. Both are served
+// from the ONE `gh pr list` call the sweep already makes per task (it gained three fields), so
+// this costs no extra API request — and the title rule stays in ONE place rather than being
+// re-expressed as a jq filter in the workflow, which is the drift this helper exists to avoid.
 //
 // Null is returned for anything doubtful: a draft PR, a PR whose `isDraft` is absent or
-// non-boolean, a title that does not match, unparseable input. Every one of those reaches
+// non-boolean, a title and head that both miss, unparseable input. Every one of those reaches
 // classifyStranded as `openPrReady=false`, which is `ok` — the sweep's existing behaviour. The
 // asymmetry is deliberate: "I could not tell" must look like "do not promote".
-export function readyOpenPr(prs, id) {
+export function readyOpenPr(prs, id, branch = "") {
   if (!Array.isArray(prs)) return null;
+  const head = String(branch || "").trim();
   for (const pr of prs) {
     if (!pr || typeof pr !== "object") continue;
-    if (!isTaskPrTitle(pr.title, id)) continue;
+    const mine = isTaskPrTitle(pr.title, id) ||
+      (!!head && typeof pr.headRefName === "string" && pr.headRefName.trim() === head);
+    if (!mine) continue;
     if (pr.isDraft !== false) continue;          // true, undefined and non-boolean all mean "no"
     const number = Number(pr.number);
     const url = typeof pr.url === "string" ? pr.url.trim() : "";
@@ -304,11 +310,12 @@ if (__isMain) {
     // Same stdin as count-task-prs (one `gh pr list` call, two questions asked of it). Prints
     // "<number>\t<url>" for the task's open non-draft PR, or NOTHING at all — the shell reads an
     // empty result as "no ready PR" and passes --open-pr-ready 0.
+    const [id, branch] = rest;
     let raw = "";
     try { raw = readFileSync(0, "utf8"); } catch { raw = ""; }
     let prs = [];
     try { prs = JSON.parse(raw || "[]"); } catch { prs = []; }
-    const hit = readyOpenPr(prs, rest[0]);
+    const hit = readyOpenPr(prs, id, branch);
     if (hit) process.stdout.write(`${hit.number}\t${hit.url}\n`);
   } else if (cmd === "reset") {
     const id = rest[0];
