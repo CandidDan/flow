@@ -16,6 +16,13 @@ name: _flow-triage (reusable)
 # Authority stays with the human: triage PROPOSES; only an `approved` or `auto-ok` label —
 # both human-applied — lets work enter the queue.
 #
+# Task ids are NOT chosen by the agent. Both create-a-task lanes go through canonical's
+# `allocate-task-id.mjs`, materialised below at this workflow's own commit, because that is the
+# only path that re-derives the id after a refused push. A model picking "the next id" out of
+# its checkout duplicates one whenever this sweep overlaps another session, and the duplicate
+# lands cleanly: the two files have different names, so nothing is refused and flow-doctor only
+# finds it afterwards, on main. That happened on 2026-09-30 (flow-0104, flow-0105).
+#
 # The lanes decide what may BECOME a task. They do not decide whose text the sweep reads, and
 # that is a separate boundary: this sweep runs an agent with `contents: write` and a permissive
 # permission mode, and on a public repository anyone can author its input. So the input set is
@@ -37,6 +44,16 @@ name: _flow-triage (reusable)
 
 on:
   workflow_call:
+    inputs:
+      # GHES-ONLY FALLBACK for the canonical-helper fetch below (flow-0094, ADR-0008). On
+      # github.com `job.workflow_sha` resolves and this is never read — leave it unset. It must
+      # never be a branch: the fetch step refuses a moving ref, because a sweep whose allocator
+      # came from `main` cannot be reproduced from its run log.
+      flow_ref:
+        description: "Fallback ref for canonical's helpers when job.workflow_sha is unavailable (GHES). A tag or a commit sha, never a branch."
+        required: false
+        type: string
+        default: ""
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: false
@@ -54,6 +71,85 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+
+      # ── Canonical's own allocator, at THIS workflow's own commit (flow-0094, ADR-0008) ──
+      #
+      # Step 3 of the prompt below creates task files, and it must do that through
+      # `allocate-task-id.mjs` — the only allocation path that re-derives the id after a refused
+      # push. The copy it runs comes from canonical at this workflow's commit, not from the
+      # calling repo's `.flow/bin/`: that directory only changes when the repo's flow-sync PR
+      # merges, so a repo that has never synced would have no allocator at all and the sweep
+      # would quietly fall back to picking an id by hand — the exact failure flow-0110 closes.
+      #
+      # This step is lifted from `_flow-gates.yml`, which does the same thing for the gate's
+      # helpers. The ONLY difference is the `for helper in` line, which names what this workflow
+      # needs — `.flow/bin/triage-allocate-id.test.mjs` asserts that, byte for byte, so the two
+      # copies cannot drift apart by hand. That is also why the refusal messages still say "the
+      # gate's helpers": rewording them for this caller would buy nothing and cost the check.
+      # `flow-state.mjs` is listed because the allocator imports it, and a sparse checkout that
+      # silently lost it would fail at import time, inside the agent, where nothing reports it.
+      #
+      # Deliberately NOT guarded by the `inbox` step's `if:`, unlike the agent below: this is a
+      # shallow sparse fetch, and running it up front makes a broken fetch fail the run loudly
+      # instead of failing inside the agent, which reports success either way.
+      - name: Materialise canonical's helpers at this workflow's commit
+        env:
+          # `job.workflow_sha` / `job.workflow_repository` describe THE FILE THAT DEFINES THIS JOB
+          # — this reusable — where `github.workflow_sha` describes the caller's 3-line caller and
+          # `github.job_workflow_sha` is not exposed as an expression at all. Both job properties
+          # are absent on GitHub Enterprise Server; `flow_ref` is the fallback for that case only,
+          # and its race is recorded in docs/adr/0008-helpers-from-canonical.md.
+          FLOW_WORKFLOW_REPO: ${{ job.workflow_repository }}
+          FLOW_WORKFLOW_SHA: ${{ job.workflow_sha }}
+          FLOW_REF_INPUT: ${{ inputs.flow_ref }}
+        run: |
+          set -euo pipefail
+          repo="${FLOW_WORKFLOW_REPO:-}"
+          ref="${FLOW_WORKFLOW_SHA:-}"
+          src="job.workflow_sha"
+          if [ -z "$ref" ]; then
+            src="flow_ref input"
+            ref="${FLOW_REF_INPUT:-}"
+          fi
+          [ -n "$repo" ] || repo="CandidDan/flow"
+          if [ -z "$ref" ]; then
+            echo "::error::Cannot resolve the commit of this reusable workflow: job.workflow_sha is"
+            echo "::error::empty (expected only on GitHub Enterprise Server) and no flow_ref input"
+            echo "::error::was passed. Set flow_ref in your flow-gates.yml caller to the same ref"
+            echo "::error::its uses: pins. See docs/adr/0008-helpers-from-canonical.md."
+            exit 1
+          fi
+          case "$repo" in
+            */*) ;;
+            *) echo "::error::Refusing canonical repo '$repo' — expected owner/repo."; exit 1 ;;
+          esac
+          case "$ref" in
+            main|master|HEAD|refs/heads/*)
+              echo "::error::Refusing to fetch the gate's helpers from the moving ref '$ref'. A"
+              echo "::error::gate that follows a branch cannot be reproduced from a run log. Pass"
+              echo "::error::flow_ref as a tag or a commit sha."
+              exit 1 ;;
+            -*) echo "::error::Invalid ref '$ref' — a ref cannot begin with '-'."; exit 1 ;;
+          esac
+          dir="$RUNNER_TEMP/flow-canonical"
+          rm -rf "$dir"
+          mkdir -p "$dir"
+          git -C "$dir" init -q
+          git -C "$dir" remote add origin "https://github.com/$repo.git"
+          git -C "$dir" config core.sparseCheckout true
+          printf 'project-template/.flow/bin/\n' > "$dir/.git/info/sparse-checkout"
+          git -C "$dir" fetch -q --depth 1 origin "$ref"
+          git -C "$dir" checkout -q FETCH_HEAD
+          bin="$dir/project-template/.flow/bin"
+          for helper in allocate-task-id.mjs flow-state.mjs; do
+            if [ -f "$bin/$helper" ]; then continue; fi
+            echo "::error::$repo@$ref carries no project-template/.flow/bin/$helper. That is"
+            echo "::error::canonical's own tree at the commit this workflow was resolved from, so"
+            echo "::error::it is a bug in canonical, not in this repository."
+            exit 1
+          done
+          echo "flow-helpers: decision=materialised repo=$repo ref=$ref source=$src bin=$bin"
+          echo "FLOW_BIN=$bin" >> "$GITHUB_ENV"
 
       # ── The trust boundary ───────────────────────────────────────────────────────────────
       # Everything after this step READS issue text. This step decides WHOSE text, and it is
@@ -413,9 +509,44 @@ jobs:
                Post the spec as a comment on the issue, then add the `proposed` label. Do NOT
                create a task file.
             3. For each in-scope issue labelled `approved` (the human accepted a proposal) or
-               `auto-ok` (pre-authorised lane): create the ready task file in .flow/tasks/ with
-               the next id, `issue:` set to the issue URL, commit it to main with message
-               "flow: triage <id> from issue #<n>", then swap the issue's labels to `triaged`.
+               `auto-ok` (pre-authorised lane): create the ready task file — and create it ONLY
+               by running the allocator, as set out in 3a-3d. The allocator is
+               allocate-task-id.mjs, and the copy to run is canonical's own, materialised for
+               this job at this workflow's commit: the directory is in the environment as
+               $FLOW_BIN, so the command names it as "$FLOW_BIN"/allocate-task-id.mjs. Do not
+               run a copy out of this repository's checkout — it may be stale, or absent
+               entirely in a repo that has never run flow-sync.
+            3a. Write the task body to a scratch file OUTSIDE the repository, at
+               ${{ runner.temp }}/flow-triage-task.md, in the task template's shape (the same
+               template step 2 uses). Set `issue:` to the issue URL and `status:` to ready.
+               Leave the frontmatter `id:` line present but with a placeholder value: the
+               allocator rewrites that line with the id it allocates, and it is the only thing
+               that may fill it in.
+            3b. Run the allocator, reading `--prefix` from `project.name` in .flow/config.yml
+               and choosing a short lowercase hyphenated slug for the task:
+
+                   node "$FLOW_BIN"/allocate-task-id.mjs --write \
+                     --repo-root "$GITHUB_WORKSPACE" \
+                     --prefix <project.name> \
+                     --content-file ${{ runner.temp }}/flow-triage-task.md \
+                     --slug <slug>
+
+               It writes the file, commits it and pushes it to main itself, re-reading the
+               store and re-allocating if another session's push lands first.
+            3c. DO NOT CHOOSE AN ID YOURSELF, and do not create the task file any other way.
+               Do not read the store and take the next id, do not reuse an id from a proposal
+               comment, and do not write, `git add`, `git commit` or `git push` a task file
+               outside the allocator — not as a fallback, not if the allocator fails. If it
+               fails, say so in a comment on the issue, leave the labels alone and move on. The
+               allocator is the only path that re-derives the id after a refused push, so an id
+               picked by hand silently duplicates one whenever this sweep overlaps another
+               session — which is what happened on 2026-09-30, when a triage run and a local
+               session each created a flow-0104 and a flow-0105 on main.
+            3d. USE THE ID THE ALLOCATOR PRINTED, never the one you expected. It prints the
+               allocated id as the first word of its output, and that same id is in the commit
+               message it made — `flow: allocate <id>` — and in the filename it pushed. Do not
+               reword or amend that commit. Then comment on the issue naming the task that id
+               identifies, quoting the printed id, and swap the issue's labels to `triaged`.
             4. If an issue is not worth doing, comment one line saying why and close it.
 
             Hard limits: never modify code or any file outside .flow/tasks/; never edit an
