@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0107"
 title: "One canonical test proves every task's changelog entry, and task-writer names it in the criterion"
-status: "blocked"
+status: "in_progress"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0107"
@@ -11,8 +11,8 @@ started: "2026-09-30T06:34:43Z"
 branch: "flow/flow-0107-store-wide-changelog-entry-test"
 pr: "https://github.com/CandidDan/flow/pull/139"
 issue: ""
-blocked_reason: "Waits on release PR #142, which fixes flow-0097's changelog entry so changelogEntry finds it. Both scope questions are decided (see notes). When #142 merges: rebase flow/flow-0107-store-wide-changelog-entry-test onto main, rerun the gate, gh pr ready 139."
-blocked_by: ["https://github.com/CandidDan/flow/pull/142"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G10"]
 touches:
   - "project-template/.claude/skills/task-writer/SKILL.md"
@@ -24,6 +24,7 @@ notes:
   - "2026-09-30 (orchestrator): Design decided here, not left to the worker: ONE test over the store, not one per task. The task's criterion then names that test, so qa can map it by name and the worker writes nothing extra. The test reads entries through changelogEntry (.flow/bin/changelog-entry.mjs), so it survives a release assembling the fragment."
   - "2026-09-30 (worker): BUILD COMPLETE and pushed on flow/flow-0107-store-wide-changelog-entry-test. All three touched files are done: the store-wide test `every claimed task that declares a changelog fragment has an entry stating its caller action` plus six fixture tests in .flow/bin/changelog-fragments.test.mjs, the task-writer pre-flight citation (file + exact test name, stated conditionally), and changes/flow-0107.md (no caller action). GATE: build green (34 workflows), lint green (101 .mjs), coverage 95.89% vs floor 83.5, test 1482/1484 pass with 1 skip and EXACTLY ONE failure - the new live-store test itself, reporting a real defect it is designed to find: `flow-0097: declares changes/flow-0097.md in touches but has no changelog entry - neither the fragment nor an assembled entry in CHANGELOG.md`. flow-0097 (done, PR #128, shipped in 2.1.2) declared its fragment and never wrote it; CHANGELOG 2.1.2's summary prose mentions flow-0097 but there is no bullet ending `, flow-0097)`, so changelogEntry returns empty. Writing changes/flow-0097.md is outside this task's touches, so criterion 5 (live store passes) cannot be met inside scope. DECISIONS already taken, so a fresh session need not re-litigate them: (a) the status filter is in_progress/in_review/done - `blocked` is skipped alongside `ready` on the spec's own stated rationale (nothing has been written yet), because eight blocked tasks (flow-0022/0030/0046/0053/0082/0083/0086/0110) declare fragments they never wrote and the literal `status is not ready` reading fails on all of them too; (b) `done` stays IN scope because criterion 4 (a fragment a release assembled) is only reachable for a done task, so excluding done would make that criterion vacuous and gut the reason changelog-entry.mjs exists; (c) the store readers (frontmatter/scalar/list, both YAML list forms) are duplicated locally in the test file because flow-doctor's parseListField is module-private and that file is outside touches. NEXT ACTION: see blocked_reason - one decision, then the branch needs at most a one-file addition and is PR-ready."
   - "2026-09-30 (orchestrator, human-approved): Both questions decided. (1) Do NOT write changes/flow-0097.md: flow-0097 shipped in 2.1.2, and a new fragment would list it again under 2.2.0. Instead, release PR #142 adds `(.github/workflows/_flow-gates.yml, project-template/.flow/bin/source-roots.mjs, flow-0097)` to its existing CHANGELOG bullet, so changelogEntry finds it. touches unchanged. (2) The status filter as built (in_progress, in_review, done; skip ready AND blocked) is accepted: the reason for skipping ready applies equally to the blocked tasks that never started."
+  - "2026-10-01 (orchestrator): unblocked as the block note said: #142 merged, branch rebased onto main (2.2.0 plus flow-0085 and flow-0111), gate green locally apart from the two flow-validation/ doctor findings that exist only on this Mac. PR 139 marked ready."
 ---
 
 ## Context
