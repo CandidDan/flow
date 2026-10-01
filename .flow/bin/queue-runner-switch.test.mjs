@@ -50,28 +50,78 @@ const caller = yamlMod ? yamlMod.parse(callerSrc) : { on: {}, jobs: {} };
 // ── the expression model ─────────────────────────────────────────────────────────────────
 //
 // Enough of GitHub's expression language for these conditions: context lookups, string
-// equality, `&&`/`||`/`!`, parentheses and `cancelled()`. Anything it does not recognise is left
-// in place, where it becomes a JavaScript syntax error rather than a silent `false` — a
-// condition this model cannot read must break the test, not quietly pass it.
+// equality, `&&`/`||`/`!`, parentheses and `cancelled()`. It is a small recursive-descent parser
+// that returns a value and never hands the workflow text to `Function`/`eval` — the `if:` strings
+// come from the checked-out tree, which on a PR is the PR's own content. Anything it does not
+// recognise throws, so a condition this model cannot read breaks the test instead of quietly
+// evaluating to false.
 const STATUS_FN = /\b(?:always|cancelled|failure|success)\s*\(/;
 
 function lookup(path, ctx) {
   let node = ctx;
   for (const key of path.split(".")) {
-    if (node === null || typeof node !== "object" || !(key in node)) return "";
+    if (node === null || typeof node !== "object" || !Object.hasOwn(node, key)) return "";
     node = node[key];
   }
   return node ?? "";
 }
 
+const TOKEN = /\s*(?:(\|\||&&|==|!=|!|\(|\))|'((?:[^']|'')*)'|(-?\d+(?:\.\d+)?)\b|((?:vars|github|needs|inputs)(?:\.[A-Za-z0-9_-]+)+|true|false|null|cancelled))/y;
+
+function tokenize(src) {
+  const out = [];
+  let i = 0;
+  while (i < src.length) {
+    if (/^\s*$/.test(src.slice(i))) break;
+    TOKEN.lastIndex = i;
+    const m = TOKEN.exec(src);
+    if (!m) throw new SyntaxError(`expression model cannot read: ${JSON.stringify(src.slice(i))}`);
+    if (m[1] !== undefined) out.push({ op: m[1] });
+    else if (m[2] !== undefined) out.push({ value: m[2].replace(/''/g, "'") });
+    else if (m[3] !== undefined) out.push({ value: Number(m[3]) });
+    else out.push({ word: m[4] });
+    i = TOKEN.lastIndex;
+  }
+  return out;
+}
+
 export function evaluate(expression, ctx = {}) {
   const inner = String(expression).trim().replace(/^\$\{\{/, "").replace(/\}\}$/, "").trim();
-  const js = inner
-    .replace(/\bcancelled\s*\(\s*\)/g, () => JSON.stringify(!!ctx.cancelled))
-    .replace(/\b(?:vars|github|needs|inputs)(?:\.[A-Za-z0-9_-]+)+/g, (path) => JSON.stringify(lookup(path, ctx)))
-    .replace(/[!=]=/g, (op) => (op === "==" ? "===" : "!=="));
-  // eslint-disable-next-line no-new-func -- the input is this repo's own workflow file
-  return Boolean(new Function(`"use strict"; return (${js});`)());
+  const toks = tokenize(inner);
+  let pos = 0;
+  const peek = () => toks[pos];
+  const isOp = (op) => peek()?.op === op;
+  const take = (op) => {
+    if (!isOp(op)) throw new SyntaxError(`expected '${op}' in: ${inner}`);
+    pos++;
+  };
+  const primary = () => {
+    const t = toks[pos++];
+    if (!t) throw new SyntaxError(`unexpected end of: ${inner}`);
+    if (t.op === "(") { const v = orExpr(); take(")"); return v; }
+    if ("value" in t) return t.value;
+    if (t.word === "true") return true;
+    if (t.word === "false") return false;
+    if (t.word === "null") return null;
+    if (t.word === "cancelled") { take("("); take(")"); return !!ctx.cancelled; }
+    if (t.word) return lookup(t.word, ctx);
+    throw new SyntaxError(`unexpected '${t.op}' in: ${inner}`);
+  };
+  const unary = () => { if (isOp("!")) { pos++; return !unary(); } return primary(); };
+  const cmp = () => {
+    let v = unary();
+    while (isOp("==") || isOp("!=")) {
+      const op = toks[pos++].op;
+      const r = unary();
+      v = op === "==" ? v === r : v !== r;
+    }
+    return v;
+  };
+  const andExpr = () => { let v = cmp(); while (isOp("&&")) { pos++; const r = cmp(); v = v && r; } return v; };
+  const orExpr = () => { let v = andExpr(); while (isOp("||")) { pos++; const r = andExpr(); v = v || r; } return v; };
+  const result = orExpr();
+  if (pos !== toks.length) throw new SyntaxError(`trailing input in: ${inner}`);
+  return Boolean(result);
 }
 
 // Does `jobId` run, in this context? This is the rule that trips people up: a job whose `if`
@@ -107,6 +157,20 @@ test("the model reads the subset it claims to, and breaks rather than guessing",
   assert.equal(evaluate("${{ (false || true) && true }}", ctx({})), true);
   assert.throws(() => evaluate("${{ contains(github.ref, 'main') }}", ctx({})),
     "a function this model does not implement must fail loudly, not evaluate to false");
+});
+
+test("the model never executes the condition text as code", { skip }, () => {
+  globalThis.__flowEvalProbe = false;
+  for (const hostile of [
+    "${{ (globalThis.__flowEvalProbe = true) }}",
+    "${{ import('node:fs') }}",
+    "${{ process.exit(1) }}",
+    "${{ vars.X == 'a' || fetch('https://example.invalid') }}",
+  ]) {
+    assert.throws(() => evaluate(hostile, ctx({})), SyntaxError, `must refuse: ${hostile}`);
+  }
+  assert.equal(globalThis.__flowEvalProbe, false, "nothing in a condition may run");
+  delete globalThis.__flowEvalProbe;
 });
 
 // ── criterion: FLOW_AI=true, FLOW_QUEUE_RUNNER unset, gate passed -> the worker is dispatched ──
