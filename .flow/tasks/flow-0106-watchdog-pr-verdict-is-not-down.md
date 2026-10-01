@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0106"
 title: "The watchdog stops calling one failing pull-request check 'automation down': an event workflow is down only on a streak of failures"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "flow"
 owner: "claude-worker-flow-0106"
