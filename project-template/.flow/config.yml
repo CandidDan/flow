@@ -60,6 +60,21 @@ coverage_min: 80
 # you measure, with stated headroom — the same way `coverage_min` is set. Never raise it to go green.
 claude_md_max: 50000
 
+# OPTIONAL — the queue cap: a WIP limit on what gets PLANNED, not on what gets worked.
+#
+# Uncomment it and at most that many tasks may be `ready` at once: `allocate-task-id` refuses a
+# new `ready` task while that many already are, before it writes, commits or pushes anything.
+# Flow already caps work in progress (one claim per session, `touches` overlap) and caps planning
+# nowhere, so an orchestrator can write `ready` tasks faster than any worker drains them.
+#
+# The number is a MAXIMUM — `queue_cap: 8` means at most 8 ready, so the 9th is refused. The only
+# bypass is the draft's own `urgent` label, which is the HUMAN's to apply (the same rule as
+# `auto-ok`): there is no flag and no env var, because a bypass a session can hand itself is not
+# a limit. A `blocked` draft is never capped — the cap limits the ready queue, not the store.
+#
+# Commented out, and that is the default: with no `queue_cap`, nothing is capped.
+# queue_cap: 8
+
 # Source roots — the gate-coverage floor. Declare every tree that holds source AND the command
 # that parses/lints it. flow-doctor enforces this on every PR: a declared root that's missing or
 # has no check FAILS, and any top-level source tree NOT covered here FAILS too — so a new runtime
