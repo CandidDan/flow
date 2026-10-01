@@ -289,6 +289,15 @@
     section,header{scroll-margin-top:96px;}
   }
 .paths{display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:760px}.paths>div{border:1px solid color-mix(in srgb,var(--bg) 22%,transparent);border-radius:12px;padding:14px 16px}.paths b{display:block;margin-bottom:4px;color:var(--bg)}.paths span{color:color-mix(in srgb,var(--bg) 72%,transparent);font-size:15px;line-height:1.5}@media(max-width:860px){.paths{grid-template-columns:1fr}}
+.ft{list-style:none;margin:44px 0 0;padding:0;display:grid;gap:14px;}
+.ft>li{display:grid;grid-template-columns:44px minmax(0,1fr) minmax(0,1fr);gap:20px;align-items:start;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px 24px;}
+.ft-n{width:36px;height:36px;border-radius:999px;display:grid;place-items:center;font:700 16px/1 var(--mono);background:var(--accent-soft);color:var(--accent);}
+.ft-k{display:block;font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;}
+.ft pre{margin:0 0 10px;padding:12px 14px;border-radius:10px;background:var(--ink);color:var(--bg);font:500 14px/1.5 var(--mono);white-space:pre-wrap;}
+.ft p{margin:0;color:var(--muted);font-size:15px;line-height:1.55;}
+.ft-see p{color:var(--ink);}
+.ft-see b,.ft-do b{color:var(--ink);font-weight:600;}
+@media(max-width:860px){.ft>li{grid-template-columns:1fr;gap:12px;}}
 </style>
 </head>
 <body>
@@ -298,12 +307,13 @@
     <a class="logo" href="#top"><i aria-hidden="true"></i>Flow</a>
     <div class="links">
       <a href="#how">How it works</a>
+      <a href="#first">First task</a>
       <a href="#pr">See a PR</a>
       <a href="#runners">Automation</a>
       <a href="#agents">Any agent</a>
       <a href="#roadmap">Roadmap</a>
     </div>
-    <a class="btn sm" href="https://github.com/CandidDan/flow-protocol">View on GitHub</a>
+    <a class="btn sm" href="https://github.com/CandidDan/flow-protocol" target="_blank" rel="noopener">View on GitHub</a>
   </nav>
 </div>
 
@@ -391,6 +401,38 @@
         <li><span class="k">Pull request</span><b>#136 · 8 of 8 criteria proved</b><span class="d">Three reviewers passed. Merged by a human.</span></li>
       </ol>
     </div>
+  </div>
+</section>
+
+
+<section id="first">
+  <div class="wrap">
+    <p class="eyebrow">Your first task</p>
+    <h2>What you type, and what you see.</h2>
+    <p class="intro">Four moments, start to finish. Everything happens in your repo and on GitHub. There’s no other app to open.</p>
+    <ol class="ft" aria-label="The four steps of a first task">
+      <li>
+        <div class="ft-n" aria-hidden="true">1</div>
+        <div class="ft-do"><span class="ft-k">You ask</span><pre>Write a task with task-writer:
+let users export notes as Markdown.</pre><p>Or just open a GitHub issue. Triage drafts the task as a comment, and you add the <code>approved</code> label.</p></div>
+        <div class="ft-see"><span class="ft-k">You see</span><p>A new file, <code>.flow/tasks/0012-export-notes.md</code>, marked <b>ready</b>. It has checkable criteria, the files it may touch, and the goal it serves. Read it. That’s your first approval.</p></div>
+      </li>
+      <li>
+        <div class="ft-n" aria-hidden="true">2</div>
+        <div class="ft-do"><span class="ft-k">You start it</span><pre>Work the next ready task.</pre><p>Say it in a fresh agent session, or leave it to the queue runner, which picks up ready tasks on a schedule.</p></div>
+        <div class="ft-see"><span class="ft-k">You see</span><p>The task flips to <b>in progress</b> on <code>main</code>, and a draft pull request appears with its branch.</p></div>
+      </li>
+      <li>
+        <div class="ft-n" aria-hidden="true">3</div>
+        <div class="ft-do"><span class="ft-k">You wait</span><p>Nothing to do. If the agent hits a decision that’s yours, it stops, marks the task <b>blocked</b> and writes down the question.</p></div>
+        <div class="ft-see"><span class="ft-k">You see</span><p>Checks run on the PR: build, lint, tests, coverage and scope. Then three reviewers post their verdicts. A failure goes back to the agent to fix, not to you.</p></div>
+      </li>
+      <li>
+        <div class="ft-n" aria-hidden="true">4</div>
+        <div class="ft-do"><span class="ft-k">You merge</span><p>Read the PR. Every criterion is ticked, next to the test that proves it. Merge it.</p></div>
+        <div class="ft-see"><span class="ft-k">You see</span><p>The task flips to <b>done</b> on <code>main</code>. <a href="#pr">Here’s what that PR looks like.</a></p></div>
+      </li>
+    </ol>
   </div>
 </section>
 
@@ -733,7 +775,7 @@
       </div>
       <p class="fine">The steps are plain text you can read first, pinned to v2.2.0: <a href="/start">getflow.now/start</a>.</p>
       <div class="ctas" style="margin-top:4px">
-        <a class="btn" href="https://github.com/CandidDan/flow-protocol">Get Flow on GitHub</a>
+        <a class="btn" href="https://github.com/CandidDan/flow-protocol" target="_blank" rel="noopener">Get Flow on GitHub</a>
         <a class="btn ghost" href="#how">How it works</a>
       </div>
     </div>
