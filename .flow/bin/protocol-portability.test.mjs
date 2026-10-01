@@ -379,6 +379,80 @@ test("stripJsComments keeps code and drops both comment forms", () => {
   assert.ok(!out.includes("CLAUDE.md"), "every comment form must be stripped");
 });
 
+// --- flow-0016 criteria 1, 2 and 4: the three sites the rename left behind ----------------
+//
+// WHY EACH NEEDS ITS OWN ASSERTION. The drift check below is a one-directional pin: it fails when
+// prose calls CLAUDE.md the protocol, and stays green when prose says nothing at all. Deleting the
+// README's entry, or the helpers' pointers, would satisfy it while leaving a reader with no idea
+// where the protocol is. These assert the positive half — the arrangement flow-0006 shipped is
+// described, in the places someone actually looks.
+
+const README = readFileSync(join(TEMPLATE, "README.md"), "utf8");
+
+// The aligned `<path><spaces><description>` entry for a path in README's "What's in here" block,
+// continuation lines (indented, no path of their own) folded in.
+export function listingEntry(readme, path) {
+  const lines = readme.split("\n");
+  const start = lines.findIndex((l) => new RegExp(`^\\s*${path.replace(/[.\/]/g, "\\$&")}\\s\\s+\\S`).test(l));
+  if (start === -1) return null;
+  const out = [lines[start]];
+  for (let i = start + 1; i < lines.length; i++) {
+    if (!/^\s{20,}\S/.test(lines[i])) break;
+    out.push(lines[i]);
+  }
+  return out.join(" ").replace(/\s+/g, " ").trim();
+}
+
+test("README's file listing calls CLAUDE.md a pointer and names .flow/PROTOCOL.md as the protocol",
+  () => {
+    const hostEntry = listingEntry(README, "CLAUDE.md");
+    assert.ok(hostEntry, "README's listing must still have an entry for CLAUDE.md");
+    assert.match(hostEntry, /pointer/i,
+      `README describes CLAUDE.md as: "${hostEntry}". It is a pointer since flow-0006, and the ` +
+      `README is where someone looks to find out what the files are.`);
+    assert.ok(hostEntry.includes(PROTOCOL_REF),
+      "the CLAUDE.md entry must name what it points AT, or 'a pointer' tells the reader nothing");
+    assert.deepEqual(protocolClaimsIn(hostEntry), [],
+      "the CLAUDE.md entry must not also claim to be the protocol");
+
+    const protocolEntry = listingEntry(README, "PROTOCOL.md");
+    assert.ok(protocolEntry,
+      `README's listing has no entry for ${PROTOCOL_REF} — the protocol is the one file the ` +
+      `listing most needs to name`);
+    assert.match(protocolEntry, /[Tt]he (protocol|contract)/,
+      `the ${PROTOCOL_REF} entry must say it is the protocol: "${protocolEntry}"`);
+  });
+
+test("neither template helper cites CLAUDE.md as the location of a protocol rule", () => {
+  // The inverse of stripJsComments: the comments are what a reader follows, and a comment is
+  // exactly where flow-0006's own criterion 5 (code only) allowed this drift to survive.
+  for (const name of ["flow-sync.mjs", "pick-task.mjs"]) {
+    const source = readFileSync(join(TEMPLATE, ".flow/bin", name), "utf8");
+    const comments = source.split("\n").filter((l) => /^\s*\/\/|^\s*\*/.test(l)).join("\n");
+    assert.ok(comments.includes(PROTOCOL_REF),
+      `${name} must cite ${PROTOCOL_REF} — it quotes a protocol rule, and the reader has to be ` +
+      `able to go and read it`);
+    assert.deepEqual(protocolClaimsIn(comments), [],
+      `${name} still sends a reader to CLAUDE.md for a protocol rule. The rules moved in ` +
+      `flow-0006; the comment did not.`);
+  }
+});
+
+test("Response style says the HOST file auto-loads and imports the protocol", () => {
+  // A content proof, not a change-detector: the digest above only pins that this section matches
+  // a hash recorded alongside the edit, so it cannot tell this sentence from any other prose.
+  const section = new Map(sectionsOf(protocol)).get("Response style — show, don't tell");
+  assert.ok(section, "the Response style section must exist to carry the statement");
+
+  assert.match(section, /host file[\s\S]{0,80}?auto-loads and imports/,
+    "Response style must say the HOST file auto-loads and imports this protocol — that is the " +
+    "one hop flow-0006 introduced, and it is why these rules bind a worker at all");
+  assert.doesNotMatch(section, /auto-load this file/,
+    "the pre-flow-0006 claim that worker sessions auto-load THIS file is one hop out of date");
+  assert.doesNotMatch(section, /they\s+auto-load/,
+    "nothing auto-loads the protocol directly; the host file does, and imports it");
+});
+
 // --- flow-0016 criterion 5: no shipped Markdown may call CLAUDE.md the protocol ----------
 //
 // WHY THIS EXISTS. flow-0006 moved the protocol to `.flow/PROTOCOL.md` and left CLAUDE.md as a
