@@ -240,7 +240,22 @@
   .split hr{border:0;border-top:1px dashed var(--line);margin:4px 0;}
   .split .cap{font-size:13.5px;color:var(--muted);}
 
+  /* vision trace */
+  .vision{margin-top:22px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:18px;padding:28px;}
+  .vision h3{font-size:clamp(22px,2.6vw,28px);font-weight:700;margin-bottom:10px;}
+  .vision-copy p{color:var(--muted);font-size:16px;}
+  .vision-copy p.eyebrow{color:var(--accent);font-size:13px;}
+  .vision code{font:500 13px var(--mono);background:var(--band);padding:1px 6px;border-radius:5px;color:var(--ink);}
+  .trace{list-style:none;margin:0;padding:0;display:grid;gap:10px;position:relative;}
+  .trace li{position:relative;display:grid;gap:2px;padding:12px 14px 12px 16px;border:1px solid var(--line);border-left:3px solid var(--agent);border-radius:10px;background:var(--bg);}
+  .trace li:first-child{border-left-color:var(--accent);}
+  .trace li + li::before{content:"↑";position:absolute;top:-16px;left:22px;font:700 13px/1 var(--body);color:var(--muted);background:var(--card);padding:0 3px;}
+  .trace .k{font:500 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
+  .trace b{font-size:15.5px;}
+  .trace .d{font-size:13.5px;color:var(--muted);}
+
   @media(max-width:860px){
+    .vision{grid-template-columns:1fr;}
     .pains,.steps,.benefits,.scars,.lanes,.fit,.runners,.agents{grid-template-columns:1fr;}
     .pr-body{grid-template-columns:1fr;} .pr-main{border-right:0;border-bottom:1px solid var(--line);}
     .stats{grid-template-columns:1fr;}
@@ -319,8 +334,8 @@
     <div class="steps">
       <div class="step">
         <span class="who you">You</span>
-        <h3>Say what you want</h3>
-        <p>Write down the outcome and why it matters. Agents turn it into small tasks, each with checkable acceptance criteria and a list of the files it’s allowed to change.</p>
+        <h3>Say what you want, or what’s broken</h3>
+        <p>Write down the outcome and why it matters, or just file an issue. Agents turn it into small tasks for you to approve. Each one has checkable acceptance criteria, a list of the files it’s allowed to change, and the goal from your vision that it serves.</p>
       </div>
       <div class="step">
         <span class="who agents">Agents + CI</span>
@@ -333,6 +348,18 @@
         <h3>Approve the merge</h3>
         <p>You get a PR where every criterion is ticked and linked to the test that proves it. Read it, merge it, move on. The merge always stays with a human.</p>
       </div>
+    </div>
+    <div class="vision">
+      <div class="vision-copy">
+        <p class="eyebrow" style="margin-bottom:10px">It starts with a vision</p>
+        <h3>Every change traces back to why you wanted it.</h3>
+        <p>You write a short <code>VISION.md</code> once: your goals and your non-goals, in your own words. Every task has to name the goal it serves, a task pointing at a goal that doesn’t exist is flagged, and a weekly audit reports when the work starts drifting from what you said you wanted. Agents work fast. The vision keeps them going somewhere.</p>
+      </div>
+      <ol class="trace" aria-label="A real trace from a merged pull request back to the vision">
+        <li><span class="k">VISION.md</span><b>G10: The gate tells the truth</b><span class="d">When CI says green, the work is actually right.</span></li>
+        <li><span class="k">Task</span><b>flow-0100 · serves G10</b><span class="d">A repo sets its own review size limit.</span></li>
+        <li><span class="k">Pull request</span><b>#136 · 8 of 8 criteria proved</b><span class="d">Three reviewers passed. Merged by a human.</span></li>
+      </ol>
     </div>
   </div>
 </section>
@@ -506,7 +533,7 @@
       <div class="runner"><span class="when">every push to a task branch</span><h3>Open PR</h3><p>Opens the pull request as a draft the moment an agent pushes, so a stalled session can’t strand finished work.</p></div>
       <div class="runner"><span class="when">weekday mornings</span><h3>Queue runner</h3><p>Picks the top ready task, starts a fresh agent, and lets it build and open the PR. If a run produces nothing it can verify, it fails loudly instead of claiming success.</p></div>
       <div class="runner"><span class="when">PR ready or updated</span><h3>Review</h3><p>Three independent reviewers on every PR: QA, code review, and security when the change touches sensitive paths. Each runs in a clean session that never saw the code being written.</p></div>
-      <div class="runner"><span class="when">weekday mornings</span><h3>Triage</h3><p>Turns new issues into scoped, ready tasks. It only listens to people who can already direct the repo.</p></div>
+      <div class="runner"><span class="when">weekday mornings</span><h3>Triage</h3><p>Reads new issues and posts a proposed task spec on each one. Add an “approved” label, even from your phone, and it becomes a ready task. It only listens to people who can already direct the repo.</p></div>
       <div class="runner"><span class="when">every 3 hours</span><h3>Recover</h3><p>Finds tasks stuck mid-flight, such as a crashed session or a PR with no status, and puts them back where they belong.</p></div>
       <div class="runner"><span class="when">weekly</span><h3>Compass</h3><p>A read-only audit of recent work against your stated goals. It flags drift before it becomes a direction.</p></div>
       <div class="runner"><span class="when">weekly</span><h3>Sync</h3><p>When a new Flow version is out, it opens a PR with the update. You review it like any other change.</p></div>
@@ -587,6 +614,8 @@
           <tr><td>Review</td><td>You, reading every line</td><td class="flow">Three independent AI checks first, then you merge</td></tr>
           <tr><td>Parallel work</td><td>Agents collide in the same files</td><td class="flow">Tasks claimed in git, scopes kept apart</td></tr>
           <tr><td>When you step away</td><td>Work stops</td><td class="flow">Ready tasks keep moving on a schedule</td></tr>
+          <tr><td>Direction</td><td>Drifts a little with every session</td><td class="flow">Every task names a goal from your vision, and a weekly audit flags drift</td></tr>
+          <tr><td>Bug reports</td><td>Sit in a list until you get to them</td><td class="flow">Get a proposed task spec every weekday morning, and one label from you makes it ready</td></tr>
           <tr><td>Where it lives</td><td>Chat history</td><td class="flow">Plain files in your repo that you own</td></tr>
         </tbody>
       </table>
