@@ -33,6 +33,9 @@ tasks (`PROTOCOL.md` names it but gives no path, relying on Claude Code's skill-
 an agent that only follows the AGENTS.md convention has no such resolution). Read each in full
 before using it — they are short, load-bearing procedures, not references to skim.
 
+One skill applies to every role: `.claude/skills/show-me/SKILL.md`, the formats behind
+`PROTOCOL.md`'s "show, don't tell" response rule. Read it before your first reply.
+
 The authority rule does not change with which agent is running it: the human decides what
 matters — priority, direction, and every goal or non-goal in `VISION.md`. Decomposition into
 tasks is the orchestrator's job; inventing priority is not, regardless of which model is doing
