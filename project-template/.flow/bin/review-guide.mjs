@@ -44,6 +44,7 @@ import {
   SECURITY_FLOOR_PATHS,
   UNTRUSTED_BEGIN,
   UNTRUSTED_END,
+  oneLine,
   parseReviewConfig,
   securityDecision,
 } from "./flow-review.mjs";
@@ -345,7 +346,11 @@ export function factsBrief(facts, hotspots) {
   else out.push("- none. The diff touches no security path, deletes or weakens no test, and stays inside the task's `touches`.");
   out.push("", "## Assumptions stated in the PR description", "");
   if (facts.assumptions.stated) {
-    out.push(UNTRUSTED_BEGIN, "", facts.assumptions.text, "", UNTRUSTED_END);
+    // ONE line, as a JSON string literal through `oneLine` — the same encoding flow-review.mjs
+    // uses for the branch and title, and for the same reason: a raw multi-line paste would let a
+    // PR body forge the END line and walk out of the fence (code review on #158). The human-facing
+    // comment below still quotes the text verbatim; only the model-facing brief is encoded.
+    out.push(UNTRUSTED_BEGIN, oneLine(facts.assumptions.text), UNTRUSTED_END);
   } else {
     out.push(NO_ASSUMPTIONS);
   }

@@ -831,7 +831,7 @@ test("flow-0089: changes/flow-0089.md exists and says the caller does nothing", 
 // its facts from BASE's gate, and can never turn this PR red.
 
 const GUIDE_FACTS_RUN = /node "\$FLOW_REVIEW_DIR"\/review-guide\.mjs facts\b/;
-const GUIDE_COMMENT_RUN = /node "\$FLOW_REVIEW_DIR"\/review-guide\.mjs comment\b/;
+const GUIDE_COMMENT_RUN = /node "\$FLOW_REVIEW_DIR"\/review-guide\.mjs comment(?!-)\b/;
 const GUIDE_ID_RUN = /node "\$FLOW_REVIEW_DIR"\/review-guide\.mjs comment-id\b/;
 const guideSteps = () => stepsOf(GUIDE_JOB);
 const guideStep = (re) => guideSteps().find((s) => re.test(String(s.run ?? "")));
