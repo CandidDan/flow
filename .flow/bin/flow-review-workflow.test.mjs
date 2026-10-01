@@ -704,8 +704,11 @@ const CLASSIFIED_PR_RULE =
   "you: · \"RELEASE PR\" — release files only. The sentinel carries release-guard's verdict over " +
   "this tree. If it reports no problems, PASS with exactly: release PR: release files only, " +
   "release-guard clean. If it reports problems, FAIL and name them. · \"SYNC PR\" — the flow-sync " +
-  "surface only, copied from canonical. PASS with exactly: sync PR: synced surface only; " +
-  "flow-tooling validates it. Under either sentinel there are no acceptance criteria to map, and " +
+  "surface only. The classification proves where the files are, not where their content came " +
+  "from, so still read the diff. If it adds or widens a `permissions:` block, introduces " +
+  "`pull_request_target`, points a `uses:` at a different owner or an unpinned branch, or changes " +
+  "how a secret is read or passed, FAIL and name it. Otherwise PASS with exactly: sync PR: synced " +
+  "surface only; flow-tooling validates it. Under either sentinel there are no acceptance criteria to map, and " +
   "a missing task is not a finding. Do not go looking for one.";
 
 test("flow-0089: every reviewer prompt carries the RELEASE PR / SYNC PR instruction verbatim", { skip }, () => {
@@ -735,8 +738,21 @@ test("flow-0089: the RELEASE PR rule states both a PASS condition and a FAIL con
 test("flow-0089: the SYNC PR rule is named with its PASS line", { skip }, () => {
   assert.match(CLASSIFIED_PR_RULE, /"SYNC PR"/);
   assert.match(CLASSIFIED_PR_RULE,
-    /PASS with exactly: sync PR: synced surface only; flow-tooling validates it/,
+    /Otherwise PASS with exactly: sync PR: synced surface only; flow-tooling validates it/,
     "this is the case every adopting repo hits on every sync — the fleet-wide half of the task");
+});
+
+test("flow-0089: the SYNC PR rule states a FAIL condition, so classification is not a blanket pass", { skip }, () => {
+  // Security review on #146: the classifier is branch prefix + path glob, and the synced surface
+  // is exactly the high-leverage files (caller workflows, .flow/bin, PROTOCOL.md). A PASS line
+  // with no FAIL branch would wave through a poisoned edit to any of them on a branch named right.
+  assert.match(CLASSIFIED_PR_RULE, /proves where the files are, not where their content came from/);
+  assert.match(CLASSIFIED_PR_RULE, /still read the diff/);
+  for (const risk of [/`permissions:`/, /`pull_request_target`/, /`uses:`/, /secret/]) {
+    assert.match(CLASSIFIED_PR_RULE, risk, `the SYNC PR rule must name ${risk} as a FAIL condition`);
+  }
+  assert.match(CLASSIFIED_PR_RULE, /FAIL and name it\. Otherwise PASS with exactly: sync PR/,
+    "the FAIL branch comes before the canned PASS line, and the PASS is conditional on it");
 });
 
 test("flow-0089: the prompts and the helper name the same sentinels and the same PASS lines", { skip: false }, () => {

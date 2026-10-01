@@ -335,8 +335,12 @@ jobs:
               · "RELEASE PR" — release files only. The sentinel carries release-guard's verdict
                 over this tree. If it reports no problems, PASS with exactly: release PR: release
                 files only, release-guard clean. If it reports problems, FAIL and name them.
-              · "SYNC PR" — the flow-sync surface only, copied from canonical. PASS with exactly:
-                sync PR: synced surface only; flow-tooling validates it.
+              · "SYNC PR" — the flow-sync surface only. The classification proves where the files
+                are, not where their content came from, so still read the diff. If it adds or
+                widens a `permissions:` block, introduces `pull_request_target`, points a `uses:`
+                at a different owner or an unpinned branch, or changes how a secret is read or
+                passed, FAIL and name it. Otherwise PASS with exactly: sync PR: synced surface
+                only; flow-tooling validates it.
             Under either sentinel there are no acceptance criteria to map, and a missing task is
             not a finding. Do not go looking for one.
 
@@ -496,8 +500,12 @@ jobs:
               · "RELEASE PR" — release files only. The sentinel carries release-guard's verdict
                 over this tree. If it reports no problems, PASS with exactly: release PR: release
                 files only, release-guard clean. If it reports problems, FAIL and name them.
-              · "SYNC PR" — the flow-sync surface only, copied from canonical. PASS with exactly:
-                sync PR: synced surface only; flow-tooling validates it.
+              · "SYNC PR" — the flow-sync surface only. The classification proves where the files
+                are, not where their content came from, so still read the diff. If it adds or
+                widens a `permissions:` block, introduces `pull_request_target`, points a `uses:`
+                at a different owner or an unpinned branch, or changes how a secret is read or
+                passed, FAIL and name it. Otherwise PASS with exactly: sync PR: synced surface
+                only; flow-tooling validates it.
             Under either sentinel there are no acceptance criteria to map, and a missing task is
             not a finding. Do not go looking for one.
 
@@ -680,8 +688,12 @@ jobs:
               · "RELEASE PR" — release files only. The sentinel carries release-guard's verdict
                 over this tree. If it reports no problems, PASS with exactly: release PR: release
                 files only, release-guard clean. If it reports problems, FAIL and name them.
-              · "SYNC PR" — the flow-sync surface only, copied from canonical. PASS with exactly:
-                sync PR: synced surface only; flow-tooling validates it.
+              · "SYNC PR" — the flow-sync surface only. The classification proves where the files
+                are, not where their content came from, so still read the diff. If it adds or
+                widens a `permissions:` block, introduces `pull_request_target`, points a `uses:`
+                at a different owner or an unpinned branch, or changes how a secret is read or
+                passed, FAIL and name it. Otherwise PASS with exactly: sync PR: synced surface
+                only; flow-tooling validates it.
             Under either sentinel there are no acceptance criteria to map, and a missing task is
             not a finding. Do not go looking for one.
 
