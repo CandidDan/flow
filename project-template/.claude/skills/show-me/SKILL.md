@@ -97,6 +97,7 @@ In this order, nothing else:
 Too much:
 
 - Wall of text with a TL;DR bolted on the end.
+- A TL;DR on a reply short enough to be its own summary (under ~15 lines).
 - Dramatic framing, restating the question, recapping what was just shown.
 - Headers over one-line sections; bullet lists that are really a table.
 - Explaining a diff in words next to the diff.

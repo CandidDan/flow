@@ -106,8 +106,8 @@ Do not "fix" these:
 ## Response style
 
 The protocol's response-style rule applies here too: show, don't tell — fewest words, visuals for
-anything structured (`project-template/.claude/skills/show-me/SKILL.md`), a one-line **TL;DR**, and
-a numbered to-do list when the human has to act. PR descriptions follow the protocol's order.
+anything structured (`project-template/.claude/skills/show-me/SKILL.md`), a one-line **TL;DR** once a
+response runs past about 15 lines, and a numbered to-do list when the human has to act. PR descriptions follow the protocol's order.
 
 ## Quick orientation
 

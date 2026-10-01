@@ -21,6 +21,12 @@ test("the response-style section requires visuals for structured content and nam
   assert.ok(responseStyle.includes(SKILL_PATH), `response style must name ${SKILL_PATH}`);
 });
 
+test("the response TL;DR is conditional on length, not always", () => {
+  assert.doesNotMatch(protocol, /always TL;DR/);
+  assert.doesNotMatch(responseStyle, /even short ones/);
+  assert.match(responseStyle, /TL;DR\*\* only when it runs past about 15 lines/);
+});
+
 test("the PR description order is TL;DR, visual, criteria checklist, to-dos", () => {
   const pr = responseStyle.slice(responseStyle.indexOf("PR description"));
   const order = ["TL;DR", "visual", "criteria checklist", "to-dos"].map((w) => pr.indexOf(w));

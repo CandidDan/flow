@@ -31,7 +31,7 @@ and `touches` overlap is what makes a task ineligible to claim, so one file ever
 format, and cutting a release is what folds the fragments in. A repo with no `changes/` directory
 has nothing to do here and keeps whatever changelog habit it already has.
 
-## Response style — always TL;DR
+## Response style — show, don't tell
 
 **Show, don't tell.** Use the fewest words that carry the point — no preamble, recap, hedging or
 drama. Anything with structure (a comparison, flow, hierarchy, state or before/after) is a
@@ -39,8 +39,9 @@ visual — table, tree, call stack, mermaid, diff — not a paragraph. Terse is 
 words, full sentences, no unexplained jargon. Formats and examples:
 `.claude/skills/show-me/SKILL.md`.
 
-End every response with a one-line **TL;DR**, even short ones. If the human has to act, follow it
-with a numbered **checklist of just those to-dos**, in order; omit it when there are none.
+End a response with a one-line **TL;DR** only when it runs past about 15 lines; a short reply is
+its own summary. If the human has to act, end with a numbered **checklist of just those to-dos**,
+in order; omit it when there are none.
 
 Workers too: their end-of-run summary, and their **PR description**, which is in this order —
 TL;DR, then one visual of the change, then the criteria checklist with proving tests, then the
