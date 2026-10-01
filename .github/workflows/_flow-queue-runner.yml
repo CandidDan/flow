@@ -17,6 +17,24 @@ name: _flow-queue-runner (reusable)
 # DISABLED BY DEFAULT. Enable: repo variable FLOW_AI=true + CLAUDE_CODE_OAUTH_TOKEN secret
 # (`claude setup-token` — uses your Max plan quota, not API credits). The thin caller passes
 # both secrets this reusable declares by name, not `secrets: inherit`.
+#
+# TIMING LIVES IN REPO VARIABLES, NEVER IN THE CALLER (flow-0080). `on:` is parsed statically and
+# cannot read `vars.*`, so anything expressed in the caller — a cron hour, GitHub's native
+# `timezone:` — is a literal in a file `flow-sync` overwrites, in every repo, edited by hand on
+# every move. The caller therefore ticks hourly and the `schedule-gate` job below decides, from
+# three variables set once per repo with `gh variable set` (no file edit, survives a sync):
+#
+#   FLOW_QUEUE_RUNNER=paused   scheduled ticks dispatch nothing; `workflow_dispatch` still works.
+#                              This is the pause that LEAVES REVIEW RUNNING — FLOW_AI=false also
+#                              switches off the three PR review checks, triage and compass, which
+#                              is how migrated repos ended up briefly with no review at all.
+#   FLOW_TZ                    an IANA zone, e.g. Australia/Sydney.
+#   FLOW_RUN_HOUR              0-23, the LOCAL hour the day's run should start.
+#
+# Both of the last two, or neither. Unset, the gate reproduces the old `0 7 * * 1-5` UTC cron
+# exactly. The decision is `.flow/bin/queue-runner-schedule.mjs` — a pure function with unit
+# tests, because "runs at 07:00 local, once, even when the scheduler is two hours late" is
+# otherwise only observable by watching a cron for a week.
 
 on:
   workflow_call:
@@ -37,8 +55,151 @@ permissions:
   id-token: write          # OIDC token minting for claude-code-action
 
 jobs:
+  # Is THIS tick the day's run? Scheduled ticks only: a `workflow_dispatch` skips this job
+  # entirely, which is what makes FLOW_QUEUE_RUNNER=paused a pause of the SCHEDULE rather than of
+  # the runner — working a single task on purpose stays available while the queue is paused.
+  #
+  # The job is deliberately small. The caller now ticks hourly, so most runs reach this job, say
+  # why they are not the run, and stop: no full checkout, no fetch-depth 0, no npm, no agent.
+  schedule-gate:
+    if: ${{ vars.FLOW_AI == 'true' && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    # Job-scoped, and NOT added to this file's top-level `permissions:` — `actions: read` is
+    # needed by this job alone, and a reusable's permissions are capped by its caller's grant, so
+    # a top-level entry would demand the scope from every caller including the ones whose
+    # dispatch-only callers never reach this job. The template caller grants it; see its header.
+    permissions:
+      contents: read          # the sparse checkout below
+      actions: read           # `gh run list` + the jobs API: did a run already dispatch today?
+    outputs:
+      proceed: ${{ steps.decide.outputs.proceed }}
+      reason: ${{ steps.decide.outputs.reason }}
+    steps:
+      # Sparse and shallow: deciding needs the helper, not a worktree. `sparse-checkout` with
+      # cone mode off takes the one directory, and no credential is persisted because this job
+      # pushes nothing.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 1
+          sparse-checkout: .flow/bin
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # "Has today's run already gone out?" is the only input the decision cannot derive from the
+      # clock, and it is what stops an hourly cron dispatching an hourly worker. It is read from
+      # the Actions API rather than from any state this repo writes: a run that dispatched a
+      # worker is a fact about the runs themselves, so there is nothing to keep in sync.
+      #
+      # EVIDENCE, NOT CONCLUSION — a run counts as "dispatched" only if its dispatch job actually
+      # reached the worker step. A tick that ran, found the queue dry and skipped that step did
+      # not consume the day: work arriving at 09:00 must still be picked up at 10:00.
+      - name: Gather this workflow's earlier scheduled runs
+        if: ${{ vars.FLOW_QUEUE_RUNNER != 'paused' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          # `github.workflow_ref` is `<owner>/<repo>/.github/workflows/<caller>.yml@<ref>`, and
+          # the CALLER's filename is what `gh run list --workflow` matches — inside a reusable
+          # there is no other way to name the workflow whose runs these are.
+          file="${WORKFLOW_REF##*/}"; file="${file%@*}"
+          # 36 hours covers the current local day in every zone (UTC-12 .. UTC+14) with room to
+          # spare, so the window can never cut off a run the decision would have counted.
+          cutoff="$(date -u -d '36 hours ago' +%Y-%m-%dT%H:%M:%SZ)"
+          gh run list --workflow "$file" --event schedule --limit 60 \
+            --json databaseId,createdAt > "$RUNNER_TEMP/runs.json"
+
+          entries=""
+          # Newest first, which is the order `gh run list` returns: the loop stops at the first
+          # run that dispatched, because every run after it in time dispatched nothing. That caps
+          # the per-tick API cost at (ticks since the last dispatch) + 1 instead of one call per
+          # run in the window.
+          while read -r id created; do
+            [ -n "$id" ] || continue
+            worked="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs" --jq '
+              [ .jobs[]
+                | select(.name | endswith("dispatch"))
+                | .steps[]?
+                | select(.name | startswith("Work the task"))
+                | select(.conclusion != "skipped")
+              ] | length' || echo "")"
+            if [ -z "$worked" ]; then
+              # Fail closed: an unreadable run is counted as a dispatch. Guessing "no" here is
+              # the one guess that dispatches a second worker at the same task.
+              echo "::warning::could not read jobs for run $id — counting it as a dispatch"
+              worked=1
+            fi
+            if [ "$worked" -gt 0 ]; then
+              entries="${entries}{\"at\":\"$created\",\"dispatched\":true},"
+              break
+            fi
+            entries="${entries}{\"at\":\"$created\",\"dispatched\":false},"
+          done <<EOF
+          $(jq -r --arg cutoff "$cutoff" --arg cur "$GITHUB_RUN_ID" '
+              .[]
+              | select(.createdAt > $cutoff)
+              | select((.databaseId|tostring) != $cur)
+              | "\(.databaseId) \(.createdAt)"' "$RUNNER_TEMP/runs.json")
+          EOF
+          printf '[%s]\n' "${entries%,}" > "$RUNNER_TEMP/earlier-runs.json"
+          cat "$RUNNER_TEMP/earlier-runs.json"
+
+      # One line to the step summary on EVERY tick, whichever way it goes. An hourly workflow is
+      # mostly skips, and a skip that prints nothing is indistinguishable from a runner that has
+      # quietly died — so each run says, by name, which answer it gave.
+      - name: Decide whether this tick is the run
+        id: decide
+        env:
+          FLOW_QUEUE_RUNNER: ${{ vars.FLOW_QUEUE_RUNNER }}
+          FLOW_TZ: ${{ vars.FLOW_TZ }}
+          FLOW_RUN_HOUR: ${{ vars.FLOW_RUN_HOUR }}
+        run: |
+          # Bootstrap guard: the helper lives in the consuming repo once it adopts the template,
+          # and a repo can pin this reusable before `flow-sync` delivers it. Until then the tick
+          # proceeds exactly as it did before flow-0080 — its caller still carries the daily cron,
+          # so "proceed" is one run per day — and the pause is enforced here instead, because a
+          # pause that waits for a sync is not a pause. The schedule variables cannot take effect
+          # until the helper lands, and the summary says so rather than looking like they did.
+          if [ ! -f .flow/bin/queue-runner-schedule.mjs ]; then
+            if [ "$FLOW_QUEUE_RUNNER" = "paused" ]; then
+              proceed=false; label="no dispatch"
+              reason="skipped: FLOW_QUEUE_RUNNER is \"paused\". This repo has not synced .flow/bin/queue-runner-schedule.mjs yet, so the pause is enforced in the workflow; review, triage and compass are untouched. Resume with \`gh variable delete FLOW_QUEUE_RUNNER\`."
+            else
+              proceed=true; label="dispatching"
+              reason="run: no .flow/bin/queue-runner-schedule.mjs in this repo yet, so this tick proceeds on its caller's cron exactly as before flow-0080. FLOW_TZ and FLOW_RUN_HOUR cannot take effect until flow-sync delivers the helper and the hourly caller."
+            fi
+            { echo "proceed=$proceed"; echo "code=bootstrap"; echo "reason=$reason"; } >> "$GITHUB_OUTPUT"
+            echo "- **$label** (\`bootstrap\`) — $reason" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Writes proceed/code/reason to $GITHUB_OUTPUT and the one-line summary itself, so no
+          # decision text is interpolated into a shell string anywhere in this file.
+          node .flow/bin/queue-runner-schedule.mjs \
+            --event "$GITHUB_EVENT_NAME" \
+            --queue-runner "$FLOW_QUEUE_RUNNER" \
+            --tz "$FLOW_TZ" \
+            --run-hour "$FLOW_RUN_HOUR" \
+            --runs-file "$RUNNER_TEMP/earlier-runs.json"
+
   dispatch:
-    if: ${{ vars.FLOW_AI == 'true' }}
+    needs: schedule-gate
+    # FLOW_AI stays the master switch, first in the expression and unchanged: false still turns
+    # the whole fleet off. Past it, the two ways in are spelled out separately rather than
+    # collapsed, because they are genuinely different runs:
+    #
+    #   · workflow_dispatch — the gate job is SKIPPED (its own `if` excludes the event), and a
+    #     skipped dependency normally skips this job too. `!cancelled()` is what drops that
+    #     implicit success requirement; `result == 'skipped'` is what keeps the condition honest
+    #     about which path it is on, and a FAILED gate therefore dispatches nothing.
+    #   · schedule — the gate ran and said so in `proceed`.
+    #
+    # Folded onto one line by YAML (`>-` with no extra indent): a `${{ }}` expression may span
+    # lines, but only folding guarantees the parser sees one.
+    if: >-
+      ${{ !cancelled() && vars.FLOW_AI == 'true'
+      && ( (github.event_name != 'schedule' && needs.schedule-gate.result == 'skipped')
+      || (needs.schedule-gate.result == 'success' && needs.schedule-gate.outputs.proceed == 'true') ) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
