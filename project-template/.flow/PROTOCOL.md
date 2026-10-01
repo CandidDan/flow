@@ -43,9 +43,11 @@ End a response with a one-line **TL;DR** only when it runs past about 15 lines; 
 its own summary. If the human has to act, end with a numbered **checklist of just those to-dos**,
 in order; omit it when there are none.
 
-Workers too: their end-of-run summary, and their **PR description**, which is in this order —
-TL;DR, then one visual of the change, then the criteria checklist with proving tests, then the
-human's to-dos (review/merge, a kickback, a `blocked` reason).
+Workers too — a worker's host file (`CLAUDE.md` for Claude Code) auto-loads and imports this
+protocol, so these rules reach it as well. A worker's "response" is its end-of-run summary, and
+its **PR description**, which is in this order — TL;DR, then one visual of the change, then the
+criteria checklist with proving tests, then the human's to-dos (review/merge, a kickback, a
+`blocked` reason).
 
 ---
 

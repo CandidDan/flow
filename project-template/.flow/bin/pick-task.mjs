@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // pick-task.mjs — the queue-runner's task selector. Pure, zero-dependency (Node >= 18).
 //
-// Implements step 1 of the Flow loop (CLAUDE.md): pick the highest-priority `ready`
+// Implements step 1 of the Flow loop (.flow/PROTOCOL.md): pick the highest-priority `ready`
 // task whose declared `touches` blast radius does NOT overlap any currently
 // `in_progress` task. Prints that task's id to stdout and nothing else, or prints
 // nothing (exit 0) when there is no eligible task.

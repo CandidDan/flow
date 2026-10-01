@@ -62,8 +62,9 @@ const PROTOCOL_REF = ".flow/PROTOCOL.md";
 // the procedure the failure message below prescribes — not relaxed to make a change go green.
 //
 // These pin that the MOVE was lossless. They are not a freeze on the protocol: an intentional
-// edit to `.flow/PROTOCOL.md` is expected to fail this test, and the fix is to re-run the
-// digest in the SAME commit that makes the edit (see the failure message), not to relax it.
+// edit to `.flow/PROTOCOL.md` is expected to fail this test, and the fix is to record it in
+// INTENTIONAL_DIVERGENCES below, in the SAME commit that makes the edit (see the failure
+// message), not to relax the pin.
 // Same two-directional pin as EXPECTED_ABSENT in protocol-docs.test.mjs.
 const PRE_MOVE_SECTION_DIGESTS = [
   ["Response style — show, don't tell", "39fd629a40ee66f98e46866e86ec227f0d68917fe8ea5c7e7a396facb5fbff74"],   // rewritten by flow-0117 (show, don't tell; TL;DR made conditional)
@@ -76,6 +77,25 @@ const PRE_MOVE_SECTION_DIGESTS = [
   ["Hard rules", "1c7c64687eb78d96e8d6e9f2c7648d95c99ae0455c03fd4a7c701e6bc2285e50"],   // rewritten by flow-0039
   ["What stays out of here", "24bd8ebcce937389248fb3c7e00ff8a4ec48db0912ec39d982abbab1397f00b3"],
 ];
+
+// Sections that have been INTENTIONALLY edited since the move, each with the reason and the task
+// that did it (flow-0016). The assertion below prefers an entry here over the pre-move digest, so
+// both facts stay on the record: what the section said when it was moved, and what it says now
+// plus why it changed. Overwriting the pre-move digest instead would erase the first of those,
+// which is the only thing that makes the pin worth keeping.
+//
+// To add an entry: make the edit, run the test, and copy the ACTUAL digest it reports in — in the
+// same commit as the edit, with a `why` a reader can check against the diff. An entry whose
+// digest equals the pre-move one is noise and fails its own test below.
+const INTENTIONAL_DIVERGENCES = new Map([
+  ["Response style — show, don't tell", {
+    digest: "853df84a5dc41392daf887fb708ecbe65f664d8f6d25b3d76797d3e24d23e6d6",
+    why: "the section told workers they \"auto-load this file\", which stopped being true the " +
+         "moment the protocol moved behind a host pointer: the HOST file auto-loads and imports " +
+         "this one. One hop, stated as one hop.",
+    task: "flow-0016",
+  }],
+]);
 
 // Split a markdown doc into `## ` sections. Returns [heading, body] pairs in document order;
 // anything before the first `## ` (the title and preamble) is deliberately excluded — the
@@ -126,10 +146,17 @@ test("every protocol section survives the move byte-for-byte", () => {
     assert.ok(moved.has(heading),
       `protocol section "${heading}" is missing from ${PROTOCOL_REF}. The move must carry every ` +
       `section across; a dropped one is a rule no session will ever read again.`);
-    assert.equal(sha256(moved.get(heading)), digest,
-      `protocol section "${heading}" changed while being moved. This task moves text, it does ` +
-      `not rewrite it. If you are INTENTIONALLY editing the protocol, recompute this digest in ` +
-      `the same commit as the edit — never adjust it to make an accidental change go green.`);
+    const divergence = INTENTIONAL_DIVERGENCES.get(heading);
+    assert.equal(sha256(moved.get(heading)), divergence ? divergence.digest : digest,
+      divergence
+        ? `protocol section "${heading}" no longer matches the divergence ${divergence.task} ` +
+          `recorded for it ("${divergence.why}"). Either this edit is also intentional — update ` +
+          `that entry, in the same commit, with a reason of its own — or it is the accident the ` +
+          `pin exists to catch.`
+        : `protocol section "${heading}" changed while being moved. This task moves text, it does ` +
+          `not rewrite it. If you are INTENTIONALLY editing the protocol, record it in ` +
+          `INTENTIONAL_DIVERGENCES in the same commit as the edit — never adjust the pre-move ` +
+          `digest to make a change go green, and never overwrite it to hide what the section said.`);
   }
 });
 
@@ -139,6 +166,26 @@ test("the move added no sections and dropped none", () => {
   assert.deepEqual(movedHeadings, expected,
     "the set and order of protocol sections must match the pre-move document exactly");
 });
+
+// The divergence map is only worth having if every entry is checkable: it names a section that
+// exists, it says why and which task, and it actually differs from the pre-move digest. Without
+// this, "record the divergence" degrades into the overwrite it was introduced to replace.
+test("every recorded divergence names a real section, a reason and a task, and really diverges",
+  () => {
+    const preMove = new Map(PRE_MOVE_SECTION_DIGESTS);
+    for (const [heading, entry] of INTENTIONAL_DIVERGENCES) {
+      assert.ok(preMove.has(heading),
+        `INTENTIONAL_DIVERGENCES names "${heading}", which is not a pre-move protocol section — ` +
+        `a divergence from nothing records nothing`);
+      assert.match(entry.digest, /^[0-9a-f]{64}$/, `${heading}: digest must be a sha256 hex`);
+      assert.notEqual(entry.digest, preMove.get(heading),
+        `${heading}: the recorded divergence equals the pre-move digest, so nothing diverged — ` +
+        `delete the entry rather than leaving a reason for a change that did not happen`);
+      assert.match(entry.task, /^flow-\d{4}$/, `${heading}: name the task that made the edit`);
+      assert.ok(entry.why && entry.why.length > 40,
+        `${heading}: give a reason a reader can check against the diff, not a label`);
+    }
+  });
 
 // --- Criterion 2: CLAUDE.md is a pointer, and one the host expands -----------------------
 
@@ -330,6 +377,179 @@ test("stripJsComments keeps code and drops both comment forms", () => {
   const out = stripJsComments(sample);
   assert.ok(out.includes("KEPT.md"), "executable code must survive");
   assert.ok(!out.includes("CLAUDE.md"), "every comment form must be stripped");
+});
+
+// --- flow-0016 criterion 5: no shipped Markdown may call CLAUDE.md the protocol ----------
+//
+// WHY THIS EXISTS. flow-0006 moved the protocol to `.flow/PROTOCOL.md` and left CLAUDE.md as a
+// pointer. Three references to the old arrangement survived, and nothing caught them: they were
+// found by hand, months later, while building something else. The digests above cannot catch this
+// class — they pin the protocol's own sections, not the prose elsewhere in the template that
+// describes where the protocol lives. This is that check, and the drift it names is the drift
+// flow-0016 cleared.
+//
+// It matches the CLAIM, not one phrasing: "CLAUDE.md is/—/, the protocol|contract" in either
+// direction, with the wrapping collapsed first so a claim split across two lines still matches.
+// Three files are exempt BY CONSTRUCTION rather than by tuning the pattern, because each has a
+// legitimate reason to put those words together — a check that fires on them is a check someone
+// switches off. The exemptions are listed in the failure message so a reader can see the hole.
+
+const CLAUDE_MD = "`?CLAUDE\\.md`?";
+
+export const PROTOCOL_CLAIM_PATTERNS = [
+  {
+    // "CLAUDE.md — the protocol", "CLAUDE.md is still the contract", and the aligned
+    // file-listing shape ("CLAUDE.md<spaces>The protocol.") that README.md used.
+    claim: "CLAUDE.md IS the protocol",
+    re: new RegExp(
+      `${CLAUDE_MD}\\s*(?:[—–:,-]|\\bis\\b|\\bas\\b|\\bremains\\b)?\\s*` +
+      `(?:still\\s+|now\\s+)?[Tt]he\\s+(?:[\\w-]+\\s+){0,2}(?:protocol|contract)\\b`),
+  },
+  {
+    // The same claim from the other end: "the full rules live in CLAUDE.md". A reader sent there
+    // for the rules is misled exactly as much as one told the file IS them.
+    claim: "the protocol/rules live IN CLAUDE.md",
+    re: new RegExp(
+      "\\b(?:protocol|contract|rules)\\b[^.`\\n]{0,40}?\\b(?:is|are|lives?|sits?)\\s+" +
+      `(?:in|at)?\\s*${CLAUDE_MD}`),
+  },
+];
+
+// Template-relative paths excluded from the scan, each for a reason that is about the file's job,
+// not about making the check pass.
+export const PROTOCOL_CLAIM_EXEMPT = [
+  "CLAUDE.md",   // the host file: it legitimately names and measures itself
+  "INIT.md",     // adoption runbook: instructs the reader to copy and edit CLAUDE.md
+  "RETROFIT.md", // the same, for a repo that already has a populated CLAUDE.md
+];
+
+// Collapse each blank-line-separated block onto one line and match the patterns against it, so a
+// claim wrapped across two source lines is still found. Reports the block's first line, which is
+// what a human needs to go and look. Code fences are deliberately NOT stripped: the README's
+// file listing lives inside one, and that listing was the drift.
+export function protocolClaimsIn(markdown) {
+  const hits = [];
+  const lines = markdown.split("\n");
+  let start = 0;
+  let buf = [];
+
+  const flush = () => {
+    if (buf.length) {
+      const text = buf.join(" ").replace(/\s+/g, " ").trim();
+      for (const { claim, re } of PROTOCOL_CLAIM_PATTERNS) {
+        const m = re.exec(text);
+        if (m) hits.push({ line: start, claim, quote: m[0] });
+      }
+    }
+    buf = [];
+  };
+
+  for (const [i, line] of lines.entries()) {
+    if (line.trim() === "") flush();
+    else {
+      if (buf.length === 0) start = i + 1;
+      buf.push(line);
+    }
+  }
+  flush();
+  return hits;
+}
+
+// Every `.md` the template ships, as template-relative paths.
+export function templateMarkdown(dir = TEMPLATE, prefix = "") {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "node_modules" || entry.name === ".git") continue;
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...templateMarkdown(join(dir, entry.name), rel));
+    else if (entry.name.endsWith(".md")) out.push(rel);
+  }
+  return out.sort();
+}
+
+test("no shipped Markdown in project-template/ describes CLAUDE.md as the protocol", () => {
+  const scanned = templateMarkdown().filter((rel) => !PROTOCOL_CLAIM_EXEMPT.includes(rel));
+  assert.ok(scanned.length > 5, `the scan found only ${scanned.length} files — it must not be a ` +
+    `no-op that passes by scanning nothing`);
+
+  const offences = [];
+  for (const rel of scanned) {
+    for (const hit of protocolClaimsIn(readFileSync(join(TEMPLATE, rel), "utf8"))) {
+      offences.push(`project-template/${rel}:${hit.line}: "${hit.quote}" — ${hit.claim}`);
+    }
+  }
+
+  assert.deepEqual(offences, [],
+    `these lines still describe CLAUDE.md as the protocol. Since flow-0006 it is a pointer and ` +
+    `the protocol is ${PROTOCOL_REF}; say so, or the reader is sent to a file that no longer ` +
+    `holds what they were promised. Exempt by construction: ` +
+    `${PROTOCOL_CLAIM_EXEMPT.join(", ")} — the host file names itself, and the two adoption ` +
+    `runbooks tell the reader to copy and edit it.\n  ${offences.join("\n  ")}`);
+});
+
+test("the claim patterns fire on the exact drift flow-0016 cleared", () => {
+  // Verbatim from project-template/README.md before this task, in its aligned-listing shape.
+  const readmeBefore = [
+    "```",
+    "CLAUDE.md                     The protocol. The contract Code reads every session. Markdown,",
+    "                              because it's a tool-loaded config file — not a human-read surface.",
+    "```",
+  ].join("\n");
+  assert.deepEqual(protocolClaimsIn(readmeBefore).map((h) => h.claim),
+    ["CLAUDE.md IS the protocol"],
+    "the aligned file-listing shape is the one a human is most likely to trust");
+
+  assert.equal(protocolClaimsIn("The full rules live in `CLAUDE.md` → *Concurrency*.").length, 1,
+    "being sent to CLAUDE.md for the rules is the same drift, phrased from the other end");
+
+  for (const phrasing of [
+    "`CLAUDE.md` is the protocol.",
+    "CLAUDE.md — the contract every session reads.",
+    "CLAUDE.md, the vendor-neutral protocol, is loaded first.",
+    "CLAUDE.md is still the contract.",
+    "The hard rules are in CLAUDE.md.",
+  ]) {
+    assert.ok(protocolClaimsIn(phrasing).length > 0, `missed the claim in: ${phrasing}`);
+  }
+
+  // Wrapped across a line break — the collapse is what makes this match.
+  assert.equal(protocolClaimsIn("a sentence ending in CLAUDE.md\nis the protocol now.").length, 1,
+    "a claim split by prose wrapping must still be caught");
+});
+
+test("the claim patterns leave correct sentences about CLAUDE.md alone", () => {
+  for (const phrasing of [
+    // The sentences the shipped template actually uses, verbatim.
+    "There is exactly **one** copy of the protocol in this repo. `CLAUDE.md` imports the same file",
+    "`CLAUDE.md` for Claude Code, `AGENTS.md` for agents that follow that convention — points",
+    "**The protocol is not `CLAUDE.md` or `AGENTS.md`.** It ships as `.flow/PROTOCOL.md`",
+    "CLAUDE.md                     A pointer, not the rules: a short host file that @-imports",
+    "Workers too — a worker's host file (`CLAUDE.md` for Claude Code) auto-loads and imports this",
+    "grep -qx '@.flow/PROTOCOL.md' CLAUDE.md && test -f .flow/PROTOCOL.md",
+    "Run `node .flow/bin/check-claude-md.mjs --entry CLAUDE.md` for the real total",
+  ]) {
+    assert.deepEqual(protocolClaimsIn(phrasing), [],
+      `false positive — a check that fires on correct prose is one someone switches off: ${phrasing}`);
+  }
+});
+
+test("every exemption names a file that exists, with the protocol's own doorway still scanned", () => {
+  // An exemption for a file that is gone is a hole nobody notices; and the whole point is that
+  // the files that DO talk about the arrangement correctly stay inside the scan.
+  for (const rel of PROTOCOL_CLAIM_EXEMPT) {
+    assert.ok(existsSync(join(TEMPLATE, rel)),
+      `PROTOCOL_CLAIM_EXEMPT names ${rel}, which the template does not ship — drop the exemption`);
+  }
+  const scanned = templateMarkdown();
+  for (const rel of ["AGENTS.md", ".flow/PROTOCOL.md", "README.md"]) {
+    assert.ok(scanned.includes(rel) && !PROTOCOL_CLAIM_EXEMPT.includes(rel),
+      `${rel} must stay inside the scan — it is prose about where the protocol lives`);
+  }
+});
+
+test("protocolClaimsIn reports the first line of the block that carries the claim", () => {
+  const doc = ["# Title", "", "para one", "", "see CLAUDE.md,", "the protocol, for details"].join("\n");
+  assert.deepEqual(protocolClaimsIn(doc).map((h) => h.line), [5]);
 });
 
 // --- Criterion 6: the host file is small again -------------------------------------------
