@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0080"
 title: "Queue runner timing lives in repo variables: a pause switch that leaves review running, and a local-time schedule that follows the operator"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0080"
 created: "2026-09-24"
-started: ""
+started: "2026-10-01T19:13:27Z"
 branch: ""
 pr: ""
 issue: ""
