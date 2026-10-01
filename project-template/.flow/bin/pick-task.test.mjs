@@ -210,3 +210,17 @@ test("flow-0111: pick-task has one list parser, flow-doctor's, and no touches re
   assert.match(src, /import \{ parseListField \} from "\.\/flow-doctor\.mjs";/);
   assert.doesNotMatch(src, /\/\^touches:/, "a second touches regex is how this bug happened");
 });
+
+// The changelog fragment lives in canonical only (changes/ is not synced to adopters), so this
+// proves it where it exists and skips visibly everywhere else.
+{
+  const { existsSync, readFileSync } = await import("node:fs");
+  const { dirname, resolve } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const fragment = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "changes", "flow-0111.md");
+  test("flow-0111 has a changelog fragment that says the caller does nothing",
+    { skip: existsSync(fragment) ? false : "not canonical: changes/ is not synced to adopting repos" },
+    () => {
+      assert.match(readFileSync(fragment, "utf8"), /Caller action: none/);
+    });
+}
