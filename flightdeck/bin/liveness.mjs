@@ -253,8 +253,8 @@ export function scheduledLiveness({ crons, lastSuccessAt, now, disabled }) {
 // THE DEFECT (flow-0106). A failed latest run used to be enough to call an event workflow down,
 // and for a workflow whose whole job is to VERDICT on a pull request — flow-review, flow-gates,
 // plane-guard, an adopter's own CI — the latest run fails every time a PR is rejected. So every
-// rejected PR filed an `automation-down` issue (CandidDan/flow#130, 2026-09-29, and #115 before
-// it, both closed by the next passing PR) in the one channel that must not cry wolf.
+// rejected PR filed an `automation-down` issue (canonical's #130, 2026-09-29, and #115 before it,
+// both closed by the next passing PR) in the one channel that must not cry wolf.
 //
 // WHY THE RULE IS A STREAK AND NOT "IGNORE pull_request". flow-status, flow-done and flow-open-pr
 // also run on `pull_request`, and a failure there IS broken machinery; keying on the event type
