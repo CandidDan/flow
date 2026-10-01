@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0114"
 title: "State-push retry re-applies over an unrelated edit to the same task file, and refuses only when a field it writes was changed"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker"
 created: "2026-10-01"
-started: ""
+started: "2026-10-01T04:56:36Z"
 branch: ""
 pr: ""
 issue: ""
