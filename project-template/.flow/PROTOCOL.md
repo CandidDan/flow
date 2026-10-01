@@ -31,19 +31,21 @@ and `touches` overlap is what makes a task ineligible to claim, so one file ever
 format, and cutting a release is what folds the fragments in. A repo with no `changes/` directory
 has nothing to do here and keeps whatever changelog habit it already has.
 
-## Response style — always TL;DR
+## Response style — show, don't tell
 
-End every response to the human with a one-line **TL;DR** synopsis of what the turn covered —
-include it even on short replies — so they can absorb each turn at a glance without re-reading the
-full output. If the turn leaves **actions for the human to take**, follow the TL;DR with a short
-**ordered checklist of just those to-dos** — numbered, one line each, in the order to do them.
-Omit the checklist entirely when there's nothing for them to do (don't pad it with things you've
-already handled or future "maybe" work).
+**Show, don't tell.** Use the fewest words that carry the point — no preamble, recap, hedging or
+drama. Anything with structure (a comparison, flow, hierarchy, state or before/after) is a
+visual — table, tree, call stack, mermaid, diff — not a paragraph. Terse is not cryptic: plain
+words, full sentences, no unexplained jargon. Formats and examples:
+`.claude/skills/show-me/SKILL.md`.
 
-This applies to **Claude Code worker** sessions too — they auto-load this file. For a worker, the
-"response" is its end-of-run summary and its **PR description**: close those with the same TL;DR and,
-where the human needs to act (review/merge, a kickback to address, or a `blocked` reason), the same
-short ordered checklist.
+End a response with a one-line **TL;DR** only when it runs past about 15 lines; a short reply is
+its own summary. If the human has to act, end with a numbered **checklist of just those to-dos**,
+in order; omit it when there are none.
+
+Workers too: their end-of-run summary, and their **PR description**, which is in this order —
+TL;DR, then one visual of the change, then the criteria checklist with proving tests, then the
+human's to-dos (review/merge, a kickback, a `blocked` reason).
 
 ---
 

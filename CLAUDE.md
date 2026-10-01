@@ -105,9 +105,9 @@ Do not "fix" these:
 
 ## Response style
 
-The protocol's rule applies to sessions in this repo too: end every response with a one-line
-**TL;DR**, and where the human has to act, follow it with a short **ordered checklist of just
-those to-dos**. For a worker, that includes the PR description.
+The protocol's response-style rule applies here too: show, don't tell — fewest words, visuals for
+anything structured (`project-template/.claude/skills/show-me/SKILL.md`), a one-line **TL;DR** once a
+response runs past about 15 lines, and a numbered to-do list when the human has to act. PR descriptions follow the protocol's order.
 
 ## Quick orientation
 
