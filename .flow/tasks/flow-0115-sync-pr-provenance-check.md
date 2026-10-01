@@ -22,6 +22,7 @@ labels: [review, flow-sync, security, flow-infra]
 notes:
   - "2026-10-01 (orchestrator): ORIGIN. Security review FAIL on CandidDan/flow#146 (flow-0089). classifyPr marks a PR as SYNC from branch prefix `flow-sync/` plus every path inside the synced surface. That proves location, not provenance. #146 answered the prompt half (every reviewer now still reads a sync PR and FAILs permission, pull_request_target, uses: or secret changes). This task is the code half the reviewer also asked for. `_flow-sync.yml` already writes a `Canonical-SHA:` trailer, so the data to check against exists."
   - "2026-10-01 (orchestrator): SEQUENCING. Shares flow-review.mjs with flow-0089. pick-task keeps them apart; build on flow-0089 as merged."
+  - "2026-10-01 (worker): PROGRESS. Branch flow/flow-0115-sync-pr-provenance-check pushed. DONE: `syncProvenance` + `canonicalShaTrailers` + `sameSyncedFile` + `canonicalPathFor` in project-template/.flow/bin/flow-review.mjs; runPlan calls it only for an already-path-classified `flow-sync/` PR and overwrites `classified` with the verdict; taskContext carries the failure reason into task.md; planSummary prints VERIFIED / NOT VERIFIED and names the mismatched files. 8 new tests in flow-review.test.mjs (90/90 pass), plus changes/flow-0115.md. NOT YET DONE: the full five-command gate (build, lint, test, coverage, check-claude-md) and the PR. Next: run `npm run build && npm run lint && npm test && npm run coverage`, then open the PR titled [flow-0115]."
 ---
 
 ## Context
