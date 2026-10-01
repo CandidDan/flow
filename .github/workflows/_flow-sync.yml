@@ -159,6 +159,89 @@ jobs:
           # carry Workflows: Write, and it is the only credential that makes this push legal.
           token: ${{ secrets.FLOW_PAT }}
 
+      # THE FIX (flow-0105). The ref a SCHEDULED sync adopts from used to be the literal `'v2'`,
+      # because the thin caller forwards `canonical_ref: ${{ inputs.canonical_ref }}` and that input
+      # is empty on `schedule` — only a `workflow_dispatch` human ever filled it in. So a repo whose
+      # callers are pinned to anything else (the progress canary on `v2-edge`, the next major, the
+      # release-repo repin of flow-0030) had its weekly sync adopt v2 content on top of non-v2
+      # workflows, and said nothing: both halves work, they just disagree about which release this
+      # repo is on. That is the split brain flow-0056 and flow-init.mjs already name, arriving by a
+      # route a pin sweep cannot reach — the caller's own comment told the human to "bump
+      # canonical_ref", which is advice a cron run has no input to receive.
+      #
+      # The answer was already written down in the repo. The ref this repo actually RUNS is the
+      # `@<ref>` on the `uses:` line of its own flow-sync caller, and `Checkout this repo` above has
+      # just put that file on disk — so the ref is read, not defaulted. Three outcomes, and none of
+      # them is silent: one distinct pin wins and is logged with the file it came from; no pin at all
+      # falls back to `v2` with a `::warning::` (today's behaviour, now visible); two callers
+      # disagreeing is an `::error::` and a failed job, because there is no safe guess between them.
+      #
+      # An explicit input still wins outright. A human dispatching the workflow is overriding the
+      # pins on purpose — a one-off adopt from a canary ref, typically — and that is the whole point
+      # of the input.
+      - name: Resolve canonical ref
+        id: canonical-ref
+        env:
+          REQUESTED_REF: ${{ inputs.canonical_ref }}
+        run: |
+          set -euo pipefail
+          # The ONLY hard-coded ref left in this file, and it is reached only when the repo carries
+          # no pinned flow-sync caller to read. `caller-pins.test.mjs` derives the expected value
+          # from root VERSION's major, so cutting a new major moves it here and nowhere else.
+          FALLBACK_REF="v2"
+
+          if [ -n "${REQUESTED_REF}" ]; then
+            echo "canonical_ref supplied as an input: ${REQUESTED_REF}. Caller pins are not consulted — an explicit input is an override."
+            printf 'ref=%s\n' "${REQUESTED_REF}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Any owner/repo, deliberately: flow-0030 repins the fleet at a release repo, and a scan
+          # that hard-coded `CandidDan/flow` would stop resolving the moment that lands while still
+          # reporting a confident `v2`. Anchored at `^[[:space:]]*uses:` so a commented-out caller
+          # is not read as a live pin. `|| true` because an absent `*.yaml` glob makes grep exit 2,
+          # and a repo with no matching line is a case handled below, not an error here.
+          PINS="$(grep -HE '^[[:space:]]*uses:[[:space:]]*[^[:space:]]+/\.github/workflows/_flow-sync\.yml@[^[:space:]]+' \
+                    .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null || true)"
+
+          # `<file> <ref>` per pin. grep -H prefixes `<file>:`, so the filename is everything up to
+          # the first colon and the ref is everything after the last `@` on the match, minus any
+          # trailing comment.
+          PAIRS=""
+          while IFS= read -r LINE; do
+            [ -n "$LINE" ] || continue
+            FILE="${LINE%%:*}"
+            REF="${LINE##*/_flow-sync.yml@}"
+            REF="${REF%%[[:space:]]*}"
+            PAIRS="${PAIRS}${FILE} ${REF}"$'\n'
+          done <<< "$PINS"
+
+          DISTINCT="$(printf '%s' "$PAIRS" | awk 'NF {print $2}' | sort -u)"
+          COUNT="$(printf '%s' "$DISTINCT" | awk 'NF' | wc -l | tr -d '[:space:]')"
+
+          case "$COUNT" in
+            0)
+              echo "::warning title=No pinned flow-sync caller found::Nothing in .github/workflows/ calls _flow-sync.yml@<ref>, so there is no pin to read and this run falls back to '${FALLBACK_REF}'. That is the historical default; it is reported rather than assumed because a repo that renamed or removed its flow-sync caller would otherwise adopt from a ref nothing here runs."
+              RESOLVED="$FALLBACK_REF"
+              ;;
+            1)
+              RESOLVED="$DISTINCT"
+              # One line per file carrying the pin, so the log says where the ref came from and a
+              # reader can check it without opening the workflow directory.
+              printf '%s' "$PAIRS" | awk 'NF {printf "canonical_ref resolved from %s: %s\n", $1, $2}'
+              ;;
+            *)
+              # One annotation, not one per file: GitHub renders an annotation as a single line, so
+              # a list echoed across several lines would leave the summary naming none of them.
+              CONFLICT="$(printf '%s' "$PAIRS" | awk 'NF {printf "%s%s pins %s", (seen++ ? "; " : ""), $1, $2} END {print ""}')"
+              echo "::error title=Conflicting flow-sync caller pins::This repo's workflows pin more than one canonical ref for _flow-sync.yml (${CONFLICT}). A scheduled sync has no way to choose between them, and guessing would move this repo's copied infra to a version its own workflows do not run. Repin every caller to one ref, or pass canonical_ref explicitly on a workflow_dispatch run."
+              exit 1
+              ;;
+          esac
+
+          printf 'ref=%s\n' "$RESOLVED" >> "$GITHUB_OUTPUT"
+          echo "Adopting from canonical ref '${RESOLVED}'."
+
       # THE FIX (flow-0064). This used to be a second `actions/checkout` with
       # `path: .flow-canonical`, which put canonical's tree INSIDE the working tree of the repo
       # being synced. `git add -A` further down then staged it, and because that directory carries
@@ -181,7 +264,7 @@ jobs:
       # from the same commit.
       - name: Clone canonical (outside the working tree)
         env:
-          CANONICAL_REF: ${{ inputs.canonical_ref || 'v2' }}
+          CANONICAL_REF: ${{ steps.canonical-ref.outputs.ref }}
         run: |
           set -euo pipefail
           CANON_DIR="${RUNNER_TEMP}/flow-canonical"
@@ -225,7 +308,9 @@ jobs:
           echo "CANON_DIR=${CANON_DIR}" >> "$GITHUB_ENV"
           # The resolved ref, exported for the same reason CANON_DIR is: the adopt step names it
           # when canonical@that ref carries no protocol to copy (flow-0048). Exported rather than
-          # re-derived there, so the `|| 'v2'` default has exactly one definition.
+          # re-derived there, and since flow-0105 it is the `Resolve canonical ref` step's output —
+          # so the ref a scheduled run adopts from has exactly one definition, and it is a pin read
+          # off this repo's own caller rather than a literal in this file.
           echo "CANONICAL_REF=${CANONICAL_REF}" >> "$GITHUB_ENV"
           # The canonical COMMIT, not just the ref (flow-0075). `canonical_ref` is normally a
           # MOVING branch (`v2`), so two syncs of the same `.flow/VERSION` can be built from
