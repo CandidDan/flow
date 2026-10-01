@@ -305,6 +305,18 @@ test("the run-history step gathers EVIDENCE: a dry tick does not consume the day
 
 // ── criterion: the changelog fragment states the caller action ──
 
+test("before the repo has synced the helper, the run-history step never calls the Actions API", { skip }, () => {
+  // Code review on #161: the reusable can move ahead of the caller's sync, and until then the
+  // caller grants no `actions` scope. `gh run list` would 403 and fail the gate before the Decide
+  // step's bootstrap branch ran, stopping dispatch in the default (not paused) case.
+  const run = String(step("schedule-gate", "Gather this workflow's earlier scheduled runs").run);
+  const guard = run.indexOf("if [ ! -f .flow/bin/queue-runner-schedule.mjs ]");
+  assert.ok(guard >= 0, "the step has the same bootstrap check as the Decide step");
+  assert.ok(guard < run.indexOf("gh run list"), "and it comes before the first API call");
+  assert.match(run.slice(guard, run.indexOf("gh run list")), /earlier-runs\.json[\s\S]*exit 0/,
+    "the bootstrap path writes an empty history and succeeds");
+});
+
 test("the changelog entry exists and names the re-sync the caller needs", { skip }, () => {
   const entry = changelogEntry(REPO, "flow-0080");
   assert.ok(entry.trim(), "changes/flow-0080.md must exist (or be assembled into CHANGELOG.md)");

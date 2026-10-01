@@ -100,6 +100,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
+          # BOOTSTRAP: the reusable can move ahead of the caller's sync. Until the repo has synced
+          # queue-runner-schedule.mjs, its caller's permissions block predates flow-0080 and grants
+          # no `actions` scope, so listing runs would 403 and fail this job before the Decide step's
+          # own bootstrap branch could proceed as before. Skip the API entirely in that window.
+          if [ ! -f .flow/bin/queue-runner-schedule.mjs ]; then
+            printf '[]\n' > "$RUNNER_TEMP/earlier-runs.json"
+            echo "queue-runner-schedule.mjs not synced yet — no earlier-runs lookup (bootstrap)."
+            exit 0
+          fi
           # `github.workflow_ref` is `<owner>/<repo>/.github/workflows/<caller>.yml@<ref>`, and
           # the CALLER's filename is what `gh run list --workflow` matches — inside a reusable
           # there is no other way to name the workflow whose runs these are.
