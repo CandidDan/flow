@@ -100,7 +100,7 @@
   .step{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:26px;display:flex;flex-direction:column;gap:10px;}
   .step .who{align-self:flex-start;font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;padding:6px 10px;border-radius:999px;}
   .step .who.you{background:var(--accent-soft);color:var(--accent);}
-  .step .who.agents{background:var(--agent-soft);color:var(--agent);}
+  .step .who.machine{background:var(--agent-soft);color:var(--agent);}
   .step h3{font-size:25px;font-weight:700;}
   .step p{color:var(--muted);font-size:16px;}
   .step ul{margin:4px 0 0;padding-left:18px;color:var(--muted);font-size:15px;display:grid;gap:4px;}
@@ -368,7 +368,7 @@
         <p>Write down the outcome and why it matters, or just file an issue. Agents turn it into small tasks for you to approve. Each one has checkable acceptance criteria, a list of the files it’s allowed to change, and the goal from your vision that it serves.</p>
       </div>
       <div class="step">
-        <span class="who agents">Agents + CI</span>
+        <span class="who machine">Agents + CI</span>
         <h3>Agents build it, CI checks it</h3>
         <p>A fresh agent picks up each task, builds it on a branch and opens a pull request. Then the gate takes over:</p>
         <ul><li>Every criterion needs a passing test</li><li>Changes outside the task’s scope fail</li><li>Build, lint, tests and coverage must pass</li><li>Three independent AI reviewers check QA, code quality and security</li></ul>
