@@ -40,6 +40,7 @@ import {
   UNRELEASED,
 } from "./changelog-fragments.mjs";
 import { changelogEntry } from "./changelog-entry.mjs";
+import { idFromBranch } from "./parse-task-id.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
@@ -384,7 +385,31 @@ const CALLER_ACTION = /caller action/i;
 // Everything else has been claimed and has either shipped or is about to. On a feature branch the
 // task file is the frozen `in_progress` snapshot, which is exactly the state that makes the check
 // apply: the PR that forgets its fragment is the one this catches.
-const CHECKED_STATUSES = new Set(["in_progress", "in_review", "done"]);
+//
+// flow-0116: `done` is checked store-wide, because merged work has its fragment on main. The two
+// in-flight statuses are checked ONLY for the task this checkout belongs to. Every PR's checkout
+// carries main's store, where other tasks are claimed while their fragments still sit on their
+// own branches, so checking those here failed every open PR whenever any task was in flight
+// (#146 went red on flow-0114's missing fragment).
+const IN_FLIGHT_STATUSES = new Set(["in_progress", "in_review"]);
+const DONE_STATUS = "done";
+
+// The task this checkout belongs to, read by the same `idFromBranch` every Flow workflow uses.
+// The PR head branch first (a pull_request checkout is a detached merge commit), then the
+// local branch.
+// Neither, or a branch that names no task: "" — and only `done` tasks are checked.
+function ownTaskId({ headRef = process.env.GITHUB_HEAD_REF, localBranch } = {}) {
+  if (headRef) return idFromBranch(headRef) ?? "";
+  if (localBranch === undefined) {
+    try {
+      localBranch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"],
+        { cwd: REPO, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {
+      localBranch = "";
+    }
+  }
+  return idFromBranch(localBranch) ?? "";
+}
 
 // ── the store reader (local on purpose) ───────────────────────────────────────────────
 // flow-doctor's `parseListField` is module-private and this task's `touches` do not include it,
@@ -424,7 +449,7 @@ function listField(head, key) {
 // changelog entry" sends the reader back through the whole store to find out which.
 // `tasksDir` and `repo` are arguments rather than constants so the criteria below can be proved
 // against a fixture store, not only against the checkout the test happens to run in.
-function changelogEntryFindings(tasksDir, repo) {
+function changelogEntryFindings(tasksDir, repo, ownId = "") {
   const findings = [];
   const names = readdirSync(tasksDir).filter((n) => n.endsWith(".md") && n !== "_TEMPLATE.md").sort();
 
@@ -432,7 +457,8 @@ function changelogEntryFindings(tasksDir, repo) {
     const head = frontmatter(readFileSync(join(tasksDir, name), "utf8"));
     const id = scalarField(head, "id");
     if (!id) continue;
-    if (!CHECKED_STATUSES.has(scalarField(head, "status"))) continue;
+    const status = scalarField(head, "status");
+    if (status !== DONE_STATUS && !(IN_FLIGHT_STATUSES.has(status) && id === ownId)) continue;
     if (!listField(head, "touches").includes(`${FRAGMENT_DIR}/${id}.md`)) continue;
 
     const entry = changelogEntry(repo, id);
@@ -490,7 +516,7 @@ test("a claimed task that declares a fragment and has no entry at all fails, nam
     tasks: [{ id: "flow-0500", status: "in_progress", touches: ["src/a.mjs", "changes/flow-0500.md"] }],
   });
 
-  const findings = changelogEntryFindings(tasksDir, root);
+  const findings = changelogEntryFindings(tasksDir, root, "flow-0500");
   assert.equal(findings.length, 1, `expected exactly one finding, got: ${findings.join(" | ")}`);
   assert.match(findings[0], /flow-0500/, "a finding that does not name the id sends the reader back through the store");
   assert.match(findings[0], /changes\/flow-0500\.md/);
@@ -506,11 +532,44 @@ test("a claimed task whose entry exists but never mentions a caller action fails
     fragments: { "flow-0501.md": "- **Something shipped** (`src/a.mjs`, flow-0501).\n\n  What it does.\n" },
   });
 
-  const findings = changelogEntryFindings(tasksDir, root);
+  const findings = changelogEntryFindings(tasksDir, root, "flow-0501");
   assert.equal(findings.length, 1, `expected exactly one finding, got: ${findings.join(" | ")}`);
   assert.match(findings[0], /flow-0501/);
   assert.match(findings[0], /never states a caller action/,
     "an entry with no caller-action line is an entry a reader of the release notes cannot act on");
+});
+
+test("flow-0116: another task in flight with no fragment is not a finding on this checkout", () => {
+  // Its fragment is on its own branch until it merges; this PR cannot write it and should not owe it.
+  const { root, tasksDir } = makeStore({
+    tasks: [
+      { id: "flow-0510", status: "in_progress", touches: ["changes/flow-0510.md"] },
+      { id: "flow-0511", status: "in_review", touches: ["changes/flow-0511.md"] },
+    ],
+  });
+  assert.deepEqual(changelogEntryFindings(tasksDir, root, "flow-0599"), []);
+  assert.deepEqual(changelogEntryFindings(tasksDir, root, ""), [],
+    "with no own task (a push to main, a local run off-branch) nothing in flight is checked");
+});
+
+test("flow-0116: a done task with no entry is a finding whichever checkout runs it", () => {
+  const { root, tasksDir } = makeStore({
+    tasks: [{ id: "flow-0512", status: "done", touches: ["changes/flow-0512.md"] }],
+  });
+  for (const own of ["", "flow-0599", "flow-0512"]) {
+    const findings = changelogEntryFindings(tasksDir, root, own);
+    assert.equal(findings.length, 1, `own=${JSON.stringify(own)}: ${findings.join(" | ")}`);
+    assert.match(findings[0], /flow-0512/);
+  }
+});
+
+test("flow-0116: the own task id comes from GITHUB_HEAD_REF first, then the local branch", () => {
+  assert.equal(ownTaskId({ headRef: "flow/flow-0116-changelog-test-own-task-only", localBranch: "x" }), "flow-0116");
+  assert.equal(ownTaskId({ headRef: "", localBranch: "flow/tanplan-0026-no-replit" }), "tanplan-0026");
+  assert.equal(ownTaskId({ headRef: "release/v2.3.0", localBranch: "flow/flow-0001-x" }), "",
+    "a PR head ref that names no task wins over the local branch: the checkout is that PR's");
+  assert.equal(ownTaskId({ headRef: "", localBranch: "HEAD" }), "");
+  assert.equal(ownTaskId({ headRef: "", localBranch: "main" }), "");
 });
 
 test("a `ready` task declaring a fragment that does not exist yet passes — nothing is written yet", () => {
@@ -564,7 +623,7 @@ test("the tolerant reader sees an inline `touches` array as well as a block list
 // ── the criterion itself, against canonical's live store ──────────────────────────────
 
 test(STORE_WIDE_TEST, () => {
-  const findings = changelogEntryFindings(TASKS_DIR, REPO);
+  const findings = changelogEntryFindings(TASKS_DIR, REPO, ownTaskId());
   assert.deepEqual(findings, [],
     `${findings.length} task(s) declare a changelog fragment they never wrote, or wrote without a ` +
     `caller action:\n  ${findings.join("\n  ")}\n` +
