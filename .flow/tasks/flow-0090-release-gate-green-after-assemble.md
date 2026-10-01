@@ -21,6 +21,7 @@ touches:
   - "changes/flow-0090.md"
 labels: [release, testing, flow-infra]
 notes:
+  - "2026-10-01 (worker): DONE on branch `flow/flow-0090-release-gate-green-after-assemble`, PR #155. New `.flow/bin/release-assemble.test.mjs` (5 tests, ~9s): copies the tracked tree into a scratch git repo, synthesises a fragment when none is pending, runs `--assemble`, re-runs the 27 test files mentioning `changes`/`CHANGELOG` with NODE_TEST_CONTEXT dropped, and names every failing test. Protocol fallback rule + 2 assertions in `protocol-docs.test.mjs`. Fragment written. All four gate commands green; coverage 95.98% vs floor 83.5. It caught a real bug while being written: this task's own fragment wrapped `**Caller\naction: none**` across a line, so `/caller action/i` missed it. Next action: mark PR ready, nothing else."
   - "2026-09-28 (orchestrator): EVIDENCE. Three times in two releases a task's 'my changelog entry exists' test read `changes/<id>.md` directly: flow-0069 and flow-0073 broke the 2.1.0 release PR, flow-0050 broke 2.1.1. `--assemble` deletes fragments by design, so each release PR had to patch tests to go green. All three are patched (fragment OR assembled entry); nothing stops the fourth."
   - "2026-09-28 (orchestrator): THE GATE, NOT A LINT. A grep for `changes/flow-` in test files would be a heuristic with false negatives. The real property is 'after --assemble, the suite passes', so test that directly. Keep the run bounded: only the test files that mention `changes` or `CHANGELOG`, not the whole suite twice."
 ---
