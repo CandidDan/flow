@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0090"
 title: "A release's own gate is green: no test requires a changelog fragment file that --assemble deletes"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0090"
 created: "2026-09-28"
-started: ""
+started: "2026-10-01T13:47:29Z"
 branch: ""
 pr: ""
 issue: ""
