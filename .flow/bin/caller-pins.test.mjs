@@ -74,7 +74,13 @@ const USES_REUSABLE = /^\s*uses:\s*(\S+\/\.github\/workflows\/_flow-[a-z-]+\.yml
 
 // `_flow-sync.yml`'s canonical checkout. The `|| '…'` fallback is the ref a scheduled sync uses,
 // because the thin caller forwards an empty `inputs.canonical_ref`.
-const CANONICAL_REF_FALLBACK = /\$\{\{\s*inputs\.canonical_ref\s*\|\|\s*'([^']*)'\s*\}\}/;
+// Two shapes. flow-0105 moved the fallback out of a `${{ inputs.canonical_ref || 'vN' }}`
+// expression into a shell assignment in the "Resolve canonical ref" step, used only when no
+// pinned caller can be read. The assignment is anchored to the start of a line (after
+// indentation) so a comment quoting it can never satisfy the guard.
+const CANONICAL_REF_FALLBACK =
+  /\$\{\{\s*inputs\.canonical_ref\s*\|\|\s*'([^']*)'\s*\}\}|^[ \t]*FALLBACK_REF="([^"]*)"/m;
+const fallbackRef = (m) => (m ? (m[1] ?? m[2]) : null);
 
 // The dispatch input's advertised default. Prose, but prose a human copies a ref out of.
 const ADVERTISED_DEFAULT = /description:\s*"Canonical ref[^"\n]*\bDefault\s+([^"\n.]+)\."/;
@@ -109,10 +115,10 @@ export function checkCallerPins({ version, callers, refFiles }) {
 
   for (const { name, text } of refFiles) {
     const fallback = text.match(CANONICAL_REF_FALLBACK);
-    if (fallback && fallback[1] !== want) {
+    if (fallback && fallbackRef(fallback) !== want) {
       seen += 1;
       problems.push(
-        `${name}: the canonical_ref fallback is '${fallback[1]}', expected '${want}'. The thin ` +
+        `${name}: the canonical_ref fallback is '${fallbackRef(fallback)}', expected '${want}'. The thin ` +
         `caller forwards an EMPTY canonical_ref on a scheduled run, so this fallback is the ref a ` +
         `real weekly sync adopts from — leaving it behind gives a v${want.slice(1)} repo v1 ` +
         `content on a cron, which is the split brain flow-init.mjs already warns about.`,
@@ -218,7 +224,7 @@ test("the _flow-sync canonical_ref fallback left at v1 fails on its own — the 
   const input = realInput();
   const want = expectedRef(input.version);
   const reusable = input.refFiles.find((f) => f.name === SYNC_REUSABLE);
-  const mutated = reusable.text.replace(`inputs.canonical_ref || '${want}'`, "inputs.canonical_ref || 'v1'");
+  const mutated = reusable.text.replace(`FALLBACK_REF="${want}"`, 'FALLBACK_REF="v1"');
   assert.notEqual(mutated, reusable.text, "the mutation must actually move the fallback back");
 
   const problems = checkCallerPins({
@@ -328,4 +334,12 @@ test("the 2.0.0 changelog section states the pin requirement, the delivery, and 
   assert.match(section, /overwrit/i,
     "…and it must warn that a repo hand-edited BEFORE this lands has its caller overwritten by " +
     "its first sync — the flow-0051 fix reverting itself is the whole reason this is priority 1");
+});
+
+test("a comment quoting the fallback cannot stand in for the code (flow-0105)", () => {
+  const code = 'run: |\n          FALLBACK_REF="v2"\n';
+  const commentOnly = 'run: |\n          # FALLBACK_REF="v2" used to live here\n';
+  assert.equal(code.match(CANONICAL_REF_FALLBACK)?.[2], "v2");
+  assert.equal(commentOnly.match(CANONICAL_REF_FALLBACK), null,
+    "a guard satisfied by prose is the green gate that checked nothing");
 });
