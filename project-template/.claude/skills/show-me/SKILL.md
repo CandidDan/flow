@@ -15,6 +15,8 @@ Humans scan pictures faster than they read paragraphs. Prose is the fallback, no
 3. **Structure → visual.** If it has rows, steps, levels, branches or a before/after, draw it.
 4. **One visual per idea.** Don't follow a table with a paragraph that says the same thing.
 5. **Prose only for the why** — one or two sentences a visual can't carry.
+6. **Terse is not cryptic.** Plain words, full sentences, jargon explained or cut. Short and
+   clear beats short and puzzling.
 
 ## Pick the format
 
@@ -92,7 +94,15 @@ In this order, nothing else:
 
 ## Anti-patterns
 
+Too much:
+
 - Wall of text with a TL;DR bolted on the end.
-- Headers over one-line sections.
-- Bullet lists that are really a table.
+- Dramatic framing, restating the question, recapping what was just shown.
+- Headers over one-line sections; bullet lists that are really a table.
 - Explaining a diff in words next to the diff.
+
+Too little:
+
+- Dropped articles and verbs ("fixed, pushed, PR up").
+- Unexplained jargon, task ids or internal names the reader hasn't seen.
+- Arrow chains (`a → b → c`) standing in for a sentence that explains why.

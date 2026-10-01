@@ -42,3 +42,12 @@ test("the show-me skill has frontmatter and covers the core formats", () => {
 test("AGENTS.md names the show-me skill path", () => {
   assert.ok(read("AGENTS.md").includes(SKILL_PATH), `AGENTS.md must name ${SKILL_PATH}`);
 });
+
+test("protocol and skill both say terse is not cryptic, and the skill lists over-terse anti-patterns", () => {
+  assert.match(responseStyle, /Terse is not cryptic/);
+  const skill = read(SKILL_PATH);
+  assert.match(skill, /Terse is not cryptic/);
+  const anti = skill.slice(skill.indexOf("## Anti-patterns"));
+  assert.match(anti, /Too much:/);
+  assert.match(anti, /Too little:[\s\S]*jargon/);
+});

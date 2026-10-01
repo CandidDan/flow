@@ -35,7 +35,8 @@ has nothing to do here and keeps whatever changelog habit it already has.
 
 **Show, don't tell.** Use the fewest words that carry the point — no preamble, recap, hedging or
 drama. Anything with structure (a comparison, flow, hierarchy, state or before/after) is a
-visual — table, tree, call stack, mermaid, diff — not a paragraph. Formats and examples:
+visual — table, tree, call stack, mermaid, diff — not a paragraph. Terse is not cryptic: plain
+words, full sentences, no unexplained jargon. Formats and examples:
 `.claude/skills/show-me/SKILL.md`.
 
 End every response with a one-line **TL;DR**, even short ones. If the human has to act, follow it
