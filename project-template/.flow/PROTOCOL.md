@@ -31,6 +31,11 @@ and `touches` overlap is what makes a task ineligible to claim, so one file ever
 format, and cutting a release is what folds the fragments in. A repo with no `changes/` directory
 has nothing to do here and keeps whatever changelog habit it already has.
 
+**Proving that entry, in a repo that has fragments.** A test that proves the entry exists reads
+the fragment **if it exists, and otherwise the assembled entry in `CHANGELOG.md`** — the entry
+whose file list ends `, <task-id>)`. Reading only the fragment is green until the next release and
+red on the release's own PR, because assembling the changelog deletes the file the test reads.
+
 ## Response style — show, don't tell
 
 **Show, don't tell.** Use the fewest words that carry the point — no preamble, recap, hedging or
