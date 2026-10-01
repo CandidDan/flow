@@ -11,6 +11,7 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: "Waiting on flow-0040, which adds the `blocked_by` field this sweep reads. There is deliberately nothing else to wait for: the classifier acts only on a machine-checkable dependency, and until that field exists there is nothing to classify. Unblock by hand once flow-0040 is done on main — which is precisely the manual step this task exists to remove, and this task will be the first to carry `blocked_by` once the field lands."
+blocked_by: ["flow-0040"]
 serves: ["G7", "G8"]
 touches:
   - "project-template/.flow/bin/flow-unblock.mjs"

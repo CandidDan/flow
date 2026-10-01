@@ -12,6 +12,7 @@ branch: ""
 pr: ""
 issue: ""
 blocked_reason: "Depends on flow-0022, which deletes the machinery this task stops describing — documenting the absence before the absence exists inverts the drift. Flow has no dependency field (a gap ADR-0002 recorded), so `blocked` is how the sequence is expressed. ALSO blocked on two file claims: project-template/INIT.md is flow-0005's and project-template/README.md + project-template/.flow/PROTOCOL.md are flow-0016's, both `ready`. UNBLOCK: flip to ready once flow-0022 has merged AND flow-0005 and flow-0016 are `done`; if either is still live then, split its files out rather than claiming them here."
+blocked_by: ["flow-0022"]
 serves: ["maintenance"]   # re-anchored 2026-09-23 from retired G4 (decision D1)
 touches: ["CLAUDE.md", "project-template/INIT.md", "project-template/RETROFIT.md", "project-template/README.md", "project-template/.flow/PROTOCOL.md", "project-template/FLOW-handoff.html", "docs/flow-map.html", "docs/flow-infra-propagation-plan.md"]
 labels: [docs, cleanup]
