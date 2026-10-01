@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0110"
 title: "flow-triage allocates task ids through allocate-task-id.mjs, so it can never duplicate one"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-cowork-orchestrator"
