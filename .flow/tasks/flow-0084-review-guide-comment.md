@@ -1,12 +1,12 @@
 ---
 id: "flow-0084"
 title: "After the reviews finish, one review-guide comment tells the human where to look: TL;DR, hotspots, assumptions, smoke test, verdicts"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker"
 created: "2026-09-26"
-started: ""
+started: "2026-10-01T16:28:30Z"
 branch: ""
 pr: ""
 issue: ""
