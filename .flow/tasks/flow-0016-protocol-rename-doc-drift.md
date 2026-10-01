@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0016"
 title: "Clear the doc drift left by the protocol rename, and add the check that would have caught it"
-status: "ready"
+status: "in_progress"
 priority: 4
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0016"
 created: "2026-08-19"
-started: ""
+started: "2026-10-01T21:03:13Z"
 branch: ""
 pr: ""
 issue: ""
