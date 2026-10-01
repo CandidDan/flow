@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0104"
 title: "flow-recover moves an in_progress task whose PR is open and ready to in_review, so a re-claimed task is never stuck"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "flow"
 owner: "claude-worker"
