@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0116"
 title: "The store-wide changelog test checks in-flight tasks only on their own branch, so one claimed task stops failing every other PR"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude-cowork-orchestrator"
