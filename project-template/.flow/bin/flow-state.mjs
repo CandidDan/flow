@@ -50,6 +50,29 @@ const __isMain = (() => {
 })();
 // ---------------------------------------------------------------------------------------
 // ── pure: frontmatter parse ────────────────────────────────────────────────
+// The value of one frontmatter scalar, given the raw text that follows `key:`.
+//
+// In YAML a `#` opens a comment only OUTSIDE quotes, and that distinction is the whole of this
+// function. The earlier version stripped a whitespace-preceded ` #…` from every scalar, quoted
+// or not, which anticipated only a value that *starts* with a hash (`issue: "#157"` survived,
+// because the strip needs leading whitespace). A hash in the MIDDLE of a quoted value did not:
+// `blocked_reason: "waits on PR #127, not machine-checkable"` was cut to `"waits on PR`, so
+// every reader downstream got a truncated reason, and the `not machine-checkable` opt-out that
+// silences flow-doctor's empty-`blocked_by` warning was thrown away with it. A `#` inside quotes
+// is data — a PR reference, a channel name, a CSS colour — and a parser that eats it corrupts
+// prose silently, which is the worst way to be wrong.
+//
+// So: a quoted value is taken whole, up to its closing quote, and whatever follows (a real
+// comment) is dropped. Only an UNQUOTED value has a trailing ` # comment` stripped. An
+// unterminated quote falls through to the unquoted path, preserving the old lenient behaviour
+// rather than throwing on a malformed store.
+export function scalarValue(raw) {
+  const s = String(raw ?? "").trim();
+  const quoted = s.match(/^"([^"]*)"/) || s.match(/^'([^']*)'/);
+  if (quoted) return quoted[1];
+  return s.replace(/\s+#.*$/, "").trim();
+}
+
 // Same tolerant reader as pick-task / flow-doctor (inline-array touches, `#` comments,
 // quoted scalars), extended to the lifecycle fields state resolution needs.
 export function parseTask(text) {
@@ -59,9 +82,7 @@ export function parseTask(text) {
   const head = text.slice(3, end);
   const get = (k) => {
     const m = head.match(new RegExp(`^${k}:\\s*(.*)$`, "m"));
-    // Strip only a whitespace-preceded ` # comment` (YAML rule) — NOT a `#` inside the
-    // value, so `issue: "#157"` and other hash-bearing values survive intact.
-    return m ? m[1].replace(/\s+#.*$/, "").trim().replace(/^"(.*)"$/, "$1") : "";
+    return m ? scalarValue(m[1]) : "";
   };
   const id = get("id");
   if (!id) return null;
