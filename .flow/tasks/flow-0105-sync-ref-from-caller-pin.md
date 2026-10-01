@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0105"
 title: "flow-sync adopts from the ref its caller is pinned to, not a hard-coded v2, when run on schedule"
-status: "blocked"
+status: "in_progress"
 priority: 3
 project: "flow"
 owner: "claude-worker-flow-0105"
@@ -11,10 +11,11 @@ started: "2026-09-30T08:31:07Z"
 branch: "flow/flow-0105-sync-ref-from-caller-pin"
 pr: "https://github.com/CandidDan/flow/pull/141"
 issue: "https://github.com/CandidDan/flow/issues/55"
-blocked_reason: "The build is complete, pushed on flow/flow-0105-sync-ref-from-caller-pin (draft PR 141), and all nine acceptance criteria are met with 16 proving tests in .flow/bin/sync-default-ref.test.mjs - but the gate cannot go green inside the declared touches, and closing it is a scope decision the task did not settle. THE CONFLICT, precisely: criterion 7 requires that no `inputs.canonical_ref || 'v2'` expression remain in _flow-sync.yml, and .flow/bin/caller-pins.test.mjs (flow-0056, not in touches) contains a test whose FIRST act is to mutate that exact literal in _flow-sync.yml and then assert `notEqual(mutated, text)` - 'the mutation must actually move the fallback back'. With the expression gone the replace is a no-op and that assertion fails. The two requirements are directly contradictory: one test asserts the string is absent, the other asserts it is present. There is no shape of _flow-sync.yml that satisfies both. THE ONE IN-SCOPE WORKAROUND WAS REJECTED ON PURPOSE: quoting the old expression verbatim in the new explanatory comment would make caller-pins green, because its CANONICAL_REF_FALLBACK regex is line-based over raw text and does not care whether the line is code or prose. That would leave flow-0056's real protection (the hard-coded fallback tracks root VERSION's major) checking a comment while reporting success - the 'green gate that checked nothing' failure mode this repo exists to prevent - so it was not done. WHAT THE FIX IS: add '.flow/bin/caller-pins.test.mjs' to this task's touches on main and flip back to ready. The edit is small and bounded: retarget CANONICAL_REF_FALLBACK (or that one test) at the new shape, which is `FALLBACK_REF=\"v2\"` in the 'Resolve canonical ref' step's shell. Nothing else in caller-pins changes - its ten `uses:` pin sweep and its ADVERTISED_DEFAULT half both still pass as shipped, because the input descriptions were left alone deliberately. IMPORTANT, so the decision can be taken without re-deriving it: flow-0056's guarantee is NOT lost in the meantime. .flow/bin/sync-default-ref.test.mjs (in touches, written, passing) derives the expected fallback from root VERSION's major itself - `const FALLBACK_REF = v${VERSION.split('.')[0]}` - and asserts the step resolves to exactly that when no caller pins a ref. So the coherence check survives the widening; what is stale is only caller-pins' mutation precondition. Both tasks that own caller-pins.test.mjs (flow-0056, flow-0058) are done, so there is no live touches overlap. SECOND, SMALLER FINDING, already handled in scope so it needs no decision: .flow/bin/adr-split-authoring.test.mjs counts the files naming canonical's bare slug to pin an ADR's repin-exposure figure, and the new test file tripped it from 47 to 48. Rather than edit the ADR (also outside touches), the fixture caller slugs were made foreign ('acme/infra'), which is also the better fixture - the scan under test is owner/repo-agnostic by design. That census is back at 47 and green. GATE AS IT STANDS ON THE BRANCH: build green (34 workflows), lint green (102 .mjs), coverage 95.89% lines vs floor 83.5, test 1490/1492 pass with 1 pre-existing skip and EXACTLY the one failure above (caller-pins.test.mjs:215). NOT MACHINE-CHECKABLE: it is a scope/authority decision, so there is no task id or PR for a sweep to watch - blocked_by is empty on purpose."
+blocked_reason: ""
 blocked_by: []
 serves: ["maintenance"]   # sync delivery health; same anchor as flow-0075/0076, no live goal names it
 touches:
+  - ".flow/bin/caller-pins.test.mjs"
   - ".github/workflows/_flow-sync.yml"
   - "project-template/.github/workflows/flow-sync.yml"
   - ".flow/bin/sync-default-ref.test.mjs"
@@ -28,6 +29,7 @@ notes:
   - "2026-09-30 (orchestrator): Written at the human's request as the last open defect on #55 (defects 1-3 fixed by flow-0051, flow-0064, flow-0075). Close #55 when this merges."
   - "2026-09-30 (orchestrator): Latent today because the fleet pins @v2 and the default is 'v2'. It bites on the first repo pinned to anything else — the progress canary on v2-edge, the next major (v3), or the release-repo repin in flow-0030 — and it bites silently: a scheduled sync adopts from v2 and opens a PR that moves the repo's local copies to a different version than its callers run."
   - "2026-09-30 (orchestrator): Overlaps flow-0081, flow-0091 and flow-0092 on _flow-sync.yml, and flow-0030 (blocked) on the template caller. pick-task sequences them; rebase onto whichever lands first."
+  - "2026-10-01 (orchestrator): DECIDED as the worker recommended, logged rather than asked: touches widened by .flow/bin/caller-pins.test.mjs. Its CANONICAL_REF_FALLBACK guard is retargeted to the new shape (FALLBACK_REF=\"vN\" in the Resolve canonical ref step, anchored to a code line so a comment cannot satisfy it), still accepting the old expression; the mutation test moves FALLBACK_REF instead. The rejected comment-quoting workaround stays rejected. Finished by the orchestrator on the existing branch."
 ---
 
 ## Context
