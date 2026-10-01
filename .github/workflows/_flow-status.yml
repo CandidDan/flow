@@ -129,10 +129,47 @@ jobs:
           # the bug with more code in front of it.
           MAX_PUSH_ATTEMPTS=5
 
-          # The task file this run edits, and its content at the tip we started from. Read off the
-          # diff rather than guessed from `$id`, so it is exactly the file about to be committed.
+          # The task file this run edits. Read off the diff rather than guessed from `$id`, so it is
+          # exactly the file about to be committed.
           task_file="$(git diff --name-only -- .flow/tasks/ | head -1)"
-          base_blob="$(git rev-parse --verify --quiet "HEAD:$task_file" || true)"
+
+          # flow-0114: the refusal below is per-FIELD, not per-blob. `apply-board-edits.mjs` patches
+          # named frontmatter fields only, so an edit by another actor to a field this run does NOT
+          # write — a worker's `notes:` entry, a widened `touches`, a body edit — cannot be lost by
+          # re-applying: the retry re-derives from the new tip, which already carries it. Comparing
+          # whole blobs called every one of those a conflict, and the commonest of them is on the
+          # normal path of almost every task: a worker's last act is a handoff note on its own task
+          # file on `main`, and marking the draft ready fires flow-status on the same file seconds
+          # later. Observed on CandidDan/tanplan-platform#25 — the note and the status write touched
+          # different fields and composed cleanly, and the transition was dropped anyway.
+          #
+          # So guard exactly the fields these edits write, and nothing else. `$EDITS` is the payload,
+          # so the list is derived from it rather than restated per call site.
+          written_fields="$(printf '%s\n' "$EDITS" | node -e '
+            let s = ""; process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+              const keys = new Set();
+              for (const u of JSON.parse(s).updates || []) {
+                for (const k of Object.keys(u)) if (k !== "id") keys.add(k);
+              }
+              process.stdout.write([...keys].join(" ") + "\n");
+            });')"
+
+          # Read those fields out of a task file on stdin: one `<field>=<value>` line each, in a
+          # fixed order, so two readings compare as plain text. Frontmatter only — a `status:` inside
+          # the body is prose, not state. A field with no line reads `<absent>`, which is a value
+          # worth comparing in its own right because apply-board-edits appends a missing field.
+          FIELD_READER='
+            const fields = process.argv[1].split(" ").filter(Boolean);
+            let s = ""; process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+              const end = s.indexOf("\n---", 3);
+              const head = end === -1 ? s : s.slice(0, end);
+              for (const f of fields) {
+                const m = head.match(new RegExp("^" + f + ":[ \\t]*(.*)$", "m"));
+                process.stdout.write(f + "=" + (m ? m[1].trim() : "<absent>") + "\n");
+              }
+            });'
+          base_fields="$(git show "HEAD:$task_file" | node -e "$FIELD_READER" "$written_fields")"
+          echo "Guarding [$written_fields] of $task_file against concurrent edits; everything else in that file composes."
 
           git config user.name  "flow-bot"
           git config user.email "flow-bot@users.noreply.github.com"
@@ -153,6 +190,10 @@ jobs:
             git fetch origin main --quiet
             git reset --hard FETCH_HEAD
 
+            # The guarded fields as the NEW tip has them. Read BEFORE re-applying, so this is the
+            # other actor's state and not the one we are about to write over it.
+            now_fields="$(git show "HEAD:$task_file" | node -e "$FIELD_READER" "$written_fields")"
+
             printf '%s\n' "$EDITS" > .flow/board-edits.json
             node .flow/bin/apply-board-edits.mjs
 
@@ -161,12 +202,31 @@ jobs:
               exit 0
             fi
 
-            # Our task file moved under us and re-applying still changes it, so another actor wrote
-            # something ELSE into it. Pushing now would silently overwrite their change, which is
-            # worse than the drop this loop exists to prevent. Refuse, and say both facts out loud.
-            now_blob="$(git rev-parse --verify --quiet "HEAD:$task_file" || true)"
-            if [ "$now_blob" != "$base_blob" ]; then
-              echo "::error::flow: CONFLICTING EDIT — $task_file changed on main while $id -> $TRANSITION was being pushed. Refusing to overwrite that change, so this transition was NOT applied."
+            # Re-applying still changes the file, so the tip is not yet what this run wants. Whether
+            # that is a CONFLICT depends on which field moved. A guarded field still reading as it did
+            # at our starting tip is ours to write — the other actor changed something else, and that
+            # something else is already in the tree we just re-applied onto, so it survives. A guarded
+            # field another actor set to the value we would write is already landed. Anything else is
+            # theirs, and pushing would erase it, which is worse than the drop this loop prevents.
+            # Name the field and both values: the alternative is a human diffing two commits to find
+            # out what collided.
+            want_fields="$(node -e "$FIELD_READER" "$written_fields" < "$task_file")"
+            conflicts="$(FLOW_BASE="$base_fields" FLOW_NOW="$now_fields" FLOW_WANT="$want_fields" node -e '
+              const readFields = (v) => new Map((v || "").split("\n").filter(Boolean).map((l) => {
+                const i = l.indexOf("=");
+                return [l.slice(0, i), l.slice(i + 1)];
+              }));
+              const base = readFields(process.env.FLOW_BASE);
+              const want = readFields(process.env.FLOW_WANT);
+              const out = [];
+              for (const [f, v] of readFields(process.env.FLOW_NOW)) {
+                if (v === base.get(f) || v === want.get(f)) continue;
+                out.push(f + " was " + base.get(f) + ", is now " + v + ", this run would write " + want.get(f));
+              }
+              process.stdout.write(out.join("; "));
+            ')"
+            if [ -n "$conflicts" ]; then
+              echo "::error::flow: CONFLICTING EDIT — $task_file changed on main in a field $id -> $TRANSITION writes: $conflicts. Refusing to overwrite that change, so this transition was NOT applied."
               exit 1
             fi
 

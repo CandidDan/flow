@@ -36,6 +36,15 @@ import { realpathSync as __realpathSync } from "node:fs";
 import { fileURLToPath as __fileURLToPath } from "node:url";
 import { globToRegExp } from "./touches-guard.mjs";
 import { idFromBranch, parseTaskId } from "./parse-task-id.mjs";
+import {
+  FRAGMENT_DIR,
+  ROOT_VERSION_PATH,
+  SEMVER,
+  TEMPLATE_VERSION_PATH,
+  checkRelease,
+  fragmentsAtRef,
+  readFileAtRef,
+} from "./release-guard.mjs";
 
 // --- main-module detection (do not simplify back to a string compare) -------------------
 // `import.meta.url` is the RESOLVED realpath; `process.argv[1]` is the path AS INVOKED. Reached
@@ -407,6 +416,193 @@ export function securityDecision({ changedFiles = [], securityPaths = [], bootst
   };
 }
 
+// ── PRs that are task-less BY DESIGN (flow-0089) ──────────────────────────────────────────
+// Two kinds of PR carry no task on purpose, and until this they were indistinguishable from a PR
+// that had simply lost one: both got `NO TASK FILE RESOLVED`, and each reviewer improvised from
+// there. The same reviewer read the same sentinel on two release PRs and returned opposite
+// answers — PASS on #117 ("no task, expected"), FAIL on #121 ("no task resolved"). A gate that
+// gives two answers to one question is not a gate, so the answer moves into code.
+//
+// IT IS NOT AN EXEMPTION, and the distinction is the whole design. A branch-name exemption would
+// let any PR called `release/…` skip the review, so the branch is only HALF of each rule: the
+// other half is that EVERY changed path falls inside a closed list of files that kind of PR is
+// allowed to touch. A `release/*` branch carrying one line of source is not a release PR and gets
+// the ordinary no-task handling, unchanged.
+//
+// DELIBERATELY NOT EXTENDED to the other two task-less kinds a human can open — a `[vision]` PR
+// (ADR-0004) and an intent-only PR (ADR-0007). Both hit the same guess and both deserve the same
+// treatment, but each needs its own closed path list agreed first, and agreeing one is a decision
+// rather than an implementation detail — the same reason the two lists below are closed. The
+// table is the extension point: a new kind is a row plus its prompt line.
+export const RELEASE_PR_SENTINEL = "RELEASE PR";
+export const SYNC_PR_SENTINEL = "SYNC PR";
+
+// The one line each reviewer PASSES a classified PR with. Pinned here AND in every prompt in
+// `_flow-review.yml`; `flow-review-workflow.test.mjs` holds the two copies in step, because the
+// prompt is where the reviewer reads it and this is where the artefact it reads is written.
+export const RELEASE_PR_PASS_LINE = "release PR: release files only, release-guard clean";
+export const SYNC_PR_PASS_LINE = "sync PR: synced surface only; flow-tooling validates it";
+
+// What a release PR may touch. CLOSED on purpose: a future release that needs another file is a
+// change to this list, reviewed as a task, not a reason to widen it at the point of use.
+export const RELEASE_PR_PATHS = Object.freeze([
+  "CHANGELOG.md",
+  "changes/**",
+  "VERSION",
+  "project-template/.flow/VERSION",
+  ".flow/VERSION",
+]);
+
+// The surface `_flow-sync.yml` copies, exactly as that workflow's own header lists it. A sync PR
+// is canonical's tooling arriving in an adopting repo; anything else in the diff means something
+// other than a sync produced it. This case matters more than the release one — it fires in every
+// adopting repo on every sync, not only in canonical.
+export const SYNC_PR_PATHS = Object.freeze([
+  ".flow/bin/**",
+  ".github/workflows/flow-*.yml",
+  ".flow/PROTOCOL.md",
+  ".flow/VERSION",
+]);
+
+export const PR_KINDS = Object.freeze([
+  Object.freeze({ kind: "release", prefix: "release/", sentinel: RELEASE_PR_SENTINEL, paths: RELEASE_PR_PATHS }),
+  Object.freeze({ kind: "sync", prefix: "flow-sync/", sentinel: SYNC_PR_SENTINEL, paths: SYNC_PR_PATHS }),
+]);
+
+// Which kind of task-less PR this is, or null when the branch matches no prefix. PURE — the
+// branch name and the changed-file list are the entire input, so the decision is reproducible
+// without a repo and the tests drive it directly.
+//
+// A branch that DOES match a prefix but carries a path outside its list comes back
+// `classified: false` with the offending paths, so "why was this not a release PR?" has an answer
+// instead of a shrug.
+export function classifyPr({ headRef = "", changedFiles = [] } = {}) {
+  const branch = String(headRef ?? "");
+  const spec = PR_KINDS.find((k) => branch.startsWith(k.prefix));
+  if (!spec) return null;
+  const files = changedFiles.filter(Boolean);
+  const res = spec.paths.map(globToRegExp);
+  const outside = files.filter((f) => !res.some((r) => r.test(f)));
+  return {
+    kind: spec.kind,
+    sentinel: spec.sentinel,
+    paths: spec.paths,
+    files,
+    outside,
+    // An EMPTY diff is not a release. `[].every(…)` is vacuously true, and a PR that changes
+    // nothing must not be waved through as "release files only".
+    classified: files.length > 0 && outside.length === 0,
+  };
+}
+
+// The Flow stamp a consuming repo carries. Canonical has no `.flow/VERSION` at all (the root
+// `VERSION` is the single source, and a second stamp inside `.flow/` would have nothing to
+// compare against); an adopting repo has only this one.
+export const ADOPTED_VERSION_PATH = ".flow/VERSION";
+
+// WHICH two stamps release-guard is pointed at, decided by which tree this is rather than by
+// scanning for VERSION files. Canonical carries the pair the guard already defaults to. An
+// adopting repo carries one Flow stamp, and its root `VERSION` — if it has one — is its PRODUCT's
+// version, which has nothing to do with Flow: comparing the two would report "stamp drift" on
+// every release PR in the fleet, which is the opposite of this task's point.
+export function releaseStampPaths(hasTemplateStamp) {
+  return hasTemplateStamp
+    ? { rootPath: ROOT_VERSION_PATH, templatePath: TEMPLATE_VERSION_PATH }
+    : { rootPath: ADOPTED_VERSION_PATH, templatePath: ADOPTED_VERSION_PATH };
+}
+
+// Release correctness over the PR's own tree. `checkRelease` is IMPORTED, never re-stated: every
+// rule about what a true stamp is already lives in release-guard.mjs, and a second copy here
+// would drift towards the guard and the gate disagreeing about the same release.
+//
+// THE TAG IS PROSPECTIVE. `checkRelease` scopes its leftover-fragment check (and its tag/stamp
+// check) to a real `vX.Y.Z`, because `main` is EXPECTED to carry pending fragments between
+// releases and failing on that would redden every push. A release PR has no tag yet — it is the
+// commit a tag would be cut at — so the stamp it proposes is handed over as that tag. The
+// tag/stamp check is then true by construction, which is correct: there is no published tag here
+// for anything to disagree with. The fragment check is the one that matters, and it is the one
+// that would have caught #121.
+//
+// No warnings are collected: both of release-guard's warnings are measured from facts a PR does
+// not have (how far `main` is past the last tag, how far the `vMAJOR` alias trails it), so with
+// these facts neither can fire.
+export function releaseReport({ git, ref = "HEAD" } = {}) {
+  const at = (path) => readFileAtRef(git, ref, path);
+  const template = at(TEMPLATE_VERSION_PATH);
+  const { rootPath, templatePath } = releaseStampPaths(template !== null);
+  const rootVersion = at(rootPath);
+  const templateVersion = templatePath === rootPath ? rootVersion : template;
+  const stamp = typeof rootVersion === "string" ? rootVersion.trim() : rootVersion;
+  const { problems } = checkRelease({
+    tag: stamp && SEMVER.test(stamp) ? `v${stamp}` : "",
+    tagVersion: rootVersion,
+    rootVersion,
+    templateVersion,
+    rootPath,
+    templatePath,
+    fragments: fragmentsAtRef(git, ref, FRAGMENT_DIR),
+    fragmentDir: FRAGMENT_DIR,
+  });
+  return {
+    rootPath,
+    templatePath,
+    // Deduplicated. An adopting repo has ONE Flow stamp, handed over as both halves of the pair,
+    // so a missing or malformed stamp would otherwise be reported twice for the same file.
+    problems: [...new Set(problems)],
+  };
+}
+
+// `task.md` for a PR the gate CLASSIFIED rather than failed to resolve. The reviewer gets the rule
+// that fired, the evidence it fired on, and one instruction with no judgement call left in it.
+export function prKindText(classification, report = null) {
+  const { kind, sentinel, files, paths } = classification;
+  const prefix = PR_KINDS.find((k) => k.kind === kind).prefix;
+  const out = [
+    sentinel,
+    "",
+    `No task resolved, and none is expected: this PR was classified IN CODE as ` +
+    `${kind === "release" ? "a release PR" : "a flow-sync PR"}. Both halves of the rule held — ` +
+    `the head branch starts with \`${prefix}\`, AND all ${files.length} changed file(s) fall ` +
+    `inside the closed list of paths that kind of PR may touch: ${paths.join(", ")}. A branch ` +
+    `with that prefix touching ANY other path is NOT classified, and gets the ordinary ` +
+    `\`${NO_TASK_SENTINEL}\` handling instead — the branch name on its own exempts nothing.`,
+    "",
+    "The changed files, in full:",
+    files.map((f) => `  - ${f}`).join("\n"),
+    "",
+  ];
+
+  if (kind !== "release") {
+    out.push(
+      "There is no guard to run here. These files are canonical's own, reviewed and tested in " +
+      "canonical before the tag they came from was cut, and this repo's `flow-tooling` gate job " +
+      "runs their tests against this very tree.",
+      "",
+      `So PASS this PR with exactly: "${SYNC_PR_PASS_LINE}". There are no acceptance criteria ` +
+      "to map and no missing task to report.",
+    );
+    return out.join("\n") + "\n";
+  }
+
+  const problems = report?.problems ?? [];
+  const ran = "release-guard — `checkRelease`, the same pure function the release path itself " +
+    "runs — was run over this PR's tree";
+  out.push(
+    problems.length
+      ? `${ran} and reports ${problems.length} problem(s):\n` +
+        problems.map((p) => `  - ${p}`).join("\n")
+      : `${ran} and reports NO problems: the version stamps agree with each other, and no ` +
+        "changelog fragment has been left unassembled.",
+    "",
+    problems.length
+      ? "So FAIL this PR, naming the release-guard problem(s) above. There are no acceptance " +
+        "criteria to map and no missing task to report; the guard has already decided."
+      : `So PASS this PR with exactly: "${RELEASE_PR_PASS_LINE}". There are no acceptance ` +
+        "criteria to map and no missing task to report.",
+  );
+  return out.join("\n") + "\n";
+}
+
 // ── the task under review ─────────────────────────────────────────────────────────────────
 // CAN-52: a task id has TWO sources. A `flow/<id>-…` branch is canonical, but a cloud session is
 // handed a `claude/…` branch it is told not to rename, so the PR title (`[<id>] …`) is the second
@@ -471,6 +667,10 @@ export function taskContext({
   // statement about a title nobody ever looked at. Default it from the arguments so a direct
   // caller (a test, an adapter) behaves exactly as before.
   callerSupplied = Boolean(String(headRef ?? "") || String(prTitle ?? "")),
+  // flow-0089. `classifyPr`'s answer, with a release PR's guard report attached — see `runPlan`,
+  // which is the only caller that has both the changed-file list and a `git` to run the guard
+  // with. Null for every ordinary PR, which is the unchanged path through this function.
+  prKind = null,
   tasksDir = DEFAULT_TASKS_DIR,
   ls = readdirSync,
   read = (p) => readFileSync(p, "utf8"),
@@ -503,6 +703,27 @@ export function taskContext({
       (sources ? `The two sources that were tried, verbatim:\n\n${untrustedBlock(headRef, prTitle)}\n\n` : "") +
       `${CLOSING[sentinel]}\n`,
   });
+
+  // A CLASSIFIED PR, before either miss. A real task still wins — a `release/*` branch titled
+  // `[flow-0088] …` has criteria, and those are what it is judged against — but once no id
+  // resolved, "this PR is a release PR" is a stronger and truer statement than either "no task"
+  // or "we never looked", and it is the statement the reviewers were improvising.
+  if (!id && prKind?.classified) {
+    const problems = prKind.kind === "release" ? (prKind.report?.problems ?? []) : [];
+    const verdict = prKind.kind !== "release"
+      ? "synced surface only"
+      : problems.length
+        ? `release-guard reports ${problems.length} problem(s)`
+        : "release files only, release-guard clean";
+    return {
+      id: null, source: null, path: null, matches: [], found: false,
+      kind: prKind.kind, sentinel: prKind.sentinel, problems,
+      // Deliberately carries no file name: this line is interpolated into the run summary, and
+      // the changed-file list belongs in `files.txt` and in `task.md`, not in a one-line label.
+      reason: `${prKind.sentinel} — classified in code (${verdict})`,
+      text: prKindText(prKind, prKind.report ?? null),
+    };
+  }
 
   // ORDER MATTERS. The id is resolved FIRST, so an ambient branch that happens to carry one still
   // produces a real task even when the caller supplied nothing. Only when no id was found does it
@@ -857,8 +1078,16 @@ export function runPlan({
     .split("\n").map((s) => s.trim()).filter(Boolean);
   const security = securityDecision({ changedFiles, securityPaths: cfg.securityPaths, bootstrap });
   const diff = boundDiff(git(["diff", `${baseRef}...HEAD`]), { maxBytes: limit.bytes });
+  // flow-0089. The guard reads the PR's own tree through the SAME injected `git` the diffs use,
+  // so it follows `REVIEW_REPO_DIR` to the PR checkout rather than to the base worktree the
+  // helper is executed from. It runs only for a classified release PR, which is why an ordinary
+  // PR's git calls are still exactly the two diffs above.
+  const classified = classifyPr({ headRef, changedFiles });
+  const prKind = classified?.classified && classified.kind === "release"
+    ? { ...classified, report: releaseReport({ git }) }
+    : classified;
   const task = taskContext({
-    headRef, prTitle, tasksDir, ls, read,
+    headRef, prTitle, tasksDir, ls, read, prKind,
     ...(callerSupplied === undefined ? {} : { callerSupplied }),
   });
 
@@ -867,7 +1096,7 @@ export function runPlan({
   writeFileSync(join(outDir, "diff.patch"), diff.text);
   writeFileSync(join(outDir, "task.md"), task.text);
 
-  return { cfg, changedFiles, security, diff, task, limit, outDir, bootstrap: Boolean(bootstrap) };
+  return { cfg, changedFiles, security, diff, task, prKind, limit, outDir, bootstrap: Boolean(bootstrap) };
 }
 
 const LIMIT_SOURCE = {
@@ -896,8 +1125,15 @@ export function planSummary({
     `- security review: **${security.run ? "RUNNING" : "SKIPPED"}** — ${security.reason}`,
     task.found
       ? `- task under review: \`${task.id}\` (${task.reason}) — \`${task.path}\``
-      : `- task under review: **none resolved** — ${task.reason}`,
+      // flow-0089: "none resolved" and "none, by design" are different facts, and the summary is
+      // where a human decides whether a task-less PR is a problem.
+      : task.kind
+        ? `- task under review: **none, by design** — ${task.reason}`
+        : `- task under review: **none resolved** — ${task.reason}`,
   ];
+  // The guard's problems, so the red check has its reason in the run summary rather than only
+  // inside an artefact a reviewer read.
+  for (const problem of task.problems ?? []) out.push(`- :x: release-guard: ${problem}`);
   for (const w of cfg.warnings) out.push(`- :warning: ${w}`);
   // The bootstrap warning is last so it is the line a reader ends on, and it is phrased as a
   // warning rather than an error because the case is legitimate exactly once. What must never

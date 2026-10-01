@@ -687,3 +687,128 @@ test("flow-0085 has a changelog fragment that says the caller does nothing", () 
   assert.ok(text, "the changelog entry for flow-0085 is missing");
   assert.match(text, /Caller action: none/);
 });
+
+
+// ── flow-0089: the two PRs that are task-less BY DESIGN ───────────────────────────────────
+// The helper's own tests prove the classification; these prove the half the helper cannot — that
+// each reviewer is TOLD what to do with the sentinel, in the same words, and that the rules it
+// reports still come from release-guard rather than from a second copy living in the gate.
+//
+// Verbatim and shared for the same reason the truncation instruction is (flow-0101): three
+// paraphrases drift, and the one that drifts is the one that stops saying what to do.
+
+const CLASSIFIED_PR_RULE =
+  ".flow-review/task.md may instead begin with one of two sentinels that mean this PR has NO " +
+  "TASK BY DESIGN. Both are decided in code — branch prefix AND every changed path inside a " +
+  "closed list — so neither is a branch-name exemption, and neither is a judgement call for " +
+  "you: · \"RELEASE PR\" — release files only. The sentinel carries release-guard's verdict over " +
+  "this tree. If it reports no problems, PASS with exactly: release PR: release files only, " +
+  "release-guard clean. If it reports problems, FAIL and name them. · \"SYNC PR\" — the flow-sync " +
+  "surface only. The classification proves where the files are, not where their content came " +
+  "from, so still read the diff. If it adds or widens a `permissions:` block, introduces " +
+  "`pull_request_target`, points a `uses:` at a different owner or an unpinned branch, or changes " +
+  "how a secret is read or passed, FAIL and name it. Otherwise PASS with exactly: sync PR: synced " +
+  "surface only; flow-tooling validates it. Under either sentinel there are no acceptance criteria to map, and " +
+  "a missing task is not a finding. Do not go looking for one.";
+
+test("flow-0089: every reviewer prompt carries the RELEASE PR / SYNC PR instruction verbatim", { skip }, () => {
+  const found = prompts();
+  assert.equal(found.length, REVIEW_JOBS.length, "one reviewer invocation per check");
+  for (const [i, p] of found.entries()) {
+    assert.ok(p.includes(CLASSIFIED_PR_RULE),
+      `the ${REVIEW_JOBS[i]} prompt does not carry the classified-PR instruction verbatim. All ` +
+      `three read the same task.md; a reviewer not told what the sentinel means improvises, ` +
+      `which is how #117 passed and #121 failed on the same kind of PR.`);
+  }
+});
+
+test("flow-0089: the RELEASE PR rule states both a PASS condition and a FAIL condition", { skip }, () => {
+  assert.match(CLASSIFIED_PR_RULE, /"RELEASE PR"/,
+    "the sentinel is named exactly as the helper writes it, or the reviewer cannot match on it");
+  assert.match(CLASSIFIED_PR_RULE,
+    /If it reports no problems, PASS with exactly: release PR: release files only, release-guard clean/,
+    "a guard-clean release PR has one allowed verdict and one allowed sentence — no judgement call");
+  assert.match(CLASSIFIED_PR_RULE, /If it reports problems, FAIL and name them/,
+    "…and the other direction has to be stated too, or the rule reads as a blanket exemption, " +
+    "which is the loophole this task exists to refuse");
+  assert.match(CLASSIFIED_PR_RULE, /a missing task is not a finding/,
+    "under either sentinel the no-task case is expected; reporting it is the behaviour being replaced");
+});
+
+test("flow-0089: the SYNC PR rule is named with its PASS line", { skip }, () => {
+  assert.match(CLASSIFIED_PR_RULE, /"SYNC PR"/);
+  assert.match(CLASSIFIED_PR_RULE,
+    /Otherwise PASS with exactly: sync PR: synced surface only; flow-tooling validates it/,
+    "this is the case every adopting repo hits on every sync — the fleet-wide half of the task");
+});
+
+test("flow-0089: the SYNC PR rule states a FAIL condition, so classification is not a blanket pass", { skip }, () => {
+  // Security review on #146: the classifier is branch prefix + path glob, and the synced surface
+  // is exactly the high-leverage files (caller workflows, .flow/bin, PROTOCOL.md). A PASS line
+  // with no FAIL branch would wave through a poisoned edit to any of them on a branch named right.
+  assert.match(CLASSIFIED_PR_RULE, /proves where the files are, not where their content came from/);
+  assert.match(CLASSIFIED_PR_RULE, /still read the diff/);
+  for (const risk of [/`permissions:`/, /`pull_request_target`/, /`uses:`/, /secret/]) {
+    assert.match(CLASSIFIED_PR_RULE, risk, `the SYNC PR rule must name ${risk} as a FAIL condition`);
+  }
+  assert.match(CLASSIFIED_PR_RULE, /FAIL and name it\. Otherwise PASS with exactly: sync PR/,
+    "the FAIL branch comes before the canned PASS line, and the PASS is conditional on it");
+});
+
+test("flow-0089: the prompts and the helper name the same sentinels and the same PASS lines", { skip: false }, () => {
+  // The prompt tells the reviewer what to look for; the helper writes what it will find. Two
+  // files, one contract — pinned here because a rename in either is silent in the other.
+  const helper = readFileSync(join(TEMPLATE, ".flow/bin/flow-review.mjs"), "utf8");
+  assert.match(helper, /export const RELEASE_PR_SENTINEL = "RELEASE PR";/);
+  assert.match(helper, /export const SYNC_PR_SENTINEL = "SYNC PR";/);
+  assert.match(helper,
+    /export const RELEASE_PR_PASS_LINE = "release PR: release files only, release-guard clean";/);
+  assert.match(helper,
+    /export const SYNC_PR_PASS_LINE = "sync PR: synced surface only; flow-tooling validates it";/);
+});
+
+test("flow-0089: the classification IMPORTS checkRelease — no release rule is restated in the gate", { skip: false }, () => {
+  const helper = readFileSync(join(TEMPLATE, ".flow/bin/flow-review.mjs"), "utf8");
+  assert.match(helper, /^import \{[\s\S]*?\bcheckRelease,[\s\S]*?\} from "\.\/release-guard\.mjs";$/m,
+    "`checkRelease` must be imported from release-guard.mjs: it is the function the release path " +
+    "itself runs, and a gate that re-decided release correctness would drift away from the guard " +
+    "it is supposed to agree with");
+  assert.match(helper, /checkRelease\(\{/,
+    "…and actually called, rather than imported and then second-guessed");
+
+  // The rules themselves must live in exactly one file. These are release-guard's own strings and
+  // patterns; any of them appearing here would be the copy this criterion forbids.
+  const guard = readFileSync(join(TEMPLATE, ".flow/bin/release-guard.mjs"), "utf8");
+  for (const rule of ["stamp drift:", "unassembled changelog", "no stamp found", "expected MAJOR.MINOR.PATCH"]) {
+    assert.ok(guard.includes(rule), `release-guard.mjs no longer states "${rule}" — update this test`);
+    assert.ok(!helper.includes(rule),
+      `flow-review.mjs restates release-guard's rule "${rule}". The guard's words must reach the ` +
+      `reviewer by being RUN, not by being retyped.`);
+  }
+  for (const pattern of ["^\\d+\\.\\d+\\.\\d+$", "^[a-z][a-z0-9]*-\\d+\\.md$"]) {
+    assert.ok(!helper.includes(pattern),
+      `flow-review.mjs carries a copy of a release-guard regex (${pattern}) — import the constant`);
+  }
+});
+
+test("flow-0089: the versioning policy states the hotfix order and the release-files-only rule", () => {
+  const doc = readFileSync(join(REPO, "docs/flow-versioning-policy.md"), "utf8");
+  assert.match(doc, /A hotfix is therefore two PRs, in this order: a task PR, then a release PR/,
+    "the procedure a human follows has to say it, or the gate is the only place the rule exists " +
+    "and people meet it as a surprise red check");
+  assert.match(doc, /A release PR carries release files and nothing else/,
+    "and the rule the gate enforces has to be written down where the release procedure is");
+  assert.match(doc, /starts with `release\/` \*\*and\*\* every changed path is one of/,
+    "BOTH halves, since the branch prefix on its own exempting a PR is the loophole this refuses");
+});
+
+test("flow-0089: changes/flow-0089.md exists and says the caller does nothing", () => {
+  const text = changelogEntry(REPO, "flow-0089");
+  assert.ok(text, "a change to what every adopting repo's reviewers are told owes the changelog an entry");
+  assert.match(text, /Caller action: none/,
+    "the caller-action line is what a reader of the release notes scans for");
+  assert.match(text, /SYNC PR/,
+    "the sync half is the one that fires in every adopting repo, so the entry has to name it");
+  assert.ok(!/^#/m.test(text),
+    "a fragment is assembled verbatim under `## Unreleased` — it carries no heading of its own");
+});
