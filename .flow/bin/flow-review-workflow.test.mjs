@@ -32,7 +32,12 @@ const QUEUE_RUNNER = join(REPO, ".github/workflows/_flow-queue-runner.yml");
 const reusableSrc = readFileSync(REUSABLE, "utf8");
 const wf = yamlMod ? yamlMod.parse(reusableSrc) : { jobs: {} };
 const REVIEW_JOBS = ["qa", "code-review", "security"];
-const HELPER_JOBS = ["plan", ...REVIEW_JOBS];
+// flow-0084 added a fifth job, `guide`. It is NOT a review job — it blocks nothing and posts no
+// verdict — but it does materialise the base gate and run `plan`, so it belongs in HELPER_JOBS and
+// in every assertion about where the helper comes from. The distinction is load-bearing: a `guide`
+// that crept into REVIEW_JOBS would be asserted to carry a verdict step and to block the PR.
+const GUIDE_JOB = "guide";
+const HELPER_JOBS = ["plan", ...REVIEW_JOBS, GUIDE_JOB];
 
 // flow-0079: the helper is no longer invoked by its path in the checkout. `$FLOW_REVIEW_DIR` is
 // written to $GITHUB_ENV by the materialise step and points at the BASE branch's copy — so these
@@ -160,7 +165,10 @@ test("the security reviewer itself is gated on the config-driven decision", { sk
 test("no reviewer names a model — every one reads it from the plan job", { skip }, () => {
   // The value is an expression containing spaces, so match the whole `${{ … }}` rather than \S+.
   const modelFlags = [...reusableSrc.matchAll(/--model\s+(\$\{\{[^}]*\}\}|\S+)/g)].map((m) => m[1]);
-  assert.equal(modelFlags.length, REVIEW_JOBS.length, "one --model per reviewer");
+  assert.equal(modelFlags.length, REVIEW_JOBS.length + 1,
+    "one --model per reviewer, plus the guide's (flow-0084). The guide reads `review.model` like " +
+    "everything else here: it cannot have a knob of its own without a `guide_model` output on the " +
+    "plan job, and the point stands either way — no model is named in this file.");
   for (const flag of modelFlags) {
     assert.match(flag, /^\$\{\{\s*needs\.plan\.outputs\.(security_)?model\s*\}\}$/,
       `"${flag}" hardcodes a model. It belongs in the consuming repo's .flow/config.yml under ` +
@@ -244,8 +252,9 @@ test("the fork fence sits on `plan` and nowhere else — so it suppresses all fo
 
 test("every `plan` invocation is handed BOTH id sources, as env, never as shell text", { skip }, () => {
   const planSteps = allSteps().filter((s) => PLAN_RUN.test(String(s.run ?? "")));
-  assert.equal(planSteps.length, 4,
-    "the plan job plus one bounded-context step per reviewer — each materialises its own context");
+  assert.equal(planSteps.length, 5,
+    "the plan job, one bounded-context step per reviewer, and the guide's (flow-0084) — each " +
+    "materialises its own context rather than passing an artifact around");
   for (const s of planSteps) {
     assert.equal(s.env?.HEAD_REF, "${{ github.head_ref }}",
       "`github.head_ref`, not `github.event.pull_request.head.ref`: the branch is an ID SOURCE " +
@@ -377,8 +386,8 @@ test("no step invokes the helper from the PR checkout — every call goes throug
   }
   const invocations = allSteps().filter((s) =>
     PLAN_RUN.test(String(s.run ?? "")) || VERDICT_RUN.test(String(s.run ?? "")));
-  assert.equal(invocations.length, 7,
-    "four plans (the plan job plus one bounded context per reviewer) and three verdicts");
+  assert.equal(invocations.length, 8,
+    "five plans (the plan job, one bounded context per reviewer, and the guide's) and three verdicts");
 });
 
 test("every job that runs the helper materialises the BASE branch first", { skip }, () => {
@@ -811,4 +820,248 @@ test("flow-0089: changes/flow-0089.md exists and says the caller does nothing", 
     "the sync half is the one that fires in every adopting repo, so the entry has to name it");
   assert.ok(!/^#/m.test(text),
     "a fragment is assembled verbatim under `## Unreleased` — it carries no heading of its own");
+});
+
+
+// ── flow-0084: the `guide` job — one comment telling the human where to look ───────────────
+// The helper's own tests (project-template/.flow/bin/review-guide.test.mjs) prove the facts: the
+// hotspots, the verbatim assumptions, the cap at three, the fail-open prose, the marker lookup.
+// These prove the half a helper cannot see — that the job exists, runs after all three checks
+// whatever they concluded, inherits the draft and fork fences rather than recopying them, computes
+// its facts from BASE's gate, and can never turn this PR red.
+
+const GUIDE_FACTS_RUN = /node "\$FLOW_REVIEW_DIR"\/review-guide\.mjs facts\b/;
+const GUIDE_COMMENT_RUN = /node "\$FLOW_REVIEW_DIR"\/review-guide\.mjs comment\b/;
+const GUIDE_ID_RUN = /node "\$FLOW_REVIEW_DIR"\/review-guide\.mjs comment-id\b/;
+const guideSteps = () => stepsOf(GUIDE_JOB);
+const guideStep = (re) => guideSteps().find((s) => re.test(String(s.run ?? "")));
+
+test("flow-0084: the guide runs after all three checks, whatever each of them concluded", { skip }, () => {
+  const job = wf.jobs[GUIDE_JOB];
+  assert.ok(job, "_flow-review.yml must define a `guide` job — it is the human's merge touchpoint");
+  assert.deepEqual(job.needs, ["plan", "qa", "code-review", "security"],
+    "the guide combines the three verdicts, so it must wait for all three AND for the plan it " +
+    "reads the security decision from");
+  assert.match(String(job.if), /always\(\)/,
+    "without always(), a FAILED reviewer suppresses the guide — which is exactly the PR a human " +
+    "most needs told where to look");
+});
+
+test("flow-0084: the guide never runs on a draft or a fork, and does not recopy either fence", { skip }, () => {
+  const guard = String(wf.jobs[GUIDE_JOB].if).trim();
+  assert.match(guard, /needs\.plan\.result == 'success'/,
+    "`plan` carries the opt-in, the draft clause and the head-repo comparison, so gating on its " +
+    "RESULT inherits all three. always() would otherwise defeat them: a skipped `needs` does not " +
+    "suppress a job that runs always().");
+  // The fences stay in exactly one place. A second copy here is the one that gets forgotten when
+  // the rule changes — the same reasoning the three review jobs carry no `if` at all.
+  assert.ok(!guard.includes("draft"), "the draft clause must not be recopied into the guide's if");
+  assert.ok(!guard.includes("head.repo"), "nor the fork fence");
+  assert.ok(!guard.includes("vars.FLOW_AI"), "nor the opt-in");
+  // And the whole-file bans still hold with the job added — reasserted because `guide` is the
+  // first job here that needed an `if` of its own.
+  assert.doesNotMatch(reusableSrc, /head\.ref/);
+  assert.doesNotMatch(reusableSrc, /github\.actor/);
+});
+
+test("flow-0084: the guide can never fail this PR — asserted, not assumed", { skip }, () => {
+  assert.equal(wf.jobs[GUIDE_JOB]["continue-on-error"], true,
+    "job-level continue-on-error is what makes `the guide never blocks` structural: a broken " +
+    "advisory comment must not fail the workflow run, and a required check that turns red on a " +
+    "guide bug is the thing this must never become");
+  for (const [name, job] of Object.entries(wf.jobs ?? {})) {
+    if (name === GUIDE_JOB) continue;
+    const needs = Array.isArray(job.needs) ? job.needs : [job.needs].filter(Boolean);
+    assert.ok(!needs.includes(GUIDE_JOB),
+      `${name} declares \`needs: guide\` — the guide would then be able to hold up, or fail, a ` +
+      `check that blocks the PR`);
+  }
+  // The model call is the half most likely to fail, and it must not even fail the guide job.
+  const model = guideSteps().filter((s) => String(s.uses ?? "").startsWith("anthropics/claude-code-action"));
+  assert.equal(model.length, 1, "exactly one model call in the guide");
+  assert.equal(model[0]["continue-on-error"], true, "prose is fail-open; the comment posts without it");
+});
+
+test("flow-0084: the facts come from BASE's gate and BASE's config, like every other decision here", { skip }, () => {
+  const facts = guideStep(GUIDE_FACTS_RUN);
+  assert.ok(facts, "the guide must compute its facts with review-guide.mjs");
+  // $FLOW_REVIEW_DIR is the base worktree's bin/ (see the materialise tests above), so this is the
+  // same fence the three checks sit behind: a PR cannot edit the code that computes its own
+  // hotspots, nor the `security_paths` those hotspots are matched against.
+  const steps = guideSteps();
+  assert.ok(steps.indexOf(facts) > steps.indexOf(materialiseStep(GUIDE_JOB)),
+    "the facts step uses $FLOW_REVIEW_DIR before the step that sets it");
+  assert.ok(steps.indexOf(facts) > steps.findIndex((s) => PLAN_RUN.test(String(s.run ?? ""))),
+    "and it reads .flow-review/, so `plan` must have materialised it first");
+  for (const s of allSteps()) {
+    assert.doesNotMatch(String(s.run ?? ""), /node\s+(?:"?\$GITHUB_WORKSPACE\/)?\.flow\/bin\/review-guide\.mjs/,
+      "no step may run review-guide.mjs from the PR checkout — that copy is part of the diff whose " +
+      "hotspots it computes");
+  }
+});
+
+test("flow-0084: the PR body reaches the helper as env data, never as shell script", { skip }, () => {
+  const facts = guideStep(GUIDE_FACTS_RUN);
+  assert.equal(facts.env?.PR_BODY, "${{ github.event.pull_request.body }}",
+    "the description's `## Assumptions` section is quoted into the comment, so the body has to be " +
+    "passed — and it is the third piece of attacker-chosen text here, after the branch and the title");
+  for (const block of allSteps().map((s) => String(s.run ?? ""))) {
+    assert.doesNotMatch(block, /\$\{\{[^}]*pull_request\.body[^}]*\}\}/,
+      "a PR body spliced into a shell script is the injection class .flow/config.yml lists for " +
+      "these reusables");
+  }
+});
+
+test("flow-0084: the verdicts row is built from the three JOB results, plus the plan's skip fact", { skip }, () => {
+  const render = guideStep(GUIDE_COMMENT_RUN);
+  assert.ok(render, "the guide must render its comment with review-guide.mjs");
+  assert.match(String(render.if ?? ""), /always\(\)/,
+    "the render step is what makes the fail-open real — it must run even though the model step " +
+    "before it is continue-on-error");
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(render.env ?? {})),
+    {
+      QA_RESULT: "${{ needs.qa.result }}",
+      CODE_REVIEW_RESULT: "${{ needs['code-review'].result }}",
+      SECURITY_RESULT: "${{ needs.security.result }}",
+      // The security job ALWAYS runs so its check is never silently absent, so a skipped REVIEW
+      // still reports a successful JOB. `security_run` is the only thing that can tell those apart,
+      // and rendering a skip as a pass is the one wrong answer this row can give.
+      SECURITY_RUN: "${{ needs.plan.outputs.security_run }}",
+      SECURITY_REASON: "${{ needs.plan.outputs.security_reason }}",
+    },
+    "each reviewer writes its verdict JSON into its own job's workspace, so the guide reads the " +
+    "job results — the same fact the human sees on the checks list");
+});
+
+test("flow-0084: one comment per PR, upserted through the helper's marker lookup", { skip }, () => {
+  const post = guideSteps().find((s) => GUIDE_ID_RUN.test(String(s.run ?? "")));
+  assert.ok(post, "the upsert must resolve the existing comment with `review-guide.mjs comment-id`");
+  const run = String(post.run);
+  assert.match(String(post.if ?? ""), /always\(\)/);
+  assert.match(run, /gh api --paginate --slurp "repos\/\$GITHUB_REPOSITORY\/issues\/\$PR_NUMBER\/comments"/,
+    "the whole comment list has to be fetched, or a guide comment past the first page reads as absent");
+  assert.match(run, /gh api -X PATCH "repos\/\$GITHUB_REPOSITORY\/issues\/comments\/\$id"/,
+    "an existing comment is EDITED. The review workflow runs again on every hand-off, and a guide " +
+    "that appended would bury the reviewers' own comments under its history");
+  assert.match(run, /gh api -X POST "repos\/\$GITHUB_REPOSITORY\/issues\/\$PR_NUMBER\/comments"/,
+    "…and the first run posts one");
+  assert.ok(!/--jq .*contains/.test(run),
+    "the marker lookup is the helper's, with a proving test — a `--jq` expression in a reusable " +
+    "workflow is the one piece of this gate nobody can test");
+  assert.equal(post.env?.GH_TOKEN, "${{ secrets.GITHUB_TOKEN }}",
+    "posting needs the workflow's own token; `pull-requests: write` is already granted at the top");
+  assert.equal(post.env?.PR_NUMBER, "${{ github.event.pull_request.number }}");
+});
+
+test("flow-0084: the marker the workflow upserts on is the helper's, and it is hidden", { skip: false }, () => {
+  // Two files, one contract. A rename in the helper orphans every guide comment in the fleet, and
+  // the workflow would silently start posting a second comment per PR.
+  const helper = readFileSync(join(TEMPLATE, ".flow/bin/review-guide.mjs"), "utf8");
+  assert.match(helper, /export const GUIDE_MARKER = "<!-- flow-review-guide: [^"]*-->";/,
+    "the marker must be an HTML comment, so it is invisible in the rendered comment, and exported " +
+    "so the upsert cannot carry a second copy of it");
+});
+
+test("flow-0084: the guide's prompt bounds the model to the facts file and forbids a second comment", { skip }, () => {
+  const p = String(guideSteps().find((s) => String(s.uses ?? "").startsWith("anthropics/claude-code-action"))
+    .with.prompt).replace(/\s+/g, " ");
+  assert.match(p, /\.flow-review\/guide-facts\.md/, "one file in");
+  assert.match(p, /\.flow-review\/guide-prose\.json/, "one file out");
+  assert.match(p, /Do not read the diff, the task, or the repository/,
+    "the guide must not re-review: the three checks already did, at three times the cost");
+  assert.match(p, /THE FACTS ARE NOT YOURS TO EDIT/,
+    "facts render from code and prose from the model, and the prompt has to say which is which");
+  assert.match(p, /You are choosing an order, not a subset/,
+    "`selectLookHere` enforces this in code; the prompt says it so the model does not try and fail");
+  assert.match(p, /Do NOT post a pull-request comment/,
+    "the workflow posts ONE comment and updates it in place — a second from the model is the noise " +
+    "this job exists to remove");
+  assert.match(p, /never edit source files/);
+  // The guide is advisory and must stay cheap: it reads one file and writes one small JSON object.
+  const args = String(guideSteps().find((s) => String(s.uses ?? "").startsWith("anthropics/claude-code-action")).with.claude_args);
+  assert.match(args, /--max-turns 6\b/,
+    "the turn budget is the effort bound — a guide needing more turns than this has misunderstood " +
+    "the job, and the three reviewers are already the expensive part of this workflow");
+});
+
+test("flow-0084: the three existing checks are untouched — the guide is additive", { skip }, () => {
+  for (const job of REVIEW_JOBS) {
+    assert.equal(wf.jobs[job].if, undefined, `${job} must still carry no job-level if`);
+    assert.equal(wf.jobs[job]["continue-on-error"], undefined,
+      `${job} must still be able to fail the PR — only the guide is advisory`);
+    assert.deepEqual(wf.jobs[job].needs, "plan", `${job}'s needs must not have gained the guide`);
+  }
+});
+
+test("flow-0084: changes/flow-0084.md exists and states that the caller does nothing", () => {
+  const text = changelogEntry(REPO, "flow-0084");
+  assert.ok(text, "a new comment on every PR in the fleet owes the changelog an entry");
+  assert.match(text, /[Cc]aller action: none/,
+    "the job lives in the reusable, so an adopting repo gets it by bumping the tag and nothing else");
+  assert.ok(!/^#/m.test(text),
+    "a fragment is assembled verbatim under `## Unreleased` — it carries no heading of its own");
+});
+
+// ── flow-0084: canonical's own adapter over the helper ────────────────────────────────────
+// `_flow-review.yml` runs `$FLOW_REVIEW_DIR/review-guide.mjs` in the CONSUMING repo, and canonical
+// is one of those. CLAUDE.md's adapter rule names the two ways this fails silently, and both end in
+// a green tick over a comment nobody posted: a store resolved to `project-template/` (the fixture
+// tree), and a CLI block that never runs because main-module detection compared an as-invoked path
+// against a resolved one. Asserted on output, never only on an exit status.
+
+test("flow-0084: the review-guide adapter resolves CANONICAL's .flow/, not the template's", async () => {
+  const { canonicalFlowDir } = await import("./review-guide.mjs");
+  assert.equal(canonicalFlowDir(), join(REPO, ".flow"));
+  assert.notEqual(canonicalFlowDir(), join(TEMPLATE, ".flow"),
+    "project-template/.flow is the FIXTURE tree — reading its config.yml would compute hotspots " +
+    "against the wrong repo's security_paths while still exiting 0");
+});
+
+test("flow-0084: the adapter imports the template's logic rather than copying it", () => {
+  const src = readFileSync(join(REPO, ".flow/bin/review-guide.mjs"), "utf8");
+  assert.match(src, /from "\.\.\/\.\.\/project-template\/\.flow\/bin\/review-guide\.mjs"/,
+    "a second copy of the logic is the flow-0008 hazard: the same fix needed twice, green when " +
+    "only one of them lands");
+  for (const name of ["rankHotspots", "selectLookHere", "GUIDE_MARKER", "pickGuideComment"]) {
+    assert.ok(src.includes(name), `the adapter must re-export ${name} so a test can reach it here`);
+  }
+  // Nothing that DECIDES may live in the adapter. The only thing it supplies is which repo.
+  assert.ok(!/function (rankHotspots|selectLookHere|pickGuideComment)/.test(src),
+    "the adapter must not reimplement a decision — only the CLI shell and canonical's paths");
+});
+
+test("flow-0084: the adapter's CLI block actually runs — silence is the symlink failure mode", async (t) => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { spawnSync } = await import("node:child_process");
+  const root = mkdtempSync(join(tmpdir(), "flow-0084-adapter-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const out = join(root, ".flow-review");
+  mkdirSync(out, { recursive: true });
+  writeFileSync(join(out, "files.txt"), ".github/workflows/_flow-review.yml\n");
+  writeFileSync(join(out, "diff.patch"), "");
+  writeFileSync(join(out, "task.md"), "NO TASK FILE RESOLVED\n\nnone\n");
+
+  const run = (args) => spawnSync(process.execPath, [join(REPO, ".flow/bin/review-guide.mjs"), ...args],
+    { cwd: REPO, encoding: "utf8", env: { ...process.env, REVIEW_OUT_DIR: out } });
+
+  const facts = run(["facts"]);
+  assert.equal(facts.status, 0, facts.stderr);
+  assert.match(facts.stdout, /review-guide: 1 hotspot\(s\) across 1 changed file\(s\)/,
+    "the adapter must produce its report, not nothing — and the one hotspot is the security FLOOR, " +
+    "which fires whatever canonical's config says");
+
+  // `comment-id` is the subcommand the upsert branches on, so an empty answer and a found one are
+  // both load-bearing: the first posts, the second edits.
+  const list = join(root, "comments.json");
+  const { GUIDE_MARKER } = await import("./review-guide.mjs");
+  writeFileSync(list, JSON.stringify([{ id: 1, body: "qa review" }, { id: 2, body: `${GUIDE_MARKER} x` }]));
+  const found = run(["comment-id", list]);
+  assert.equal(found.status, 0, found.stderr);
+  assert.equal(found.stdout.trim(), "2");
+
+  writeFileSync(list, "[]");
+  assert.equal(run(["comment-id", list]).stdout.trim(), "",
+    "empty output is how the workflow decides to post a new comment");
 });

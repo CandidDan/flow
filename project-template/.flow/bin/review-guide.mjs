@@ -123,7 +123,7 @@ export function assumptionsSection(body) {
 // Language-agnostic by shape, because the guide ships to every repo that adopts Flow and the
 // test-file conventions differ: a path segment or a filename stem of `test`/`tests`/`spec`, in
 // any of the usual spellings.
-const TEST_PATH_RE = /(^|\/)(tests?|specs?|__tests__)(\/|$)|(^|[./_-])(test|tests|spec|spec_?s)\.[A-Za-z0-9]+$|[._-](test|spec)\.[A-Za-z0-9]+$|^test_[^/]*$|(^|\/)test_[^/]+$/i;
+const TEST_PATH_RE = /(^|\/)(tests?|specs?|__tests__)(\/|$)|(^|[\/._-])(test|spec)s?\.[A-Za-z0-9]+$|(^|\/)test_[^/]+$/i;
 
 export function isTestFile(path) {
   return TEST_PATH_RE.test(String(path ?? ""));
@@ -401,8 +401,14 @@ export function guideComment({ facts, hotspots, prose = null, verdicts = [] } = 
 // The existing guide comment in a PR's comment list, or null. Marker-based, so it survives an
 // edited body and does not depend on who posted it — and it takes the OLDEST match, so a
 // duplicate created by some earlier run keeps being the one updated rather than the pair growing.
+//
+// `flat()` is not defensive tidying. The workflow fetches the list with `gh api --paginate
+// --slurp`, and gh's two shapes for that — one merged array, or one array per page — differ by gh
+// version. Reading the nested shape as "no previous comment" would post a NEW comment on every run
+// of every PR in the fleet, which is the one failure this function exists to prevent, arriving
+// through a dependency nobody pinned.
 export function pickGuideComment(comments, marker = GUIDE_MARKER) {
-  const list = Array.isArray(comments) ? comments : [];
+  const list = Array.isArray(comments) ? comments.flat() : [];
   const matches = list.filter((c) => typeof c?.body === "string" && c.body.includes(marker));
   if (!matches.length) return null;
   return matches.reduce((a, b) => (Number(a.id) <= Number(b.id) ? a : b));
