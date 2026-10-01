@@ -328,6 +328,18 @@ jobs:
             the truncation in your verdict and in its summary, because passing a partial read
             certifies what you could not read.
 
+            .flow-review/task.md may instead begin with one of two sentinels that mean this PR
+            has NO TASK BY DESIGN. Both are decided in code — branch prefix AND every changed
+            path inside a closed list — so neither is a branch-name exemption, and neither is a
+            judgement call for you:
+              · "RELEASE PR" — release files only. The sentinel carries release-guard's verdict
+                over this tree. If it reports no problems, PASS with exactly: release PR: release
+                files only, release-guard clean. If it reports problems, FAIL and name them.
+              · "SYNC PR" — the flow-sync surface only, copied from canonical. PASS with exactly:
+                sync PR: synced surface only; flow-tooling validates it.
+            Under either sentinel there are no acceptance criteria to map, and a missing task is
+            not a finding. Do not go looking for one.
+
             Your verdict turns on ONE thing above all: does every acceptance criterion in the
             task have a test that proves its OUTCOME? Coverage is a backstop — a green coverage
             number with an unproven criterion is still a FAIL. For each criterion, name the
@@ -476,6 +488,18 @@ jobs:
             If the diff carries the DIFF TRUNCATED marker, do NOT return a PASS verdict: name
             the truncation in your verdict and in its summary, because passing a partial read
             certifies what you could not read.
+
+            .flow-review/task.md may instead begin with one of two sentinels that mean this PR
+            has NO TASK BY DESIGN. Both are decided in code — branch prefix AND every changed
+            path inside a closed list — so neither is a branch-name exemption, and neither is a
+            judgement call for you:
+              · "RELEASE PR" — release files only. The sentinel carries release-guard's verdict
+                over this tree. If it reports no problems, PASS with exactly: release PR: release
+                files only, release-guard clean. If it reports problems, FAIL and name them.
+              · "SYNC PR" — the flow-sync surface only, copied from canonical. PASS with exactly:
+                sync PR: synced surface only; flow-tooling validates it.
+            Under either sentinel there are no acceptance criteria to map, and a missing task is
+            not a finding. Do not go looking for one.
 
             Review for:
             1. Correctness — does it satisfy each acceptance criterion? Logic errors, off-by-one,
@@ -648,6 +672,18 @@ jobs:
             If the diff carries the DIFF TRUNCATED marker, do NOT return a PASS verdict: name
             the truncation in your verdict and in its summary, because passing a partial read
             certifies what you could not read.
+
+            .flow-review/task.md may instead begin with one of two sentinels that mean this PR
+            has NO TASK BY DESIGN. Both are decided in code — branch prefix AND every changed
+            path inside a closed list — so neither is a branch-name exemption, and neither is a
+            judgement call for you:
+              · "RELEASE PR" — release files only. The sentinel carries release-guard's verdict
+                over this tree. If it reports no problems, PASS with exactly: release PR: release
+                files only, release-guard clean. If it reports problems, FAIL and name them.
+              · "SYNC PR" — the flow-sync surface only, copied from canonical. PASS with exactly:
+                sync PR: synced surface only; flow-tooling validates it.
+            Under either sentinel there are no acceptance criteria to map, and a missing task is
+            not a finding. Do not go looking for one.
 
             Always check:
             1. Secrets — no keys, tokens, passwords, connection strings or private certs in the

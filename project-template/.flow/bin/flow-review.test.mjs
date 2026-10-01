@@ -32,7 +32,14 @@ import {
   MAX_DIFF_BYTES_CEILING,
   NO_SOURCES_SENTINEL,
   NO_TASK_SENTINEL,
+  RELEASE_PR_PASS_LINE,
+  RELEASE_PR_PATHS,
+  RELEASE_PR_SENTINEL,
   ReviewError,
+  SYNC_PR_PASS_LINE,
+  SYNC_PR_PATHS,
+  SYNC_PR_SENTINEL,
+  classifyPr,
   UNTRUSTED_BEGIN,
   UNTRUSTED_END,
   boundDiff,
@@ -1537,4 +1544,205 @@ test("`plan` publishes diff_bytes and diff_full_bytes alongside diff_truncated",
     assert.match(text, new RegExp(`^diff_full_bytes=${REPORTED_DIFF_BYTES}$`, "m"),
       "and the FULL count, which is the number review.max_diff_bytes has to clear");
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+// ── flow-0089: the two PRs that are task-less BY DESIGN ───────────────────────────────────
+// The failure these replace is not a crash. The same reviewer read `NO TASK FILE RESOLVED` on two
+// release PRs and returned PASS on one (#117) and FAIL on the other (#121) — so the assertions
+// below are all about the artefact the reviewer is handed, which is the only thing that decides
+// which of those two it writes.
+
+// A `git` that answers the reads a classified release PR makes: the two diffs `runPlan` always
+// does, plus the stamps and the fragment listing release-guard reads out of the PR's own tree.
+// A path the tree does not hold THROWS, the way real git does — release-guard's readers turn that
+// into "absent", and a fake that returned "" instead would make every missing stamp look empty
+// rather than missing, which is a different problem with a different message.
+const LS_TREE = "ls-tree --name-only HEAD:";
+function fakeGit({ files = [], diff = "", tree = {} } = {}) {
+  return (args) => {
+    const cmd = args.join(" ");
+    if (cmd === "diff --name-only origin/main...HEAD") return files.join("\n");
+    if (cmd === "diff origin/main...HEAD") return diff;
+    if (args[0] === "show" && String(args[1]).startsWith("HEAD:")) {
+      const path = String(args[1]).slice("HEAD:".length);
+      if (!(path in tree)) throw new Error(`fatal: path '${path}' does not exist in 'HEAD'`);
+      return tree[path];
+    }
+    if (cmd.startsWith(LS_TREE)) {
+      const dir = cmd.slice(LS_TREE.length);
+      const names = Object.keys(tree)
+        .filter((k) => k.startsWith(`${dir}/`))
+        .map((k) => k.slice(dir.length + 1));
+      if (!names.length) throw new Error(`fatal: not a tree object`);
+      return names.join("\n");
+    }
+    throw new Error(`unexpected git call: ${cmd}`);
+  };
+}
+
+// Canonical's two stamps, agreeing, with `changes/` already assembled away — the tree a correct
+// release PR proposes to tag.
+const CLEAN_TREE = { "VERSION": "9.9.9", "project-template/.flow/VERSION": "9.9.9" };
+const RELEASE_FILES = ["CHANGELOG.md", "VERSION", "project-template/.flow/VERSION", "changes/flow-0001.md"];
+
+// Plan a PR against a throwaway store, and hand back both the plan and the `task.md` a reviewer
+// would actually open.
+function planPr(name, { headRef, prTitle = "Cut the release", files, tree = {} }) {
+  const dir = tmp(name);
+  try {
+    writeFileSync(join(dir, "config.yml"), CONFIG);
+    const tasksDir = storeFixture(dir, ["flow-0068-a-slug.md"]);
+    const plan = runPlan({
+      configPath: join(dir, "config.yml"),
+      outDir: join(dir, "out"),
+      headRef,
+      prTitle,
+      tasksDir,
+      git: fakeGit({ files, tree }),
+    });
+    return { plan, md: readFileSync(join(dir, "out", "task.md"), "utf8") };
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+test("flow-0089: `release/` + release files only is a RELEASE PR, and task.md says so first", () => {
+  const { plan, md } = planPr("release-ok", {
+    headRef: "release/v9.9.9", files: RELEASE_FILES, tree: CLEAN_TREE,
+  });
+
+  assert.equal(plan.prKind.kind, "release");
+  assert.equal(plan.prKind.classified, true);
+  assert.equal(plan.task.found, false, "a release PR has no task, and that is the point");
+  assert.ok(md.startsWith(RELEASE_PR_SENTINEL),
+    `task.md must OPEN with ${RELEASE_PR_SENTINEL} — the prompts key off the first line, and a ` +
+    `reviewer that has to read three paragraphs to learn what kind of PR this is will guess`);
+  for (const f of RELEASE_FILES) {
+    assert.ok(md.includes(`  - ${f}`), `the sentinel must list ${f}: the file list IS the evidence`);
+  }
+  assert.ok(md.includes(RELEASE_PR_PASS_LINE),
+    "a clean guard means the verdict is fixed text, not a judgement call");
+  assert.ok(!md.includes("So FAIL this PR"), "…and nothing in it may read as a reason to fail");
+});
+
+test("flow-0089: one extra path and it is NOT a release PR — the branch name exempts nothing", () => {
+  for (const extra of ["src/x.mjs", "project-template/.flow/bin/flow-review.test.mjs"]) {
+    const { plan, md } = planPr("release-extra", {
+      headRef: "release/v9.9.9", files: [...RELEASE_FILES, extra], tree: CLEAN_TREE,
+    });
+    assert.equal(plan.prKind.classified, false, `${extra} is not a release file`);
+    assert.deepEqual(plan.prKind.outside, [extra],
+      "and the path that disqualified it is reported, so the answer to \"why not?\" is in the plan");
+    assert.ok(md.startsWith(NO_TASK_SENTINEL),
+      `a release/* PR carrying ${extra} gets today's no-task handling, unchanged — otherwise the ` +
+      `branch name alone would be an exemption, which is what this task refuses`);
+  }
+});
+
+test("flow-0089: release files on a branch that is not `release/` is NOT a release PR", () => {
+  const { plan, md } = planPr("release-branch", {
+    headRef: "chore/bump-the-stamps", prTitle: "Bump the stamps",
+    files: RELEASE_FILES, tree: CLEAN_TREE,
+  });
+  assert.equal(plan.prKind, null, "no prefix matched, so there is no kind to report");
+  assert.ok(md.startsWith(NO_TASK_SENTINEL),
+    "both halves of the rule have to hold; the file list on its own is not a release");
+});
+
+test("flow-0089: a release PR whose two stamps disagree stays classified, and carries the problem", () => {
+  const { plan, md } = planPr("release-drift", {
+    headRef: "release/v9.9.9",
+    files: RELEASE_FILES,
+    tree: { "VERSION": "9.9.9", "project-template/.flow/VERSION": "9.9.8" },
+  });
+
+  assert.equal(plan.prKind.classified, true,
+    "the problem is REPORTED, not hidden: a drifting release PR is still a release PR, and " +
+    "declassifying it would send it back to the no-task guess this task exists to end");
+  assert.ok(md.startsWith(RELEASE_PR_SENTINEL));
+  assert.match(md, /stamp drift: `VERSION` is 9\.9\.9 but `project-template\/\.flow\/VERSION` is 9\.9\.8/,
+    "release-guard's own words reach the reviewer — this gate re-states none of its rules");
+  assert.ok(md.includes("So FAIL this PR"), "and the instruction that follows them is FAIL");
+  assert.ok(!md.includes(RELEASE_PR_PASS_LINE), "…never the PASS line, which would contradict it");
+  assert.equal(plan.task.problems.length, 1);
+});
+
+test("flow-0089: a release PR that left a changelog fragment behind carries that problem too", () => {
+  const { plan, md } = planPr("release-fragment", {
+    headRef: "release/v9.9.9",
+    files: RELEASE_FILES,
+    // `changes/README.md` documents the convention and lives there permanently; `flow-0001.md` is
+    // a release note that was never folded into CHANGELOG.md.
+    tree: { ...CLEAN_TREE, "changes/README.md": "# changes", "changes/flow-0001.md": "- a note" },
+  });
+
+  assert.ok(md.startsWith(RELEASE_PR_SENTINEL));
+  assert.match(md, /unassembled changelog fragment\(s\) — changes\/flow-0001\.md/,
+    "the release notes for a change this release ships would otherwise go out unmentioned — " +
+    "and README.md must not be mistaken for one");
+  assert.ok(md.includes("So FAIL this PR"));
+  assert.equal(plan.prKind.classified, true);
+  assert.equal(plan.task.problems.length, 1);
+});
+
+test("flow-0089: `flow-sync/` + the synced surface only is a SYNC PR", () => {
+  const files = [".flow/bin/x.mjs", ".flow/VERSION", ".github/workflows/flow-gates.yml"];
+  const { plan, md } = planPr("sync-ok", {
+    headRef: "flow-sync/9.9.9", prTitle: "flow: adopt canonical Flow infra 9.9.9", files,
+  });
+
+  assert.equal(plan.prKind.kind, "sync");
+  assert.equal(plan.prKind.classified, true);
+  assert.ok(md.startsWith(SYNC_PR_SENTINEL),
+    "this is the case that fires in every adopting repo on every sync, not only in canonical");
+  for (const f of files) assert.ok(md.includes(`  - ${f}`));
+  assert.ok(md.includes(SYNC_PR_PASS_LINE));
+  assert.ok(!md.includes("release-guard"),
+    "there is no guard to run on a sync PR — flow-tooling runs the synced tests instead");
+
+  // One path outside the copied surface and it is a different kind of PR entirely.
+  const off = planPr("sync-extra", {
+    headRef: "flow-sync/9.9.9", files: [...files, ".flow/config.yml"],
+  });
+  assert.equal(off.plan.prKind.classified, false);
+  assert.deepEqual(off.plan.prKind.outside, [".flow/config.yml"],
+    "flow-sync never writes config.yml — a sync PR that did is not a sync");
+  assert.ok(off.md.startsWith(NO_TASK_SENTINEL));
+});
+
+test("flow-0089: a resolved task still wins, and an empty diff is never a classified PR", () => {
+  // A `release/*` branch titled `[flow-0068] …` HAS criteria, and those are what it is judged
+  // against. Classification only ever replaces a miss.
+  const withTask = planPr("release-task", {
+    headRef: "release/v9.9.9", prTitle: "[flow-0068] fold the notes in",
+    files: RELEASE_FILES, tree: CLEAN_TREE,
+  });
+  assert.equal(withTask.plan.task.found, true);
+  assert.match(withTask.md, /body of flow-0068-a-slug\.md/,
+    "the task file, not the sentinel — a release PR that has a task is reviewed against it");
+
+  // `[].every(…)` is vacuously true, so an empty changed-file list would otherwise sail through
+  // as "release files only".
+  assert.equal(classifyPr({ headRef: "release/v9.9.9", changedFiles: [] }).classified, false);
+  assert.equal(classifyPr({ headRef: "flow-sync/9.9.9", changedFiles: [] }).classified, false);
+});
+
+test("flow-0089: the two allowed-path lists are closed, and the plan summary says which fired", () => {
+  // Pinned because widening either list at the point of use is exactly the loophole this task
+  // closes: a new path belongs here, in a reviewed change, not in a caller's special case.
+  assert.deepEqual([...RELEASE_PR_PATHS],
+    ["CHANGELOG.md", "changes/**", "VERSION", "project-template/.flow/VERSION", ".flow/VERSION"]);
+  assert.deepEqual([...SYNC_PR_PATHS],
+    [".flow/bin/**", ".github/workflows/flow-*.yml", ".flow/PROTOCOL.md", ".flow/VERSION"]);
+
+  const { plan } = planPr("release-summary", {
+    headRef: "release/v9.9.9",
+    files: RELEASE_FILES,
+    tree: { "VERSION": "9.9.9", "project-template/.flow/VERSION": "9.9.8" },
+  });
+  const summary = planSummary(plan);
+  assert.match(summary, /task under review: \*\*none, by design\*\* — RELEASE PR/,
+    "`none resolved` and `none, by design` are different facts, and the run summary is where a " +
+    "human decides whether a task-less PR is a problem");
+  assert.match(summary, /- :x: release-guard: stamp drift/,
+    "…and a red check must state its reason in the summary, not only inside an artefact");
 });

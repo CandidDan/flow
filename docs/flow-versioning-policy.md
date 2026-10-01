@@ -59,6 +59,20 @@ exactly what a repo pinned to `@v1` should get from a major bump: nothing moves 
 
 ## Release procedure
 
+**A release PR carries release files and nothing else.** That is a rule with a check behind it,
+not a convention: the review gate classifies a PR as a *release PR* in code when its head branch
+starts with `release/` **and** every changed path is one of `CHANGELOG.md`, `changes/**`,
+`VERSION`, `project-template/.flow/VERSION`, `.flow/VERSION`. A `release/*` PR touching any other
+path is not a release PR, and is reviewed as an ordinary task-less PR — so the branch name on its
+own exempts nothing. A classified release PR is reviewed against `release-guard` instead of
+against acceptance criteria it does not have.
+
+**A hotfix is therefore two PRs, in this order: a task PR, then a release PR.** Fix the code under
+a task, with criteria and tests, and merge it; then cut the release PR that moves the stamps and
+assembles the notes. Bundling the fix into the release is what the classification refuses: v2.1.1
+shipped a code change and a new test inside its release PR, the reviewers had no criteria to judge
+them against, and the task giving them criteria (flow-0088) had to be written afterwards.
+
 1. Fix in canonical on `main`, gate green.
 2. Write the changelog entry as a **fragment**: `changes/<task-id>.md` — what changed, why, and any
    *caller action* required. One file per task, never a direct edit to `CHANGELOG.md`, and it is
@@ -162,6 +176,11 @@ changing a repo's infra under it. `flow-sync` is the matching *fix*.
   it carried `main` and the exact version tags only, so repinning a consuming repo at
   `@v1` there would have resolved to nothing. Mirrored from canonical's `vMAJOR` rather than
   advanced on publish, so the canary survives the split (flow-0045).
+- **2026-10-01** — a release PR became a thing the review gate recognises rather than guesses at:
+  `release/*` plus a closed list of release-only paths, checked in code, with `release-guard`'s
+  verdict handed to the reviewers. The same task-less release PR had been getting both a PASS
+  (#117) and a FAIL (#121) from the same reviewer. `flow-sync/*` PRs are classified the same way
+  (flow-0089).
 - **2026-09-24** — the changelog entry became a per-task fragment (`changes/<task-id>.md`) with an
   assembly step before the tag, because the single `CHANGELOG.md` was in 12 of 23 open tasks'
   `touches` and was the main throttle on the queue (flow-0069).
