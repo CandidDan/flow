@@ -110,7 +110,7 @@ export const MANIFEST = Object.freeze({
     //
     // The four below are the whole of it. Three files in `docs/` are EXCLUDED BY DECISION
     // rather than by oversight, under ADR-0005's boundary rule — needed at run time or
-    // adoption time, or it does not cross: `docs/landing.html` and `docs/flow-map.html` (the
+    // adoption time, or it does not cross: `docs/site/` and `docs/flow-map.html` (the
     // public face; an adopter needs neither to adopt or run Flow) and `docs/blog-two-touchpoints.md`
     // (an essay about the model, not instructions for using it). Each is a one-line addition
     // here if the human decides the release repo should carry the public face too.

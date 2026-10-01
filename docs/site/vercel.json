@@ -1,0 +1,12 @@
+{
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/start", "destination": "/start.md" }
+  ],
+  "headers": [
+    { "source": "/start.md", "headers": [{ "key": "Content-Type", "value": "text/markdown; charset=utf-8" }] },
+    { "source": "/start", "headers": [{ "key": "Content-Type", "value": "text/markdown; charset=utf-8" }] },
+    { "source": "/llms.txt", "headers": [{ "key": "Content-Type", "value": "text/plain; charset=utf-8" }] },
+    { "source": "/(.*)", "headers": [{ "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" }, { "key": "X-Content-Type-Options", "value": "nosniff" }] }
+  ]
+}
