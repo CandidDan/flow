@@ -289,7 +289,7 @@ The order is:
 3. **Verify** a green run against the new reference — an actual CI run, not a reading of the diff.
 4. **Only then** flip canonical private.
 
-The reason, in counts rather than vaguely. As of 2026-09-17, **47 files outside the task store name
+The reason, in counts rather than vaguely. As of 2026-10-01, **48 files outside the task store name
 `CandidDan/flow`**. That is the *bare* reference: `CandidDan/flow-protocol` and
 `CandidDan/flow-plugin` are different repositories and need no re-pinning, so a substring count
 overstates the exposure by three files. The original Consequences recorded 40 on 2026-08-31, so the

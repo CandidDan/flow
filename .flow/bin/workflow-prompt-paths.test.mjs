@@ -292,7 +292,21 @@ jobs:
 // Recorded so criterion 2 — "the change is confined to the prompt text" — is checked against
 // values, not against a diff a reader has to eyeball. These are the pre-fix values.
 const TRIAGE_STRUCTURE_BEFORE = {
-  on: { workflow_call: { secrets: { CLAUDE_CODE_OAUTH_TOKEN: { required: false } } } },
+  // flow-0110 (reading A, human-approved) adds exactly one optional input, flow_ref, the GHES
+  // fallback for the materialise-canonical-helpers step. Everything else in the trigger is frozen.
+  on: {
+    workflow_call: {
+      inputs: {
+        flow_ref: {
+          description: "Fallback ref for canonical's helpers when job.workflow_sha is unavailable (GHES). A tag or a commit sha, never a branch.",
+          required: false,
+          type: "string",
+          default: "",
+        },
+      },
+      secrets: { CLAUDE_CODE_OAUTH_TOKEN: { required: false } },
+    },
+  },
   permissions: { contents: "write", issues: "write", "id-token": "write" },
   jobIf: "${{ vars.FLOW_AI == 'true' }}",
   runsOn: "ubuntu-latest",
