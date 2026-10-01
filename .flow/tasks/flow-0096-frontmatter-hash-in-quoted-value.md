@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0096"
 title: "A hash inside a double-quoted frontmatter value is data, not a comment, so blocked_reason is never silently truncated"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0096"
 created: "2026-09-29"
-started: ""
+started: "2026-10-01T20:09:57Z"
 branch: ""
 pr: ""
 issue: ""
