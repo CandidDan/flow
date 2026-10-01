@@ -26,7 +26,7 @@ labels: [protocol, skills]
 notes:
   - "2026-10-01 (orchestrator): human direction — agent output is wordy (over-dramatic + terse at once); adopt something like humanlayer's show-me skill (https://www.humanlayer.com/blog/show-me-skill), especially in PRs. Fewer words; anything better as a visual, visual."
   - "2026-10-01 (human, via chat): the complaint names two failures, over-dramatic wordiness AND unnecessary terseness. Fixing the first must not cause the second: terse is not cryptic. Plain words, full sentences, no unexplained jargon, no arrow-chains standing in for sentences."
-  - "2026-10-01 (human, via chat): open decision, not in scope until answered: make TL;DR conditional (only when output runs past ~15 lines) rather than always. Recommendation: yes, a TL;DR on a five-line reply is padding."
+  - "2026-10-01 (human, via chat): DECIDED yes: response TL;DR only when output runs past ~15 lines; PR descriptions keep theirs. Pushed to PR #150 as a789281."
 ---
 
 ## Context
