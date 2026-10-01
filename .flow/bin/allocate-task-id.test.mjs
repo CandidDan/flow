@@ -7,12 +7,17 @@
 // here — which store, which prefix, and that the CLI actually runs.
 
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { canonicalProjectName, canonicalRepoRoot, nextId, readIdsFromOrigin } from "./allocate-task-id.mjs";
+import {
+  canonicalProjectName, canonicalRepoRoot, nextId, readIdsFromOrigin, readQueueCap,
+  readStoreFromOrigin,
+} from "./allocate-task-id.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
@@ -73,4 +78,54 @@ test("--prefix is derived automatically — omitting it still resolves canonical
 test("the CLI actually runs against this checkout — silence is the symlink failure mode", () => {
   const r = spawnSync(process.execPath, [join(BIN, "allocate-task-id.mjs"), "--dry-run"], { cwd: REPO, encoding: "utf8" });
   assert.ok(r.stdout.trim().length > 0, "a symlinked adapter exits 0 with empty output — this must not be that");
+});
+
+// ══ the queue cap, as canonical resolves it (flow-0070) ════════════════════════════════════
+//
+// The cap itself is proved in the template's own test file. What is unique to adopting it here
+// is WHICH config is read: the template's CLI reads `<repoRoot>/.flow/config.yml`, and the repo
+// root comes from this adapter. A copy or a symlink would resolve `project-template/` — which
+// declares no `queue_cap` at all — and allocate uncapped while still exiting 0, the same silent
+// failure mode every other test in this file exists to catch.
+
+test("the cap the adapter resolves is CANONICAL's queue_cap: 8, not the template's absent one", () => {
+  assert.equal(readQueueCap(REPO), 8,
+    "canonical's own .flow/config.yml sets the cap — see flow-0070");
+  assert.equal(readQueueCap(dirname(TEMPLATE_FLOW)), null,
+    "project-template/ documents the key COMMENTED OUT, so a mis-resolved root reads as uncapped");
+});
+
+test("the adapter's --dry-run with a --content-file reports the cap decision and writes nothing", () => {
+  spawnSync("git", ["-C", REPO, "fetch", "origin", "main", "--quiet"]);
+  const { readyCount } = readStoreFromOrigin(REPO);
+  const before = spawnSync("git", ["status", "--porcelain", "--", ".flow/tasks"], { cwd: REPO, encoding: "utf8" });
+
+  // The draft lives outside the repo: a dry run must not even leave a scratch file behind.
+  const dir = mkdtempSync(join(tmpdir(), "flow-cap-draft-"));
+  try {
+    const contentFile = join(dir, "draft.md");
+    writeFileSync(contentFile, '---\nid: "PENDING"\nstatus: "ready"\npriority: 3\ntouches: []\n---\n\ndraft\n');
+
+    const r = spawnSync(process.execPath, [join(BIN, "allocate-task-id.mjs"), "--dry-run", "--content-file", contentFile],
+      { cwd: REPO, encoding: "utf8" });
+
+    assert.equal(r.status, 0, r.stderr);
+    const [id, decision] = r.stdout.trim().split("\n");
+    assert.match(id, /^flow-\d{4}$/, `line 1 must stay the bare id; got: ${JSON.stringify(r.stdout)}`);
+
+    // Asserted against the live store rather than against a number copied into this file: the
+    // queue drains, and a test that hard-codes "13 ready" would be proving last week's state.
+    assert.match(decision, /cap 8/, "the decision must name the cap it read from canonical's config");
+    assert.match(decision, new RegExp(`${readyCount} ready`), "and the ready count it counted");
+    if (readyCount >= 8) {
+      assert.match(decision, /^queue_cap: REFUSE/, "over the cap, a plain `ready` draft is refused");
+      assert.match(decision, /urgent/, "and the refusal names the one bypass");
+      assert.match(decision, /blocked/, "and the other way forward");
+    } else {
+      assert.match(decision, /^queue_cap: ok/, "under the cap, nothing is refused");
+    }
+
+    const after = spawnSync("git", ["status", "--porcelain", "--", ".flow/tasks"], { cwd: REPO, encoding: "utf8" });
+    assert.equal(after.stdout, before.stdout, "--dry-run must leave the store exactly as it found it");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
