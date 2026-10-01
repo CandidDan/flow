@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Flow lets AI coding agents build, test and open pull requests on their own, with CI and independent reviewers deciding when the work is done. You approve the intent and the merge.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Flow: delegate the work, not the watching">
+<meta property="og:description" content="Flow lets AI coding agents build, test and open pull requests on their own, with CI and independent reviewers deciding when the work is done. You approve the intent and the merge.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect x=%272%27 y=%2711%27 width=%2728%27 height=%2710%27 rx=%275%27 fill=%27%233f6f73%27/%3E%3Crect x=%272%27 y=%2711%27 width=%278%27 height=%2710%27 rx=%275%27 fill=%27%23c2410c%27/%3E%3Crect x=%2722%27 y=%2711%27 width=%278%27 height=%2710%27 rx=%275%27 fill=%27%23c2410c%27/%3E%3C/svg%3E">
 <title>Flow — delegate the work, not the watching</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -32,10 +37,15 @@
   h1,h2,h3{font-family:var(--display);letter-spacing:-.025em;line-height:1.05;text-wrap:balance;margin:0;}
   p{margin:0;}
 
-  nav{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-block:22px;flex-wrap:wrap;}
+  .navbar{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--bg) 94%,transparent);-webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid transparent;transition:border-color .2s;}
+  .navbar.scrolled{border-bottom-color:var(--line);}
+  .navbar nav{display:flex;align-items:center;gap:16px 24px;padding-block:14px;}
+  .navbar .links{margin-left:auto;}
+  .links a.active{color:var(--ink);}
+  section,header{scroll-margin-top:76px;}
   .logo{font:800 24px/1 var(--display);letter-spacing:-.04em;color:var(--ink);text-decoration:none;display:flex;align-items:center;gap:9px;}
   .logo i{width:22px;height:10px;border-radius:5px;background:linear-gradient(90deg,var(--accent) 0 26%,var(--agent) 26% 74%,var(--accent) 74%);display:inline-block;}
-  .links{display:flex;gap:22px;align-items:center;flex-wrap:wrap;font-size:15px;}
+  .links{display:flex;gap:22px;align-items:center;font-size:15px;}
   .links a{color:var(--muted);text-decoration:none;}
   .links a:hover{color:var(--ink);}
   .btn{display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:var(--accent-ink)!important;font-weight:600;text-decoration:none;padding:13px 22px;border-radius:999px;font-size:16px;}
@@ -44,7 +54,7 @@
   .btn.ghost:hover{border-color:var(--ink);}
 
   /* hero */
-  .hero{padding-block:48px 30px;}
+  .hero{padding-block:56px 30px;}
   .pill{display:inline-flex;gap:8px;align-items:center;font:500 13px/1 var(--mono);color:var(--muted);border:1px solid var(--line);background:var(--card);padding:8px 12px;border-radius:999px;margin-bottom:26px;}
   .pill b{color:var(--accent);font-weight:500;}
   .hero h1{font-size:clamp(44px,8.4vw,96px);font-weight:800;max-width:11ch;}
@@ -261,23 +271,31 @@
     .stats{grid-template-columns:1fr;}
     .stat + .stat{border-left:0;padding-left:0;border-top:1px solid var(--line);}
     section{padding-block:64px;}
-    .links a:not(.btn){display:none;}
+    .navbar nav{flex-wrap:wrap;row-gap:8px;padding-block:10px;}
+    .navbar .btn.sm{margin-left:auto;}
+    .navbar .links{order:3;width:100%;margin-left:0;gap:18px;overflow-x:auto;white-space:nowrap;scrollbar-width:none;padding-bottom:2px;font-size:14px;}
+    .navbar .links::-webkit-scrollbar{display:none;}
+    section,header{scroll-margin-top:96px;}
   }
 </style>
 </head>
 <body>
 
-<div class="wrap">
-  <nav>
+<div class="navbar" id="navbar">
+  <nav class="wrap" aria-label="Main">
     <a class="logo" href="#top"><i aria-hidden="true"></i>Flow</a>
     <div class="links">
       <a href="#how">How it works</a>
       <a href="#pr">See a PR</a>
+      <a href="#runners">Automation</a>
       <a href="#agents">Any agent</a>
       <a href="#roadmap">Roadmap</a>
-      <a class="btn sm" href="https://github.com/CandidDan/flow-protocol">View on GitHub</a>
     </div>
+    <a class="btn sm" href="https://github.com/CandidDan/flow-protocol">View on GitHub</a>
   </nav>
+</div>
+
+<div class="wrap">
 
   <header class="hero" id="top">
     <div class="pill"><b>v2.2</b> Independent AI review on every pull request</div>
@@ -290,7 +308,7 @@
     <div class="facts"><span>Open source, Apache-2.0</span><span>Runs on GitHub Actions</span><span>Works with Claude Code and other agents</span><span>Nothing to host</span></div>
 
     <div class="pipe" role="img" aria-label="Diagram: you approve the intent, agents write the spec, build, test and get reviewed, then you approve the merge.">
-      <svg viewBox="0 0 1000 170" xmlns="http://www.w3.org/2000/svg">
+      <svg viewBox="0 0 1000 170" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
         <rect class="band" x="150" y="18" width="700" height="134" rx="18"/>
         <text class="bandtxt" x="500" y="42" text-anchor="middle">AGENTS + CI · NO HUMAN NEEDED</text>
         <line class="track" x1="80" y1="96" x2="920" y2="96"/>
@@ -373,8 +391,8 @@
 
     <div class="prtabs" role="tablist" aria-label="Example pull requests">
       <button type="button" role="tab" id="tab-pass" aria-controls="pr-pass" aria-selected="true" style="--c:#1f883d"><span class="dot"></span>Ready to merge</button>
-      <button type="button" role="tab" id="tab-fail" aria-controls="pr-fail" aria-selected="false" style="--c:#cf222e"><span class="dot"></span>Review caught a gap</button>
-      <button type="button" role="tab" id="tab-block" aria-controls="pr-block" aria-selected="false" style="--c:#6e7781"><span class="dot"></span>Agent stopped to ask</button>
+      <button type="button" role="tab" id="tab-fail" aria-controls="pr-fail" aria-selected="false" tabindex="-1" style="--c:#cf222e"><span class="dot"></span>Review caught a gap</button>
+      <button type="button" role="tab" id="tab-block" aria-controls="pr-block" aria-selected="false" tabindex="-1" style="--c:#6e7781"><span class="dot"></span>Agent stopped to ask</button>
     </div>
 
     <!-- 1: PASS (PR #136) -->
@@ -641,6 +659,7 @@
         <span class="tag">Next</span>
         <ul>
           <li><b>Self-fixing PRs</b><span>When a review fails, an agent fixes the findings on the same PR, without weakening a test to do it.</span></li>
+          <li><b>A plan your client can read</b><span>Intents rendered as a shareable page, grouped into workstreams, with each outcome marked done, in progress or not started and linked to the PR that delivered it.</span></li>
           <li><b>Review by a different vendor</b><span>Run the reviewers on a different agent from the builder, so no model marks its own homework.</span></li>
           <li><b>Right model for the job</b><span>Cheaper models for routine work and the strongest ones for the hard parts, set per task.</span></li>
           <li><b>Decisions from your phone</b><span>Anything Flow needs from you arrives as one question with a recommendation, answerable in under a minute.</span></li>
@@ -709,6 +728,18 @@
 </div>
 
 <script>
+  (function(){
+    var bar=document.getElementById('navbar'); if(!bar) return;
+    var links=[].slice.call(bar.querySelectorAll('.links a'));
+    var secs=links.map(function(a){return document.querySelector(a.getAttribute('href'));});
+    function onScroll(){
+      bar.classList.toggle('scrolled', window.scrollY>8);
+      var y=window.scrollY+120, cur=-1;
+      secs.forEach(function(s,i){ if(s && s.offsetTop<=y) cur=i; });
+      links.forEach(function(a,i){ a.classList.toggle('active', i===cur); if(i===cur) a.setAttribute('aria-current','true'); else a.removeAttribute('aria-current'); });
+    }
+    window.addEventListener('scroll',onScroll,{passive:true}); onScroll();
+  })();
   (function(){
     var tabs=[].slice.call(document.querySelectorAll('.prtabs [role="tab"]'));
     function show(t){tabs.forEach(function(x){var on=x===t;x.setAttribute('aria-selected',on?'true':'false');x.tabIndex=on?0:-1;document.getElementById(x.getAttribute('aria-controls')).hidden=!on;});}
