@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0115"
 title: "A sync PR is classified only when its content matches canonical at the Canonical-SHA it claims"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker"
 created: "2026-10-01"
-started: ""
+started: "2026-10-01T13:25:30Z"
 branch: ""
 pr: ""
 issue: ""
