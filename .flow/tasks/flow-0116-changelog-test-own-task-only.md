@@ -2,13 +2,13 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0116"
 title: "The store-wide changelog test checks in-flight tasks only on their own branch, so one claimed task stops failing every other PR"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-cowork-orchestrator"
 created: "2026-10-01"
-started: ""
-branch: ""
+started: "2026-10-01T05:06:17Z"
+branch: "flow/flow-0116-changelog-test-own-task-only"
 pr: ""
 issue: ""
 blocked_reason: ""
