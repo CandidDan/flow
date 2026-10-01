@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0070"
 title: "Queue cap: refuse to allocate a new ready task while the queue is full, unless it is urgent"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0070"
 created: "2026-09-23"
-started: ""
+started: "2026-10-01T18:18:51Z"
 branch: ""
 pr: ""
 issue: ""
