@@ -1,7 +1,7 @@
 ---
 id: "flow-0123"
 title: "flow-0081's, flow-0104's and flow-0115's fragment tests read their entry through changelog-entry.mjs, so the 2.3.0 release PR stays green"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "orchestrator-cowork-2026-10-02"
