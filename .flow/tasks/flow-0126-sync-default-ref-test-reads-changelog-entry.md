@@ -8,7 +8,7 @@ owner: "orchestrator-cowork-2026-10-02"
 created: "2026-10-02"
 started: "2026-10-02T05:30:00Z"
 branch: "flow/flow-0126-sync-default-ref-test-reads-changelog-entry"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/173"
 issue: ""
 blocked_reason: ""
 blocked_by: []
