@@ -95,6 +95,22 @@ const INTENTIONAL_DIVERGENCES = new Map([
          "this one. One hop, stated as one hop.",
     task: "flow-0016",
   }],
+  ["Concurrency — how parallel sessions don't collide", {
+    digest: "b109c9d9a05e59e910603ceae55daf82ed3d9037ec64a06898141310952ecebd",
+    why: "the `touches` paragraph told a worker to skip a `ready` task overlapping an " +
+         "`in_progress` one and said nothing about `in_review`, so a task overlapping an open " +
+         "unmerged PR read as claimable. It now names both, and says why: a review-stage PR " +
+         "still has a live branch about to rewrite `main` in those very files. `blocked` is " +
+         "still deliberately excluded.",
+    task: "flow-0118",
+  }],
+  ["The loop you run", {
+    digest: "7782a30da99d62d4b00abe99fac986c27df6781fd989daa87ac399af72e5a797",
+    why: "step 1 is the second place the claim rule is stated, and it said `in_progress` only. " +
+         "Two statements of one rule drift apart unless both move; pick-task.test.mjs now " +
+         "asserts on both strings for the same reason.",
+    task: "flow-0118",
+  }],
 ]);
 
 // Split a markdown doc into `## ` sections. Returns [heading, body] pairs in document order;
