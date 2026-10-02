@@ -6,7 +6,350 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
-## 2.2.0 — 2026-09-30 (pending tag + canary)
+## 3.0.0 — 2026-10-02 (pending tag + canary)
+
+**MAJOR: one caller contract change, plus the fixes that end TanPlan's hand-set `in_review`.** The
+queue runner can now be paused and timed from repo variables (flow-0080). Its new schedule gate
+reads the runner's own earlier runs, so **the `flow-queue-runner.yml` caller must grant
+`actions: read`**. A caller without it is refused by GitHub before any job starts
+(`startup_failure`), which is exactly what canonical hit until flow-0124. Under the versioning
+policy, a new caller permission is MAJOR, so `@v2` stays on 2.2.0 and nothing moves until a repo
+opts in. **Caller action:** run flow-sync (or follow `docs/repinning-a-consuming-repo.md`) to move
+callers to `@v3`, which brings the `actions: read` grant with it.
+
+Also in this release: flow-status and flow-done stop reporting a CONFLICTING EDIT that is not
+there (flow-0114), recover promotes a ready PR (flow-0104), flow-sync ships the skills
+(flow-0081), the review-guide comment (flow-0084), the queue cap (flow-0070), and the release
+gate stays green after assemble (flow-0090, flow-0123). The re-pin to `@v3` and the VERSION bump
+land in flow-0125, right after this PR; the `v3.0.0` tag follows both.
+
+- **The task queue has an optional cap** (`.flow/bin/allocate-task-id.mjs`, `.flow/config.yml`,
+  task-writer skill, flow-0070). Set `queue_cap: N` in `.flow/config.yml` and `allocate-task-id`
+  refuses a new `ready` task while `N` or more are already `ready` on `origin/main` — before it
+  writes, commits or pushes anything, with a message naming the count, the cap and the two ways
+  forward. Flow already capped work in progress (one claim per session, `touches` overlap) and
+  capped planning nowhere, so an orchestrator could write `ready` tasks faster than any worker
+  drained them. **No caller action** — the key is absent by default and an uncapped repo behaves
+  exactly as before.
+
+    The only bypass is the draft's own `urgent` label, which is the human's to apply: there is no
+    flag, no env var and no `--force`, because a bypass a session can hand itself is not a limit.
+    A `blocked` draft is never capped — the cap limits the ready queue, not the store. `--dry-run`
+    with a `--content-file` reports the decision without writing. Canonical sets `queue_cap: 8`
+    and is currently over it, which is the intended effect: nothing new enters its queue until it
+    drains.
+
+- **Queue-runner timing lives in repo variables** (`_flow-queue-runner.yml`, the
+  `flow-queue-runner.yml` caller, new `.flow/bin/queue-runner-schedule.mjs`, flow-0080). Three
+  variables, set once per repo with `gh variable set` and never by editing a workflow:
+  `FLOW_QUEUE_RUNNER=paused` stops **scheduled** runs while leaving the three PR review checks,
+  triage and compass running (`FLOW_AI=false` still turns everything off, and `workflow_dispatch`
+  still works while paused); `FLOW_TZ` + `FLOW_RUN_HOUR` move the day's run to a local hour in an
+  IANA zone, daylight saving included. The caller's cron becomes hourly and a new `schedule-gate`
+  job decides which tick is the run — the **first** tick at or after the hour, once per local day,
+  so GitHub's habitually late scheduler delays the run instead of skipping the day. Every skipped
+  tick writes one line to its step summary saying which answer it gave. With both schedule
+  variables unset, behaviour is unchanged: one run per UTC weekday at 07:00. **Caller action:**
+  re-sync `flow-queue-runner.yml` to get the hourly cron and the `actions: read` grant the gate
+  needs; until then the pause switch works but the local-time schedule cannot take effect. If you
+  keep a customised cron whose only daily tick is before 07:00 UTC, set `FLOW_RUN_HOUR` to that
+  hour — otherwise the gate's default run hour falls after your tick and nothing runs.
+
+- **flow-sync now ships the template's skills** (`.github/workflows/_flow-sync.yml`, flow-0081).
+  Every canonical-named directory under `project-template/.claude/skills/` is on the copied
+  surface, mirrored wholesale into the adopting repo. Before this, `flow-init` copied the skills
+  once at adoption and no sync ever refreshed them: a repo adopted before a skill existed never
+  got it — `AGENTS.md` pointed at a `SKILL.md` that was not there — and a skill *fixed* in
+  canonical never reached the fleet. Skills the adopting repo wrote itself are untouched, and
+  `.claude/settings.json` and `.claude/settings.local.json` stay project-owned. A local edit to a
+  canonical-named skill is overwritten by the next sync, the same bargain as `.flow/bin/`.
+  **Caller action:** none — the surface lives in the reusable, so the skills arrive with the next
+  sync; move any local change to a canonical-named skill into canonical first.
+
+- **After the three review checks finish, one `guide` comment tells the human where to look**
+  (`.github/workflows/_flow-review.yml`, `project-template/.flow/bin/review-guide.mjs`, flow-0084).
+  **Caller action: none** — the job lives in the reusable, so bumping the workflow tag is all an
+  adopting repo does.
+
+  The merge touchpoint was the weak one: three reviewer comments plus a long PR description is not
+  a touchpoint, it is reading. A fourth job now runs after `qa`, `code-review` and `security`
+  — whatever each of them concluded — and posts a single comment in a fixed order: **TL;DR · Look
+  here (max 3) · Assumptions · Smoke test · Verdicts**. One comment per PR, found by a hidden
+  marker and updated in place, never reposted.
+
+  **Facts render from code; prose renders from a model; they are separate sections.**
+  `review-guide.mjs` computes the hotspots — a file matching `review.security_paths` or the
+  always-reviewed security floor, a test file deleted or left with fewer assertions than it
+  started with, a file changed outside the task's declared `touches` — quotes the PR description's
+  `## Assumptions` section verbatim (or says "none stated"), and renders the three verdicts. The
+  model writes only the one-line TL;DR and the smoke-test suggestion, and may **reorder** the
+  hotspots by naming their ids; it cannot add, drop or reword one, because every fact's text is
+  produced by the helper and the model only ever returns ids. If the model call fails the comment
+  still posts, with a line saying the summary is unavailable: fail-open for prose, never for facts.
+
+  **It never blocks.** `continue-on-error` sits on the job and no other job depends on it, so a
+  broken guide cannot turn a PR red. It inherits the draft and fork fences from `plan` rather than
+  recopying them, and its facts are computed from the **base** branch's helper and config — a PR
+  cannot edit the code that finds its own hotspots, nor delete the glob that names one.
+
+  A skipped security review reads as **skipped, with the plan's reason**, never as a pass: the
+  security job always runs so its check is never silently absent, which means a skipped review
+  still reports a successful job.
+
+- **The reviewers read the task, and its acceptance criteria, from the base branch**
+  (`.github/workflows/_flow-review.yml`, flow-0085). `REVIEW_TASKS_DIR` now points into the base
+  worktree the gate is already materialised from, so a PR that edits its own task file no longer
+  hands the qa reviewer criteria of its own choosing. A task that exists only on the PR branch
+  resolves to the usual `NO TASK FILE RESOLVED`. In BOOTSTRAP (no gate on base) the task still
+  comes from the PR, since there is no independent copy. Unblocks flow-0082 (auto-fix).
+  **Caller action: none** — adopting repos get it through the `@v2` alias.
+
+- **Release and sync PRs are classified by code, so the reviewers stop guessing about task-less
+  PRs** (`project-template/.flow/bin/flow-review.mjs`, `.github/workflows/_flow-review.yml`,
+  flow-0089). The review plan now recognises two kinds of PR that carry no task *by design*, and
+  writes a third and fourth sentinel into `.flow-review/task.md` instead of
+  `NO TASK FILE RESOLVED`:
+
+  - **`RELEASE PR`** — head branch `release/*` **and** every changed path one of `CHANGELOG.md`,
+    `changes/**`, `VERSION`, `project-template/.flow/VERSION`, `.flow/VERSION`. The sentinel
+    carries `release-guard`'s `checkRelease` verdict over the PR's own tree, so the reviewers PASS
+    a clean one with a fixed line and FAIL one whose stamps disagree or whose changelog fragments
+    were never assembled.
+  - **`SYNC PR`** — head branch `flow-sync/*` **and** every changed path inside the surface
+    `_flow-sync.yml` copies (`.flow/bin/**`, `.github/workflows/flow-*.yml`, `.flow/PROTOCOL.md`,
+    `.flow/VERSION`). The reviewers PASS it; `flow-tooling` is what validates the synced files.
+
+  Both halves of each rule must hold, so the branch name on its own exempts nothing: a `release/*`
+  or `flow-sync/*` PR that touches any other path is reviewed exactly as it is today. The same
+  task-less release PR had been getting a qa PASS (#117) and a qa FAIL (#121) from the same
+  reviewer, and every adopting repo hit the sync case on every sync.
+  A sync PR is still read: the classification proves where the files are, not where their content
+  came from, so every reviewer FAILs one that adds or widens `permissions:`, introduces
+  `pull_request_target`, repoints a `uses:`, or changes secret handling.
+  **Caller action: none** — adopting repos get it through the `@v2` alias.
+
+- **A release's own gate is green: canonical's changelog-aware tests now run against the tree
+  `--assemble` leaves behind** (`.flow/bin/release-assemble.test.mjs`,
+  `project-template/.flow/PROTOCOL.md`, `.flow/bin/protocol-docs.test.mjs`, flow-0090).
+  **Caller action: none** — the new check is canonical-only, and the protocol sentence is stated
+  conditionally so it stays true in a repo with no `changes/` directory.
+
+  `changelog-fragments.mjs --assemble` deletes every fragment by design, so a test that proves "my
+  changelog entry exists" by reading `changes/<id>.md` is green until the release and red on the
+  release's own PR. It happened on three releases (flow-0069 and flow-0073 broke 2.1.0, flow-0050
+  broke 2.1.1, flow-0093/0094/0095 broke 2.1.2) and each one was patched by hand afterwards.
+  `release-assemble.test.mjs` copies canonical's tracked tree into a scratch git repo, assembles
+  there — synthesising a fragment when none is pending, so the path runs on every gate — and
+  re-runs exactly the test files that mention `changes` or `CHANGELOG`. A failure names each
+  failing test. `PROTOCOL.md` now tells a worker to read the fragment if it exists and the
+  assembled entry in `CHANGELOG.md` otherwise, so the test is written right the first time.
+
+- **A `#` inside a quoted frontmatter value is data, not a comment** (`project-template/.flow/bin/flow-state.mjs`, flow-0096). **Caller action: none** — the fix is strictly more permissive, and every value that parsed correctly before still does.
+
+  `parseTask` stripped a whitespace-preceded ` # comment` from every scalar, quoted or not. A value that *starts* with a hash survived (`issue: "#157"`), but one carrying a hash mid-string did not: `blocked_reason: "waits on PR #127, not machine-checkable"` was read as `"waits on PR`. Downstream that truncated the sentence a human reads *and* threw away the `not machine-checkable` sentinel at the end of it, so a task that had opted out of flow-doctor's empty-`blocked_by` warning got warned about anyway. Quoted values are now taken whole up to their closing quote (single or double) with any real trailing comment dropped; only unquoted values have ` # comment` stripped. The reader is exported as `scalarValue` for direct testing.
+
+- **flow-recover un-sticks a task whose PR is open and out of draft**
+  (`project-template/.flow/bin/flow-recover.mjs`, `.github/workflows/_flow-recover.yml`,
+  flow-0104). `classifyStranded` gains a `promote-in-review` outcome: an `in_progress` task whose
+  open PR is **not** a draft, past the same staleness threshold the other outcomes use, has its
+  store entry corrected to `in_review` with that PR's `pr` url and `branch`. An open **draft** PR
+  still classifies `ok`, exactly as before. Only a PR from a branch in the same repository can promote a task: a fork PR titled `[<id>] …` is ignored.
+  **No caller action** — a repo calling
+  `_flow-recover.yml` by reference gets it at the next tag, and the `classify` subcommand's new
+  `--open-pr-ready` flag defaults to `0`, so an older pinned caller behaves identically.
+
+  Why this state existed at all: since flow-0039 a worker's PR opens as a draft and the task
+  reaches `in_review` on `ready_for_review`, an event that cannot fire twice. A task
+  hand-returned to `ready` and re-claimed while its PR was already out of draft therefore stayed
+  `in_progress` for good — nothing was lost (flow-done still resolves it on merge) but the board
+  was wrong about what was in flight. The sweep already queries `gh pr list` per in_progress task,
+  so it reads `isDraft` and `url` from those same two calls and makes no extra request. It
+  corrects the store only; it never touches the PR.
+
+- **A scheduled `flow-sync` now adopts from the ref your callers are pinned to, not a hard-coded
+  `v2`** (`.github/workflows/_flow-sync.yml`, `project-template/.github/workflows/flow-sync.yml`,
+  flow-0105). **No caller action.** Repinning a repo becomes one change instead of two.
+
+  The thin caller forwards `canonical_ref: ${{ inputs.canonical_ref }}`, which is empty on the
+  weekly `schedule` — only a `workflow_dispatch` human ever filled it in. `_flow-sync.yml` then
+  read `${{ inputs.canonical_ref || 'v2' }}`, so a repo whose callers pin anything else had its
+  weekly sync pull `v2` content on top of non-`v2` workflows and say nothing: both halves work,
+  they just disagree about which release the repo is on. The caller's own comment told the human to
+  "bump `canonical_ref`", which is advice a cron run has no input to receive. Latent while the
+  whole fleet pins `@v2`; it bites the first repo that does not — the progress canary on
+  `v2-edge`, the next major, or the release-repo repin.
+
+  When `canonical_ref` is empty the reusable now scans the checked-out repo's
+  `.github/workflows/*.yml` and `*.yaml` for a `uses:` line calling
+  `<owner>/<repo>/.github/workflows/_flow-sync.yml@<ref>` — any owner/repo, so a repin at a release
+  repo keeps resolving — and adopts from the ref it finds, logging the file it came from. Two
+  callers pinned at different refs **fail the job** with an error naming each file and its ref,
+  because a half-finished repin has no safe reading. No caller pinning one at all falls back to
+  `v2` with a `::warning::` that says so — the old behaviour, now visible rather than assumed. An
+  explicit `canonical_ref` on a `workflow_dispatch` run still wins outright.
+
+  If your `flow-sync.yml` caller carries a customised default
+  (`canonical_ref: ${{ inputs.canonical_ref || 'v2-edge' }}`, the workaround `docs/
+  repinning-a-consuming-repo.md` used to prescribe), you can **drop it** — the pin on that file's
+  own `uses:` line now does the same job. Keeping it also works: an explicit input is still an
+  override, so nothing breaks if you leave it in place.
+
+- **One test now proves every task's changelog entry, and `task-writer` names it in the criterion**
+  (`.flow/bin/changelog-fragments.test.mjs`,
+  `project-template/.claude/skills/task-writer/SKILL.md`, flow-0107). **No caller action** — the
+  test is canonical's own, and the skill change only affects how a task is written.
+
+  Canonical tasks that ship something user-visible all carry the same criterion — `changes/<id>.md`
+  exists and states the caller action — and nothing told the worker a test was owed for it.
+  flow-0098 (#129), flow-0101 (#134) and flow-0102 (#135) each failed qa on it, and each fix was a
+  near-identical hand-written one-off. The criterion is a property of the store, so it is now proved
+  once for every task at once: `every claimed task that declares a changelog fragment has an entry
+  stating its caller action` reads every task in `.flow/tasks/`, and for each one that has been
+  claimed and declares `changes/<its-id>.md`, asserts the entry is non-empty and mentions a caller
+  action. It reads entries through `changelog-entry.mjs`, so a release that folds the fragment into
+  `CHANGELOG.md` and deletes it does not turn the check red on its own PR. A failure names the task
+  id. `ready` and `blocked` tasks are skipped — neither has written a fragment yet.
+
+  The pre-flight in `task-writer` now says, where the repo keeps a `changes/` directory, that the
+  changelog criterion must name the test that proves it, and names canonical's. An adopting repo
+  has no `changes/` directory and no such test, and the instruction is stated conditionally so it
+  stays true there.
+
+- **flow-triage allocates task ids through `allocate-task-id.mjs`, so it can never duplicate one**
+  (`.github/workflows/_flow-triage.yml`, flow-0110). **No caller action** — the reusable workflow
+  changes, so callers pick it up with the release; the new `flow_ref` input is optional and only
+  read on GitHub Enterprise Server.
+
+  Step 3 of the triage prompt told the model to create the ready task file "with the next id",
+  which it picked out of its own checkout. That is the one allocation path that never re-derives
+  the id after a refused push, and the duplicate lands cleanly: two tasks sharing an id have
+  different filenames, so nothing is refused and flow-doctor only reports it afterwards, on `main`,
+  by which time every open PR is red for a defect none of their authors can fix from a branch. It
+  happened on 2026-09-30, when a triage run and a local session each created a `flow-0104` and a
+  `flow-0105`. The prompt now creates task files **only** by running
+  `allocate-task-id.mjs --write`, forbids choosing an id by hand or writing a task file any other
+  way, and uses the id the allocator prints — which is already the id in the commit it pushed. The
+  allocator it runs is canonical's own, materialised at this workflow's commit the way
+  `_flow-gates.yml` materialises the gate's helpers (flow-0094, ADR-0008), so a repo that has never
+  run flow-sync still gets it.
+
+- **The queue runner's overlap guard works again** (`project-template/.flow/bin/pick-task.mjs`,
+  flow-0111). `pick-task` read `touches` only as an inline array, and every real task file uses
+  the block-sequence form, so every task parsed with empty `touches` and the "skip a ready task
+  that overlaps an in_progress one" filter never fired. It now reads `touches` with
+  `flow-doctor`'s `parseListField`, which handles both forms. Seen live in tanplan-platform on
+  30 Sep, when the runner dispatched tanplan-0026 into tanplan-0022's files.
+  **Caller action: none** — adopters get it at their next flow-sync.
+
+- **The state-push retry no longer reports a conflict that is not there**
+  (`.github/workflows/_flow-status.yml`, `.github/workflows/_flow-done.yml`, flow-0114). When the
+  retry lost a race for `main` it re-fetched, re-applied its edit, and compared the task file's
+  whole blob against the one it started from — so *any* other change to that file was called a
+  `CONFLICTING EDIT` and the transition was dropped. The commonest such change is on the normal
+  path of almost every task: a worker's last act is a handoff `notes:` entry on its own task file
+  on `main`, and `gh pr ready` fires flow-status on the same file seconds later. Seen live on
+  CandidDan/tanplan-platform#25, where `in_review` was lost and set by hand.
+
+  The comparison is now per **field**. The run derives the set of frontmatter fields its edits
+  actually write (`apply-board-edits.mjs` patches named fields only — `status`, `owner`, `branch`,
+  `pr`, `priority`) and compares just those. A field still reading as it did at the starting tip is
+  the run's to write, and the other actor's change survives because the retry re-derives from the
+  new tip rather than merging a stale edit. A field another actor set to the value this run would
+  write is the existing "already landed" no-op. Only a *written* field moved to some other value is
+  a `CONFLICTING EDIT` — and the error now names the field and both values instead of just the file.
+
+  Nothing flow-0059 deliberately excluded has been added: still no `pull`, `rebase`, `merge` or
+  `--force`, and still `MAX_PUSH_ATTEMPTS=5` with a non-zero exit on exhaustion.
+  **Caller action: none** — adopters call these reusables by reference and get it at their next
+  flow-sync. A repo that was papering over the false refusal by re-running the check or setting
+  `in_review` by hand can stop.
+
+- **A sync PR is classified only when its content matches canonical at the `Canonical-SHA:` it
+  claims** (`project-template/.flow/bin/flow-review.mjs`, flow-0115). The `SYNC PR` sentinel used
+  to be granted on two facts an attacker controls: a `flow-sync/` branch prefix and a changed-file
+  list inside the synced surface. Both prove *where* the files are; neither proves *where they came
+  from*, and `.flow/bin/**` executes in the adopting repo's CI. The gate now checks the claim: it
+  reads the `Canonical-SHA:` trailer `_flow-sync.yml` writes on the sync commit, fetches canonical
+  at that exact object name, and compares every changed file with the file the sync would have
+  copied over it (`.flow/bin/x.mjs` here against `project-template/.flow/bin/x.mjs` there).
+
+  Every file matches → the sentinel and the fixed PASS line, exactly as before. Anything else — one
+  file edited after the sync, no trailer, two different trailers, a fetch that failed — is **not**
+  classified: the PR gets the ordinary task-less handling and all three reviewers read it in full,
+  and the run summary names the files that disagreed. Fail-closed in the direction that costs a
+  review, never in the direction that waves a diff through.
+
+  The fetch is the only network call the review gate makes, and it sits behind *both* halves of the
+  classification — a PR that is not on a `flow-sync/` branch, or that is but strayed outside the
+  surface, never reaches it, so the per-PR cost of the gate is unchanged for everything else.
+
+  **No caller action** — adopting repos get it through the `@v2` alias. Two things to expect once
+  it lands: a sync branch built before flow-0075 carries no trailer and will no longer be
+  classified (re-run flow-sync to rebuild it), and a sync PR that someone has hand-edited will now
+  be reviewed in full rather than passed on the strength of its branch name.
+
+- **The store-wide changelog test stops failing every PR while another task is in flight**
+  (`.flow/bin/changelog-fragments.test.mjs`, flow-0116). `done` tasks are still checked
+  store-wide. `in_progress` and `in_review` tasks are now checked only on their own branch, read
+  from `GITHUB_HEAD_REF` or the local `flow/<id>-<slug>` branch, because a PR's checkout carries
+  main's store while other tasks' fragments sit on their own branches. Canonical-only test.
+  **No caller action**.
+
+- **Agents show, don't tell** (`PROTOCOL.md` response style, new `.claude/skills/show-me/SKILL.md`,
+  flow-0117). Fewest words; structured content as a table, tree, call stack, mermaid or diff; PR
+  descriptions ordered TL;DR → one visual → criteria → human to-dos. The response TL;DR is now
+  conditional: only past about 15 lines (PR descriptions keep theirs). **Caller action:** none —
+  the protocol and skill arrive with the next sync; replace any local PR template that conflicts.
+
+- **The queue runner now treats an `in_review` task as still in flight**
+  (`project-template/.flow/bin/pick-task.mjs`, `project-template/.flow/PROTOCOL.md`, flow-0118).
+  `pickTask` skipped a `ready` task only when its `touches` overlapped an `in_progress` one, so a
+  task overlapping an open, unmerged PR looked claimable: observed in `CandidDan/inflight` on
+  2026-10-01, where `inflight-0016` was dispatched against four files `inflight-0015`'s review-stage
+  PR was about to rewrite. A review-stage PR has a live branch pointed at `main`, so for collision
+  purposes it has not landed. `blocked` deliberately still does not count — no live branch, and
+  `blocked_by` sequences it. Sort order, tie-breaks and the empty-result behaviour are unchanged,
+  and both statements of the claim rule in `PROTOCOL.md` now name `in_review` alongside
+  `in_progress`. **Caller action: none** — the queue-runner workflow calls `pick-task.mjs`
+  unchanged, and adopting repos get the new behaviour at their next `flow-sync`. Expect one
+  visible consequence: a PR left unmerged for days now holds back the `ready` tasks that overlap
+  it, surfacing as a waiting item instead of as a merge conflict.
+
+- **One flow-recover CLI, parameterised by store** (`project-template/.flow/bin/flow-recover.mjs`,
+  `.flow/bin/flow-recover.mjs`, flow-0121). The template now exports
+  `runRecoverCli(argv, { tasksDir, stdin, out })` — the whole CLI shell, taking the store to read —
+  and both the template's own entry point and canonical's adapter are callers of it. The adapter
+  previously hand-copied that shell, so it had none of flow-0104's `classify --open-pr-ready`,
+  `ready-pr` or `promote`, and `promote-in-review` could never fire in canonical's own sweep:
+  the unknown flag arrived as `0` and the missing subcommand printed nothing, both
+  indistinguishable from a healthy "no ready PR". **No caller action** — subcommand output,
+  flags and exit codes are unchanged, and a repo that adopts the template's helper directly was
+  never affected. A repo that maintains its own adapter over `flow-recover.mjs` (canonical's
+  pattern, for a store the template cannot resolve) should replace its copied CLI with one call
+  to `runRecoverCli`; leaving the copy in place keeps working and keeps drifting.
+
+- **Three changelog checks read their entry the release-safe way**
+  (`project-template/.flow/bin/flow-recover.test.mjs`, `project-template/.flow/bin/flow-review.test.mjs`,
+  `.flow/bin/sync-skills.test.mjs`,
+  flow-0123). flow-0081's, flow-0104's and flow-0115's canonical-only tests read `changes/<id>.md` directly,
+  which the release-assemble check (flow-0090) showed would go red on the release PR. They now
+  read through `.flow/bin/changelog-entry.mjs`. No caller action needed: all three skip outside
+  canonical.
+
+- **Canonical's queue runner starts again** (`.github/workflows/flow-queue-runner.yml`,
+  `.flow/bin/adapters.test.mjs`, flow-0124). flow-0080 gave the reusable's schedule-gate job
+  `actions: read`, but canonical's own caller did not grant it, so every dispatch was refused at
+  startup. The caller now grants it, and the caller-permissions test checks job-level grants as
+  well as top-level ones. No caller action needed: the template caller already grants it.
+
+- **flow-0105's changelog check reads its entry the release-safe way**
+  (`.flow/bin/sync-default-ref.test.mjs`,
+  flow-0126). The test read `changes/flow-0105.md` directly and went red on the 3.0.0 release PR
+  (#172) once the fragment was assembled. It now reads through `.flow/bin/changelog-entry.mjs`.
+  The release-assemble check (flow-0090) missed it because the test needs `yaml` and skips in the
+  flow-tooling job; only the gate job runs it. No caller action needed: canonical-only test.
+
+## 2.2.0 — 2026-09-30 (tagged `v2.2.0`)
 
 **MINOR: the review gate stops passing work it did not read, and a repo can size it to its own
 PRs.** A PR whose diff exceeds the review limit now fails all three review checks, not just qa
