@@ -36,6 +36,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { changelogEntry } from "./changelog-entry.mjs";
 
 // DEPENDENCY NOTE. Same posture as the other sync-*.test.mjs files: `_flow-gates.yml`'s
 // flow-tooling job runs `node --test .flow/bin/*.test.mjs` with no install step, so when `yaml` is
@@ -48,7 +49,6 @@ const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
 const REUSABLE = join(REPO, ".github/workflows/_flow-sync.yml");
 const TEMPLATE_CALLER = join(REPO, "project-template/.github/workflows/flow-sync.yml");
-const FRAGMENT = join(REPO, "changes/flow-0105.md");
 
 const RESOLVE_STEP = "Resolve canonical ref";
 const CLONE_STEP = "Clone canonical (outside the working tree)";
@@ -390,9 +390,10 @@ test("the template caller no longer says to bump canonical_ref by hand", { skip 
 // Criterion: the changelog fragment exists and says no caller action is needed.
 // ---------------------------------------------------------------------------------------------
 
-test("changes/flow-0105.md exists and says no caller action is needed", { skip: skip || undefined }, () => {
-  assert.ok(existsSync(FRAGMENT), "changes/flow-0105.md is missing — the fragment IS the release note");
-  const text = readFileSync(FRAGMENT, "utf8");
+test("flow-0105's changelog entry exists and says no caller action is needed", { skip: skip || undefined }, () => {
+  // Read through changelog-entry.mjs: the fragment is folded into CHANGELOG.md at release (flow-0126).
+  const text = changelogEntry(REPO, "flow-0105");
+  assert.ok(text, "flow-0105 has no changelog entry (changes/flow-0105.md or CHANGELOG.md) — the entry IS the release note");
   assert.match(text, /\*\*No caller action\.\*\*/,
     "the fix is transparent to every repo that pins @v2; say so in the words the other fragments use");
   assert.match(text, /flow-0105/, "a fragment names its task, so a release note traces back to the work");
