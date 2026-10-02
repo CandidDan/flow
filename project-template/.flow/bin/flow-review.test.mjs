@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { DEFAULT_CANONICAL_REPO } from "./flow-init.mjs";
 import {
   CHECKS,
   DEFAULT_MAX_DIFF_BYTES,
@@ -39,6 +40,13 @@ import {
   SYNC_PR_PASS_LINE,
   SYNC_PR_PATHS,
   SYNC_PR_SENTINEL,
+  CANONICAL_REPO_URL,
+  CANONICAL_SHA_TRAILER,
+  SYNC_SOURCE_ROOT,
+  canonicalPathFor,
+  canonicalShaTrailers,
+  sameSyncedFile,
+  syncProvenance,
   classifyPr,
   UNTRUSTED_BEGIN,
   UNTRUSTED_END,
@@ -63,6 +71,13 @@ import {
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const CLI = join(BIN, "flow-review.mjs");
+
+// "the repo three levels up contains THIS directory at project-template/.flow/bin" is true in
+// canonical and false in every repo that adopted the template. The same test as
+// flow-doctor.test.mjs uses, for the same reason: a handful of assertions are about canonical's
+// own tree and must be skipped — with the reason printed — rather than failed in the fleet.
+const CANON_ROOT = resolve(BIN, "..", "..", "..");
+const inCanonical = resolve(CANON_ROOT, "project-template", ".flow", "bin") === resolve(BIN);
 
 const tmp = (name) => mkdtempSync(join(tmpdir(), `flow-review-${name}-`));
 const run = (args, opts = {}) =>
@@ -1559,11 +1574,38 @@ test("`plan` publishes diff_bytes and diff_full_bytes alongside diff_truncated",
 // into "absent", and a fake that returned "" instead would make every missing stamp look empty
 // rather than missing, which is a different problem with a different message.
 const LS_TREE = "ls-tree --name-only HEAD:";
-function fakeGit({ files = [], diff = "", tree = {} } = {}) {
+
+// A canonical sha shaped exactly as the real trailer is — 40 lowercase hex — because
+// `syncProvenance` validates that shape before it will hand the value to `git fetch`, and a
+// fixture that cheated on it would test a path production never takes.
+const CANON_SHA = "a".repeat(39) + "7";
+
+// flow-0115. `trailers` is what `git log --format=%(trailers:…)` reports over the PR's commits,
+// and `canon` is canonical's tree at CANON_SHA, keyed by canonical path. `calls` is handed in by
+// a test that needs to assert what git was asked to do — specifically, that no fetch happened.
+function fakeGit({ files = [], diff = "", tree = {}, trailers = null, canon = {},
+                   fetchFails = false, calls = [] } = {}) {
+  const TRAILER_LOG = `log --format=%(trailers:key=${CANONICAL_SHA_TRAILER},valueonly) origin/main..HEAD`;
   return (args) => {
     const cmd = args.join(" ");
+    calls.push(cmd);
     if (cmd === "diff --name-only origin/main...HEAD") return files.join("\n");
     if (cmd === "diff origin/main...HEAD") return diff;
+    if (cmd === TRAILER_LOG) {
+      if (trailers === null) throw new Error("fatal: no trailer log expected in this fixture");
+      // Real git prints one (possibly empty) line per commit, which is why the production reader
+      // filters blanks rather than trusting the line count.
+      return [...trailers, ""].join("\n");
+    }
+    if (args[0] === "fetch") {
+      if (fetchFails) throw new Error("fatal: could not read from remote repository");
+      return "";
+    }
+    if (args[0] === "show" && String(args[1]).startsWith(`${CANON_SHA}:`)) {
+      const path = String(args[1]).slice(CANON_SHA.length + 1);
+      if (!(path in canon)) throw new Error(`fatal: path '${path}' does not exist in '${CANON_SHA}'`);
+      return canon[path];
+    }
     if (args[0] === "show" && String(args[1]).startsWith("HEAD:")) {
       const path = String(args[1]).slice("HEAD:".length);
       if (!(path in tree)) throw new Error(`fatal: path '${path}' does not exist in 'HEAD'`);
@@ -1588,7 +1630,8 @@ const RELEASE_FILES = ["CHANGELOG.md", "VERSION", "project-template/.flow/VERSIO
 
 // Plan a PR against a throwaway store, and hand back both the plan and the `task.md` a reviewer
 // would actually open.
-function planPr(name, { headRef, prTitle = "Cut the release", files, tree = {} }) {
+function planPr(name, { headRef, prTitle = "Cut the release", files, tree = {},
+                        trailers = null, canon = {}, fetchFails = false, calls = [] }) {
   const dir = tmp(name);
   try {
     writeFileSync(join(dir, "config.yml"), CONFIG);
@@ -1599,9 +1642,9 @@ function planPr(name, { headRef, prTitle = "Cut the release", files, tree = {} }
       headRef,
       prTitle,
       tasksDir,
-      git: fakeGit({ files, tree }),
+      git: fakeGit({ files, tree, trailers, canon, fetchFails, calls }),
     });
-    return { plan, md: readFileSync(join(dir, "out", "task.md"), "utf8") };
+    return { plan, md: readFileSync(join(dir, "out", "task.md"), "utf8"), calls };
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
@@ -1684,30 +1727,256 @@ test("flow-0089: a release PR that left a changelog fragment behind carries that
   assert.equal(plan.task.problems.length, 1);
 });
 
+// A sync PR that is exactly what it says it is: three files in the copied surface, each
+// byte-identical to the file canonical holds at the sha the head commit's trailer names.
+const SYNCED_FILES = [".flow/bin/x.mjs", ".flow/VERSION", ".github/workflows/flow-gates.yml"];
+const SYNCED_HEAD = {
+  ".flow/bin/x.mjs": "export const x = 1;\n",
+  ".flow/VERSION": "9.9.9\n",
+  ".github/workflows/flow-gates.yml": "name: flow-gates\n",
+};
+const SYNCED_CANON = {
+  "project-template/.flow/bin/x.mjs": "export const x = 1;\n",
+  "project-template/.flow/VERSION": "9.9.9\n",
+  "project-template/.github/workflows/flow-gates.yml": "name: flow-gates\n",
+};
+const syncPr = (name, over = {}) => planPr(name, {
+  headRef: "flow-sync/9.9.9",
+  prTitle: "flow: adopt canonical Flow infra 9.9.9",
+  files: SYNCED_FILES,
+  tree: SYNCED_HEAD,
+  canon: SYNCED_CANON,
+  trailers: [CANON_SHA],
+  ...over,
+});
+
 test("flow-0089: `flow-sync/` + the synced surface only is a SYNC PR", () => {
-  const files = [".flow/bin/x.mjs", ".flow/VERSION", ".github/workflows/flow-gates.yml"];
-  const { plan, md } = planPr("sync-ok", {
-    headRef: "flow-sync/9.9.9", prTitle: "flow: adopt canonical Flow infra 9.9.9", files,
-  });
+  const { plan, md } = syncPr("sync-ok");
 
   assert.equal(plan.prKind.kind, "sync");
   assert.equal(plan.prKind.classified, true);
   assert.ok(md.startsWith(SYNC_PR_SENTINEL),
     "this is the case that fires in every adopting repo on every sync, not only in canonical");
-  for (const f of files) assert.ok(md.includes(`  - ${f}`));
+  for (const f of SYNCED_FILES) assert.ok(md.includes(`  - ${f}`));
   assert.ok(md.includes(SYNC_PR_PASS_LINE));
   assert.ok(!md.includes("release-guard"),
     "there is no guard to run on a sync PR — flow-tooling runs the synced tests instead");
 
   // One path outside the copied surface and it is a different kind of PR entirely.
   const off = planPr("sync-extra", {
-    headRef: "flow-sync/9.9.9", files: [...files, ".flow/config.yml"],
+    headRef: "flow-sync/9.9.9", files: [...SYNCED_FILES, ".flow/config.yml"],
   });
   assert.equal(off.plan.prKind.classified, false);
   assert.deepEqual(off.plan.prKind.outside, [".flow/config.yml"],
     "flow-sync never writes config.yml — a sync PR that did is not a sync");
   assert.ok(off.md.startsWith(NO_TASK_SENTINEL));
 });
+
+// ── flow-0115: the sentinel is granted by PROVENANCE, not by a branch name ────────────────
+
+test("flow-0115: a sync PR whose files match canonical at its Canonical-SHA gets the sentinel", () => {
+  const { plan, md, calls } = syncPr("prov-ok");
+
+  assert.equal(plan.prKind.classified, true);
+  assert.equal(plan.prKind.provenance.ok, true);
+  assert.equal(plan.prKind.provenance.sha, CANON_SHA);
+  assert.equal(plan.prKind.provenance.checked, SYNCED_FILES.length,
+    "every changed file is compared — a check that skipped one would be no check at all");
+  assert.deepEqual(plan.prKind.provenance.mismatched, []);
+  assert.ok(md.startsWith(SYNC_PR_SENTINEL),
+    "a VERIFIED sync PR behaves exactly as it did before this task — the fixed PASS line, " +
+    "unchanged; nothing here makes honest syncs more expensive");
+  assert.ok(md.includes(SYNC_PR_PASS_LINE));
+
+  // The fetch is by OBJECT NAME, not by the moving ref the sync was built from: `v2` can have
+  // advanced since, and comparing against where it points now would fail honest syncs.
+  assert.ok(calls.includes(`fetch --quiet --depth 1 --no-tags ${CANONICAL_REPO_URL} ${CANON_SHA}`),
+    `the comparison must read canonical at ${CANON_SHA}, the sha the PR itself claims`);
+  assert.match(planSummary(plan), /sync provenance: \*\*VERIFIED\*\*/,
+    "and the run summary records that the claim was checked, not merely that it was made");
+});
+
+test("flow-0115: one file edited after the sync is NOT classified, and the summary names it", () => {
+  const { plan, md } = syncPr("prov-edited", {
+    tree: { ...SYNCED_HEAD, ".flow/bin/x.mjs": "export const x = 1;\nawait fetch(SECRET_URL);\n" },
+  });
+
+  assert.equal(plan.prKind.classified, false,
+    "the branch prefix and the path list both held — and they are exactly what an attacker " +
+    "controls, which is why they cannot be the whole rule");
+  assert.equal(plan.prKind.provenance.ok, false);
+  assert.deepEqual(plan.prKind.provenance.mismatched.map((m) => m.path), [".flow/bin/x.mjs"]);
+  assert.equal(plan.prKind.provenance.mismatched[0].canonicalPath,
+    "project-template/.flow/bin/x.mjs",
+    "the mapping is reported too, so a human can check the comparison this gate made");
+  assert.ok(md.startsWith(NO_TASK_SENTINEL),
+    "an unverified sync PR gets the ordinary task-less handling: three reviewers read it in full");
+  assert.ok(!md.includes(SYNC_PR_PASS_LINE),
+    "…and the fixed PASS line must be nowhere in the artefact they read");
+
+  const summary = planSummary(plan);
+  assert.match(summary, /sync provenance: \*\*NOT VERIFIED\*\*/);
+  assert.match(summary, /\.flow\/bin\/x\.mjs/,
+    "naming the file is the whole difference between an actionable rejection and a shrug");
+  assert.match(md, /\.flow\/bin\/x\.mjs/,
+    "the reviewers are told which file disagreed, not just that the claim failed");
+});
+
+test("flow-0115: a `flow-sync/*` PR with no Canonical-SHA trailer is NOT classified", () => {
+  const { plan, md } = syncPr("prov-no-trailer", { trailers: [] });
+
+  assert.equal(plan.prKind.classified, false);
+  assert.equal(plan.prKind.provenance.ok, false);
+  assert.match(plan.prKind.provenance.reason, /carry no `Canonical-SHA:` trailer/,
+    "there is nothing to compare against, and an unchecked claim is not granted");
+  assert.ok(md.startsWith(NO_TASK_SENTINEL));
+  assert.match(planSummary(plan), /sync provenance: \*\*NOT VERIFIED\*\*/);
+  assert.match(md, /re-run flow-sync/,
+    "a branch built before flow-0075 lands here and is a stale branch, not an attack — the " +
+    "artefact has to say which way to look");
+});
+
+test("flow-0115: no network call is made for a PR that is not on a `flow-sync/` branch", () => {
+  const network = (calls) => calls.filter((c) => c.startsWith("fetch") || c.startsWith("log "));
+
+  // An ordinary PR, a release PR, and a `flow-sync/` branch that strayed outside the surface.
+  // The last one matters most: the fetch sits behind BOTH halves of the classification, so a
+  // branch name alone cannot make this gate reach the network.
+  const ordinary = planPr("prov-none-ordinary", {
+    headRef: "flow/flow-0068-a-slug", prTitle: "[flow-0068] a change", files: ["src/x.mjs"],
+  });
+  const release = planPr("prov-none-release", {
+    headRef: "release/v9.9.9", files: RELEASE_FILES, tree: CLEAN_TREE,
+  });
+  const strayed = planPr("prov-none-strayed", {
+    headRef: "flow-sync/9.9.9", files: [...SYNCED_FILES, "src/x.mjs"], tree: SYNCED_HEAD,
+  });
+
+  for (const { name, res } of [
+    { name: "an ordinary PR", res: ordinary },
+    { name: "a release PR", res: release },
+    { name: "a flow-sync PR that strayed outside the surface", res: strayed },
+  ]) {
+    assert.deepEqual(network(res.calls), [],
+      `${name} must plan without touching the network: this gate runs on every PR in every ` +
+      `adopting repo, so a fetch on the ordinary path is a per-PR cost and a per-PR dependency ` +
+      `on github.com being reachable`);
+  }
+  assert.equal(strayed.plan.prKind.provenance, undefined,
+    "a PR that never got past the path list has no provenance verdict to report, and must not " +
+    "be given one");
+});
+
+test("flow-0115: a mirrored deletion matches, and a trailing newline does not", () => {
+  // `rsync -a --delete` mirrors canonical's deletions, so a sync legitimately REMOVES a helper
+  // canonical removed. That arrives as a changed path present in neither tree, and reading it
+  // as a mismatch would reject every sync that drops a file.
+  const deleted = syncPr("prov-deleted", {
+    files: [...SYNCED_FILES, ".flow/bin/gone.mjs"],
+  });
+  assert.equal(deleted.plan.prKind.provenance.ok, true,
+    "absent here AND absent in canonical is a match — the sync mirrored a deletion");
+
+  // The comparison is of bytes, not of "roughly the same file". A trailing newline is the
+  // smallest edit that a line-oriented comparison would wave through.
+  const newline = syncPr("prov-newline", {
+    tree: { ...SYNCED_HEAD, ".flow/bin/x.mjs": "export const x = 1;" },
+  });
+  assert.equal(newline.plan.prKind.provenance.ok, false,
+    "a one-byte difference in a file that executes in this repo's CI is a difference");
+
+  // …except for `.flow/VERSION`, which `_flow-sync.yml` GENERATES with
+  // `printf '%s\n' "$CANON_VER"` rather than copying, so its whitespace is normalised by
+  // construction and a trailing-newline difference there says nothing.
+  const stamp = syncPr("prov-stamp", {
+    canon: { ...SYNCED_CANON, "project-template/.flow/VERSION": "9.9.9" },
+  });
+  assert.equal(stamp.plan.prKind.provenance.ok, true);
+  assert.equal(sameSyncedFile(".flow/VERSION", "9.9.9\n", "9.9.9"), true);
+  assert.equal(sameSyncedFile(".flow/bin/x.mjs", "a\n", "a"), false,
+    "the trim is scoped to the one generated path, and is not a general tolerance");
+});
+
+test("flow-0115: an unusable Canonical-SHA is refused BEFORE it reaches `git fetch`", () => {
+  // The trailer is written by whoever made the head commit, and it is handed to `git fetch` as a
+  // revision. A value beginning with `-` would be read as a flag there, so the shape is
+  // validated rather than quoted — and the proof is that no fetch is attempted at all.
+  for (const bad of ["--upload-pack=touch /tmp/pwned", "HEAD", "abc123", CANON_SHA.toUpperCase()]) {
+    const { plan, calls } = syncPr(`prov-bad-sha`, { trailers: [bad] });
+    assert.equal(plan.prKind.classified, false);
+    assert.match(plan.prKind.provenance.reason, /not a 40-character object name/);
+    assert.deepEqual(calls.filter((c) => c.startsWith("fetch")), [],
+      `${bad} must never be passed to git fetch`);
+  }
+
+  // Two different trailers is not an ambiguity to resolve by picking one: a sync branch is built
+  // by one run from one canonical tree, so two answers mean this is not that.
+  const two = syncPr("prov-two-shas", { trailers: [CANON_SHA, "b".repeat(40)] });
+  assert.equal(two.plan.prKind.classified, false);
+  assert.match(two.plan.prKind.provenance.reason, /2 different `Canonical-SHA:` trailers/);
+
+  // A fetch that fails is not evidence of anything, and must not read as one.
+  const unreachable = syncPr("prov-fetch-fails", { fetchFails: true });
+  assert.equal(unreachable.plan.prKind.classified, false);
+  assert.match(unreachable.plan.prKind.provenance.reason, /could not be fetched/);
+  assert.equal(unreachable.plan.prKind.provenance.sha, CANON_SHA,
+    "the sha it tried is reported, so the failure can be reproduced by hand");
+});
+
+test("flow-0115: the path mapping and the trailer reader are the ones the sync actually uses", () => {
+  // `_flow-sync.yml` copies every file in the surface out of canonical's `project-template/`,
+  // and reads the trailer back with git's own formatter. Both are pinned here because a drift in
+  // either turns this check into one that compares the wrong file and passes.
+  assert.equal(SYNC_SOURCE_ROOT, "project-template/");
+  assert.equal(canonicalPathFor(".flow/bin/flow-doctor.mjs"),
+    "project-template/.flow/bin/flow-doctor.mjs");
+  assert.equal(canonicalPathFor(".github/workflows/flow-gates.yml"),
+    "project-template/.github/workflows/flow-gates.yml");
+  assert.equal(CANONICAL_REPO_URL, `https://github.com/${DEFAULT_CANONICAL_REPO}.git`,
+    "canonical's location has ONE definition — flow-init's — and this derives from it rather " +
+    "than typing it again; a second literal is the flow-0058 hazard, the constant left pointing " +
+    "at the old place after everything else moved");
+
+  const asked = [];
+  canonicalShaTrailers((args) => { asked.push(args); return `${CANON_SHA}\n\n`; }, "origin/main");
+  assert.deepEqual(asked, [[
+    "log", `--format=%(trailers:key=${CANONICAL_SHA_TRAILER},valueonly)`, "origin/main..HEAD",
+  ]], "git's trailer formatter, not a hand-rolled commit-message parser");
+
+  // Blank lines — one per commit that carries no trailer — are not trailers.
+  assert.deepEqual(canonicalShaTrailers(() => "\n\n\n", "origin/main"), []);
+  // The same trailer on two commits is one answer, not two.
+  assert.deepEqual(canonicalShaTrailers(() => `${CANON_SHA}\n${CANON_SHA}\n`, "origin/main"),
+    [CANON_SHA]);
+});
+
+test("flow-0115: `syncProvenance` reports a file canonical does not have at all", () => {
+  const res = syncProvenance({
+    git: fakeGit({
+      tree: { ".flow/bin/backdoor.mjs": "export const pwn = 1;\n" },
+      canon: {},
+      trailers: [CANON_SHA],
+    }),
+    files: [".flow/bin/backdoor.mjs"],
+  });
+  assert.equal(res.ok, false);
+  assert.equal(res.mismatched.length, 1);
+  assert.match(res.mismatched[0].detail, /canonical has no such file/);
+  assert.match(res.lines[0], /backdoor\.mjs/);
+});
+
+test("flow-0115: changes/flow-0115.md exists and states that no caller action is needed",
+  { skip: inCanonical ? false : "not canonical" }, () => {
+    // The fragment IS the release note: `changes/` is assembled into CHANGELOG.md at release
+    // time, so a task that ships a behaviour change without one ships it unannounced.
+    const fragment = join(CANON_ROOT, "changes", "flow-0115.md");
+    assert.ok(existsSync(fragment), "changes/flow-0115.md is missing");
+    const text = readFileSync(fragment, "utf8");
+    assert.match(text, /Canonical-SHA/, "it has to name the trailer the check reads");
+    assert.match(text, /flow-0115/, "and the task it came from");
+    assert.match(text, /caller action/i,
+      "every fragment says what an adopting repo must do — here, nothing");
+  });
 
 test("flow-0089: a resolved task still wins, and an empty diff is never a classified PR", () => {
   // A `release/*` branch titled `[flow-0068] …` HAS criteria, and those are what it is judged

@@ -36,6 +36,8 @@ import { realpathSync as __realpathSync } from "node:fs";
 import { fileURLToPath as __fileURLToPath } from "node:url";
 import { globToRegExp } from "./touches-guard.mjs";
 import { idFromBranch, parseTaskId } from "./parse-task-id.mjs";
+// One constant, for the one fact both files need: WHERE canonical is. See CANONICAL_REPO_URL.
+import { DEFAULT_CANONICAL_REPO } from "./flow-init.mjs";
 import {
   FRAGMENT_DIR,
   ROOT_VERSION_PATH,
@@ -495,6 +497,201 @@ export function classifyPr({ headRef = "", changedFiles = [] } = {}) {
   };
 }
 
+// ── a sync PR's PROVENANCE, not just its location (flow-0115) ─────────────────────────────
+// `classifyPr` proves WHERE the changed files are — a `flow-sync/` branch, every path inside the
+// copied surface. It does not prove WHERE THEY CAME FROM, and those are not the same claim.
+// Anyone with write access can name a branch `flow-sync/9.9.9` and put whatever they like under
+// `.flow/bin/**`, which is the most sensitive directory in an adopting repo: every file in it
+// executes in that repo's CI. Raised as a security FAIL on canonical's PR #146, which answered the
+// PROMPT half — every reviewer still READS a sync PR, and fails one that widens `permissions:`,
+// introduces `pull_request_target`, repoints a `uses:` or changes secret handling. This is the
+// code half the same review asked for.
+//
+// The evidence already exists. `_flow-sync.yml` records the canonical commit it built from as a
+// `Canonical-SHA:` trailer on the sync commit (flow-0075), so the claim is CHECKABLE: fetch
+// canonical at that commit and compare every changed file with the file the sync would have
+// copied over it. All of them match → classify, exactly as before. Anything else — one file
+// edited after the sync, no trailer, two different trailers, a fetch that failed — does not
+// classify, and the PR falls back to the ordinary task-less handling where all three reviewers
+// read it in full.
+//
+// FAIL-CLOSED, and note which way that points. The cost of refusing to classify a genuine sync is
+// one PR reviewed the way every other PR is reviewed; the cost of classifying a forged one is a
+// fixed PASS line on code nobody read. So every uncertainty resolves to "not classified",
+// including the uncertainties that are far more likely to be infrastructure than attack.
+
+// Where canonical lives — the same repository `_flow-sync.yml` clones. Two decisions here:
+//
+//   NOT A CONFIG KEY. A repo able to point this at its own fork could satisfy the check against a
+//   tree it controls, which is the check deleting itself.
+//   NOT A SECOND LITERAL. `flow-init` already defines the canonical repository, and that is the
+//   definition; this derives the clone URL from it. A typed copy is the flow-0058 hazard — the
+//   one constant left pointing at the old place after everything else moved, indistinguishable
+//   from a correct one because it still resolves.
+export const CANONICAL_REPO_URL = `https://github.com/${DEFAULT_CANONICAL_REPO}.git`;
+
+export const CANONICAL_SHA_TRAILER = "Canonical-SHA";
+
+// A full 40-character object name, and nothing else. The trailer is written by whoever made the
+// head commit and is then handed to `git fetch` as a revision, so this is a validation rather
+// than a formatting preference: an abbreviation is ambiguous, and a value beginning with `-`
+// would be read as a flag.
+const SHA40 = /^[0-9a-f]{40}$/;
+
+// The whole path mapping, because the sync has exactly one source root: every file in the copied
+// surface comes out of canonical's `project-template/`. `.flow/bin/x.mjs` here is
+// `project-template/.flow/bin/x.mjs` there, and so are the thin callers, the protocol and the
+// stamp.
+export const SYNC_SOURCE_ROOT = "project-template/";
+export const canonicalPathFor = (path) => `${SYNC_SOURCE_ROOT}${path}`;
+
+// The blob at a ref, EXACTLY as stored. `release-guard`'s `readFileAtRef` trims, which is right
+// for a version stamp and wrong here: the question is whether two files are identical, and a
+// trailing newline is part of a file. `null` for a path absent from that tree — a real answer,
+// not an error, because a sync that mirrors a deletion changes a file present in neither tree.
+function blobAtRef(git, ref, path) {
+  try { return git(["show", `${ref}:${path}`]); } catch { return null; }
+}
+
+// Is this changed file the file canonical holds? Both absent counts as a match: `rsync -a
+// --delete` mirrors canonical's deletions, so a sync legitimately removes a helper canonical
+// removed, and that arrives as a changed path that exists in neither tree.
+//
+// `.flow/VERSION` is the one synced path that is GENERATED rather than copied — `_flow-sync.yml`
+// writes `printf '%s\n' "$CANON_VER"` from canonical's stamp with its whitespace stripped — so
+// the two files can differ by a trailing newline while saying the same thing. Compared trimmed,
+// and ONLY this path: everywhere else a trailing-newline difference is an edit, which is the
+// thing being looked for. (`ADOPTED_VERSION_PATH` is declared a few lines below and referenced
+// rather than restated — one definition of `.flow/VERSION` in this file, not two.)
+export function sameSyncedFile(path, here, there) {
+  if (here === null || there === null) return here === there;
+  return path === ADOPTED_VERSION_PATH ? here.trim() === there.trim() : here === there;
+}
+
+// Every distinct `Canonical-SHA:` trailer on the commits this PR adds, read with git's own
+// trailer formatter — exactly as `_flow-sync.yml` reads it back, so nothing here parses a commit
+// message by hand. More than one is not an ambiguity to resolve by picking: a sync branch is
+// built by one run from one canonical tree, so two answers mean this is not that.
+export function canonicalShaTrailers(git, baseRef = "origin/main", head = "HEAD") {
+  const out = git(["log", `--format=%(trailers:key=${CANONICAL_SHA_TRAILER},valueonly)`, `${baseRef}..${head}`]);
+  return [...new Set(String(out ?? "").split("\n").map((s) => s.trim()).filter(Boolean))];
+}
+
+// THE ONLY NETWORK CALL IN THIS FILE, and it is reached only from a `flow-sync/` branch whose
+// paths have already passed `classifyPr`. Every other PR — ordinary, or `release/*` — plans with
+// exactly the two diffs it always did. That bound is worth keeping deliberately: this gate runs
+// on every PR in every adopting repo, so a fetch on the ordinary path would be a per-PR cost and
+// a per-PR dependency on github.com being reachable.
+export function syncProvenance({
+  git,
+  baseRef = "origin/main",
+  files = [],
+  repoUrl = CANONICAL_REPO_URL,
+} = {}) {
+  const no = (reason, lines = [], sha = null) =>
+    ({ ok: false, sha, checked: 0, mismatched: [], reason, lines });
+
+  let shas;
+  try {
+    shas = canonicalShaTrailers(git, baseRef);
+  } catch (e) {
+    return no(
+      `the \`${CANONICAL_SHA_TRAILER}:\` trailer could not be read from this PR's commits`,
+      [`\`git log\` failed: ${oneLine(e.message)}`]);
+  }
+
+  if (!shas.length) {
+    return no(
+      `this PR's commits carry no \`${CANONICAL_SHA_TRAILER}:\` trailer`,
+      [`\`_flow-sync.yml\` writes \`${CANONICAL_SHA_TRAILER}: <sha>\` on the sync commit, and it ` +
+       `is the only record of which canonical tree a sync branch was built from. Without it ` +
+       `there is nothing to compare this diff against, and an unchecked claim is not granted. A ` +
+       `branch built before flow-0075, or rebased in a way that dropped the trailer, lands here: ` +
+       `re-run flow-sync.`]);
+  }
+
+  if (shas.length > 1) {
+    return no(
+      `this PR's commits carry ${shas.length} different \`${CANONICAL_SHA_TRAILER}:\` trailers`,
+      [`a sync branch is built by one run from one canonical tree, so there is exactly one right ` +
+       `answer and this PR offers ${shas.length}: ${shas.map(oneLine).join(", ")}.`]);
+  }
+
+  const sha = shas[0];
+  if (!SHA40.test(sha)) {
+    return no(
+      `this PR's \`${CANONICAL_SHA_TRAILER}:\` trailer is not a 40-character object name`,
+      [`the trailer reads ${oneLine(sha)}. It is handed to \`git fetch\` as a revision, so only a ` +
+       `full object name is accepted — an abbreviation is ambiguous, and a leading \`-\` is a flag.`]);
+  }
+
+  // Shallow, and by object name rather than by ref: the one commit the trailer names is the only
+  // tree this comparison is entitled to read. A moving `v2` could have advanced since the sync,
+  // and comparing against whatever it points at now would fail honest syncs and pass stale ones.
+  try {
+    git(["fetch", "--quiet", "--depth", "1", "--no-tags", repoUrl, sha]);
+  } catch (e) {
+    return no(
+      `canonical could not be fetched at the ${CANONICAL_SHA_TRAILER} this PR claims`,
+      [`\`git fetch ${repoUrl} ${sha}\` failed: ${oneLine(e.message)}`,
+       `either that commit is not in canonical — which is itself the answer — or the fetch could ` +
+       `not be made. Neither is evidence that these files came from canonical, so the PR is ` +
+       `reviewed in full.`],
+      sha);
+  }
+
+  const mismatched = [];
+  for (const path of files) {
+    const canonicalPath = canonicalPathFor(path);
+    const here = blobAtRef(git, "HEAD", path);
+    const there = blobAtRef(git, sha, canonicalPath);
+    if (sameSyncedFile(path, here, there)) continue;
+    mismatched.push({
+      path,
+      canonicalPath,
+      detail: here === null
+        ? "is deleted here, but canonical still has it"
+        : there === null
+          ? "is present here, but canonical has no such file"
+          : "does not match canonical's copy",
+    });
+  }
+
+  if (mismatched.length) {
+    return {
+      ok: false, sha, checked: files.length, mismatched,
+      // NAMES THE FILES, because "a sync PR was rejected" is not actionable and "this one file
+      // was edited after the sync" is. Paths come from `git diff --name-only` and are therefore
+      // chosen by whoever opened the PR, so they are rendered through `oneLine` — one line each,
+      // quoted, unable to forge surrounding structure in an artefact three reviewers read.
+      reason: `${mismatched.length} of ${files.length} changed file(s) do not match canonical at ` +
+        `the ${CANONICAL_SHA_TRAILER} this PR claims (${sha})`,
+      lines: mismatched.map(({ path, canonicalPath, detail }) =>
+        `${oneLine(path)} ${detail} (${oneLine(canonicalPath)} at canonical ${sha})`),
+    };
+  }
+
+  return {
+    ok: true, sha, checked: files.length, mismatched: [],
+    reason: `all ${files.length} changed file(s) are byte-identical to canonical at ${sha}`,
+    lines: [],
+  };
+}
+
+// The one place a failed provenance check becomes prose, so `task.md` and the run summary cannot
+// end up disagreeing about why a `flow-sync/` PR was not classified.
+export function syncProvenanceText(provenance) {
+  return [
+    "This PR is on a `flow-sync/` branch and every changed path is inside the synced surface, so " +
+    "it CLAIMS to be canonical's tooling arriving here. That claim was CHECKED against canonical " +
+    `itself and did not hold: ${provenance.reason}.`,
+    ...provenance.lines.map((l) => `  - ${l}`),
+    "A `flow-sync/` branch name is not provenance — anyone with write access can create one, and " +
+    "`.flow/bin/**` executes in this repo's CI. So this PR is handled as the ordinary task-less " +
+    "PR it is, and reviewed in full.",
+  ].join("\n");
+}
+
 // The Flow stamp a consuming repo carries. Canonical has no `.flow/VERSION` at all (the root
 // `VERSION` is the single source, and a second stamp inside `.flow/` would have nothing to
 // compare against); an adopting repo has only this one.
@@ -697,9 +894,10 @@ export function taskContext({
       "CONTEXT was unavailable and name this sentinel — that is a fact about the workflow, and " +
       "it is what tells a human to run flow-sync rather than to go looking at the PR.",
   };
-  const miss = (reason, { sources = false, sentinel = NO_TASK_SENTINEL } = {}) => ({
+  const miss = (reason, { sources = false, sentinel = NO_TASK_SENTINEL, extra = "" } = {}) => ({
     id: null, source: null, path: null, matches: [], found: false, reason,
     text: `${sentinel}\n\n${reason}\n\n` +
+      (extra ? `${extra}\n\n` : "") +
       (sources ? `The two sources that were tried, verbatim:\n\n${untrustedBlock(headRef, prTitle)}\n\n` : "") +
       `${CLOSING[sentinel]}\n`,
   });
@@ -745,11 +943,22 @@ export function taskContext({
   }
 
   if (!id) {
-    return miss(
-      "No task id in the branch or the PR title. Flow resolves it from a `flow/<id>-<slug>` " +
-      "branch or a leading `[<id>]` in the PR title; this PR carries neither. Both sources are " +
-      "reproduced verbatim in the fenced block below.",
-      { sources: true });
+    // flow-0115. A `flow-sync/` PR whose paths held but whose CONTENT did not lands here, and the
+    // SENTINEL IS DELIBERATELY UNCHANGED: the reviewers' job on an unverified sync PR is exactly
+    // their job on any PR with no task, and inventing a third sentinel would be inventing a third
+    // behaviour nobody specified. What they do get is the reason, because "this branch says sync
+    // and the files say otherwise" is the fact a human needs to tell a stale branch from a forgery.
+    const unverified = prKind && !prKind.classified && prKind.provenance && !prKind.provenance.ok
+      ? prKind.provenance
+      : null;
+    return {
+      ...miss(
+        "No task id in the branch or the PR title. Flow resolves it from a `flow/<id>-<slug>` " +
+        "branch or a leading `[<id>]` in the PR title; this PR carries neither. Both sources are " +
+        "reproduced verbatim in the fenced block below.",
+        { sources: true, extra: unverified ? syncProvenanceText(unverified) : "" }),
+      ...(unverified ? { provenance: unverified } : {}),
+    };
   }
 
   const source = idFromBranch(headRef) === id ? "the branch" : "the PR title";
@@ -1083,9 +1292,18 @@ export function runPlan({
   // helper is executed from. It runs only for a classified release PR, which is why an ordinary
   // PR's git calls are still exactly the two diffs above.
   const classified = classifyPr({ headRef, changedFiles });
-  const prKind = classified?.classified && classified.kind === "release"
-    ? { ...classified, report: releaseReport({ git }) }
-    : classified;
+  let prKind = classified;
+  if (classified?.classified && classified.kind === "release") {
+    prKind = { ...classified, report: releaseReport({ git }) };
+  } else if (classified?.classified && classified.kind === "sync") {
+    // flow-0115. The provenance check lives behind BOTH halves of the classification, which is
+    // what keeps the network call off every other PR's path: a branch without the prefix, or one
+    // with it that strayed outside the surface, never reaches this line. `classified` is then
+    // overwritten by the verdict — the sentinel is granted by evidence, never by the path list
+    // on its own.
+    const provenance = syncProvenance({ git, baseRef, files: classified.files });
+    prKind = { ...classified, provenance, classified: provenance.ok };
+  }
   const task = taskContext({
     headRef, prTitle, tasksDir, ls, read, prKind,
     ...(callerSupplied === undefined ? {} : { callerSupplied }),
@@ -1107,6 +1325,9 @@ const LIMIT_SOURCE = {
 
 export function planSummary({
   cfg, changedFiles, security, diff, task, bootstrap = false,
+  // flow-0115. Defaulted for the same reason `limit` is: a caller holding an older plan object
+  // still renders, and simply reports no provenance verdict — which is the truth for one.
+  prKind = null,
   // Defaulted so a caller holding an older plan object still renders. The line then reports the
   // default, which is what such a plan actually used.
   limit = { bytes: DEFAULT_MAX_DIFF_BYTES, source: "default" },
@@ -1134,6 +1355,19 @@ export function planSummary({
   // The guard's problems, so the red check has its reason in the run summary rather than only
   // inside an artefact a reviewer read.
   for (const problem of task.problems ?? []) out.push(`- :x: release-guard: ${problem}`);
+  // flow-0115. The same obligation for the sync case: a `flow-sync/` PR that was NOT classified
+  // must say so here, naming the files that disagreed with canonical. Without this line the only
+  // visible difference between a verified sync and a rejected one is the absence of a sentinel,
+  // which reads as nothing having happened.
+  const provenance = prKind?.provenance ?? null;
+  if (provenance?.ok) {
+    out.push(`- sync provenance: **VERIFIED** against canonical \`${provenance.sha}\` — ${provenance.reason}`);
+  } else if (provenance) {
+    out.push(
+      `- :x: sync provenance: **NOT VERIFIED**, so this PR is not a \`${SYNC_PR_SENTINEL}\` — ` +
+      `${provenance.reason}`);
+    for (const l of provenance.lines) out.push(`  - ${l}`);
+  }
   for (const w of cfg.warnings) out.push(`- :warning: ${w}`);
   // The bootstrap warning is last so it is the line a reader ends on, and it is phrased as a
   // warning rather than an error because the case is legitimate exactly once. What must never
