@@ -19,7 +19,7 @@ touches:
   - ".flow/bin/stamp-intents.mjs"
   - ".github/workflows/_flow-done.yml"
   - "docs/adr/0007-intent-layer.md"
-  - "changes/flow-0000.md"
+  - "changes/flow-0127.md"
 labels: [flow-infra, intents]
 notes:
   - "2026-10-03 (orchestrator): written on the human's request after inflight PR #37, the first intent approval in any repo. The human chose to write it now rather than wait for the cap."
@@ -80,7 +80,7 @@ Does:
   - fails the job if the CLI throws, with the error in the log. It never silently drops a stamp.
 - **`docs/adr/0007-intent-layer.md`**: one line under slice 4 saying it shipped, with this task's
   id.
-- `changes/flow-0000.md`, renamed to the allocated id, in the format `changes/README.md` gives.
+- `changes/flow-0127.md`, renamed to the allocated id, in the format `changes/README.md` gives.
 
 Does not:
 
