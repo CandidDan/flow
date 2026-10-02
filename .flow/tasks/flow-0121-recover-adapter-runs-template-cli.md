@@ -1,7 +1,7 @@
 ---
 id: "flow-0121"
 title: "Canonical's flow-recover adapter runs the template's CLI instead of a copy of it, so its own sweep can promote a ready PR to in_review"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Needs flow-0104 (PR #156) merged first: the --open-pr-ready flag and the ready-pr and promote subcommands this task brings to canonical are added by that PR. When flow-0104 is done, clear blocked_by and set status ready."
-blocked_by: ["flow-0104"]
+blocked_reason: ""
+blocked_by: []
 serves: ["maintenance"]
 touches:
   - "project-template/.flow/bin/flow-recover.mjs"
