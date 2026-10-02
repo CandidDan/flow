@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0115"
 title: "A sync PR is classified only when its content matches canonical at the Canonical-SHA it claims"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude-worker"
