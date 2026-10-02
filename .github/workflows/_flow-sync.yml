@@ -53,7 +53,7 @@ on:
   workflow_call:
     inputs:
       canonical_ref:
-        description: "Canonical ref to adopt from (tag/branch). Match your callers' pin. Default v2."
+        description: "Canonical ref to adopt from (tag/branch). Match your callers' pin. Default v3."
         required: false
         type: string
     secrets:
@@ -178,7 +178,7 @@ jobs:
       # `@<ref>` on the `uses:` line of its own flow-sync caller, and `Checkout this repo` above has
       # just put that file on disk — so the ref is read, not defaulted. Three outcomes, and none of
       # them is silent: one distinct pin wins and is logged with the file it came from; no pin at all
-      # falls back to `v2` with a `::warning::` (today's behaviour, now visible); two callers
+      # falls back to `v3` with a `::warning::` (today's behaviour, now visible); two callers
       # disagreeing is an `::error::` and a failed job, because there is no safe guess between them.
       #
       # An explicit input still wins outright. A human dispatching the workflow is overriding the
@@ -193,7 +193,7 @@ jobs:
           # The ONLY hard-coded ref left in this file, and it is reached only when the repo carries
           # no pinned flow-sync caller to read. `caller-pins.test.mjs` derives the expected value
           # from root VERSION's major, so cutting a new major moves it here and nowhere else.
-          FALLBACK_REF="v2"
+          FALLBACK_REF="v3"
 
           if [ -n "${REQUESTED_REF}" ]; then
             echo "canonical_ref supplied as an input: ${REQUESTED_REF}. Caller pins are not consulted — an explicit input is an override."

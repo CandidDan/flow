@@ -257,15 +257,27 @@ test("an input description still advertising the old default fails too", () => {
 // Criterion: the check tracks the stamp, it does not hard-code v2.
 // ---------------------------------------------------------------------------------------------
 
-test("a hypothetical VERSION 3.0.0 fails the real @v2 callers — the check follows the stamp", () => {
+test("a hypothetical NEXT major fails the real callers — the check follows the stamp", () => {
   // Without this case the check passes today and quietly stops working at the next major, which
   // is precisely the failure mode that produced flow-0056: 2.0.0 shipped with v1 callers and
   // nothing noticed.
-  const problems = checkCallerPins({ ...realInput(), version: "3.0.0\n" });
+  //
+  // The bumped stamp is DERIVED from the real one, and that is flow-0125's correction. Written as
+  // the literal `3.0.0` this case was itself the hard-coded stamp the rest of the file refuses:
+  // it went stale the day 3.0.0 was cut, because the "hypothetical" major had become the current
+  // one, every real caller matched it, and the case guarding the derivation found nothing to
+  // report. It failed loudly rather than silently, which is the only reason it was caught — but a
+  // guard that has to be edited at every major is a chore, not a check.
+  const input = realInput();
+  const next = `${Number(expectedRef(input.version).slice(1)) + 1}.0.0\n`;
+  const nextRef = expectedRef(next);
+  assert.notEqual(nextRef, expectedRef(input.version), "the hypothetical major must not be the current one");
+  const problems = checkCallerPins({ ...input, version: next });
   assert.ok(problems.length >= 10,
-    `every caller must be reported against the bumped stamp, got ${problems.length}: ` +
+    `every caller must be reported against the bumped stamp (${nextRef}), got ${problems.length}: ` +
     problems.join(" | "));
-  for (const p of problems) assert.match(p, /expected @v3|expected 'v3'|"Default v3"/, p);
+  const wanted = new RegExp(`expected @${nextRef}\\b|expected '${nextRef}'|"Default ${nextRef}"`);
+  for (const p of problems) assert.match(p, wanted, p);
 });
 
 test("expectedRef reads the major and nothing else", () => {
@@ -334,6 +346,42 @@ test("the 2.0.0 changelog section states the pin requirement, the delivery, and 
   assert.match(section, /overwrit/i,
     "…and it must warn that a repo hand-edited BEFORE this lands has its caller overwritten by " +
     "its first sync — the flow-0051 fix reverting itself is the whole reason this is priority 1");
+});
+
+// ---------------------------------------------------------------------------------------------
+// Criterion: the repinning doc names the step a repo must take by hand to reach this major.
+//
+// A major exists BECAUSE the per-repo callers need editing (docs/flow-versioning-policy.md), so the
+// pins moving in this repo is only half of it: the other half is an edit inside somebody else's
+// repo, which nothing here can make for them. `changes/flow-0125.md` states it once, at release
+// time; the runbook is where a human looks months later, and a runbook that stops at `sed` over the
+// `uses:` lines sends them away with nine working checks and a queue runner that fails at startup.
+//
+// Derived from root VERSION like everything else in this file: the section has to be about the
+// major that is current, not about whichever one was current when it was written.
+// ---------------------------------------------------------------------------------------------
+
+test("the repinning doc has a section for reaching the current major, and names the caller step", () => {
+  const want = expectedRef(readFileSync(VERSION_FILE, "utf8"));
+  const doc = readFileSync(join(REPO, "docs/repinning-a-consuming-repo.md"), "utf8");
+
+  const heading = doc.split("\n").find((l) => l.startsWith("## ") && l.includes(`@${want}`));
+  assert.ok(heading,
+    `docs/repinning-a-consuming-repo.md has no "## " section naming @${want}. Repinning to a new ` +
+    `major is the one repin that is not just the sed, and this file is the runbook for it.`);
+
+  const section = doc.slice(doc.indexOf(heading)).split(/^---$/m)[0];
+  assert.match(section, /actions: read/,
+    "the section must name `actions: read` — flow-0080's caller grant is the single reason this " +
+    "major cannot ride the alias, and it is the step the sed over the `uses:` lines cannot make");
+  assert.match(section, /flow-queue-runner\.yml/,
+    "…and the file it goes in, or the reader has to guess which of the ten callers");
+  assert.match(section, /schedule-gate/,
+    "…and the job, because a top-level grant demands the scope from every caller including the " +
+    "dispatch-only ones that never reach it");
+  assert.match(section, /startup|before any step/,
+    "…and the symptom: GitHub refuses the run before any step executes, so there is no log inside " +
+    "the job to find it in");
 });
 
 test("a comment quoting the fallback cannot stand in for the code (flow-0105)", () => {

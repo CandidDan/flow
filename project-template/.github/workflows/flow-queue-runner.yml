@@ -97,7 +97,7 @@ jobs:
       # exhaustive and a reusable cannot raise a scope above its caller's grant, so without this
       # line the gate fails closed every hour and the runner never dispatches.
       actions: read
-    uses: CandidDan/flow/.github/workflows/_flow-queue-runner.yml@v2
+    uses: CandidDan/flow/.github/workflows/_flow-queue-runner.yml@v3
     with:
       task_id: ${{ inputs.task_id }}
     # Named, not `inherit` — see the SECRETS note in this file's header for what each one buys
