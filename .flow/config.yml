@@ -54,6 +54,22 @@ coverage_min: 83.5
 # number catches. Raise it deliberately and say why; never raise it to go green.
 claude_md_max: 12000
 
+# The queue cap (flow-0070) — a WIP limit on what gets PLANNED, not on what gets worked.
+#
+# At most this many tasks may be `ready` at once; `allocate-task-id` refuses a new `ready` task
+# while that many already are, before it writes, commits or pushes anything. Flow already caps
+# work in progress (one claim per session, `touches` overlap) and capped planning nowhere — on
+# 2026-09-23 canonical held 13 `ready` tasks, nearly all of the last ~25 Flow maintaining itself.
+#
+# 8 is a MAXIMUM, so the 9th is refused. The only bypass is the draft's own `urgent` label, which
+# is the human's to apply (the same rule as `auto-ok`) — there is no flag and no env var, because
+# a bypass a session can hand itself is not a limit. A `blocked` draft is never capped: the cap
+# limits the ready queue, not the store.
+#
+# Canonical is over the cap today, and that is the point: nothing new enters this queue until it
+# drains below 8. Removing the key switches the cap off entirely.
+queue_cap: 8
+
 # Gate-coverage floor. Note an honest limitation, recorded rather than papered over: every one
 # of canonical's source trees lives under a dot-directory (`.flow/bin/`, `.github/workflows/`,
 # `project-template/.flow/bin/`), and flow-doctor's undeclared-tree scan skips dot-directories.

@@ -7,9 +7,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  parseTask, idNum, branchMatchesTask, resolveState, pickPrForTask, reconcile,
+  parseTask, scalarValue, idNum, branchMatchesTask, resolveState, pickPrForTask, reconcile,
   readPrs, readTasksFromOrigin, runStateCli,
 } from "./flow-state.mjs";
+import { blockedByFindings } from "./flow-doctor.mjs";
 
 const task = (o) => ({ id: "CAN-1", title: "", status: "ready", owner: "", branch: "", pr: "", blocked_reason: "", issue: "", ...o });
 
@@ -27,6 +28,65 @@ test("parseTask reads the lifecycle fields it needs", () => {
 test("parseTask returns null without frontmatter", () => {
   assert.equal(parseTask("no frontmatter here"), null);
   assert.equal(parseTask(""), null);
+});
+
+// ── flow-0096: a `#` inside a quoted scalar is data, not a comment ──
+// The bug these pin down truncated prose silently: a `blocked_reason` naming the PR it waits on
+// lost everything from the `#` onward, including the `not machine-checkable` opt-out at the end
+// of the sentence, so the reason a human reads and the sentinel a machine reads both vanished.
+
+test("flow-0096: a hash inside a double-quoted value is kept whole (criterion 1)", () => {
+  const text = `---\nid: "CAN-7"\nstatus: "blocked"\nblocked_reason: "waits on PR #127, not machine-checkable"\n---\nbody`;
+  assert.equal(parseTask(text).blocked_reason, "waits on PR #127, not machine-checkable");
+});
+
+test("flow-0096: a trailing comment after an unquoted inline array is still stripped (criterion 2)", () => {
+  assert.equal(scalarValue('["G10"]    # a comment'), '["G10"]');
+  assert.equal(scalarValue("[]   # none yet"), "[]");
+});
+
+test("flow-0096: an unquoted scalar still drops its trailing comment (criterion 3)", () => {
+  assert.equal(scalarValue("2  # note"), "2");
+  const text = `---\nid: "CAN-8"\npriority: 2  # note\n---\nbody`;
+  assert.equal(parseTask(text).priority, 2);
+});
+
+test("flow-0096: a quoted value that is only a hash survives, as before (criterion 4)", () => {
+  const text = `---\nid: "CAN-9"\nissue: "#157"\n---\nbody`;
+  assert.equal(parseTask(text).issue, "#157");
+  assert.equal(scalarValue('"#157"'), "#157");
+  assert.equal(scalarValue("#157"), "#157");   // unquoted, hash-leading: no whitespace to strip on
+});
+
+test("flow-0096: a quoted reason carrying a hash keeps the opt-out flow-doctor reads (criterion 5)", () => {
+  // Composed deliberately: the reason is read by the parser this task fixes, then handed to
+  // flow-doctor's own finding logic. Before the fix the string reaching this call was
+  // `"waits on PR` — sentinel gone — and the warning fired on a task that had opted out.
+  // (flow-doctor's OWN scalar reader has the same defect and is outside this task's `touches`;
+  // see the PR description.)
+  const text = `---\nid: "CAN-10"\nstatus: "blocked"\nblocked_reason: "waits on a call about PR #127, not machine-checkable"\nblocked_by: []\n---\nbody`;
+  const parsed = parseTask(text);
+  const { problems, warnings } = blockedByFindings({
+    id: parsed.id, status: parsed.status, blocked_reason: parsed.blocked_reason, blockedByList: [],
+  });
+  assert.deepEqual(warnings, [], "the 'not machine-checkable' opt-out must survive the parse");
+  assert.deepEqual(problems, []);
+});
+
+test("flow-0096: a real comment after a quoted value is dropped, the quoted hash is not", () => {
+  const text = `---\nid: "CAN-11"\ntitle: "fix #42 in the parser"   # tracked in #157\n---\nbody`;
+  assert.equal(parseTask(text).title, "fix #42 in the parser");
+});
+
+test("flow-0096: single quotes behave like double quotes", () => {
+  assert.equal(scalarValue("'waits on PR #127'   # comment"), "waits on PR #127");
+});
+
+test("flow-0096: an unterminated quote stays lenient rather than throwing", () => {
+  assert.equal(scalarValue('"oops'), '"oops');
+  assert.equal(scalarValue('"oops  # trailing'), '"oops');
+  assert.equal(scalarValue(""), "");
+  assert.equal(scalarValue(undefined), "");
 });
 
 test("idNum extracts the numeric suffix", () => {

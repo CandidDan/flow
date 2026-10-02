@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0080"
 title: "Queue runner timing lives in repo variables: a pause switch that leaves review running, and a local-time schedule that follows the operator"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0080"

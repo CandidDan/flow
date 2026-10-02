@@ -20,7 +20,7 @@
 // line, computed AFTER `git add -A`. It was the pre-`add` worktree diff until flow-0054, which
 // omitted every newly created file and could render a PR body asserting that none differed.
 //
-// Why a PR and not a direct push: the governance rule (CLAUDE.md "Hard rules") is *repos adopt
+// Why a PR and not a direct push: the governance rule (.flow/PROTOCOL.md "Hard rules") is *repos adopt
 // canonical; they don't patch infra locally* — but adoption must still clear the same
 // Definition-of-Done gate as any other change, so a bad sync is caught before it reaches main.
 // A flow-sync/<version> branch isn't a flow/<id> branch, so touches-guard skips it and the
