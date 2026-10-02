@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0086"
 title: "flow-doctor warns when claude_md_max is not declared"
-status: "blocked"
+status: "ready"
 priority: 3
 project: "flow"
 owner: ""
@@ -11,8 +11,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Needs flow-0050 merged: the `claude_md_max` key, and `check-claude-md.mjs` that exports its name, only exist on main once PR #114 lands."
-blocked_by: ["flow-0050", "https://github.com/CandidDan/flow/pull/114"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G9"]
 touches:
   - "project-template/.flow/bin/flow-doctor.mjs"
@@ -20,6 +20,7 @@ touches:
   - "changes/flow-0086.md"
 labels: [infra, context]
 notes:
+  - "2026-10-02 (orchestrator): unblocked on the human's say-so. Every blocked_by entry had landed (checked against main), and inflight listed it as UNBLOCK."
   - "2026-09-28 (orchestrator): split out of flow-0050, whose acceptance criterion 8 originally carried this as its second half. The flow-0050 worker left it undelivered on purpose because neither flow-doctor file was in that task's `touches`, and QA failed PR #114 on the unproven half. The human chose to split rather than widen flow-0050's scope, so criterion 8 there was amended to the check's own behaviour and this task owns the doctor's."
 ---
 

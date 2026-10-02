@@ -1,7 +1,7 @@
 ---
 id: "flow-0083"
 title: "A task can recommend its model and effort, the orchestrator sets them deliberately, and the runner honours them"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "same workflow file as flow-0080 (_flow-queue-runner.yml); land the switch/schedule change first, then rebase onto it"
-blocked_by: ["flow-0080"]  # same workflow file; land the switch/schedule change first, then rebase onto it
+blocked_reason: ""
+blocked_by: []
 serves: ["G9", "G10"]      # G9: stop paying Opus prices for mechanical work. G10: put the hardest work on the model most likely to get it right.
 touches:
   - "project-template/.flow/tasks/_TEMPLATE.md"
@@ -23,6 +23,7 @@ touches:
   - "changes/flow-0083.md"
 labels: [queue-runner, cost, task-writer]
 notes:
+  - "2026-10-02 (orchestrator): unblocked on the human's say-so. Every blocked_by entry had landed (checked against main), and inflight listed it as UNBLOCK."
   - "2026-09-26 (orchestrator): From the operator. Every task runs on Opus today, whatever it needs. Fable is available on his Max plan and should be recommended where a task suits it. Effort matters as much as model: the TanPlan planning work that went in circles probably needed more effort, not just a bigger model."
 ---
 

@@ -1,7 +1,7 @@
 ---
 id: "flow-0041"
 title: "Sweep blocked tasks whose dependency has landed, so the only status with no way out stops needing a human"
-status: "blocked"
+status: "ready"
 priority: 3
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waiting on flow-0040, which adds the `blocked_by` field this sweep reads. There is deliberately nothing else to wait for: the classifier acts only on a machine-checkable dependency, and until that field exists there is nothing to classify. Unblock by hand once flow-0040 is done on main — which is precisely the manual step this task exists to remove, and this task will be the first to carry `blocked_by` once the field lands."
-blocked_by: ["flow-0040"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G7", "G8"]
 touches:
   - "project-template/.flow/bin/flow-unblock.mjs"
@@ -25,7 +25,8 @@ touches:
   - "project-template/.github/workflows/flow-unblock.yml"
   - "docs/flow-reusable-workflows.md"
 labels: [infra, protocol]
-notes: []
+notes:
+  - "2026-10-02 (orchestrator): unblocked on the human's say-so. Every blocked_by entry had landed (checked against main), and inflight listed it as UNBLOCK."
 ---
 
 ## Context

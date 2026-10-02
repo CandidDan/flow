@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0082"
 title: "A failed qa or code-review check dispatches a bounded auto-fix worker onto the same PR"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -11,8 +11,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits on flow-0085. The reviewers still read the task file, and so the acceptance criteria, from the PR checkout; an auto-fix round could edit the criteria it is trying to satisfy. flow-0085 moves that read to the base branch."
-blocked_by: ["flow-0085"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G12", "G10"]    # G12: every escalation is one decision card. G10: a fix may not pass review by weakening the tests.
 touches:
   - ".github/workflows/_flow-kickback.yml"
@@ -28,6 +28,7 @@ touches:
   - "changes/flow-0082.md"
 labels: [flow-infra, review, automation]
 notes:
+  - "2026-10-02 (orchestrator): unblocked on the human's say-so. Every blocked_by entry had landed (checked against main), and inflight listed it as UNBLOCK."
   - "2026-09-25 (orchestrator): From the human, after PR #108 (flow-0076) sat red on a precise, mechanical code-review finding (a CRLF gap) until a human noticed and started a session. PR #109 (flow-0077) then did the same thing the same day. The protocol calls a red review check a kickback (PROTOCOL.md step 9), but nothing dispatches one: the worker stops at `gh pr ready` and the queue runner only takes `ready` tasks. The human was acting as a relay."
   - "2026-09-25 (orchestrator): DECIDED WITH THE HUMAN: automatic, bounded, and off by default. Rounds are capped (default 2, hard max 3, with a warning above that). qa and code-review only; a failed security check is never auto-fixed. Gated behind FLOW_AI like the other AI workflows. The fixer may dispute a finding, which hands the PR to the human."
   - "2026-09-25 (orchestrator): DECIDED: ESCALATION IS A LABEL PLUS A DECISION CARD, NOT `blocked`. `blocked` is the worker's own judgment transition, and blocking a task on its own open PR has no clean way to clear. The PR gets `flow:needs-human`, and the task stays `in_review`. The label is also the off switch for that PR: the kickback workflow never acts on a labelled PR, and removing the label re-arms it."
