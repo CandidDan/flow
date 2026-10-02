@@ -3,7 +3,7 @@
 id: "flow-0074"
 title: "intent: on tasks — a ready task names the intent it derives from (warn-first, forward-only)"
 status: "ready"
-priority: 2
+priority: 1
 project: "flow"
 owner: ""
 created: "2026-09-24"

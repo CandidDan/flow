@@ -2,7 +2,7 @@
 id: "flow-0112"
 title: "Streams: group intents under a stream that carries their shared purpose, constraints and dependencies"
 status: "ready"
-priority: 3
+priority: 1
 project: "flow"
 owner: ""
 created: "2026-10-01"
