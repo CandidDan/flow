@@ -342,6 +342,13 @@ land in flow-0125, right after this PR; the `v3.0.0` tag follows both.
   startup. The caller now grants it, and the caller-permissions test checks job-level grants as
   well as top-level ones. No caller action needed: the template caller already grants it.
 
+- **flow-0105's changelog check reads its entry the release-safe way**
+  (`.flow/bin/sync-default-ref.test.mjs`,
+  flow-0126). The test read `changes/flow-0105.md` directly and went red on the 3.0.0 release PR
+  (#172) once the fragment was assembled. It now reads through `.flow/bin/changelog-entry.mjs`.
+  The release-assemble check (flow-0090) missed it because the test needs `yaml` and skips in the
+  flow-tooling job; only the gate job runs it. No caller action needed: canonical-only test.
+
 ## 2.2.0 — 2026-09-30 (tagged `v2.2.0`)
 
 **MINOR: the review gate stops passing work it did not read, and a repo can size it to its own
