@@ -1,12 +1,12 @@
 ---
 id: "flow-0121"
 title: "Canonical's flow-recover adapter runs the template's CLI instead of a copy of it, so its own sweep can promote a ready PR to in_review"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0121"
 created: "2026-10-02"
-started: ""
+started: "2026-10-02T00:29:20Z"
 branch: ""
 pr: ""
 issue: ""
