@@ -1,7 +1,7 @@
 ---
 id: "flow-0126"
 title: "flow-0105's fragment test reads its entry through changelog-entry.mjs, so the 3.0.0 release PR goes green"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "orchestrator-cowork-2026-10-02"
