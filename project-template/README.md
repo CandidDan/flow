@@ -11,9 +11,14 @@ from commit one, not bolted on later.
 ## What's in here
 
 ```
-CLAUDE.md                     The protocol. The contract Code reads every session. Markdown,
-                              because it's a tool-loaded config file — not a human-read surface.
+CLAUDE.md                     A pointer, not the rules: a short host file that @-imports
+                              .flow/PROTOCOL.md and then carries this project's own notes.
+                              Markdown, because it's a tool-loaded config file — not a
+                              human-read surface. AGENTS.md is the same doorway for agents
+                              that follow that convention.
 .flow/
+  PROTOCOL.md                 The protocol. The contract every agent session reads, arriving
+                              through the pointer above. One copy, two doorways.
   config.yml                  The ONLY per-stack file: declares this project's test/lint/build/
                               coverage commands + coverage_min. The protocol is identical across
                               every project; only these commands differ. This is what makes
@@ -160,7 +165,7 @@ Several Code sessions can work in parallel. Coordination is git, not a lock: tas
 someone else claimed it, so the session rebases and picks the next), and every task declares a
 `touches` glob list so a session skips any `ready` task that overlaps something already
 `in_progress`. Feature code still goes branch → PR; only the state transitions commit to `main`.
-The full rules live in `CLAUDE.md` → *Concurrency*. Practical implication: keep tasks
+The full rules live in `.flow/PROTOCOL.md` → *Concurrency*. Practical implication: keep tasks
 small-and-disjoint in their `touches`, and the queue runner can safely fan out.
 
 Three mechanisms make this safe rather than hopeful, and they're enforced, not trusted:
