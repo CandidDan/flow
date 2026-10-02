@@ -663,6 +663,207 @@ test("the classify CLI honours --pr-state-known end to end", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────
+// flow-recover: the adapter runs the TEMPLATE's CLI, not a copy of it (flow-0121)
+// ─────────────────────────────────────────────────────────────────────────────────────────
+//
+// Until flow-0121 this adapter re-implemented the template's CLI shell — the same seven
+// `cmd === …` branches, hand-kept in two places. It drifted exactly as a second implementation
+// always does: flow-0104 added `classify --open-pr-ready`, `ready-pr` and `promote` to the
+// template, the copy grew none of them, and `promote-in-review` was therefore unreachable in
+// canonical's own sweep for every scheduled run in between.
+//
+// What made that cost a release rather than a minute is that NOTHING went red. An unknown flag
+// is ignored and arrives at the classifier as 0; a missing subcommand prints the usage line to
+// stderr and exits 0; the sweep reads an empty stdout as "no ready PR". Every one of those is
+// byte-identical to the healthy "nothing to promote" answer. So the tests below do not check
+// that the subcommands exist — they check that the adapter and the template give the SAME
+// answer to the same question, which is the only property that cannot be satisfied by silence.
+
+import { mkdirSync } from "node:fs";
+// Both shapes of the adapter's surface: the named import the sweep's own callers use, and the
+// namespace, which is how the re-export list below is compared against the template's.
+import * as adapterExports from "./flow-recover.mjs";
+import { runRecoverCli } from "./flow-recover.mjs";
+
+// A two-store fixture: canonical's adapter and the template's CLI, side by side in a tmp repo,
+// each pointed at its own store. Deliberately NOT the real stores — `list-in-progress` is the
+// one subcommand whose answer depends on the store, and asserting on canonical's live store
+// would make this test pass or fail according to whether a worker happens to hold a claim.
+// Seeded instead, so the difference between the two stores is a fact of the fixture: the
+// adapter's store has exactly one in_progress task and the template's has none.
+//
+// The layout is the minimum that makes the adapter's relative import resolve — it reaches the
+// template's module as `../../project-template/.flow/bin/flow-recover.mjs`, and the template
+// resolves its own store from its own realpath, so both trees have to be real directories.
+const SEED_ROW = "flow-9121\t2026-10-02T09:00:00Z\tclaude/seeded-x";
+function recoverPairFixture() {
+  const root = tmp("recover-pair");
+  cpSync(join(TEMPLATE_FLOW, "bin"), join(root, "project-template", ".flow", "bin"), { recursive: true });
+  cpSync(join(TEMPLATE_FLOW, "tasks"), join(root, "project-template", ".flow", "tasks"), { recursive: true });
+  mkdirSync(join(root, ".flow", "bin"), { recursive: true });
+  mkdirSync(join(root, ".flow", "tasks"), { recursive: true });
+  cpSync(join(BIN, "flow-recover.mjs"), join(root, ".flow", "bin", "flow-recover.mjs"));
+  writeFileSync(join(root, ".flow", "tasks", "9121-seed.md"),
+    '---\nid: "flow-9121"\nstatus: "in_progress"\nstarted: "2026-10-02T09:00:00Z"\n' +
+    'branch: "claude/seeded-x"\n---\nseeded\n');
+  writeFileSync(join(root, ".flow", "tasks", "9122-seed.md"),
+    '---\nid: "flow-9122"\nstatus: "ready"\nstarted: ""\n---\nseeded\n');
+  return root;
+}
+
+const PRS_JSON = JSON.stringify([
+  { number: 9, title: "[flow-9121] seeded", headRefName: "claude/seeded-x", isDraft: false,
+    isCrossRepository: false, url: "https://github.com/o/r/pull/9" },
+  { number: 10, title: "[flow-9122] draft", headRefName: "claude/seeded-y", isDraft: true,
+    isCrossRepository: false, url: "https://github.com/o/r/pull/10" },
+]);
+
+// The table. One row per subcommand, and the `storeDependent` flag names the single licensed
+// difference between the two CLIs — which store they read. Keys are checked against the
+// template's source below, so a subcommand added later fails this test until it has a row:
+// that is how "covered without anyone remembering" is enforced rather than hoped for.
+const RECOVER_CASES = {
+  "classify": {
+    argv: ["classify", "--status", "in_progress", "--has-open-pr", "1", "--open-pr-ready", "1",
+           "--age", "9999", "--threshold", "75"],
+    want: "promote-in-review\n",
+  },
+  "list-in-progress": { argv: ["list-in-progress"], storeDependent: true },
+  "branch-candidates": {
+    argv: ["branch-candidates", "flow-9121", "claude/seeded-x"],
+    want: "claude/seeded-x\nflow/flow-9121-*\n",
+  },
+  "count-task-prs": { argv: ["count-task-prs", "flow-9121"], stdin: PRS_JSON, want: "1\n" },
+  "ready-pr": {
+    argv: ["ready-pr", "flow-9121", "claude/seeded-x"], stdin: PRS_JSON,
+    want: "9\thttps://github.com/o/r/pull/9\n",
+  },
+  "reset": {
+    argv: ["reset", "flow-9121"],
+    want: '{"updates":[{"id":"flow-9121","status":"ready","owner":"","branch":"","pr":""}]}\n',
+  },
+  "promote": {
+    argv: ["promote", "flow-9121", "https://github.com/o/r/pull/9", "claude/seeded-x"],
+    want: '{"updates":[{"id":"flow-9121","status":"in_review","pr":"https://github.com/o/r/pull/9","branch":"claude/seeded-x"}]}\n',
+  },
+};
+
+test("every flow-recover subcommand answers identically from the adapter and the template", () => {
+  const root = recoverPairFixture();
+  try {
+    const invoke = (rel, c) => spawnSync(process.execPath, [join(root, rel), ...c.argv],
+      { cwd: root, encoding: "utf8", input: c.stdin ?? "" });
+    const ADAPTER = join(".flow", "bin", "flow-recover.mjs");
+    const TEMPLATE = join("project-template", ".flow", "bin", "flow-recover.mjs");
+
+    // The table must cover exactly the subcommands the template implements. Read off the
+    // template's source, so this is the thing that goes red when the eighth one lands.
+    const implemented = [...readFileSync(join(TEMPLATE_FLOW, "bin", "flow-recover.mjs"), "utf8")
+      .matchAll(/cmd === "([a-z-]+)"/g)].map((m) => m[1]).sort();
+    assert.ok(implemented.length > 0, "an empty scan is a failure, not a pass");
+    assert.deepEqual(implemented, Object.keys(RECOVER_CASES).sort(),
+      "a subcommand with no row here is a subcommand nobody proved the adapter can reach — " +
+      "which is precisely how flow-0104's three went inert in canonical for a whole release");
+    assert.equal(implemented.length, 7, "seven subcommands, per flow-0121");
+
+    for (const [name, c] of Object.entries(RECOVER_CASES)) {
+      const a = invoke(ADAPTER, c);
+      const t = invoke(TEMPLATE, c);
+      assert.equal(a.status, 0, `${name}: the adapter must exit 0 — ${a.stderr}`);
+      assert.equal(t.status, 0, `${name}: the template must exit 0 — ${t.stderr}`);
+      assert.equal(a.stderr, "", `${name}: a usage line on stderr means the adapter has no such ` +
+        `subcommand — the exact shape of the flow-0104 drift, and it exits 0 while it happens`);
+
+      if (c.storeDependent) {
+        // The licensed difference, asserted in both directions so neither half can be the
+        // accident. A copy or a symlink resolves the template's fixture store and prints the
+        // template's answer here, which is empty — and empty is also what a healthy sweep
+        // prints when nothing is in flight, so only the seeded row can tell them apart.
+        assert.equal(a.stdout, SEED_ROW + "\n",
+          "the adapter must read the CONSUMING repo's store — its seeded in_progress task");
+        assert.equal(t.stdout, "",
+          "the template reads its own fixture store, which holds no in_progress task");
+        continue;
+      }
+      assert.equal(a.stdout, t.stdout, `${name}: adapter and template must agree byte for byte`);
+      assert.equal(a.stdout, c.want, `${name}: and that shared answer is the one expected`);
+    }
+
+    // The fallthrough is drift-prone too: the adapter's copy listed five subcommands in its
+    // usage line while the template listed seven, which is a wrong answer to `--help`-shaped
+    // misuse that no other assertion here would have caught.
+    const bad = { argv: ["no-such-subcommand"] };
+    assert.equal(invoke(ADAPTER, bad).stderr, invoke(TEMPLATE, bad).stderr);
+    assert.match(invoke(ADAPTER, bad).stderr, /ready-pr\|reset\|promote/,
+      "the usage line must name every subcommand, including flow-0104's");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("flow-recover.mjs is an ADAPTER — one call into runRecoverCli, with no CLI of its own", () => {
+  const file = join(BIN, "flow-recover.mjs");
+  assert.ok(!lstatSync(file).isSymbolicLink(),
+    "a symlink resolves its realpath into project-template/, so the sweep would read the " +
+    "fixture store and still exit 0 — the failure canonical's CLAUDE.md names by name");
+  const src = readFileSync(file, "utf8");
+  // Comments are stripped first: the file is allowed to SAY `cmd ===` in the note explaining
+  // why it must not DO it, and a guard that forbids the explanation of itself gets deleted.
+  const code = src.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  assert.ok(!/cmd ===/.test(code),
+    "a `cmd === …` branch here is the hand-kept copy growing back; the next subcommand added " +
+    "to the template would go inert in canonical again");
+  assert.ok(!/function parseFlags\s*\(/.test(code),
+    "flag parsing belongs to the one CLI, not to a second copy of it");
+  assert.match(code, /runRecoverCli\(process\.argv\.slice\(2\), \{ tasksDir: join\(canonicalFlowDir\(\), "tasks"\) \}\)/,
+    "the CLI must be one call into the template's runner, given canonical's store");
+  assert.match(code, /from "\.\.\/\.\.\/project-template\/\.flow\/bin\/flow-recover\.mjs"/,
+    "the logic must come from the template, not be re-implemented here");
+});
+
+test("runRecoverCli's stdin and out are injectable, and it returns the exit code", () => {
+  // The signature flow-0121 specifies, exercised in-process: the adapter and the template are
+  // two callers of ONE function, so the parameters that make them differ have to be real.
+  const dir = tmp("recover-cli");
+  try {
+    const tasksDir = join(dir, "tasks");
+    mkdirSync(tasksDir, { recursive: true });
+    writeFileSync(join(tasksDir, "9121-seed.md"),
+      '---\nid: "flow-9121"\nstatus: "in_progress"\nstarted: "2026-10-02T09:00:00Z"\n' +
+      'branch: "claude/seeded-x"\n---\nseeded\n');
+
+    let buf = "";
+    const out = { write: (s) => { buf += s; } };
+    assert.equal(runRecoverCli(["list-in-progress"], { tasksDir, out }), 0,
+      "always 0 — a scheduled sweep degrades to a no-op rather than failing the run");
+    assert.equal(buf, SEED_ROW + "\n", "the store it reads is the one it was given");
+
+    buf = "";
+    runRecoverCli(["ready-pr", "flow-9121"], { tasksDir, out, stdin: () => PRS_JSON });
+    assert.equal(buf, "9\thttps://github.com/o/r/pull/9\n", "stdin is read through the injection");
+
+    buf = "";
+    runRecoverCli(["ready-pr", "flow-9121"], { tasksDir, out, stdin: () => "not json" });
+    assert.equal(buf, "", "and unparseable input still never promotes");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the adapter re-exports the template's pure helpers, flow-0104's included", () => {
+  // The re-export list is the other hand-kept list in this file, and it had drifted the same
+  // way: readyOpenPr and buildPromoteEdit existed in the template and were unreachable through
+  // the adapter. Asserted against the template's own export surface so it cannot drift again.
+  const names = (src) => new Set([...src.matchAll(/^export (?:function|const) (\w+)/gm)].map((m) => m[1]));
+  const fromTemplate = names(readFileSync(join(TEMPLATE_FLOW, "bin", "flow-recover.mjs"), "utf8"));
+  assert.ok(fromTemplate.size >= 8, "an empty scan is a failure, not a pass");
+  const reExported = new Set(Object.keys(adapterExports));
+  const missing = [...fromTemplate].filter((n) => !reExported.has(n)).sort();
+  assert.deepEqual(missing, [],
+    `the adapter must re-export everything the template exports: ${missing.join(", ")}`);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
 // source-roots (flow-0077) — the sixth adapter, and the one whose correct answer is silence
 // ─────────────────────────────────────────────────────────────────────────────────────────
 //

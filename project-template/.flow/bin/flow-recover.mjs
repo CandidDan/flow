@@ -249,7 +249,7 @@ export function readTasks(tasksDir) {
   return out;
 }
 
-// ── CLI ── three thin subcommands; the workflow supplies all git/gh facts. Always exits 0.
+// ── CLI ── seven thin subcommands; the workflow supplies all git/gh facts. Always exits 0.
 function parseFlags(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
@@ -258,10 +258,36 @@ function parseFlags(argv) {
   return out;
 }
 
-if (__isMain) {
-  const [cmd, ...rest] = process.argv.slice(2);
-  const flowDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const tasksDir = join(flowDir, "tasks");
+// ── ONE CLI, two callers ─────────────────────────────────────────────────────────────────
+//
+// This function is the whole CLI, and it is exported because canonical runs it too. The
+// reusable `_flow-recover.yml` invokes `.flow/bin/flow-recover.mjs` in the CONSUMING repo, and
+// canonical is one of those — but the template resolves its store from its own realpath, which
+// is `project-template/.flow/tasks`, the fixture store. So canonical's `.flow/bin/` holds an
+// adapter that supplies its real store location instead.
+//
+// That adapter used to hand-copy this shell, and the copy went stale exactly as a second
+// implementation always does: flow-0104 added `--open-pr-ready`, `ready-pr` and `promote` here,
+// the copy grew none of them, and `promote-in-review` was therefore inert in canonical's own
+// sweep — silently, because the missing flag arrives as 0 and `ready-pr` prints nothing, which
+// are both indistinguishable from "no ready PR". The next subcommand added would have gone the
+// same way. Hence one function, parameterised by the only thing that actually differs:
+//
+//   export function runRecoverCli(argv, { tasksDir, stdin?, out? }): number
+//
+// `tasksDir` is the store to read; `stdin` and `out` are injectable so a test can drive this
+// in-process. The usage line stays on `process.stderr` and is deliberately NOT injectable: it
+// is diagnostic, the sweep never reads it, and stdout is the only channel that carries an
+// answer. The return value is the exit code, and it is always 0 — a scheduled sweep must
+// degrade to a no-op rather than fail the run (see the subcommand notes above for why "could
+// not tell" must never look like a finding).
+export function runRecoverCli(argv, opts = {}) {
+  const { tasksDir } = opts;
+  const out = opts.out || process.stdout;
+  const readStdin = opts.stdin || (() => {
+    try { return readFileSync(0, "utf8"); } catch { return ""; }
+  });
+  const [cmd, ...rest] = argv;
 
   if (cmd === "classify") {
     const f = parseFlags(rest);
@@ -280,19 +306,19 @@ if (__isMain) {
       },
       f.threshold ? Number(f.threshold) : DEFAULT_THRESHOLD_MINUTES,
     );
-    process.stdout.write(decision + "\n");
+    out.write(decision + "\n");
   } else if (cmd === "list-in-progress") {
     // Three tab-separated fields. `branch` is the third and may be empty — the shell reads it
     // with a trailing `read -r id started branch`, so an absent value stays an empty string
     // rather than shifting the columns.
     for (const t of readTasks(tasksDir)) {
       if (t.status === "in_progress") {
-        process.stdout.write(`${t.id}\t${t.started}\t${t.branch}\n`);
+        out.write(`${t.id}\t${t.started}\t${t.branch}\n`);
       }
     }
   } else if (cmd === "branch-candidates") {
     const [id, declared] = rest;
-    if (id) for (const p of recoveryBranchCandidates(id, declared)) process.stdout.write(p + "\n");
+    if (id) for (const p of recoveryBranchCandidates(id, declared)) out.write(p + "\n");
   } else if (cmd === "count-task-prs") {
     // Reads `gh pr list --json title` output on stdin and prints how many of those PRs belong
     // to this task. Deliberately NOT a jq expression in the workflow: the `[<id>] …` rule is
@@ -305,32 +331,28 @@ if (__isMain) {
     // "there is no PR" and clear a live claim. Whether the question was answerable AT ALL is a
     // separate fact the caller must establish and pass as `prStateKnown` — see classifyStranded.
     const id = rest[0];
-    let raw = "";
-    try { raw = readFileSync(0, "utf8"); } catch { raw = ""; }
     let n = 0;
     try {
-      const prs = JSON.parse(raw || "[]");
+      const prs = JSON.parse(readStdin() || "[]");
       if (Array.isArray(prs)) n = prs.filter((p) => isTaskPrTitle(p && p.title, id)).length;
     } catch { n = 0; }
-    process.stdout.write(String(n) + "\n");
+    out.write(String(n) + "\n");
   } else if (cmd === "ready-pr") {
     // Same stdin as count-task-prs (one `gh pr list` call, two questions asked of it). Prints
     // "<number>\t<url>" for the task's open non-draft PR, or NOTHING at all — the shell reads an
     // empty result as "no ready PR" and passes --open-pr-ready 0.
     const [id, branch] = rest;
-    let raw = "";
-    try { raw = readFileSync(0, "utf8"); } catch { raw = ""; }
     let prs = [];
-    try { prs = JSON.parse(raw || "[]"); } catch { prs = []; }
+    try { prs = JSON.parse(readStdin() || "[]"); } catch { prs = []; }
     const hit = readyOpenPr(prs, id, branch);
-    if (hit) process.stdout.write(`${hit.number}\t${hit.url}\n`);
+    if (hit) out.write(`${hit.number}\t${hit.url}\n`);
   } else if (cmd === "reset") {
     const id = rest[0];
-    if (id) process.stdout.write(JSON.stringify({ updates: [buildResetEdit(id)] }) + "\n");
+    if (id) out.write(JSON.stringify({ updates: [buildResetEdit(id)] }) + "\n");
   } else if (cmd === "promote") {
     const [id, prUrl, branch] = rest;
     if (id) {
-      process.stdout.write(JSON.stringify({ updates: [buildPromoteEdit(id, prUrl, branch)] }) + "\n");
+      out.write(JSON.stringify({ updates: [buildPromoteEdit(id, prUrl, branch)] }) + "\n");
     }
   } else {
     process.stderr.write(
@@ -338,5 +360,10 @@ if (__isMain) {
         "<classify|list-in-progress|branch-candidates|count-task-prs|ready-pr|reset|promote> …\n",
     );
   }
-  process.exit(0);
+  return 0;
+}
+
+if (__isMain) {
+  const flowDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  process.exit(runRecoverCli(process.argv.slice(2), { tasksDir: join(flowDir, "tasks") }));
 }
