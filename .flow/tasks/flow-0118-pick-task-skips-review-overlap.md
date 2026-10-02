@@ -19,7 +19,24 @@ touches:
   - "project-template/.flow/PROTOCOL.md"
   - "changes/flow-0118.md"
 labels: [flow-infra, concurrency, queue-runner]
-notes: []
+notes:
+  - date: "2026-10-02"
+    by: "claude-worker-flow-0118"
+    text: >-
+      Build complete on branch flow/flow-0118-pick-task-skips-review-overlap (pushed). All four
+      gate commands green: build 34 workflows, lint 113 .mjs, test 1779/1778 pass, coverage
+      96.97% lines (floor 83.5). pickTask now filters against IN_FLIGHT_STATUSES =
+      ["in_progress", "in_review"]; both statements of the claim rule in PROTOCOL.md name
+      in_review; six new tests in pick-task.test.mjs cover every acceptance criterion.
+      ONE FILE OUTSIDE `touches`, flagged rather than hidden: .flow/bin/protocol-portability.test.mjs.
+      Its digest pin fails on ANY PROTOCOL.md edit and its own failure message prescribes
+      recording an INTENTIONAL_DIVERGENCES entry in the same commit, so the declared PROTOCOL.md
+      edit is not landable without it. Two entries added (Concurrency, The loop you run), each
+      with a reason and task id. It is canonical-only bookkeeping, touches-guard excludes
+      `.flow/**` from scope judging, and no other task is in flight, so nothing collides — but
+      the orchestrator may want to add it to `touches` for any future protocol-editing task.
+      NEXT ACTION: open the PR titled "[flow-0118] pick-task skips a ready task whose touches
+      overlap a task in review, not only one in progress", then `gh pr ready`.
 ---
 
 ## Context
