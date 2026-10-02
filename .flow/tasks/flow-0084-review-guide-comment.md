@@ -1,7 +1,7 @@
 ---
 id: "flow-0084"
 title: "After the reviews finish, one review-guide comment tells the human where to look: TL;DR, hotspots, assumptions, smoke test, verdicts"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude-worker"
