@@ -35,8 +35,72 @@ them. They are:
 | `_flow-recover.yml` | Scheduled self-heal sweep (CAN-51): a task stranded `in_progress` past a staleness threshold gets its PR re-opened as a **draft** (work was pushed but is unfinished by definition — flow-0039) or its claim reset to `ready` (nothing to recover). Off unless `FLOW_AI=true`; always on-demand via dispatch | input `threshold_minutes`; secret `FLOW_PAT` (optional) |
 | `_flow-triage.yml` | Scheduled issue triage (off unless `FLOW_AI=true`) | secret `CLAUDE_CODE_OAUTH_TOKEN` |
 | `_flow-review.yml` | The three Definition-of-Done review checks on a PR — qa, code-review and a conditional security review (flow-0007). **Skipped entirely while the PR is a draft** (flow-0039) — the `plan` job carries the condition and the other three `needs: plan` — so the reviewers run once, when the worker marks the PR ready, not on every work-in-progress push. Runs for **any** PR author, not just `flow/` branches; model and security-trigger paths come from the caller's `.flow/config.yml` `review:` block, and `.flow/bin/flow-review.mjs` turns each written verdict into an exit code (fail-closed). Off unless `FLOW_AI=true` | input `node_version`; secret `CLAUDE_CODE_OAUTH_TOKEN` |
-| `_flow-queue-runner.yml` | Picks a ready task → dispatches a fresh worker (off unless `FLOW_AI=true`) | input `task_id`; secrets `CLAUDE_CODE_OAUTH_TOKEN` + `FLOW_PAT` (CAN-58 — so the worker's own push fires `flow-open-pr`; both are forwarded by **both** thin callers since flow-0095) |
+| `_flow-queue-runner.yml` | Picks a ready task → dispatches a fresh worker (off unless `FLOW_AI=true`). Its caller ticks **hourly** and a small `schedule-gate` job decides which tick is the day's run, from the three repo variables below (flow-0080) — so the pause switch and the local-time schedule need no file edit and survive a sync. `workflow_dispatch` bypasses the gate entirely | input `task_id`; secrets `CLAUDE_CODE_OAUTH_TOKEN` + `FLOW_PAT` (CAN-58 — so the worker's own push fires `flow-open-pr`; both are forwarded by **both** thin callers since flow-0095); caller grant `actions: read` |
 | `_flow-sync.yml` | The adopt mechanism (Phase 4): when the repo's `.flow/VERSION` is behind canonical, copies the updated `.flow/bin/*` + thin callers in, bumps the stamp, and opens a **reviewed PR**. Safe to run anytime (only opens a PR; no `FLOW_AI` gate). The ref it adopts from is **read off the caller's own `uses:` pin** when `canonical_ref` is empty — which is every scheduled run (flow-0105) | input `canonical_ref` (overrides the pin; empty ⇒ resolved from the caller, `v2` only if no caller pins one); secret `FLOW_PAT` (optional) |
+
+### Queue-runner timing — three repo variables, never a caller edit (flow-0080)
+
+`on:` is parsed statically and cannot read `vars.*`. So anything written in a caller — a cron
+hour, GitHub's native `timezone:` (available since March 2026) — is a literal in a file
+`flow-sync` overwrites, in every repo, re-edited by hand whenever it changes. The caller
+therefore ticks hourly (`0 * * * *`) and the *decision* lives in the reusable, where it can read
+repo variables. Each is set once per repo, with no file edit:
+
+| Variable | Values | What it does |
+|---|---|---|
+| `FLOW_QUEUE_RUNNER` | `paused`, or unset | `paused` → **scheduled** ticks dispatch no worker. `workflow_dispatch` still works, and the three PR review checks, triage and compass are untouched. Any other value, or unset, is not paused |
+| `FLOW_TZ` | an IANA zone, e.g. `Australia/Sydney` | the zone the run hour and the weekday test are read in |
+| `FLOW_RUN_HOUR` | `0`–`23` | the **local** hour the day's run should start |
+
+```bash
+# pause autonomous work without emptying the gate, then resume
+gh variable set FLOW_QUEUE_RUNNER -R <owner>/<repo> -b paused
+gh variable delete FLOW_QUEUE_RUNNER -R <owner>/<repo>
+
+# run the day's task at 07:00 in the operator's own zone, DST included
+gh variable set FLOW_TZ -R <owner>/<repo> -b Australia/Sydney
+gh variable set FLOW_RUN_HOUR -R <owner>/<repo> -b 7
+```
+
+These are **per-repo** variables. A personal account has no account-level Actions variables, so
+there is nothing to set once for the fleet; it is one command per repo, which is still cheaper
+than a PR per repo.
+
+- **Why a `paused` string rather than a boolean.** An unset variable can never be misread as
+  "off". `FLOW_AI` remains the master switch and `FLOW_AI=false` still turns everything off —
+  including review, which is exactly the problem that `FLOW_QUEUE_RUNNER` exists to avoid:
+  during the 1.x → 2.0.0 migrations the only way to pause the runner also disabled the three
+  review checks, so repos briefly had a gate that passed on build/lint/test alone.
+- **The gate is "first tick at or after the hour, once per local day", never "hour equals".**
+  GitHub's scheduler runs 15 minutes to 2+ hours late at peak, so an exact-hour match would
+  silently skip a whole day whenever a tick was late. A scheduled tick proceeds only when the
+  local weekday is Mon–Fri, the local hour is at or after `FLOW_RUN_HOUR`, and no earlier
+  *scheduled* run has already dispatched a worker on that local date. "Dispatched" means the
+  worker step actually ran: a tick that found the queue dry does not consume the day.
+- **Both schedule variables, or neither.** Half a schedule is reported as a misconfiguration on
+  every tick, as is an unknown zone or an hour outside 0–23 — it never falls back silently to
+  UTC or to 07:00. With both unset, behaviour is exactly as before flow-0080: one run per UTC
+  weekday at 07:00.
+- **Visible skips.** An hourly workflow is mostly skips, and a skip that prints nothing is
+  indistinguishable from a runner that has quietly died. Every tick writes one line to its step
+  summary naming its answer: `paused`, `before-run-hour`, `already-ran-today`, `weekend`,
+  `bad-config`, `runs-unknown` or `run`.
+- **Where the logic is.** `.flow/bin/queue-runner-schedule.mjs` — a pure, dependency-free
+  function (`scheduleDecision`), with the git/`gh` gathering as a thin shell in the workflow, the
+  same split `queue-runner-verify.mjs` uses. Unit tests are
+  `project-template/.flow/bin/queue-runner-schedule.test.mjs`; the wiring, the `if:` conditions
+  and the three switch properties are `.flow/bin/queue-runner-switch.test.mjs`.
+- **The caller must grant `actions: read`.** The gate reads this workflow's own earlier runs to
+  answer "has today's run already gone out?". A caller `permissions:` block is exhaustive and a
+  reusable cannot raise a scope above its caller's grant, so without that line the gate fails
+  closed every hour and nothing is ever dispatched. It is granted on the caller only (and is
+  *not* in the reusable's top-level `permissions:`), because dispatch-only callers — canonical's
+  own, which has no `schedule:` block — never reach the gate job.
+- **Adoption.** Re-sync `flow-queue-runner.yml` for the hourly cron and the `actions: read`
+  grant. Until then the pause switch works (the reusable carries it) but the local-time schedule
+  cannot take effect. If you keep a customised cron whose only daily tick is before 07:00 UTC,
+  set `FLOW_RUN_HOUR` to that hour, or the default run hour falls after your tick and nothing
+  runs.
 
 **`FLOW_PAT` (CAN-58).** A PR opened with the Actions `GITHUB_TOKEN` does *not* trigger downstream
 workflows, so `flow-gates` would never fire on an auto-opened PR — the gate silently bypassed.
