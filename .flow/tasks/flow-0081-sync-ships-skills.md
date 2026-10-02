@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0081"
 title: "flow-sync ships the template's skills, so AGENTS.md never points an adopter at a skill it doesn't have"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude-worker"
