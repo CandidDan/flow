@@ -13,19 +13,28 @@
 // See parse-task-id.mjs in this directory for why canonical adapts rather than copies, and
 // flow-doctor.mjs for why the store location has to be supplied here.
 //
+// WHAT THIS FILE IS NOT, as of flow-0121: a second copy of the template's CLI. It was one, and
+// the copy went stale the way a second implementation always does — flow-0104 added
+// `--open-pr-ready`, `ready-pr` and `promote` to the template and the copy grew none of them, so
+// `promote-in-review` could never fire in canonical's own sweep. Nothing failed loudly: a missing
+// flag arrives as 0 and a missing `ready-pr` prints nothing, which is exactly what "no ready PR"
+// looks like. The CLI below is therefore ONE call into the template's `runRecoverCli`, which is
+// the same shell every adopting repo runs, differing only in the store it is pointed at. Do not
+// reintroduce a `cmd === …` branch here — adapters.test.mjs fails the build if one appears.
+//
 //   node .flow/bin/flow-recover.mjs classify --status in_progress --branch-exists 1 …
 //   node .flow/bin/flow-recover.mjs list-in-progress
 //   node .flow/bin/flow-recover.mjs branch-candidates flow-0040 claude/foo-x
 //   gh pr list --state open --json title | node .flow/bin/flow-recover.mjs count-task-prs flow-0040
+//   gh pr list --state open --json number,title,headRefName,isDraft,url \
+//     | node .flow/bin/flow-recover.mjs ready-pr flow-0040 <branch>
 //   node .flow/bin/flow-recover.mjs reset flow-0040
+//   node .flow/bin/flow-recover.mjs promote flow-0040 <pr-url> <branch>
 
-import { readFileSync, realpathSync as __realpathSync } from "node:fs";
+import { realpathSync as __realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath as __fileURLToPath } from "node:url";
-import {
-  buildResetEdit, classifyStranded, isTaskPrTitle, readTasks, recoveryBranchCandidates,
-  DEFAULT_THRESHOLD_MINUTES,
-} from "../../project-template/.flow/bin/flow-recover.mjs";
+import { runRecoverCli } from "../../project-template/.flow/bin/flow-recover.mjs";
 
 // --- main-module detection (do not simplify back to a string compare) -------------------
 // See project-template/.flow/bin/flow-recover.mjs for the incident this guards against.
@@ -37,9 +46,12 @@ const __isMain = (() => {
 })();
 // ---------------------------------------------------------------------------------------
 
+// Re-exported, never re-implemented — including the pure helpers flow-0104 added
+// (`readyOpenPr`, `buildPromoteEdit`), because a hand-kept re-export list is the same drift
+// hazard in miniature as the hand-kept CLI this file used to carry.
 export {
-  classifyStranded, buildResetEdit, minutesSince, readTasks, recoveryBranchCandidates,
-  isTaskPrTitle, DEFAULT_THRESHOLD_MINUTES,
+  classifyStranded, buildResetEdit, buildPromoteEdit, minutesSince, readTasks, readyOpenPr,
+  recoveryBranchCandidates, isTaskPrTitle, runRecoverCli, DEFAULT_THRESHOLD_MINUTES,
 } from "../../project-template/.flow/bin/flow-recover.mjs";
 
 // Canonical's own store — `.flow/`, one level up from this `bin/` directory. This is the whole
@@ -49,59 +61,8 @@ export function canonicalFlowDir(here = __fileURLToPath(import.meta.url)) {
   return resolve(dirname(here), "..");
 }
 
-function parseFlags(argv) {
-  const out = {};
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i].startsWith("--")) out[argv[i].slice(2)] = argv[i + 1];
-  }
-  return out;
-}
-
-// ── CLI ── mirrors the template's shell, differing only in the store it reads. Always exits 0:
-// the sweep must degrade to a no-op rather than fail a scheduled run.
+// ── CLI ── the template's shell verbatim, pointed at canonical's store. Always exits 0: the
+// sweep must degrade to a no-op rather than fail a scheduled run.
 if (__isMain) {
-  const [cmd, ...rest] = process.argv.slice(2);
-  const tasksDir = join(canonicalFlowDir(), "tasks");
-
-  if (cmd === "classify") {
-    const f = parseFlags(rest);
-    process.stdout.write(classifyStranded(
-      { status: f.status },
-      {
-        branchExists: Number(f["branch-exists"] || 0) > 0,
-        hasOpenPr: Number(f["has-open-pr"] || 0) > 0,
-        aheadOfBase: Number(f.ahead || 0) > 0,
-        ageMinutes: Number(f.age || 0),
-        prStateKnown: f["pr-state-known"] === undefined || Number(f["pr-state-known"]) > 0,
-      },
-      f.threshold ? Number(f.threshold) : DEFAULT_THRESHOLD_MINUTES,
-    ) + "\n");
-  } else if (cmd === "list-in-progress") {
-    for (const t of readTasks(tasksDir)) {
-      if (t.status === "in_progress") {
-        process.stdout.write(`${t.id}\t${t.started}\t${t.branch}\n`);
-      }
-    }
-  } else if (cmd === "branch-candidates") {
-    const [id, declared] = rest;
-    if (id) for (const p of recoveryBranchCandidates(id, declared)) process.stdout.write(p + "\n");
-  } else if (cmd === "count-task-prs") {
-    const id = rest[0];
-    let raw = "";
-    try { raw = readFileSync(0, "utf8"); } catch { raw = ""; }
-    let n = 0;
-    try {
-      const prs = JSON.parse(raw || "[]");
-      if (Array.isArray(prs)) n = prs.filter((p) => isTaskPrTitle(p && p.title, id)).length;
-    } catch { n = 0; }
-    process.stdout.write(String(n) + "\n");
-  } else if (cmd === "reset") {
-    const id = rest[0];
-    if (id) process.stdout.write(JSON.stringify({ updates: [buildResetEdit(id)] }) + "\n");
-  } else {
-    process.stderr.write(
-      "usage: flow-recover.mjs <classify|list-in-progress|branch-candidates|count-task-prs|reset> …\n",
-    );
-  }
-  process.exit(0);
+  process.exit(runRecoverCli(process.argv.slice(2), { tasksDir: join(canonicalFlowDir(), "tasks") }));
 }
