@@ -416,13 +416,22 @@ test("every new caller passes exactly the secret(s) its reusable declares, by na
 test("every new caller grants at least the permissions its reusable declares", { skip }, () => {
   for (const name of ADDED) {
     const reusable = `_${name.replace(/\.yml$/, "")}.yml`;
-    const required = wfParse(reusable).permissions ?? {};
+    // The union of the reusable's top-level permissions and every job's own: a job-scoped grant
+    // the caller lacks is just as fatal (GitHub refuses to start the run) as a top-level one.
+    const parsed = wfParse(reusable);
+    const required = { ...(parsed.permissions ?? {}) };
+    for (const job of Object.values(parsed.jobs ?? {})) {
+      for (const [scope, level] of Object.entries(job.permissions ?? {})) {
+        if (required[scope] !== "write") required[scope] = level;
+      }
+    }
     const jobs = Object.values(wfParse(name).jobs ?? {});
     assert.equal(jobs.length, 1, `${name} is a thin caller: exactly one job`);
     const granted = jobs[0].permissions ?? {};
 
     for (const [scope, level] of Object.entries(required)) {
-      assert.equal(granted[scope], level,
+      const ok = granted[scope] === level || (level === "read" && granted[scope] === "write");
+      assert.ok(ok,
         `${name} must grant ${scope}: ${level} — a reusable cannot raise a permission above ` +
         `its caller's grant, and a permissions block is exhaustive, so an omitted scope is a denial`);
     }

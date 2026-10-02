@@ -46,6 +46,10 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
+      # The schedule-gate job reads this workflow's own earlier runs (`gh run list` and the jobs
+      # API). A reusable cannot raise a scope above its caller's grant, and GitHub refuses to
+      # start the run at all (startup_failure, no jobs) when a job asks for one it was not given.
+      actions: read
     uses: CandidDan/flow/.github/workflows/_flow-queue-runner.yml@main
     with:
       task_id: ${{ inputs.task_id }}
