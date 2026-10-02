@@ -1,4 +1,5 @@
-// protocol-docs.test.mjs — proving tests for canonical's root CLAUDE.md and .gitattributes.
+// protocol-docs.test.mjs — proving tests for canonical's root CLAUDE.md, .gitattributes, and the
+// rules the template's PROTOCOL.md has to carry.
 //
 // A protocol document is the one artefact with no natural failure mode: it can be confidently,
 // silently wrong for months. It points at a file someone moved. It quotes a coverage floor that
@@ -25,6 +26,7 @@ const REPO = resolve(FLOW, "..");
 
 const CLAUDE_MD = join(REPO, "CLAUDE.md");
 const GITATTRIBUTES = join(REPO, ".gitattributes");
+const PROTOCOL = join(REPO, "project-template", ".flow", "PROTOCOL.md");
 
 const doc = existsSync(CLAUDE_MD) ? readFileSync(CLAUDE_MD, "utf8") : "";
 
@@ -126,6 +128,37 @@ test(".gitattributes marks the generated board files", () => {
   const attrs = readFileSync(GITATTRIBUTES, "utf8");
   assert.match(attrs, /^\.flow\/board\.html\s+linguist-generated=true$/m);
   assert.match(attrs, /^\.flow\/board-edits\.json\s+linguist-generated=true$/m);
+});
+
+// flow-0090. The protocol has to tell a worker HOW to prove a changelog criterion, not only that
+// it owes one: `--assemble` deletes the fragment, so a test that reads it is green on the task's
+// PR and red on the release's. `release-assemble.test.mjs` is the gate; this is the instruction
+// that stops the mistake being made in the first place, and these assertions keep it present.
+test("PROTOCOL.md says to prove a changelog entry from the fragment or the assembled entry", () => {
+  const protocol = readFileSync(PROTOCOL, "utf8");
+
+  const section = protocol.match(/\*\*Changelog entries[\s\S]*?(?=\n## )/);
+  assert.ok(section, "PROTOCOL.md must still carry the changelog-fragment rule");
+  const rule = section[0];
+
+  assert.match(rule, /if it exists/i,
+    "the fallback must be conditional on the fragment still being there");
+  assert.match(rule, /otherwise the assembled entry in `CHANGELOG\.md`/,
+    "a worker told only 'read the fragment' writes the test that breaks the next release");
+  assert.match(rule, /, <task-id>\)/,
+    "the assembled entry is found by the marker that ends its file list — name it, or the rule is unactionable");
+  assert.match(rule, /changes\/<task-id>\.md/, "it must still name the fragment path");
+});
+
+test("the changelog rule stays conditional, so it is true in a repo with no `changes/`", () => {
+  const protocol = readFileSync(PROTOCOL, "utf8");
+  const rule = protocol.match(/\*\*Changelog entries[\s\S]*?(?=\n## )/)[0];
+
+  // Two scopes, both needed: the rule's own heading, and the fallback paragraph added under it.
+  assert.match(rule, /where the repo keeps a `changes\/` directory/i,
+    "the whole rule is scoped to repos that have fragments");
+  assert.match(rule, /in a repo that has fragments/i,
+    "an adopting repo has no `changes/` directory; an unconditional fallback is one it cannot follow");
 });
 
 test("extractPaths ignores globs, placeholders and code — not just real paths", () => {
