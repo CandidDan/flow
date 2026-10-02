@@ -1,7 +1,7 @@
 ---
 id: "flow-0118"
 title: "pick-task skips a ready task whose touches overlap a task in review, not only one in progress"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0118"
