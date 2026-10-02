@@ -1,7 +1,7 @@
 ---
 id: "flow-0125"
 title: "Flow goes to v3: template callers, flow-init and flow-sync's fallback pin @v3, and VERSION moves to 3.0.0, because flow-0080 changed the queue-runner caller contract"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-worker"
