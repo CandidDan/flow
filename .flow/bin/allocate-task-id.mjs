@@ -11,6 +11,11 @@
 // `--prefix` from THIS repo's `.flow/config.yml` (`project.name: "flow"`) when the caller
 // omits it, so `node .flow/bin/allocate-task-id.mjs --dry-run` works with no flags at all.
 //
+// `queue_cap` needs no adapter code either, for the same reason: the template's CLI reads it
+// from `<repoRoot>/.flow/config.yml`, and the repo root this adapter supplies is canonical's —
+// so canonical's own `queue_cap: 8` is the cap that applies here. A copy or a symlink would
+// read the TEMPLATE's config (no `queue_cap` at all) and allocate uncapped, still exiting 0.
+//
 //   node .flow/bin/allocate-task-id.mjs --dry-run
 //   node .flow/bin/allocate-task-id.mjs --write --content-file draft.md --slug my-new-task
 //
@@ -32,8 +37,9 @@ const __isMain = (() => {
 // ---------------------------------------------------------------------------------------
 
 export {
-  AllocationError, SLUG_RE, allocateTaskId, assertInsideTasksDir, buildContentFromFile, idWidth,
-  nextId, readIdsFromOrigin, runCli,
+  AllocationError, SLUG_RE, URGENT_LABEL, allocateTaskId, assertInsideTasksDir,
+  buildContentFromFile, idWidth, nextId, parseDraftFrontmatter, parseQueueCap, queueCapRefusal,
+  queueCapReport, readIdsFromOrigin, readQueueCap, readStoreFromOrigin, runCli,
 } from "../../project-template/.flow/bin/allocate-task-id.mjs";
 
 // Canonical's repo root — two levels up from this `bin/` directory (`.flow/bin` -> `.flow` -> repo).
