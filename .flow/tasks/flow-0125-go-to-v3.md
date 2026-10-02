@@ -1,7 +1,7 @@
 ---
 id: "flow-0125"
 title: "Flow goes to v3: template callers, flow-init and flow-sync's fallback pin @v3, and VERSION moves to 3.0.0, because flow-0080 changed the queue-runner caller contract"
-status: "blocked"
+status: "in_progress"
 priority: 1
 project: "flow"
 owner: "claude-worker"
@@ -10,8 +10,8 @@ started: "2026-10-02T04:41:59Z"
 branch: "flow/flow-0125-go-to-v3"
 pr: "https://github.com/CandidDan/flow/pull/171"
 issue: ""
-blocked_reason: "Waits for the 3.0.0 changelog section to land on main (release PR #172, resolution B). When it merges: rebase this branch, keep VERSION 3.0.0 and the re-pins, then mark the PR ready."
-blocked_by: ["https://github.com/CandidDan/flow/pull/172"]
+blocked_reason: ""
+blocked_by: []
 serves: ["maintenance"]
 touches:
   - "project-template/.github/workflows/*.yml"
@@ -25,6 +25,7 @@ touches:
   - "changes/flow-0125.md"
 labels: [flow-infra, release, major, urgent]
 notes:
+  - "2026-10-03 orchestrator: #172 merged (3.0.0 changelog on main). Rebased #171 onto main; full suite green apart from the known plane-guard parallel flake, release-guard 0 problems. Unblocked."
   - "2026-10-02 orchestrator: chose resolution (B). The release PR #172 carries only CHANGELOG.md and changes/, VERSION stays 2.2.0 there, and it folds in 21 fragments including flow-0118. This task then rebases and goes green. Its own fragment changes/flow-0125.md is folded in by a final small release-files PR before the tag."
   - "2026-10-02 orchestrator: Dan approved the MAJOR bump ('v3 makes sense') and asked for this to be set ready and labelled urgent."
   - "2026-10-02 orchestrator: preparing the next release found that it is MAJOR, not 2.3.0. flow-0080 (PR #161) made the flow-queue-runner CALLER grant `actions: read`; without that grant GitHub refuses the run at startup, which is what canonical hit until flow-0124. docs/flow-versioning-policy.md: 'if a change requires editing the per-repo callers, it is MAJOR'. The 1.3.0 incident (CHANGELOG 2.0.0) is this exact mistake. Moving `v2` onto this tree would break every repo pinned @v2 whose caller lacks the grant: tanplan-platform today, and the external test user's repo. release-stamp.test.mjs checks that every template caller pins the major the root VERSION declares, so the re-pin and the VERSION bump must land together. That is this task. The release PR that follows touches only CHANGELOG.md and changes/, and the orchestrator has it prepared locally on release/3.0.0. DECISION: v2 stays on 2.2.0 and is never moved onto this tree; repos opt in to @v3 via flow-sync, whose PR carries the caller edits including `actions: read`."
