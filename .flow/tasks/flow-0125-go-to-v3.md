@@ -1,7 +1,7 @@
 ---
 id: "flow-0125"
 title: "Flow goes to v3: template callers, flow-init and flow-sync's fallback pin @v3, and VERSION moves to 3.0.0, because flow-0080 changed the queue-runner caller contract"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
 owner: ""
@@ -10,7 +10,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Not machine-checkable: waits on Dan's go-ahead to make the next release MAJOR (3.0.0) rather than 2.3.0. When he agrees, set ready. queue_cap (8) is already exceeded, so he may need to label it urgent."
+blocked_reason: ""
 blocked_by: []
 serves: ["maintenance"]
 touches:
@@ -23,8 +23,9 @@ touches:
   - "project-template/.flow/VERSION"
   - "docs/repinning-a-consuming-repo.md"
   - "changes/flow-0125.md"
-labels: [flow-infra, release, major]
+labels: [flow-infra, release, major, urgent]
 notes:
+  - "2026-10-02 orchestrator: Dan approved the MAJOR bump ('v3 makes sense') and asked for this to be set ready and labelled urgent."
   - "2026-10-02 orchestrator: preparing the next release found that it is MAJOR, not 2.3.0. flow-0080 (PR #161) made the flow-queue-runner CALLER grant `actions: read`; without that grant GitHub refuses the run at startup, which is what canonical hit until flow-0124. docs/flow-versioning-policy.md: 'if a change requires editing the per-repo callers, it is MAJOR'. The 1.3.0 incident (CHANGELOG 2.0.0) is this exact mistake. Moving `v2` onto this tree would break every repo pinned @v2 whose caller lacks the grant: tanplan-platform today, and the external test user's repo. release-stamp.test.mjs checks that every template caller pins the major the root VERSION declares, so the re-pin and the VERSION bump must land together. That is this task. The release PR that follows touches only CHANGELOG.md and changes/, and the orchestrator has it prepared locally on release/3.0.0. DECISION: v2 stays on 2.2.0 and is never moved onto this tree; repos opt in to @v3 via flow-sync, whose PR carries the caller edits including `actions: read`."
 ---
 
