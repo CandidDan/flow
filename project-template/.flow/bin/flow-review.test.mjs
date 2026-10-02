@@ -20,7 +20,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -1966,12 +1966,15 @@ test("flow-0115: `syncProvenance` reports a file canonical does not have at all"
 });
 
 test("flow-0115: changes/flow-0115.md exists and states that no caller action is needed",
-  { skip: inCanonical ? false : "not canonical" }, () => {
+  { skip: inCanonical ? false : "not canonical" }, async () => {
     // The fragment IS the release note: `changes/` is assembled into CHANGELOG.md at release
-    // time, so a task that ships a behaviour change without one ships it unannounced.
-    const fragment = join(CANON_ROOT, "changes", "flow-0115.md");
-    assert.ok(existsSync(fragment), "changes/flow-0115.md is missing");
-    const text = readFileSync(fragment, "utf8");
+    // time, so a task that ships a behaviour change without one ships it unannounced. Read it
+    // through changelog-entry.mjs, which finds it in either place; a direct read of
+    // changes/flow-0115.md goes red on the release PR. Imported here because this file ships to
+    // adopting repos, which have no such helper.
+    const { changelogEntry } = await import(pathToFileURL(join(CANON_ROOT, ".flow", "bin", "changelog-entry.mjs")).href);
+    const text = changelogEntry(CANON_ROOT, "flow-0115");
+    assert.ok(text, "flow-0115's changelog entry is missing, as a fragment and in CHANGELOG.md");
     assert.match(text, /Canonical-SHA/, "it has to name the trailer the check reads");
     assert.match(text, /flow-0115/, "and the task it came from");
     assert.match(text, /caller action/i,

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import {
   classifyStranded, buildResetEdit, minutesSince, readTasks, DEFAULT_THRESHOLD_MINUTES,
@@ -618,8 +618,11 @@ test("criterion 7: the promote-in-review branch writes in_review + pr + branch a
 // Criterion 8.
 test("criterion 8: the changelog fragment exists and says no caller action is needed", async (t) => {
   if (!CANON) return t.skip(notCanonical);
-  const frag = join(CANON, "changes", "flow-0104.md");
-  assert.ok(existsSync(frag), "changes/flow-0104.md must exist");
-  const text = readFileSync(frag, "utf8");
+  // Read through changelog-entry.mjs, never changes/<id>.md: a release folds the fragment into
+  // CHANGELOG.md and deletes it, so a direct read is green until the release PR and red on it.
+  // Imported here, not at the top: this file ships to adopting repos, which have no such helper.
+  const { changelogEntry } = await import(pathToFileURL(join(CANON, ".flow", "bin", "changelog-entry.mjs")).href);
+  const text = changelogEntry(CANON, "flow-0104");
+  assert.ok(text, "flow-0104's changelog entry must exist, as a fragment or in CHANGELOG.md");
   assert.match(text, /no caller action/i, "an adopting repo has to be told it need do nothing");
 });

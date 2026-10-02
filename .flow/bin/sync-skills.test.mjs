@@ -38,6 +38,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { prContent } from "../../project-template/.flow/bin/flow-sync.mjs";
+import { changelogEntry } from "./changelog-entry.mjs";
 
 // DEPENDENCY NOTE. Same posture as sync-surface.test.mjs: `_flow-gates.yml`'s flow-tooling job
 // runs `node --test .flow/bin/*.test.mjs` with no install step, so when `yaml` is missing these
@@ -51,7 +52,6 @@ const REPO = resolve(BIN, "..", "..");
 const REUSABLE = join(REPO, ".github/workflows/_flow-sync.yml");
 const CANON_TPL = join(REPO, "project-template");
 const CANON_SKILLS = join(CANON_TPL, ".claude/skills");
-const FRAGMENT = join(REPO, "changes/flow-0081.md");
 
 // The two project-owned files under `.claude/` that this sync must never write. Permissions and
 // hooks are a repo's own decision; canonical has no business replacing them, and the scope rule is
@@ -563,8 +563,9 @@ test("a canonical without skills warns and still completes the sync", { skip }, 
 // ---------------------------------------------------------------------------------------------
 
 test("changes/flow-0081.md exists and states that no caller action is needed", () => {
-  assert.ok(existsSync(FRAGMENT), "changes/flow-0081.md must exist — one fragment per task");
-  const text = readFileSync(FRAGMENT, "utf8");
+  // Through changelog-entry.mjs: a release folds the fragment into CHANGELOG.md and deletes it.
+  const text = changelogEntry(REPO, "flow-0081");
+  assert.ok(text, "flow-0081's changelog entry must exist, as a fragment or in CHANGELOG.md");
   assert.match(text, /caller action:\*\*\s*none/i,
     "the surface is in the reusable, so a caller needs no edit — the fragment must say so");
   assert.match(text, /flow-0081/, "the fragment must name its task id");
