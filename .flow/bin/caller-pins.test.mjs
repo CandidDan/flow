@@ -348,6 +348,42 @@ test("the 2.0.0 changelog section states the pin requirement, the delivery, and 
     "its first sync — the flow-0051 fix reverting itself is the whole reason this is priority 1");
 });
 
+// ---------------------------------------------------------------------------------------------
+// Criterion: the repinning doc names the step a repo must take by hand to reach this major.
+//
+// A major exists BECAUSE the per-repo callers need editing (docs/flow-versioning-policy.md), so the
+// pins moving in this repo is only half of it: the other half is an edit inside somebody else's
+// repo, which nothing here can make for them. `changes/flow-0125.md` states it once, at release
+// time; the runbook is where a human looks months later, and a runbook that stops at `sed` over the
+// `uses:` lines sends them away with nine working checks and a queue runner that fails at startup.
+//
+// Derived from root VERSION like everything else in this file: the section has to be about the
+// major that is current, not about whichever one was current when it was written.
+// ---------------------------------------------------------------------------------------------
+
+test("the repinning doc has a section for reaching the current major, and names the caller step", () => {
+  const want = expectedRef(readFileSync(VERSION_FILE, "utf8"));
+  const doc = readFileSync(join(REPO, "docs/repinning-a-consuming-repo.md"), "utf8");
+
+  const heading = doc.split("\n").find((l) => l.startsWith("## ") && l.includes(`@${want}`));
+  assert.ok(heading,
+    `docs/repinning-a-consuming-repo.md has no "## " section naming @${want}. Repinning to a new ` +
+    `major is the one repin that is not just the sed, and this file is the runbook for it.`);
+
+  const section = doc.slice(doc.indexOf(heading)).split(/^---$/m)[0];
+  assert.match(section, /actions: read/,
+    "the section must name `actions: read` — flow-0080's caller grant is the single reason this " +
+    "major cannot ride the alias, and it is the step the sed over the `uses:` lines cannot make");
+  assert.match(section, /flow-queue-runner\.yml/,
+    "…and the file it goes in, or the reader has to guess which of the ten callers");
+  assert.match(section, /schedule-gate/,
+    "…and the job, because a top-level grant demands the scope from every caller including the " +
+    "dispatch-only ones that never reach it");
+  assert.match(section, /startup|before any step/,
+    "…and the symptom: GitHub refuses the run before any step executes, so there is no log inside " +
+    "the job to find it in");
+});
+
 test("a comment quoting the fallback cannot stand in for the code (flow-0105)", () => {
   const code = 'run: |\n          FALLBACK_REF="v2"\n';
   const commentOnly = 'run: |\n          # FALLBACK_REF="v2" used to live here\n';

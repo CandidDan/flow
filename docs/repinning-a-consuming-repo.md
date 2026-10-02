@@ -78,10 +78,63 @@ Three things follow:
   longer carries one.
 - **Two callers pinned at different refs fail the sync**, with an error naming each file and its ref.
   That is the state a half-finished repin leaves behind, and it is now loud instead of silent.
-- **No flow-sync caller at all** falls back to `v2` with a warning saying so.
+- **No flow-sync caller at all** falls back to the current major — `v3` — with a warning saying
+  so. The fallback is the only hard-coded ref left in `_flow-sync.yml`, and `caller-pins.test.mjs`
+  derives the expected value from root `VERSION`, so cutting a major moves it there and nowhere else.
 
 A `workflow_dispatch` run with the input filled in still overrides everything above — that is how you
 adopt from a canary ref once without repinning.
+
+---
+
+## Moving from `@v2` to `@v3` (the one step the `sed` does not cover)
+
+**A major is deliberate adoption, not maintenance.** `v2` stays at 2.2.0 and is **never** moved onto
+the 3.0.0 tree, so nothing arrives on its own: a repo left on `@v2` keeps working exactly as it does
+today and simply stops receiving updates. You opt in.
+
+`docs/flow-versioning-policy.md` sets the rule that makes this a major: *if a change requires editing
+the per-repo callers, it is MAJOR*. Here that change is flow-0080, and it is one line.
+
+### The step
+
+`flow-queue-runner.yml`'s `schedule-gate` job must grant `actions: read`:
+
+```yaml
+  schedule-gate:
+    permissions:
+      contents: read
+      actions: read        # ← v3 requires this
+```
+
+The gate asks the Actions API "has today's run already gone out?", and **GitHub refuses the run at
+startup** if the caller does not grant the scope — before any step executes, so there is no log
+inside the job to read. A caller `permissions:` block is a ceiling the reusable cannot raise, which
+is why this cannot ride the alias and why it is the whole reason 3.0.0 exists.
+
+It belongs on the **job**, not at the top level: a repo-wide `actions: read` would demand the scope
+from every caller, including dispatch-only ones that never reach this job.
+
+### Doing it
+
+Re-syncing is the easy path — `flow-sync`'s PR carries the new callers, grant included:
+
+```bash
+gh workflow run flow-sync.yml -R <owner>/<repo> -f canonical_ref=v3
+```
+
+By hand it is the ordinary `sed` plus that one grant:
+
+```bash
+FROM="v2"; TO="v3"
+sed -i "s|\(_flow-[a-z-]*\.yml\)@$FROM$|\1@$TO|" .github/workflows/flow-*.yml
+grep -h "uses:" .github/workflows/flow-*.yml | sort -u      # every line must show @v3
+grep -n "actions: read" .github/workflows/flow-queue-runner.yml   # must match, under schedule-gate
+```
+
+A repin that moves the ten pins and misses the grant leaves the repo with a scheduled queue run that
+fails before it starts, and nine checks that are fine — read the changelog's caller-action notes
+first, every time.
 
 ---
 
