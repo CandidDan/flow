@@ -12,6 +12,14 @@ name: _flow-recover (reusable)
 # sweep heals it: re-open the PR when work was pushed, or reset the claim to `ready` when there
 # is nothing to recover.
 #
+# flow-0104 (#91) adds a third, non-destructive outcome for a state the event stream cannot leave
+# on its own: a task `in_progress` whose PR is open and already OUT of draft. `flow-status` moves a
+# task to `in_review` on `ready_for_review`, and that event cannot fire twice — so a task
+# hand-returned to `ready` and re-claimed while its PR was non-draft stays `in_progress` for ever,
+# and the board lies about what is in flight. The sweep already asks `gh pr list` about every
+# in_progress task, so it reads the draft state from that same call and corrects the store. It
+# never touches the PR.
+#
 # Conservative by construction: only acts past a staleness threshold, never disturbs a task
 # with an open PR, and resets ONLY via apply-board-edits.mjs (a commit to main — never a
 # hand-edit). DORMANT until FLOW_AI=true (same switch as the queue-runner — no autonomous
@@ -117,12 +125,18 @@ jobs:
             # also could not be found, that is what produces `reset-to-ready`. A bad minute at
             # GitHub was enough to clear a live claim. `--pr-state-known 0` makes the sweep leave
             # the task alone instead; the next run, three hours later, asks again.
+            # `headRefName`, `isDraft` and `url` ride along on this same call — no extra request
+            # per task. They answer the one question `promote-in-review` turns on, below.
+            #
+            # On failure `prs_json` is CLEARED, not left holding the previous task's list: the
+            # variable outlives one loop iteration, and reading a stale list as this task's facts
+            # is the same class of mistake as reading a failed query as an empty one.
             pr_state_known=1
-            if prs_json="$(gh pr list --state open --limit 200 --json title </dev/null 2>/dev/null)"; then
+            if prs_json="$(gh pr list --state open --limit 200 --json number,title,headRefName,isDraft,isCrossRepository,url </dev/null 2>/dev/null)"; then
               by_title="$(printf '%s' "$prs_json" | node .flow/bin/flow-recover.mjs count-task-prs "$id")"
             else
               echo "::warning::gh pr list failed for $id — PR state unknown, leaving the task alone."
-              pr_state_known=0; by_title=0
+              pr_state_known=0; by_title=0; prs_json=""
             fi
 
             by_head=0
@@ -138,6 +152,21 @@ jobs:
             has_open_pr=0
             [ "${by_title:-0}" -gt 0 ] && has_open_pr=1
             [ "${by_head:-0}" -gt 0 ] && has_open_pr=1
+
+            # Is that open PR already OUT of draft? If it is, `ready_for_review` can never fire
+            # again, so flow-status can never move this task on and it is stuck `in_progress` for
+            # good (flow-0104/#91). Read from `$prs_json` — the list fetched above, no second
+            # request — and matched by the SAME two sources used for has_open_pr: the `[<id>] …`
+            # title, or the PR's head being this task's branch. Both live in the helper, so the
+            # title convention is not re-expressed as a jq filter here. A failed query left
+            # `prs_json` empty, which prints nothing and passes 0: an unknown never promotes.
+            open_pr_ready=0; open_pr_number=""; open_pr_url=""
+            ready_facts="$(printf '%s' "$prs_json" | node .flow/bin/flow-recover.mjs ready-pr "$id" "$branch")"
+            if [ -n "$ready_facts" ]; then
+              open_pr_ready=1
+              open_pr_number="$(printf '%s' "$ready_facts" | cut -f1)"
+              open_pr_url="$(printf '%s' "$ready_facts" | cut -f2)"
+            fi
 
             if [ -n "$branch" ]; then
               branch_exists=1
@@ -175,8 +204,8 @@ jobs:
             decision="$(node .flow/bin/flow-recover.mjs classify \
               --status in_progress --branch-exists "$branch_exists" --ahead "$ahead" \
               --has-open-pr "$has_open_pr" --age "$age" --threshold "$THRESHOLD" \
-              --pr-state-known "$pr_state_known")"
-            echo "$id: branch='${branch:-<none>}' (declared='${declared_branch:-<none>}') ahead=$ahead open_pr=$has_open_pr (title=$by_title head=$by_head known=$pr_state_known) age=${age}m -> $decision"
+              --pr-state-known "$pr_state_known" --open-pr-ready "${open_pr_ready:-0}")"
+            echo "$id: branch='${branch:-<none>}' (declared='${declared_branch:-<none>}') ahead=$ahead open_pr=$has_open_pr (title=$by_title head=$by_head known=$pr_state_known ready=${open_pr_ready:-0}) age=${age}m -> $decision"
 
             case "$decision" in
               reopen-pr)
@@ -201,6 +230,22 @@ jobs:
                     gh pr create --base main --head "$branch" --title "$title" --body "$body" || \
                       echo "gh pr create failed for $id — will retry next sweep."
                   fi
+                fi
+                ;;
+              promote-in-review)
+                # The PR is open and out of draft; only the STORE is wrong. Nothing here touches
+                # the PR — no `gh pr ready`, no comment, no reviewer spend — because the PR is
+                # already in the state the task should have been following. Same writer and same
+                # commit-and-push path as reset-to-ready: apply-board-edits.mjs, a commit to main.
+                node .flow/bin/flow-recover.mjs promote "$id" "$open_pr_url" "$branch" > .flow/board-edits.json
+                node .flow/bin/apply-board-edits.mjs
+                if git diff --quiet -- .flow/tasks/; then
+                  echo "No change for $id (already in_review / not found)."
+                else
+                  git add .flow/tasks/
+                  git commit -m "flow: recover $id -> in_review (PR #$open_pr_number open and ready, status was stuck in_progress)"
+                  git pull --rebase origin main
+                  git push origin main
                 fi
                 ;;
               reset-to-ready)
