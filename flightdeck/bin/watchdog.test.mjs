@@ -29,6 +29,7 @@ import {
   markedIssues,
   newestRun,
   planRepoActions,
+  recentRunSummaries,
   renderIssueBody,
   reportRun,
   RUN_PAGE,
@@ -937,16 +938,19 @@ test("flow-0061 criterion 4 (the declared name is read as YAML reads it): quotes
   assert.equal(startupFailure({ path, name: path, text: `name: ${path} # deliberate\non:\n  push:\n` }), null, "the comment does not manufacture a disagreement");
 });
 
-test("flow-0061 criterion 5: an ordinary failing run — a workflow that starts and exits non-zero — reports exactly what it reported before, never unparseable", async () => {
+test("flow-0061 criterion 5: an ordinary failing run — a workflow that starts and exits non-zero — is reported by the eventLiveness rule, never unparseable", async () => {
+  // flow-0106 moved the TRIGGER for this report (one failed pull-request run is a verdict, so the
+  // fixture is now a streak across three PRs) and changed nothing about what flow-0061 pins: a
+  // workflow that ran and failed is reported by the liveness rule, with no mention of parsing.
   const { io, state } = fakeGitHub({
-    workflows: [{ file: "gates.yml", text: EVENT_WF, latestRun: { conclusion: "failure", html_url: "https://x/9", event: "pull_request", created_at: "2026-08-28T07:50:00Z", updated_at: "2026-08-28T07:55:00Z" } }],
+    workflows: [{ file: "gates.yml", text: EVENT_WF, runs: PR_STREAK_RUNS }],
   });
 
   const result = await watchRepo({ io, fullName: REPO, now: NOW });
   assert.equal(result.down.length, 1);
-  assert.equal(result.down[0].state, "crit", "still the pre-existing eventLiveness verdict");
-  assert.equal(result.down[0].reason, "latest run failed");
-  assert.equal(filings(state).length, 1, "one issue, the same one as before — nothing new is added");
+  assert.equal(result.down[0].state, "crit", "still the eventLiveness verdict, not a parse verdict");
+  assert.equal(result.down[0].reason, "last 3 runs failed across 3 pull requests");
+  assert.equal(filings(state).length, 1, "one issue — nothing new is added");
   assert.doesNotMatch(filings(state)[0].body.body, /could not parse/);
 });
 
@@ -1198,4 +1202,109 @@ test("flow-0065: the bound is one page of 100, and both run lookups ask for it �
     assert.doesNotMatch(r, /per_page=1(?!\d)/, "never a one-item page, which leaves nothing to compare against");
   }
   assert.equal(RUN_PAGE, 100, "the API's maximum single page — a workflow with no success in 100 runs is dead");
+});
+
+// ── flow-0106: the watchdog stops calling one failing pull-request check "automation down" ────
+//
+// The shape that filed CandidDan/flow#130: `flow-review` returned FAIL on one PR, its latest run
+// concluded `failure`, and an `automation-down` issue appeared in the channel that must not cry
+// wolf. The page of runs needed to tell that from a breakage was already being fetched.
+
+// A failed pull-request run, newest first by construction (one minute apart, descending).
+const prRun = (branch, i, conclusion = "failure") => ({
+  conclusion,
+  status: "completed",
+  event: "pull_request",
+  head_branch: branch,
+  head_sha: `sha-${branch}-${i}`,
+  html_url: `https://github.com/${REPO}/actions/runs/${900 + i}`,
+  created_at: new Date(NOW - (i + 1) * 60000).toISOString(),
+  updated_at: new Date(NOW - i * 60000).toISOString(),
+});
+
+// Three different PRs failing in a row: a breakage, by spread. Used by flow-0061 criterion 5 too.
+const PR_STREAK_RUNS = [prRun("flow/a", 0), prRun("flow/b", 1), prRun("flow/c", 2)];
+
+test("flow-0106 criterion 2 (end to end): one rejected pull request files no issue — the latest run failed and the one before it passed", async () => {
+  const { io, state } = fakeGitHub({
+    workflows: [{
+      file: "flow-review.yml",
+      text: EVENT_WF,
+      runs: [prRun("flow/flow-0104", 0), prRun("flow/flow-0103", 1, "success")],
+    }],
+  });
+
+  const result = await watchRepo({ io, fullName: REPO, now: NOW });
+  assert.deepEqual(result.down, [], "a reviewer returning FAIL is the check working");
+  assert.equal(filings(state).length, 0, "no automation-down issue — this is flow#130, not filed");
+});
+
+test("flow-0106 criterion 4 (end to end): three pull requests failing in a row IS filed, and the issue names the spread", async () => {
+  const { io, state } = fakeGitHub({
+    workflows: [{ file: "flow-review.yml", text: EVENT_WF, runs: PR_STREAK_RUNS }],
+  });
+
+  const result = await watchRepo({ io, fullName: REPO, now: NOW });
+  assert.equal(result.down.length, 1);
+  assert.equal(result.down[0].state, "crit");
+  assert.match(filings(state)[0].body.body, /last 3 runs failed across 3 pull requests/,
+    "the human reads the count AND the spread, which is the evidence for the claim");
+});
+
+test("flow-0106 criterion 7: a workflow GitHub could not parse is still reported on its FIRST failed run, whatever recentRuns holds", async () => {
+  // One failed run, which the streak rule alone would call `good`. `startupFailure` runs first and
+  // short-circuits, so the one failure that can never self-correct is unaffected by this change.
+  const { io, state } = fakeGitHub({
+    workflows: [{ file: "gates.yml", text: BROKEN_EVENT, apiName: ".github/workflows/gates.yml", runs: [{ ...STARTUP_RUN, status: "completed", head_branch: "main" }] }],
+  });
+
+  const result = await watchRepo({ io, fullName: REPO, now: NOW });
+  assert.equal(result.down.length, 1);
+  assert.equal(result.down[0].state, UNPARSEABLE_STATE, "the parse question is asked first and wins");
+  assert.match(filings(state)[0].body.body, /could not parse this workflow file/);
+
+  // Stated on the pure function too, with a full failing-PR streak present: the startup path does
+  // not consult recentRuns at all, so no history can route around it.
+  const entry = { path: ".github/workflows/gates.yml", name: ".github/workflows/gates.yml", text: BROKEN_EVENT, disabled: false, latestRun: null, recentRuns: PR_STREAK_RUNS };
+  assert.equal(evaluateWorkflows([entry], NOW)[0].state, UNPARSEABLE_STATE);
+});
+
+test("flow-0106 criterion 8: recentRuns is built from the latest-run page already requested — no additional request per workflow", async () => {
+  const { io, state } = fakeGitHub({
+    workflows: [{ file: "flow-review.yml", text: EVENT_WF, runs: PR_STREAK_RUNS, lastSuccessAt: "2026-08-27T05:00:00Z" }],
+  });
+
+  const [entry] = await collectRepoEntries({ io, fullName: REPO });
+
+  const runReads = state.reads.filter((p) => /\/actions\/workflows\/\d+\/runs\?/.test(p));
+  assert.equal(runReads.length, 2, "still exactly two run reads per workflow: one success page, one latest page");
+  assert.equal(runReads.filter((p) => !p.includes("status=success")).length, 1,
+    "recentRuns rides the single unfiltered page, it does not ask for its own");
+  assert.equal(entry.recentRuns.length, 3, "built from that page");
+  assert.deepEqual(entry.recentRuns.map((r) => r.head_branch), ["flow/a", "flow/b", "flow/c"], "newest first");
+  assert.deepEqual(Object.keys(entry.recentRuns[0]).sort(), ["conclusion", "created_at", "event", "head_branch", "head_sha"],
+    "and carries only the fields the streak rule reads");
+});
+
+test("flow-0106: recentRunSummaries sorts newest-first rather than trusting the page, and drops runs it cannot place", async () => {
+  // flow-0065's lesson applied to ordering: the documented created_at order has been observed
+  // wrong, and "newest first" is the entire meaning of a streak.
+  const shuffled = [prRun("flow/b", 1), prRun("flow/c", 2), prRun("flow/a", 0)];
+  assert.deepEqual(recentRunSummaries(shuffled).map((r) => r.head_branch), ["flow/a", "flow/b", "flow/c"]);
+
+  assert.deepEqual(recentRunSummaries([{ conclusion: "failure", created_at: "not a date" }]), [],
+    "a run with no placeable timestamp is dropped, never coerced");
+  assert.deepEqual(recentRunSummaries([{ status: "in_progress", conclusion: null, created_at: "2026-08-28T07:00:00Z" }]), [],
+    "and an unfinished run carries no verdict");
+  assert.deepEqual(recentRunSummaries(null), []);
+
+  // An unfiltered page served through the IO layer reaches eventLiveness as the same order.
+  const { io } = fakeGitHub({ workflows: [{ file: "flow-review.yml", text: EVENT_WF, runs: shuffled }] });
+  const [entry] = await collectRepoEntries({ io, fullName: REPO });
+  assert.equal(evaluateWorkflows([entry], NOW)[0].reason, "last 3 runs failed across 3 pull requests");
+});
+
+test("flow-0106: a failed latest-run read leaves recentRuns null, so the latest-run rule still answers — absence is not an empty history", async () => {
+  const entry = { path: "a.yml", name: "gates", text: EVENT_WF, disabled: false, latestRun: { conclusion: "failure" }, recentRuns: null };
+  assert.equal(evaluateWorkflows([entry], NOW)[0].state, "crit", "no history read: report the failure rather than silently nothing");
 });
