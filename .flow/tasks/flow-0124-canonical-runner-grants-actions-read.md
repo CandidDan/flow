@@ -1,7 +1,7 @@
 ---
 id: "flow-0124"
 title: "Canonical's own queue-runner caller grants actions: read, and the caller-permissions test checks job-level grants too"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "orchestrator-cowork-2026-10-02"
