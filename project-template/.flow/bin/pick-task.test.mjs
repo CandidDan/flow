@@ -224,3 +224,107 @@ test("flow-0111: pick-task has one list parser, flow-doctor's, and no touches re
       assert.match(readFileSync(fragment, "utf8"), /Caller action: none/);
     });
 }
+
+// ── flow-0118: `in_review` is still in flight ──────────────────────────────────────────
+//
+// Observed on 2026-10-01 in CandidDan/inflight: `inflight-0015` was `in_review` (PR #30 open,
+// unmerged) and `inflight-0016` was `ready` with four overlapping paths. The queue runner
+// dispatched 0016 anyway, because this selector only excluded overlap against `in_progress`.
+// The worker noticed and blocked itself by hand; nothing in the code made it. A review-stage PR
+// has a live branch about to rewrite `main` in exactly the files it declared, so for collision
+// purposes it has not landed. `blocked` is the deliberate exception — no live branch, and
+// `blocked_by` sequences it already.
+
+test("flow-0118: skips a ready task whose touches overlap an in_review task", () => {
+  const id = pickTask([
+    T("CAN-15", { priority: 1, status: "in_review", touches: ["app/_components/needs-you.js", "bin/home-view.mjs"] }),
+    T("CAN-16", { priority: 1, status: "ready", touches: ["bin/home-view.mjs"] }),
+  ]);
+  assert.equal(id, null, "an unmerged PR still holds its files — dispatching here is a merge conflict");
+});
+
+test("flow-0118: the same pair with the other task in_progress still blocks — old behaviour kept", () => {
+  const id = pickTask([
+    T("CAN-15", { priority: 1, status: "in_progress", touches: ["app/_components/needs-you.js", "bin/home-view.mjs"] }),
+    T("CAN-16", { priority: 1, status: "ready", touches: ["bin/home-view.mjs"] }),
+  ]);
+  assert.equal(id, null);
+});
+
+test("flow-0118: overlap with only a blocked and a done task does NOT hold a ready task back", () => {
+  const id = pickTask([
+    T("CAN-1", { priority: 1, status: "blocked", touches: ["bin/home-view.mjs"] }),
+    T("CAN-2", { priority: 1, status: "done", touches: ["bin/home-view.mjs"] }),
+    T("CAN-3", { priority: 2, status: "ready", touches: ["bin/home-view.mjs"] }),
+  ]);
+  assert.equal(id, "CAN-3", "a blocked task has no live branch, and a done one has already landed");
+});
+
+test("flow-0118: an in_review overlap defers to the next eligible task, it does not stall the queue", () => {
+  const id = pickTask([
+    T("CAN-15", { priority: 1, status: "in_review", touches: ["app/dashboard/**"] }),
+    T("CAN-16", { priority: 1, status: "ready", touches: ["app/dashboard/Hero.tsx"] }), // overlaps -> skip
+    T("CAN-17", { priority: 3, status: "ready", touches: ["docs/x.md"] }),              // clear, lower priority
+  ]);
+  assert.equal(id, "CAN-17", "sort order is unchanged; the P1 is skipped on overlap, not de-prioritised");
+});
+
+test("flow-0118: the in_review guard holds on block-form touches read off disk by readTasks", () => {
+  // Every real task file writes `touches` as a YAML block sequence. The guard must not fail open
+  // on the parse — flow-0111 is exactly that bug, and a new filter is a new chance to reintroduce it.
+  const dir = mkdtempSync(join(tmpdir(), "pick-0118-"));
+  const tasksDir = join(dir, "tasks");
+  mkdirSync(tasksDir);
+  const file = (id, status, paths) =>
+    `---\nid: "${id}"\nstatus: "${status}"\npriority: 2\ntouches:\n${paths.map((p) => `  - "${p}"\n`).join("")}---\n\n## Context\n`;
+  writeFileSync(join(tasksDir, "0015-a.md"), file("CAN-15", "in_review", ["app/_components/needs-you.js", "bin/home-view.mjs"]));
+  writeFileSync(join(tasksDir, "0016-b.md"), file("CAN-16", "ready", ["bin/home-view.mjs"]));
+  writeFileSync(join(tasksDir, "0017-c.md"), file("CAN-17", "ready", ["docs/x.md"]));
+  const tasks = readTasks(tasksDir);
+  assert.deepEqual(tasks.find((t) => t.id === "CAN-15").touches,
+    ["app/_components/needs-you.js", "bin/home-view.mjs"], "fixture must parse, or the assertion below is vacuous");
+  assert.equal(pickTask(tasks), "CAN-17");
+  assert.equal(pickTask(tasks.filter((t) => t.id !== "CAN-17")), null);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("flow-0118: both statements of the claim rule in PROTOCOL.md name in_review", async () => {
+  // The rule lives in two places: the *Concurrency* paragraph on `touches`, and step 1 of *The
+  // loop you run*. A human worker follows the prose, not this file, so prose that still says only
+  // `in_progress` is the same bug wearing a different hat. Asserted here so they cannot drift.
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../PROTOCOL.md", import.meta.url), "utf8");
+
+  const blastRadius = src.match(/\*\*`touches` declares the blast radius\.\*\*[\s\S]*?\n\n/);
+  assert.ok(blastRadius, "could not find the Concurrency paragraph on `touches`");
+  assert.match(blastRadius[0], /`in_progress`[\s\S]{0,40}`in_review`/,
+    "the `touches` paragraph must name `in_review` alongside `in_progress`");
+
+  const step1 = src.match(/\n1\. \*\*Pick\.\*\*[\s\S]*?\n2\. /);
+  assert.ok(step1, "could not find step 1 of The loop you run");
+  assert.match(step1[0], /`in_progress`[\s\S]{0,40}`in_review`/,
+    "step 1 must name `in_review` alongside `in_progress`");
+});
+
+// The changelog entry lives in canonical only (`changes/` is not synced to adopters), so this
+// skips visibly everywhere else. Read through `changelog-entry.mjs`, never `changes/<id>.md`
+// directly: a release folds the fragment into CHANGELOG.md and deletes it, so a direct read is
+// green until the release PR and red on it. Imported dynamically, because this file ships to
+// adopting repos, which have no such helper.
+{
+  const { existsSync } = await import("node:fs");
+  const { dirname, resolve } = await import("node:path");
+  const { fileURLToPath, pathToFileURL } = await import("node:url");
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+  const CANON = existsSync(join(root, ".flow", "bin", "changelog-entry.mjs")) ? root : null;
+
+  test("flow-0118 has a changelog entry naming the queue runner's new skip",
+    { skip: CANON ? false : "canonical-only: `changes/` and CHANGELOG.md are not synced to adopting repos" },
+    async () => {
+      const { changelogEntry } = await import(pathToFileURL(join(CANON, ".flow", "bin", "changelog-entry.mjs")).href);
+      const text = changelogEntry(CANON, "flow-0118");
+      assert.ok(text, "flow-0118's changelog entry must exist, as a fragment or in CHANGELOG.md");
+      assert.match(text, /in_review/, "the entry must name the status that now holds a ready task back");
+      assert.match(text, /caller action/i, "the entry must state whether a caller has to act");
+    });
+}

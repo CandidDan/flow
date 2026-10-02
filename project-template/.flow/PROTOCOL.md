@@ -137,7 +137,9 @@ commit owns the task; the others never started it.
 
 **`touches` declares the blast radius.** Every task's frontmatter carries a `touches` list
 of path globs it expects to modify. Before claiming, skip any `ready` task whose `touches`
-overlaps an `in_progress` task's `touches` — work it later, once the conflicting task lands.
+overlaps an `in_progress` **or `in_review`** task's `touches` — work it later, once the
+conflicting task lands. `in_review` counts because that PR has not merged: its branch is still
+live and about to rewrite `main` in those very files.
 This keeps two sessions out of the same files. If you discover mid-build that you must touch
 a path outside your declared `touches`, that's a scope signal: stop and treat it as a
 `blocked` task or a note for the orchestrator, don't silently expand.
@@ -161,7 +163,7 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
 ## The loop you run
 
 1. **Pick.** Take the highest-`priority` task in `ready` with no `touches` overlap against
-   anything `in_progress`. If none, stop — do not invent work.
+   anything `in_progress` or `in_review`. If none, stop — do not invent work.
 2. **Claim (atomic).** `git pull --rebase`; set `in_progress` + `owner` + `started` (full UTC
    ISO datetime, see *Status lifecycle*); commit
    that task file and push to `main`. If the push is rejected, rebase and go back to step 1.
