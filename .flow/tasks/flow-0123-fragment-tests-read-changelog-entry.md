@@ -1,6 +1,6 @@
 ---
 id: "flow-0123"
-title: "flow-0104's and flow-0115's fragment tests read their entry through changelog-entry.mjs, so the 2.3.0 release PR stays green"
+title: "flow-0081's, flow-0104's and flow-0115's fragment tests read their entry through changelog-entry.mjs, so the 2.3.0 release PR stays green"
 status: "in_progress"
 priority: 1
 project: "flow"
@@ -16,9 +16,11 @@ serves: ["maintenance"]
 touches:
   - "project-template/.flow/bin/flow-recover.test.mjs"
   - "project-template/.flow/bin/flow-review.test.mjs"
+  - ".flow/bin/sync-skills.test.mjs"
   - "changes/flow-0123.md"
 labels: [flow-infra, release, changelog, hotfix]
 notes:
+  - "2026-10-02 orchestrator: a third direct read surfaced once the first two were fixed: sync-skills.test.mjs (flow-0081, merged in #159). Added to touches."
   - "2026-10-02 orchestrator: found on PR #164 (flow-0121). flow-0090's release-assemble check (merged in #155) runs every changelog-aware test against an assembled CHANGELOG. It fails because two tests merged in the same batch read changes/<id>.md directly: flow-recover.test.mjs 'criterion 8' (flow-0104) and flow-review.test.mjs 'flow-0115: changes/flow-0115.md exists' (flow-0115). They are green today and would go red on the 2.3.0 release PR, which is exactly what the check exists to catch. It fails every open Flow PR until fixed, and it blocks cutting 2.3.0. Fixed by the orchestrator directly because it is a two-test change and it blocks the release."
 ---
 
