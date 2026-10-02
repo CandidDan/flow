@@ -257,15 +257,27 @@ test("an input description still advertising the old default fails too", () => {
 // Criterion: the check tracks the stamp, it does not hard-code v2.
 // ---------------------------------------------------------------------------------------------
 
-test("a hypothetical VERSION 3.0.0 fails the real @v2 callers — the check follows the stamp", () => {
+test("a hypothetical NEXT major fails the real callers — the check follows the stamp", () => {
   // Without this case the check passes today and quietly stops working at the next major, which
   // is precisely the failure mode that produced flow-0056: 2.0.0 shipped with v1 callers and
   // nothing noticed.
-  const problems = checkCallerPins({ ...realInput(), version: "3.0.0\n" });
+  //
+  // The bumped stamp is DERIVED from the real one, and that is flow-0125's correction. Written as
+  // the literal `3.0.0` this case was itself the hard-coded stamp the rest of the file refuses:
+  // it went stale the day 3.0.0 was cut, because the "hypothetical" major had become the current
+  // one, every real caller matched it, and the case guarding the derivation found nothing to
+  // report. It failed loudly rather than silently, which is the only reason it was caught — but a
+  // guard that has to be edited at every major is a chore, not a check.
+  const input = realInput();
+  const next = `${Number(expectedRef(input.version).slice(1)) + 1}.0.0\n`;
+  const nextRef = expectedRef(next);
+  assert.notEqual(nextRef, expectedRef(input.version), "the hypothetical major must not be the current one");
+  const problems = checkCallerPins({ ...input, version: next });
   assert.ok(problems.length >= 10,
-    `every caller must be reported against the bumped stamp, got ${problems.length}: ` +
+    `every caller must be reported against the bumped stamp (${nextRef}), got ${problems.length}: ` +
     problems.join(" | "));
-  for (const p of problems) assert.match(p, /expected @v3|expected 'v3'|"Default v3"/, p);
+  const wanted = new RegExp(`expected @${nextRef}\\b|expected '${nextRef}'|"Default ${nextRef}"`);
+  for (const p of problems) assert.match(p, wanted, p);
 });
 
 test("expectedRef reads the major and nothing else", () => {
