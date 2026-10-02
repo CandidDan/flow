@@ -108,12 +108,12 @@ export const MANIFEST = Object.freeze({
     // whole: `docs/` also holds the ADRs, the propagation plan and the handoff notes, which
     // ADR-0005 names as never crossing. A directory include here would export them.
     //
-    // The four below are the whole of it. Three files in `docs/` are EXCLUDED BY DECISION
+    // The four below are the whole of it. Two files in `docs/` are EXCLUDED BY DECISION
     // rather than by oversight, under ADR-0005's boundary rule — needed at run time or
-    // adoption time, or it does not cross: `docs/site/` and `docs/flow-map.html` (the
-    // public face; an adopter needs neither to adopt or run Flow) and `docs/blog-two-touchpoints.md`
-    // (an essay about the model, not instructions for using it). Each is a one-line addition
-    // here if the human decides the release repo should carry the public face too.
+    // adoption time, or it does not cross: `docs/flow-map.html` (part of the public face; an
+    // adopter does not need it to adopt or run Flow) and `docs/blog-two-touchpoints.md` (an essay
+    // about the model, not instructions for using it). Each is a one-line addition here if the
+    // human decides the release repo should carry them. The site itself lives in CandidDan/getflow.
     "docs/adopting-flow-cutover.md",
     "docs/flow-reusable-workflows.md",
     "docs/flow-versioning-policy.md",
