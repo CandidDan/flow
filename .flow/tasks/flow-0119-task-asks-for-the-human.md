@@ -1,7 +1,7 @@
 ---
 id: "flow-0119"
 title: "A task carries typed asks for the human, in a format flow-doctor validates and inflight can read"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0119"
