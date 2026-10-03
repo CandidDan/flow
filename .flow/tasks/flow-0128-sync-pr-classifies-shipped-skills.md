@@ -1,12 +1,12 @@
 ---
 id: "flow-0128"
 title: "A sync PR that ships canonical skills is still classified as a sync PR"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0128"
 created: "2026-10-03"
-started: ""
+started: "2026-10-03T22:19:40Z"
 branch: ""
 pr: ""
 issue: ""
