@@ -21,7 +21,34 @@ Maintainer notes (stripped before this file reaches context, so they cost no tok
     convention defines no import mechanism. One protocol, two doorways.
   * To confirm the import resolved in a live session, run `/context` and look for
     `.flow/PROTOCOL.md` under **Memory files**.
+  * The ONE deliberate exception to "do not paste the protocol back into this file" is the
+    `notes`/`asks` split below. It is restated, not pasted: four lines and three examples, with
+    the protocol named as authoritative. `asks.test.mjs` asserts that both copies name all three
+    kinds, so the duplication cannot drift silently — which is the only condition under which a
+    second copy is allowed to exist here.
 -->
+
+## The split this file repeats on purpose: `notes` vs `asks`
+
+The protocol above is authoritative. This one rule is restated here because it is the rule a
+worker breaks while *following* the protocol correctly — it writes a careful handoff, and buries
+in it the one line a person had to see.
+
+| Field | Read by | Holds |
+|---|---|---|
+| `notes` | the next **session** | what is done, what only looks done, branch/PR, the exact next action |
+| `asks` | the **human** | the open items only a person can act on — three kinds, nothing else |
+
+```yaml
+asks:
+  - "decision: v2 or v3 in the schema id? Recommend: v3, the id should say the shape"
+  - "follow-up: the retry path needs its own task, it is out of scope here"
+  - "fyi: the fixture store moved, so a stale checkout fails one test"
+```
+
+A `decision` **must** carry `Recommend:`. `flow-doctor` fails a malformed ask; `flow-state
+--json` reports them parsed. Resolving an ask removes it from `asks` and records the answer in
+`notes`.
 
 ## Project notes
 

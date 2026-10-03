@@ -102,6 +102,7 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { STATUSES } from "./apply-board-edits.mjs";
+import { parseAsks } from "./asks.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -356,6 +357,22 @@ export function blockedByFindings(task) {
         "each entry must be a task id (PROJ-0007) or a PR url (https://…)");
 
   return { problems, warnings };
+}
+
+// ── asks (flow-0119) ──
+// `notes` is the handoff to the next SESSION; `asks` is the queue for the HUMAN. The split only
+// means anything if the shape is enforced, because the consumers (the PR comment, inflight) route
+// on the kind and would silently drop an entry they could not read — reproducing the bug `asks`
+// was written to fix, one layer further down where nobody is looking for it.
+//
+// Every finding here is a PROBLEM, not a warning, and that is a deliberate departure from
+// `blocked_by`'s graceful-adoption posture above. `blocked_by` could trip on history: every
+// blocked task in every already-adopted repo predates the field. `asks` cannot — a task with no
+// `asks:` key parses as an empty list and raises nothing, so the only way to be malformed here is
+// to have been written after this change. There is no history to punish.
+export function asksFindings(task) {
+  const { errors } = parseAsks(task.asksList ?? []);
+  return { problems: errors.map((e) => `${task.id}: ${e}`), warnings: [] };
 }
 
 // ── readiness bar (flow-0010) ──
@@ -824,7 +841,8 @@ function parseTask(text) {
            blocked_reason: get("blocked_reason"), touches: get("touches"),
            touchesList: parseListField(head, "touches"),
            blockedByList: parseListField(head, "blocked_by"),
-           servesList: parseListField(head, "serves"), body };
+           servesList: parseListField(head, "serves"),
+           asksList: parseListField(head, "asks"), body };
 }
 
 export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
@@ -866,6 +884,11 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
       const b = blockedByFindings(t);
       problems.push(...b.problems);
       warnings.push(...b.warnings);
+    }
+    {
+      const a = asksFindings(t);
+      problems.push(...a.problems);
+      warnings.push(...a.warnings);
     }
     if (t.status === "in_progress" && (!t.owner || !t.started))
       problems.push(`${t.id}: in_progress but ${!t.owner ? "owner" : "started"} is empty — claim was not completed properly`);

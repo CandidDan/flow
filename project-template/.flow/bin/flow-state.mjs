@@ -30,6 +30,9 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { parseAsks } from "./asks.mjs";
+import { parseListField } from "./flow-doctor.mjs";
+
 
 import { realpathSync as __realpathSync } from "node:fs";
 import { fileURLToPath as __fileURLToPath } from "node:url";
@@ -96,6 +99,10 @@ export function parseTask(text) {
     pr: get("pr"),
     blocked_reason: get("blocked_reason"),
     issue: get("issue"),
+    // flow-0119. Only the asks that PARSE: a malformed one is a flow-doctor failure on `main`,
+    // and this resolver is read-only — it reports the store, it does not grade it. `[]` for every
+    // task written before the field, so a consumer never has to test for its absence.
+    asks: parseAsks(parseListField(head, "asks")).asks,
   };
 }
 
@@ -158,7 +165,7 @@ export function resolveState(task, pr) {
         resolved = store; detail = "no PR"; break;
     }
   }
-  return { id: task.id, title: task.title, store, resolved, detail, disagreement };
+  return { id: task.id, title: task.title, store, resolved, detail, disagreement, asks: task.asks ?? [] };
 }
 
 // Pure: pick the PR belonging to a task from a list of PRs. Prefers an explicit `pr:` URL

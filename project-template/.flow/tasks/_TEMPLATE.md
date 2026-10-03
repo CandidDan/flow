@@ -40,7 +40,21 @@ serves: []                # the VISION.md goal ids this task advances, e.g. ["G1
 touches: []               # path globs this task expects to modify, e.g. ["src/signup/**", "api/subscribe.*"]
                           # concurrency: a ready task is skipped while its touches overlap an in_progress one
 labels: []                # optional, e.g. [frontend, infra, spike]
-notes: []                 # append-only log; kickbacks land here
+notes: []                 # append-only log; kickbacks land here. For the next SESSION, not the
+                          # human: what is done, what only looks done, the exact next action.
+asks: []                  # the open items for the HUMAN — the other half of the `notes` split.
+                          # A person never opens frontmatter prose, so an item only a person can
+                          # act on reaches nobody when it is written as a note. Each entry is ONE
+                          # string, prefixed with its kind. Exactly three kinds:
+                          #   - "decision: <the question>. Recommend: <the option and why>"
+                          #   - "follow-up: <the task that should exist, one sentence>"
+                          #   - "fyi: <what the reviewer should know before merging>"
+                          # A `decision` MUST carry `Recommend:` — it arrives with the
+                          # recommendation the worker already holds, or it hands back thinking
+                          # that was already done. flow-doctor fails a malformed ask.
+                          # Resolving an ask REMOVES it from here and appends a `notes` line
+                          # recording the answer. A blocked task's decision goes here as well as
+                          # in `blocked_reason`.
 ---
 
 ## Context
