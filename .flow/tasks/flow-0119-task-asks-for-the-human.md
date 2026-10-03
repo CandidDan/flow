@@ -1,12 +1,12 @@
 ---
 id: "flow-0119"
 title: "A task carries typed asks for the human, in a format flow-doctor validates and inflight can read"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0119"
 created: "2026-10-02"
-started: ""
+started: "2026-10-03T01:29:51Z"
 branch: ""
 pr: ""
 issue: ""
