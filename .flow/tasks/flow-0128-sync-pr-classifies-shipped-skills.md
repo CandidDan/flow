@@ -1,7 +1,7 @@
 ---
 id: "flow-0128"
 title: "A sync PR that ships canonical skills is still classified as a sync PR"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
 owner: ""
@@ -10,15 +10,16 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Queue cap (13 ready, cap 8). Needs Dan's `urgent` label or the queue to drain. It is the v3 canary's first finding."
+blocked_reason: ""
 blocked_by: []
 serves: ["maintenance"]
 touches:
   - "project-template/.flow/bin/flow-review.mjs"
   - "project-template/.flow/bin/flow-review.test.mjs"
   - "changes/flow-0128.md"
-labels: [flow-infra, review, sync, canary]
+labels: [flow-infra, review, sync, canary, urgent]
 notes:
+  - "2026-10-04 orchestrator: Dan approved the recommendations: run first, labelled urgent."
   - "2026-10-03 orchestrator: found by the v3 canary, progress PR #115 (flow-sync/3.0.0). flow-0081 made `_flow-sync.yml` copy `.claude/skills/<canonical-name>/`, but `SYNC_PR_PATHS` in flow-review.mjs still lists only .flow/bin/**, flow-*.yml callers, PROTOCOL.md and VERSION. So every v3 sync that ships a skill is refused the SYNC PR classification. Reviewers then read it like a feature PR: qa fails it for having no task, and a large sync also fails on diff truncation."
 ---
 
