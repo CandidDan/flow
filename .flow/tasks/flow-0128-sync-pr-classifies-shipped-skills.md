@@ -1,7 +1,7 @@
 ---
 id: "flow-0128"
 title: "A sync PR that ships canonical skills is still classified as a sync PR"
-status: "in_progress"
+status: "blocked"
 priority: 1
 project: "flow"
 owner: "claude-worker-flow-0128"
@@ -10,8 +10,8 @@ started: "2026-10-03T22:19:40Z"
 branch: "flow/flow-0128-sync-pr-classifies-shipped-skills"
 pr: "https://github.com/CandidDan/flow/pull/176"
 issue: ""
-blocked_reason: ""
-blocked_by: []
+blocked_reason: "Build is COMPLETE and pushed (branch flow/flow-0128-sync-pr-classifies-shipped-skills, draft PR #176); all four acceptance criteria have passing proving tests, verified by mutation. Blocked only on the GATE: `npm test` has 2 failures that are PRE-EXISTING on main and outside this task's diff and touches. Root cause is one store file — .flow/tasks/flow-0130-v2-to-v3-doc-runs-v3-sync.md is `ready` with `## Scope` + `## Acceptance` but no `## Context` and no `## Acceptance criteria` with `- [ ]` items, so flow-doctor's readiness bar FAILs it and .flow/bin/adapters.test.mjs fails with it (release-assemble.test.mjs then re-runs the same test, hence 2). Reproduced on an untouched origin/main worktree. Not fixable from here: it is another task's spec, in .flow/tasks/ (store plane, never a branch), outside flow-0128's touches, and the worker never writes tasks. Fix: add `## Context` and rename `## Acceptance` to `## Acceptance criteria` with `- [ ]` items on flow-0130 (flow-0129 and flow-0128 itself have the same shape and will trip the same bar when `ready`), then re-run the gate and `gh pr ready 176`."
+blocked_by: ["flow-0130"]
 serves: ["maintenance"]
 touches:
   - "project-template/.flow/bin/flow-review.mjs"
@@ -19,6 +19,7 @@ touches:
   - "changes/flow-0128.md"
 labels: [flow-infra, review, sync, canary, urgent]
 notes:
+  - "2026-10-03 worker: BUILD DONE, GATE BLOCKED ON A STORE DEFECT ELSEWHERE. Branch flow/flow-0128-sync-pr-classifies-shipped-skills is pushed; flow-open-pr opened draft PR #176 and its description is written in full (change, criteria→test mapping, gate table). GENUINELY DONE: SYNC_PR_PATHS now carries .claude/skills/<name>/** for each of canonical's five skill directories via a new CANONICAL_SKILLS constant + skillSurfaceGlob(); the flow-0089 closed-list pin was updated to the full literal list; changes/flow-0128.md written; six new tests in project-template/.flow/bin/flow-review.test.mjs cover all four criteria and all pass (96/96 in that file, 0 skipped), each verified to FAIL against the pre-fix constant. DECISION, so it is not re-litigated: the skills surface is scoped to canonical's NAMES, not .claude/skills/** — the sync loop only ever writes canonical's own directories, so the broad glob would grant the fixed SYNC PR PASS line to a flow-sync/ branch that added a skill the repo invented. The flow-0115 provenance check needed NO code change: canonicalPathFor already maps a skill path into project-template/ and rsync -a copies byte for byte, so the existing byte-compare covers skills — proved by a test, not assumed. ONLY LOOKS DONE: the gate. build OK (34 workflows), lint OK (113 .mjs), coverage 96.97% lines vs floor 83.5 — but `npm test` is 2 failures, both pre-existing on main, both from flow-0130's task body missing `## Context` / `## Acceptance criteria`; see blocked_reason. NEXT ACTION: fix flow-0130's body on main (and flow-0129's and this file's, same shape), re-run the five gate commands, then `gh pr ready 176`. No code change is needed on the branch."
   - "2026-10-04 orchestrator: Dan approved the recommendations: run first, labelled urgent."
   - "2026-10-03 orchestrator: found by the v3 canary, progress PR #115 (flow-sync/3.0.0). flow-0081 made `_flow-sync.yml` copy `.claude/skills/<canonical-name>/`, but `SYNC_PR_PATHS` in flow-review.mjs still lists only .flow/bin/**, flow-*.yml callers, PROTOCOL.md and VERSION. So every v3 sync that ships a skill is refused the SYNC PR classification. Reviewers then read it like a feature PR: qa fails it for having no task, and a large sync also fails on diff truncation."
 ---
