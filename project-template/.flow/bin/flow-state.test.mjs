@@ -11,6 +11,7 @@ import {
   readPrs, readTasksFromOrigin, runStateCli,
 } from "./flow-state.mjs";
 import { blockedByFindings } from "./flow-doctor.mjs";
+import { askId } from "./asks.mjs";
 
 const task = (o) => ({ id: "CAN-1", title: "", status: "ready", owner: "", branch: "", pr: "", blocked_reason: "", issue: "", ...o });
 
@@ -215,7 +216,11 @@ function repoWithOrigin(tasks) {
 
 const fm = (id, fields = {}) =>
   `---\nid: "${id}"\ntitle: "${fields.title ?? id}"\nstatus: "${fields.status ?? "ready"}"\npriority: 2\n` +
-  `owner: "${fields.owner ?? ""}"\nbranch: ""\npr: ""\nblocked_reason: ""\nissue: ""\n---\nbody\n`;
+  `owner: "${fields.owner ?? ""}"\nbranch: ""\npr: ""\nblocked_reason: ""\nissue: ""\n` +
+  // Omitted entirely unless a test asks for it — "no asks key at all" is the shape of every task
+  // written before flow-0119, and it is the case the resolver must report as `[]`.
+  (fields.asks === undefined ? "" : `asks:\n${fields.asks.map((a) => `  - ${JSON.stringify(a)}`).join("\n")}\n`) +
+  `---\nbody\n`;
 
 // A writable sink with the one method runStateCli uses, so the render paths are assertable.
 const sink = () => { const c = []; return { write: (s) => c.push(s), text: () => c.join("") }; };
@@ -338,5 +343,63 @@ test("runStateCli --fetch is tolerated when there is no reachable remote", () =>
     const out = sink();
     assert.equal(runStateCli({ repoRoot: dir, argv: ["--json", "--no-pr", "--fetch"], out }), 0);
     assert.deepEqual(JSON.parse(out.text()).tasks.map((t) => t.id), ["CAN-1"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── asks (flow-0119) ──
+// `flow-state --json` is the machine-readable report the human's surfaces read — inflight and the
+// PR-comment workflow. Reporting `asks` here is what makes the field reachable by anything other
+// than a session that happens to open the task file.
+
+test("criterion 5: --json reports every ask parsed, with id, kind, text and recommend", () => {
+  const dir = repoWithOrigin({ "a.md": fm("CAN-1", { asks: [
+    "decision: v2 or v3 in the schema id? Recommend: v3, the id should say the shape",
+    "follow-up: the retry path needs its own task",
+    "fyi: the fixture store moved",
+  ] }) });
+  try {
+    const out = sink();
+    assert.equal(runStateCli({ repoRoot: dir, argv: ["--json", "--no-pr"], out }), 0);
+    const [row] = JSON.parse(out.text()).tasks;
+    assert.equal(row.asks.length, 3);
+    for (const a of row.asks) assert.deepEqual(Object.keys(a).sort(), ["id", "kind", "recommend", "text"]);
+    assert.deepEqual(row.asks.map((a) => a.kind), ["decision", "follow-up", "fyi"]);
+    assert.equal(row.asks[0].text, "v2 or v3 in the schema id?");
+    assert.equal(row.asks[0].recommend, "v3, the id should say the shape");
+    assert.equal(row.asks[1].recommend, null, "a kind that recommends nothing reports null, not absent");
+    // The id is the shared one — the same string hashed the same way inflight will hash it.
+    assert.equal(row.asks[0].id, askId("decision: v2 or v3 in the schema id?"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("criterion 4: a task with no asks field reports asks: [] — never undefined", () => {
+  const dir = repoWithOrigin({ "a.md": fm("CAN-1"), "b.md": fm("CAN-2", { status: "in_progress", owner: "s" }) });
+  try {
+    assert.doesNotMatch(fm("CAN-1"), /^asks:/m, "the fixture must omit the field, or this proves nothing");
+    const out = sink();
+    runStateCli({ repoRoot: dir, argv: ["--json", "--no-pr"], out });
+    for (const row of JSON.parse(out.text()).tasks)
+      assert.deepEqual(row.asks, [], "a consumer must never have to test for the field's absence");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("parseTask reads asks, and resolveState carries them onto the row", () => {
+  const t = parseTask(fm("CAN-3", { asks: ["fyi: the store moved"] }));
+  assert.equal(t.asks.length, 1);
+  assert.equal(t.asks[0].kind, "fyi");
+  // Every resolution branch must carry them, not just the one the fixture happens to take.
+  for (const pr of [null, { number: 1, state: "MERGED", url: "u" }, { number: 2, state: "OPEN", url: "u" }])
+    assert.deepEqual(resolveState(t, pr).asks, t.asks);
+  assert.deepEqual(resolveState(parseTask(fm("CAN-4")), null).asks, []);
+});
+
+test("a malformed ask is reported as no ask, because the resolver grades nothing", () => {
+  // flow-doctor fails this on `main`; flow-state is read-only and must not invent a row shape
+  // for an entry it could not parse. Dropping it here is safe only because the gate is elsewhere.
+  const dir = repoWithOrigin({ "a.md": fm("CAN-1", { asks: ["todo: x", "fyi: fine"] }) });
+  try {
+    const out = sink();
+    runStateCli({ repoRoot: dir, argv: ["--json", "--no-pr"], out });
+    assert.deepEqual(JSON.parse(out.text()).tasks[0].asks.map((a) => a.text), ["fine"]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

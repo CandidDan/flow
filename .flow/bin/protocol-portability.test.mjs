@@ -104,6 +104,22 @@ const INTENTIONAL_DIVERGENCES = new Map([
          "still deliberately excluded.",
     task: "flow-0118",
   }],
+  ["Status lifecycle", {
+    digest: "d9bccf75c9e2d2337011514ac5f3d43c7f9c8944e61d88a403b7a87bab625960",
+    why: "the `blocked` bullet told a worker to record the undecidable thing in " +
+         "`blocked_reason` and `blocked_by` only — both of which a person reads only once they " +
+         "are already looking at the task file, which is the thing a human never opens. It now " +
+         "also sends the decision to `asks`, which is the field that brings them there.",
+    task: "flow-0119",
+  }],
+  ["Session hygiene — context is a budget", {
+    digest: "65ee3fa781bad844dccfcb45e43c343c7ced01058dbf6744ecd510f2c5aab5a0",
+    why: "the handoff rule specified `notes` and nothing else, so an item only a PERSON could " +
+         "act on had one correct place to go and reached nobody from there. The section now " +
+         "states the split — `notes` for the next session, `asks` for the human — with the " +
+         "three kinds and what each one is for. Nothing about the trip conditions changed.",
+    task: "flow-0119",
+  }],
   ["The loop you run", {
     digest: "7782a30da99d62d4b00abe99fac986c27df6781fd989daa87ac399af72e5a797",
     why: "step 1 is the second place the claim rule is stated, and it said `in_progress` only. " +
