@@ -176,25 +176,54 @@ human asking it to, so every bound on it is stated here rather than left to the 
 look successful and prove nothing. With no `FLOW_PAT` the workflow **skips**, visibly, saying so.
 
 **And it reaches exactly one step — never the fixer.** `FLOW_PAT` is handed only to
-`stamp-and-push`, which runs after all four guards have passed. Every other step — the
-fact-gathering, the draft toggle, the guards, the card, the label, *and the fixer session
-itself* — runs on `GITHUB_TOKEN`, scoped by the `permissions:` block below to `contents: read`.
-That split is the actual boundary, and it is worth being explicit about why, because the
-intuitive design gets it wrong: the fixer runs a model under `--permission-mode
+`stamp-and-push`, which runs after all four guards have passed. Every other step runs on
+`GITHUB_TOKEN`. That split is the actual boundary, and it is worth being explicit about why,
+because the intuitive design gets it wrong: the fixer runs a model under `--permission-mode
 bypassPermissions`, on a checkout of the PR branch, and its prompt tells it to read the PR's
 comments as its instructions — so on a non-fork PR, anyone who can comment can address that
 session. `--disallowedTools` does not contain that; it pattern-matches command prefixes, so any
 route it does not textually name reaches the remote, and a hosted runner's open egress reaches
 the network. A session that cannot push because it holds nothing that can push is bounded. A
 session that was merely *asked* not to push is not.
+
+**The same argument applies to every write, not just the push — so the permissions are per job.**
+`GITHUB_TOKEN` is only as narrow as the job holding it, and a workflow-level `pull-requests:
+write` is a grant *every* job gets, the fixer's session included. With it, an injected PR comment
+is one step from `gh pr review --approve`, `gh pr close`, or `gh pr edit --remove-label
+flow:needs-human` — undoing the escalation that stopped the PR. So the two jobs that run a model
+hold reads only, and the jobs that hold writes run no model:
+
+| job | token can write | runs a model | what it does |
+|---|---|---|---|
+| `plan` | nothing | no | reads the run's failed jobs, the PR, and the task's status on the default branch |
+| `undraft` | pull requests | no | one `gh pr ready --undo`, and nothing else |
+| `fix` | **nothing** | **yes** | the round: commit-only, then the four guards, then the one push — made with `FLOW_PAT`, not with this token |
+| `escalate-round` | pull requests, issues | no | posts the card and the label for a round that did not push |
+| `card` | **nothing** | **yes** | writes the card's four fields, read-only |
+| `escalate` | pull requests, issues | no | posts that card and the label |
+
+The model jobs get `contents: read` + `pull-requests: read` (+ `id-token: write`, which is OIDC
+minting and reaches nothing in the repo). `read` is what the fixer's prompt actually needs — it
+is told to read the reviewers' verdicts — and read cannot label, comment, approve, close, edit or
+merge. The file's own top-level block is `contents: read` and nothing more: a **floor**, so a job
+added later is read-only until someone writes a block saying otherwise.
+
+Splitting the model off from the step that posts its card means `outcome.json` has to cross a job
+boundary, and every field in it is model-written text. It travels **base64 through a job output**,
+bounded at 16 KiB — an alphabet that cannot carry a quote, a newline, a backtick or a `$`, which
+is the same reason the fact-gathering step base64s commit messages. Absent or over-long, it
+decodes to nothing readable and `decisionCard` renders the fallback card: visible, not silent.
 **Rounds are counted on the PR, never on `main`.** Each pushed round carries exactly one commit
 stamped with the git trailer `Flow-Auto-Fix-Round: N/CAP` — stamped by the *workflow*, after the
 guards, so the thing being bounded cannot write its own bound. Rounds used is how many of the
 PR's commits carry one, which a human can read straight off the commit list. That is also why
-this workflow needs **no write access to the default branch at all**: its `permissions:` are
-`contents: read`, `pull-requests: write`, `issues: write`, `id-token: write`, and nothing else.
+this workflow needs **no write access to the default branch at all**. The caller grants the
+*union* of the per-job table above — `contents: read`, `pull-requests: write`, `issues: write`,
+`actions: read`, `id-token: write`, and nothing else — because a reusable workflow can never
+raise a scope above its caller's; the reusable then hands each job only its own share.
 (`issues: write` is the `flow:needs-human` label — GitHub's label endpoints live under `issues`,
-so labelling a *pull request* needs that grant rather than the `pull-requests` one.)
+so labelling a *pull request* needs that grant rather than the `pull-requests` one. `actions:
+read` is the jobs API, the only way to learn *which* review job failed, and it is `plan`'s alone.)
 
 **What it will never do:**
 
