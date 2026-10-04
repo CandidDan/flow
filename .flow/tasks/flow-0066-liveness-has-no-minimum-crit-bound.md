@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0066"
 title: "Liveness has no minimum crit bound — a sub-hourly cron is judged inside GitHub's own scheduler jitter"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker"
 created: "2026-09-21"
-started: ""
+started: "2026-10-04T13:03:05Z"
 branch: ""
 pr: ""
 issue: ""
