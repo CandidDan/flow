@@ -403,3 +403,20 @@ test("a malformed ask is reported as no ask, because the resolver grades nothing
     assert.deepEqual(JSON.parse(out.text()).tasks[0].asks.map((a) => a.text), ["fine"]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// Code review on #175: the frontmatter readers split on the first `#`, so an ask quoting a PR or
+// issue number was truncated, failed to parse and vanished from --json (block list) or from both
+// --json and flow-doctor (inline list). A `#` inside quotes is text; only ` #` outside is a comment.
+test("an ask carrying `#` survives intact, block and inline list alike, and a trailing comment is still dropped", () => {
+  const block = `---\nid: "CAN-7"\ntitle: "t"\nstatus: "ready"\npriority: 2\nowner: ""\nbranch: ""\npr: ""\n` +
+    `blocked_reason: "waits for PR #172" # why\nissue: ""\n` +
+    `asks:\n  - "fyi: see PR #127 for context, needs rebase"  # a comment\n---\nbody\n`;
+  const t = parseTask(block);
+  assert.deepEqual(t.asks.map((a) => a.text), ["see PR #127 for context, needs rebase"]);
+  assert.equal(t.blocked_reason, "waits for PR #172", "a scalar keeps its # too");
+
+  const inline = block.replace(/asks:\n.*\n/, `asks: ["fyi: see #127, it's fine", "follow-up: split #9 out"] # c\n`);
+  const u = parseTask(inline);
+  assert.deepEqual(u.asks.map((a) => [a.kind, a.text]),
+    [["fyi", "see #127, it's fine"], ["follow-up", "split #9 out"]]);
+});

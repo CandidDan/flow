@@ -1942,3 +1942,19 @@ test("the inline asks form parses too, like every other list field in the store"
   assert.equal(runDoctor({ flowDir: d }).problems.filter((p) => /unknown kind "todo"/.test(p)).length, 1);
   cleanup(d);
 });
+
+// Code review on #175. flow-doctor must judge the ask the author WROTE, not a version cut at its
+// first `#`: a legal ask quoting an issue number is clean, and a malformed one is quoted back whole.
+test("flow-0119: an ask carrying `#` is read whole by flow-doctor, in block and inline lists", async () => {
+  const { parseListField, yamlScalar } = await import("./flow-doctor.mjs");
+  assert.deepEqual(parseListField(`asks:\n  - "fyi: see PR #127 for context"  # note\n`, "asks"),
+    ["fyi: see PR #127 for context"]);
+  assert.deepEqual(parseListField(`asks: ["fyi: see #127", 'follow-up: it''s #9'] # c\n`, "asks"),
+    ["fyi: see #127", "follow-up: it's #9"]);
+  assert.deepEqual(parseListField(`touches:\n  - src/a.ts # why\n  - "b/**"\n`, "touches"), ["src/a.ts", "b/**"],
+    "an unquoted entry with a trailing comment is still cut at the comment");
+  assert.equal(yamlScalar(`"waits for #172 \\"x\\"" # note`), 'waits for #172 "x"');
+  assert.equal(yamlScalar(`ready # c`), "ready");
+  assert.deepEqual(asksFindings({ id: "CAN-1", asksList: parseListField(`asks:\n  - "decision: #12 or #13? Recommend: #13"\n`, "asks") }).problems, [],
+    "a legal ask with # in it is not a finding");
+});

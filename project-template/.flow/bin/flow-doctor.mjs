@@ -283,19 +283,53 @@ function rootCovers(declaredPath, topDir) {
 // (A naive same-line scan misses the multi-line form — it would read those tasks as having
 // empty touches, silencing both the empty-touches warning and overlap detection below.)
 // Exported for pick-task.mjs (flow-0111): one list parser for the whole store, not three.
+// A YAML scalar as written on one line: strip a trailing `# comment` ONLY outside quotes (YAML
+// needs whitespace before the `#`), then drop the surrounding quotes. Splitting on the first `#`
+// truncated any quoted value carrying a PR or issue reference ("see PR #127") — flow-0119's review.
+export function stripYamlComment(s) {
+  let q = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) {
+      if (c === "\\" && q === '"') { i++; continue; }
+      if (c === q) q = null;
+    } else if (c === '"' || c === "'") {
+      q = c;
+    } else if (c === "#" && (i === 0 || /\s/.test(s[i - 1]))) {
+      return s.slice(0, i);
+    }
+  }
+  return s;
+}
+
+export function yamlScalar(raw) {
+  const v = stripYamlComment(raw).trim();
+  const dq = v.match(/^"((?:[^"\\]|\\.)*)"$/);
+  if (dq) return dq[1].replace(/\\(["\\])/g, "$1");
+  const sq = v.match(/^'((?:[^']|'')*)'$/);
+  if (sq) return sq[1].replace(/''/g, "'");
+  return v;
+}
+
+const QUOTED_ITEM = /"((?:[^"\\]|\\.)*)"|'((?:[^']|'')*)'/g;
+
 export function parseListField(head, key) {
   const lines = head.split("\n");
   const i = lines.findIndex((l) => new RegExp(`^\\s*${key}:`).test(l));
   if (i === -1) return [];
-  const inline = lines[i].replace(new RegExp(`^\\s*${key}:\\s*`), "").split("#")[0].trim();
-  if (inline.startsWith("[")) return [...inline.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]);
+  const inline = stripYamlComment(lines[i].replace(new RegExp(`^\\s*${key}:\\s*`), "")).trim();
+  if (inline.startsWith("[")) {
+    return [...inline.matchAll(QUOTED_ITEM)]
+      .map((m) => (m[1] !== undefined ? m[1].replace(/\\(["\\])/g, "$1") : m[2].replace(/''/g, "'")))
+      .filter(Boolean);
+  }
   const out = [];
   for (let j = i + 1; j < lines.length; j++) {
     const t = lines[j].trim();
     if (t === "" || t.startsWith("#")) continue;
     const m = t.match(/^-\s*(.+)$/);
     if (!m) break; // dedent to the next key → list done
-    out.push(m[1].split("#")[0].trim().replace(/^["'](.*)["']$/, "$1"));
+    out.push(yamlScalar(m[1]));
   }
   return out.filter(Boolean);
 }
@@ -827,7 +861,7 @@ function splitFrontmatter(text) {
 function scalarReader(head) {
   return (k) => {
     const m = head.match(new RegExp(`^${k}:\\s*(.*)$`, "m"));
-    return m ? m[1].split("#")[0].trim().replace(/^"(.*)"$/, "$1") : undefined;
+    return m ? yamlScalar(m[1]) : undefined;
   };
 }
 
