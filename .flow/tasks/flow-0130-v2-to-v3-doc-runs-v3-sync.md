@@ -19,6 +19,7 @@ touches:
   - "changes/flow-0130.md"
 labels: [flow-infra, docs, sync, canary, urgent]
 notes:
+  - "2026-10-04 worker: DONE pending review. PR #177 marked ready for review. All four gate commands green (build 34 workflows, lint 113 mjs, 1789 tests 0 fail, coverage 96.97% vs floor 83.5). Both acceptance criteria have proving tests in .flow/bin/caller-pins.test.mjs. Next action: nothing for a worker — the PR review checks decide; a red one is a kickback on the same branch."
   - "2026-10-04 worker: branch flow/flow-0130-v2-to-v3-doc-runs-v3-sync pushed, one commit. Doc section rewritten (two-step order + the canonical_ref-vs-pin reason + the second-run recovery), changes/flow-0130.md written, three tests appended to .flow/bin/caller-pins.test.mjs (order checked positionally; verified red against the old doc). Next: run the four gate commands and open the PR."
   - "2026-10-04 orchestrator: Dan approved the recommendations: run first, labelled urgent."
   - "2026-10-03 orchestrator: found by the v3 canary, progress PR #115. The doc's easy path, `gh workflow run flow-sync.yml -f canonical_ref=v3`, runs the repo's CURRENT caller, which is `_flow-sync.yml@v2` (2.2.0). That copies 3.0.0's .flow/bin, but 2.2.0's reusable predates flow-0081 and ships no skills. The synced allocate-task-id.test.mjs then fails on the task-writer skill's missing queue_cap paragraph, so the repo's flow-tooling check goes red on the adoption PR itself."
