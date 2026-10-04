@@ -416,16 +416,30 @@ export function decisionCard(input = {}) {
   const { ok, problems } = validateCard(input);
 
   if (!ok) {
+    // The fallback renders `tried` as well as `finding`, and that is not symmetry for its own
+    // sake. The fallback is what the DEAD-ROUND path reaches: a round that crashed, timed out or
+    // handed back unusable JSON has no `finding` of its own, and `cardFromOutcome` puts the
+    // guard's own sentence ("the round did not hand back", "it weakened the tests") into
+    // `tried`. A fallback that printed only `finding` therefore told the human "not captured"
+    // and withheld the one thing the workflow did know — which check fired and why.
     const head = `${CARD_FALLBACK_TITLE}\n\n` +
       `The auto-fix round produced no usable recommendation: ${problems.join("; ")}. ` +
       `Nothing was pushed; this PR is yours to decide.\n\n`;
-    const findingLabel = `**Finding** (\`${check}\`): `;
+    const labels = {
+      finding: `**Finding** (\`${check}\`): `,
+      tried: "\n\n**Tried / disputed:** ",
+    };
     const tail = `\n\n---\n${cardFooter(rounds, cap, link)}\n`;
-    const { finding } = fitFields(
-      { finding: String(input.finding ?? "").trim() || MISSING },
-      CARD_MAX_CHARS - head.length - findingLabel.length - tail.length,
-    );
-    return `${head}${findingLabel}${finding}${tail}`;
+    const overhead =
+      head.length + Object.values(labels).reduce((n, s) => n + s.length, 0) + tail.length;
+    const parts = fitFields({
+      finding: String(input.finding ?? "").trim() || MISSING,
+      tried: String(input.tried ?? "").trim() || MISSING,
+    }, CARD_MAX_CHARS - overhead);
+    return head +
+      labels.finding + parts.finding +
+      labels.tried + parts.tried +
+      tail;
   }
 
   const action = String(input.recommendation.action).trim();

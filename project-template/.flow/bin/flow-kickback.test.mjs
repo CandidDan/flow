@@ -520,6 +520,43 @@ test("no hand-back at all still produces a card — the fallback one", () => {
   }
 });
 
+// The dead-round path, which is the ONE the `if: always()` backstop exists for: the round
+// crashed, timed out, or handed back nothing usable, so there is no `finding` and no
+// `recommendation` and the card is necessarily the fallback one. `cardFromOutcome` puts the
+// guard's own sentence into `tried`, so a fallback that rendered only `finding` would post a
+// card reading "Finding: not captured" and drop the only fact the workflow actually had —
+// WHICH check fired. Each of the four guards' real sentences is asserted here by text.
+test("a round with NO usable hand-back still shows the guard's own amend text on the card", () => {
+  const amends = [
+    "The round ended without writing a hand-back, so there is no account of what it did.",
+    "The round's hand-back named no known outcome, so nothing about the round can be trusted.",
+    "The round WEAKENED THE TESTS — it removed a test or an assertion. The change was thrown away, not pushed.",
+    "The round ended without completing, and left no reason.",
+  ];
+  for (const amend of amends) {
+    for (const data of [null, undefined, [], "text", { outcome: "fixed" }]) {
+      const card = decisionCard(cardFromOutcome(data, {
+        amend, check: "qa", link: "https://x.test/1", rounds: 1, cap: 2,
+      }));
+      const why = `${amend.slice(0, 24)}… / ${JSON.stringify(data)}`;
+      assert.ok(card.startsWith(CARD_FALLBACK_TITLE), `${why}: must fall back`);
+      assert.match(card, /\*\*Tried \/ disputed:\*\*/, `${why}: the fallback must render the tried line`);
+      assert.ok(card.includes(amend), `${why}: the guard's sentence must reach the human`);
+      assert.ok(card.includes("https://x.test/1"), `${why}: the link survives`);
+      assert.match(card, /Auto-fix rounds used: 1\/2/, `${why}: the footer survives`);
+      assert.ok(card.length <= CARD_MAX_CHARS, `${why}: card is ${card.length} characters`);
+    }
+  }
+  // An over-long amend is cut to the budget rather than blowing it, same as every other field.
+  const long = decisionCard(cardFromOutcome(null, { amend: "z".repeat(9000), link: "https://x.test/1" }));
+  assert.ok(long.length <= CARD_MAX_CHARS, `card is ${long.length} characters`);
+  assert.match(long, /…/, "a cut amend is marked as cut, not silently truncated");
+  // And with no amend and no hand-back there is nothing to say, so the card says that outright
+  // instead of rendering a blank line under the label.
+  const silent = decisionCard(cardFromOutcome(null, { link: "https://x.test/1" }));
+  assert.match(silent, /\*\*Tried \/ disputed:\*\* not captured/);
+});
+
 // ═════════════════════════════════════════════════════════════════════════════════════════
 // review.auto_fix_rounds, read from .flow/config.yml
 // ═════════════════════════════════════════════════════════════════════════════════════════

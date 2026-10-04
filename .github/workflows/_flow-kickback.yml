@@ -51,14 +51,27 @@ on:
       FLOW_PAT:
         required: false
 
-# Least privilege, and the list is exhaustive. `contents: read` is the checkout only: every write
-# this workflow makes to a branch goes out as FLOW_PAT, and the only branch it touches is the
-# PR's own. `pull-requests: write` covers the draft toggle, the decision card and the label.
-# `id-token: write` is OIDC minting for claude-code-action. There is deliberately no `workflows:`
-# grant, no `actions: write` and no `contents: write`.
+# Least privilege, and the list is exhaustive. This block governs GITHUB_TOKEN, which is what
+# every step here uses EXCEPT `stamp-and-push` — see the FLOW_PAT note below. `contents: read`
+# is the checkout only: the one branch write this workflow makes goes out as FLOW_PAT, to the
+# PR's own branch. `pull-requests: write` covers the draft toggle and the decision card.
+# `issues: write` covers the `flow:needs-human` label — GitHub's label endpoints live under
+# `issues`, so a PR label needs that grant and not the `pull-requests` one. `id-token: write` is
+# OIDC minting for claude-code-action. There is deliberately no `workflows:` grant, no
+# `actions: write` and no `contents: write`.
+#
+# WHERE FLOW_PAT GOES, AND WHERE IT DOES NOT. It appears in exactly one step, `stamp-and-push`,
+# which runs only after all four guards have passed. It is deliberately absent from the fixer
+# step: that step runs a model under `--permission-mode bypassPermissions` on a checkout of the
+# PR branch, and the model is told to read PR comments as its instructions — so anyone who can
+# comment on the PR can address that session. A push-capable credential in that process's
+# environment is reachable by any command a two-entry deny-list does not textually match, and is
+# exfiltratable over a hosted runner's open egress. GITHUB_TOKEN scoped by this block cannot
+# push, which is what makes the guard set a boundary rather than a request.
 permissions:
   contents: read
   pull-requests: write
+  issues: write
   id-token: write
 
 jobs:
@@ -94,7 +107,7 @@ jobs:
       - name: Resolve the PR this review run belongs to
         id: pr
         env:
-          GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           # A branch name is attacker-influenced text. It reaches the shell through `env:`, never
           # through `${{ }}` in a `run:` body — the same rule _flow-review.yml keeps for the PR
@@ -126,7 +139,7 @@ jobs:
         id: failed
         if: ${{ steps.pr.outputs.number != '' }}
         env:
-          GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
@@ -148,7 +161,7 @@ jobs:
         id: facts
         if: ${{ steps.pr.outputs.number != '' }}
         env:
-          GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
@@ -259,7 +272,7 @@ jobs:
       - name: Convert the PR to a draft for the duration of the round
         id: undraft
         env:
-          GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.plan.outputs.pr }}
         run: |
@@ -273,18 +286,29 @@ jobs:
         id: worker
         uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
         env:
-          GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.FLOW_PAT || github.token }}
-          # The same action pin, credentials and model settings as _flow-queue-runner.yml's
-          # worker — this IS that worker, pointed at a narrower job — with two limits. `git push`
-          # and `gh pr ready` are disallowed, because the guard set below has to sit between the
-          # commit and the push; and the checkout persisted no credential, so the disallowed tool
-          # is a statement of intent with no way around it rather than a request.
+          github_token: ${{ github.token }}
+          # The same action pin and model settings as _flow-queue-runner.yml's worker — this IS
+          # that worker, pointed at a narrower job — with three limits, in increasing order of
+          # how much they actually hold.
+          #
+          #   1. NO PUSH-CAPABLE CREDENTIAL. The token above is GITHUB_TOKEN, scoped by this
+          #      workflow's `permissions:` block to `contents: read`. FLOW_PAT reaches only
+          #      `stamp-and-push`, after every guard. This is the limit that is a boundary: the
+          #      session cannot push because it holds nothing that can, not because it was asked
+          #      not to.
+          #   2. NO PERSISTED CREDENTIAL in .git/config, from the checkout above.
+          #   3. A DENY-LIST, which is a statement of intent and nothing stronger. Under
+          #      `bypassPermissions` it only pattern-matches command prefixes, so it is listed
+          #      last on purpose: it names the routes to the network and to the git remote so a
+          #      round that reaches for one is a visible act rather than an accident. Do not read
+          #      it as the thing keeping the round honest — limit 1 is.
           claude_args: >-
             --max-turns 60 --model opus --permission-mode bypassPermissions
-            --disallowedTools "Bash(git push:*)" "Bash(gh pr ready:*)"
+            --disallowedTools "Bash(git push:*)" "Bash(gh pr ready:*)" "Bash(gh api:*)"
+            "Bash(curl:*)" "Bash(wget:*)"
           prompt: |
             You are a Flow auto-fix round on an open pull request. A Definition-of-Done review
             check went red, and your job is to address it on this branch — nothing else.
@@ -379,7 +403,7 @@ jobs:
       - name: Check 2 — the remote branch head has not moved
         id: check-remote-head
         env:
-          GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           BASE_SHA: ${{ steps.base.outputs.sha }}
           HEAD_REF: ${{ needs.plan.outputs.head_ref }}
@@ -463,7 +487,7 @@ jobs:
         id: escalate
         if: ${{ always() && steps.stamp-and-push.outputs.pushed != 'true' }}
         env:
-          GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.plan.outputs.pr }}
           KICKBACK_CHECK: ${{ needs.plan.outputs.failed }}
@@ -483,8 +507,11 @@ jobs:
           export KICKBACK_AMEND="${AMEND_1:-${AMEND_2:-${AMEND_3:-${AMEND_4:-The round ended without completing, and left no reason.}}}}"
           bin="${KICKBACK_BIN:-.flow/bin}"
           card="$RUNNER_TEMP/card.md"
-          node "$bin/flow-kickback.mjs" card "$RUNNER_TEMP/outcome.json" > "$card" \
-            || node "$bin/flow-kickback.mjs" card > "$card"
+          # ONE invocation, and no `||` fallback after it. `card` renders a card whatever it is
+          # given: a missing, unreadable or unparseable hand-back becomes the fallback card,
+          # built from KICKBACK_AMEND and KICKBACK_LINK alone, and the command still exits 0.
+          # A second attempt behind `||` would be dead code that read like a safety net.
+          node "$bin/flow-kickback.mjs" card "$RUNNER_TEMP/outcome.json" > "$card"
           # The card FIRST. A label with no card is the "12 questions" problem this replaces, so
           # the order is the guarantee: if the comment fails, the label is never added.
           gh pr comment "$PR_NUMBER" --body-file "$card"
@@ -516,10 +543,10 @@ jobs:
         id: write-card
         uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
         env:
-          GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ secrets.FLOW_PAT || github.token }}
+          github_token: ${{ github.token }}
           # Bounded and read-only with respect to the PR: it may not commit, push, re-ready,
           # merge, comment or label. The only thing it produces is a JSON file this job then
           # validates in code.
@@ -559,7 +586,7 @@ jobs:
       - name: Post the card, then the label
         if: ${{ always() }}
         env:
-          GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
+          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.plan.outputs.pr }}
           KICKBACK_CHECK: ${{ needs.plan.outputs.failed }}
@@ -570,8 +597,9 @@ jobs:
         run: |
           set -eu
           card="$RUNNER_TEMP/card.md"
-          node .flow/bin/flow-kickback.mjs card .flow-kickback/outcome.json > "$card" \
-            || node .flow/bin/flow-kickback.mjs card > "$card"
+          # ONE invocation, same reason as the round's own escalation step: `card` never fails,
+          # it falls back, so a `||` after it would be dead code dressed as a safety net.
+          node .flow/bin/flow-kickback.mjs card .flow-kickback/outcome.json > "$card"
           # The card FIRST, then the label — the same order and the same guarantee as the round's
           # own escalation: no path adds the label without a card.
           gh pr comment "$PR_NUMBER" --body-file "$card"

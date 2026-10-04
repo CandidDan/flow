@@ -175,12 +175,26 @@ human asking it to, so every bound on it is stated here rather than left to the 
 (GitHub's recursion guard), so a fix pushed with it would never be re-reviewed — the round would
 look successful and prove nothing. With no `FLOW_PAT` the workflow **skips**, visibly, saying so.
 
+**And it reaches exactly one step — never the fixer.** `FLOW_PAT` is handed only to
+`stamp-and-push`, which runs after all four guards have passed. Every other step — the
+fact-gathering, the draft toggle, the guards, the card, the label, *and the fixer session
+itself* — runs on `GITHUB_TOKEN`, scoped by the `permissions:` block below to `contents: read`.
+That split is the actual boundary, and it is worth being explicit about why, because the
+intuitive design gets it wrong: the fixer runs a model under `--permission-mode
+bypassPermissions`, on a checkout of the PR branch, and its prompt tells it to read the PR's
+comments as its instructions — so on a non-fork PR, anyone who can comment can address that
+session. `--disallowedTools` does not contain that; it pattern-matches command prefixes, so any
+route it does not textually name reaches the remote, and a hosted runner's open egress reaches
+the network. A session that cannot push because it holds nothing that can push is bounded. A
+session that was merely *asked* not to push is not.
 **Rounds are counted on the PR, never on `main`.** Each pushed round carries exactly one commit
 stamped with the git trailer `Flow-Auto-Fix-Round: N/CAP` — stamped by the *workflow*, after the
 guards, so the thing being bounded cannot write its own bound. Rounds used is how many of the
 PR's commits carry one, which a human can read straight off the commit list. That is also why
 this workflow needs **no write access to the default branch at all**: its `permissions:` are
-`contents: read`, `pull-requests: write`, `id-token: write`, and nothing else.
+`contents: read`, `pull-requests: write`, `issues: write`, `id-token: write`, and nothing else.
+(`issues: write` is the `flow:needs-human` label — GitHub's label endpoints live under `issues`,
+so labelling a *pull request* needs that grant rather than the `pull-requests` one.)
 
 **What it will never do:**
 

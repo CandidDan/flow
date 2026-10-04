@@ -27,6 +27,13 @@ name: flow-kickback
 # would look successful and prove nothing. With no FLOW_PAT the workflow skips, visibly, saying
 # so. See _flow-open-pr.yml's header for the one FLOW_PAT permission list the fleet shares.
 #
+# AND IT REACHES EXACTLY ONE STEP. FLOW_PAT is used only by the reusable's `stamp-and-push`
+# step, which runs after all four guards have passed. Every other step — the fact-gathering,
+# the draft toggle, the fixer session itself, the card and the label — runs on GITHUB_TOKEN,
+# scoped by the block below. That is deliberate: the fixer is a model running under
+# `bypassPermissions` that is told to read PR comments as instructions, so anyone who can
+# comment on the PR can address it. It must not be holding a credential that can push.
+#
 # THE ESCALATION: `flow:needs-human`, PLUS A DECISION CARD. Anything the round may not or cannot
 # do — a failed SECURITY check (never auto-fixed), the round cap reached, a round that weakened
 # the tests, a round that disputed the finding, a round that died — posts ONE comment on the PR
@@ -59,10 +66,13 @@ jobs:
     # and a reusable workflow can't raise it above the caller's grant. A permissions block is
     # exhaustive, so contents and pull-requests are re-listed. There is deliberately no
     # `contents: write`: this workflow never commits to the default branch, and the only branch
-    # it pushes to is the PR's own, as FLOW_PAT.
+    # it pushes to is the PR's own, as FLOW_PAT. `issues: write` is the `flow:needs-human`
+    # label: GitHub's label endpoints live under `issues`, so labelling a PR needs that grant
+    # rather than the `pull-requests` one.
     permissions:
       contents: read
       pull-requests: write
+      issues: write
       id-token: write
     uses: CandidDan/flow/.github/workflows/_flow-kickback.yml@main
     secrets:

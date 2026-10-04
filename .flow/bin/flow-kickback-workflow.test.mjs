@@ -116,6 +116,62 @@ test("the fixer step disallows `git push` and `gh pr ready`", { skip }, () => {
   assert.match(args, /--disallowedTools/);
   assert.match(args, /Bash\(git push:\*\)/, "the fixer must not be able to push — the guard sits between the commit and the push");
   assert.match(args, /Bash\(gh pr ready:\*\)/, "the fixer must not re-request review — the workflow does that, after the checks");
+  // The two above are the task's criterion. These three are the routes a deny-list of exactly
+  // those two left open: `gh api` can commit contents to a branch, and curl/wget reach the
+  // network a hosted runner leaves open. The list is still only a statement of intent — the
+  // boundary is the token, pinned by the FLOW_PAT tests below — but it should at least name the
+  // obvious ways around itself, so a round that reaches for one is visible rather than routine.
+  for (const route of ["gh api", "curl", "wget"]) {
+    assert.ok(args.includes(`Bash(${route}:*)`),
+      `\`${route}\` is an unlisted route past "no push" and "no re-ready"`);
+  }
+});
+
+// The CRITICAL finding on PR #179, pinned so it cannot come back. The fixer is a model running
+// under `--permission-mode bypassPermissions`, on a checkout of the PR branch, and its own prompt
+// tells it to read PR comments as its instructions — so on a non-fork PR, anyone who can comment
+// can address that session. A push-capable credential in that process's environment is not held
+// back by `--disallowedTools`: that flag pattern-matches command prefixes, so any route the list
+// does not textually name (a wrapper script, an unlisted CLI) reaches the remote, and a hosted
+// runner's open egress reaches the network. The only real boundary is the token itself, so the
+// test is about WHICH token the step is handed, not about what the step was asked not to do.
+test("the fixer step is handed NO FLOW_PAT — not in env:, not in with:", { skip }, () => {
+  const fixer = steps(parse(REUSABLE), "fix").find((s) => /claude-code-action/.test(s.uses ?? ""));
+  assert.ok(fixer, "the fix job must run a claude-code-action worker");
+  for (const [block, values] of [["env", fixer.env ?? {}], ["with", fixer.with ?? {}]]) {
+    for (const [k, v] of Object.entries(values)) {
+      assert.doesNotMatch(String(v), /FLOW_PAT/,
+        `the fixer's ${block}.${k} references FLOW_PAT. A session that can be addressed by a PR comment must not hold a credential that can push — GITHUB_TOKEN, scoped by this workflow's \`contents: read\`, is what makes the guard set a boundary rather than a request.`);
+    }
+  }
+  for (const key of ["github_token"]) {
+    assert.equal(fixer.with[key], "${{ github.token }}",
+      `the fixer's ${key} must be GITHUB_TOKEN and nothing stronger`);
+  }
+});
+
+test("FLOW_PAT reaches exactly one step — stamp-and-push, after every guard", { skip }, () => {
+  const wf = parse(REUSABLE);
+  const holders = [];
+  for (const [job, j] of Object.entries(wf.jobs)) {
+    for (const step of j.steps ?? []) {
+      const refs = [...Object.entries(step.env ?? {}), ...Object.entries(step.with ?? {})]
+        .filter(([, v]) => /secrets\.FLOW_PAT(?!\s*!=)/.test(String(v)));
+      if (refs.length) holders.push({ job, id: step.id ?? step.name, keys: refs.map(([k]) => k) });
+    }
+  }
+  assert.deepEqual(holders.map((h) => h.id), ["stamp-and-push"],
+    `FLOW_PAT must reach one step and one only; found: ${JSON.stringify(holders)}`);
+  // And that step runs after all four guards, which the ordering test above already pins. What
+  // is pinned here is that no guard, no card step and no fixer step is on the list at all.
+  const ids = steps(wf, "fix").map((s) => s.id).filter(Boolean);
+  assert.ok(ids.indexOf("stamp-and-push") > ids.indexOf(GUARD_ORDER.at(-1)),
+    "the one step holding the push credential is the one that runs last");
+  // `plan` reads only WHETHER the secret is set. The value itself never enters that job.
+  const hasPat = steps(wf, "plan").flatMap((s) => Object.values(s.env ?? {}))
+    .filter((v) => /FLOW_PAT/.test(String(v)));
+  assert.deepEqual(hasPat, ["${{ secrets.FLOW_PAT != '' }}"],
+    "plan may test for the secret's presence; it may never be handed the secret");
 });
 
 test("every checkout in the reusable sets persist-credentials: false", { skip }, () => {
@@ -221,8 +277,9 @@ test("there is exactly one push in the file, and it targets the PR's branch, nev
 
 test("the reusable's permissions name only what its steps use, and never grant workflows:", { skip }, () => {
   const perms = parse(REUSABLE).permissions;
-  assert.deepEqual(perms, { contents: "read", "pull-requests": "write", "id-token": "write" },
-    "contents: read is the checkout; pull-requests: write is the draft toggle, the card and the label; id-token: write is OIDC for claude-code-action. Nothing else is used, so nothing else is granted.");
+  assert.deepEqual(perms,
+    { contents: "read", "pull-requests": "write", issues: "write", "id-token": "write" },
+    "contents: read is the checkout; pull-requests: write is the draft toggle and the card; issues: write is the label, because GitHub's label endpoints live under issues; id-token: write is OIDC for claude-code-action. Nothing else is used, so nothing else is granted.");
   for (const scope of ["workflows", "actions", "packages", "deployments", "security-events"]) {
     assert.ok(!(scope in perms), `${scope}: is granted but no step uses it`);
   }
@@ -309,6 +366,24 @@ test("every path that adds flow:needs-human posts a card first — no path adds 
     assert.ok(step.run.includes(NEEDS_HUMAN_LABEL), `${job}: the label must be the one the helper names`);
     assert.ok(step.run.indexOf("gh pr comment") < step.run.indexOf("--add-label"),
       `${job}: the card is posted BEFORE the label, so a failed comment never leaves a bare label — the "12 questions" problem this replaces`);
+  }
+});
+
+// A `||` after a command that cannot fail is dead code that reads like a safety net, and here it
+// read like a SECOND rendering path for an unreadable hand-back. There is no second path: `card`
+// catches its own read and parse errors and renders the fallback card, exiting 0 either way. The
+// `||` hid that the fallback is the only thing on both sides of it.
+test("no card step guards its render with a dead `||` — the card command cannot fail", { skip }, () => {
+  const cardSteps = Object.entries(parse(REUSABLE).jobs).flatMap(([job, j]) => (j.steps ?? [])
+    .filter((st) => typeof st.run === "string" && /flow-kickback\.mjs"? card/.test(st.run))
+    .map((st) => ({ job, step: st })));
+  assert.ok(cardSteps.length >= 2, "an empty scan is a failure, not a pass — both escalation paths render a card");
+  for (const { job, step } of cardSteps) {
+    const renders = step.run.split("\n").filter((l) => /flow-kickback\.mjs"? card/.test(l) && !l.trim().startsWith("#"));
+    assert.equal(renders.length, 1,
+      `${job}: the card is rendered once; a second invocation behind \`||\` never runs, because \`card\` always exits 0`);
+    assert.doesNotMatch(renders[0], /\|\|/,
+      `${job}: \`card\` renders the fallback and exits 0 on a missing or unparseable hand-back, so a \`||\` branch after it is unreachable`);
   }
 });
 
