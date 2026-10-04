@@ -1,7 +1,7 @@
 ---
 id: "flow-0130"
 title: "The v2-to-v3 repin doc says to run the v3 sync, not the v2 one, or skills are skipped"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0130"
