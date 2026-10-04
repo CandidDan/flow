@@ -117,13 +117,31 @@ from every caller, including dispatch-only ones that never reach this job.
 
 ### Doing it
 
-Re-syncing is the easy path — `flow-sync`'s PR carries the new callers, grant included:
+Re-syncing is the easy path — `flow-sync`'s PR carries the new callers, grant included — but it is
+**two steps, and the order is the whole point**:
 
 ```bash
+# 1. Repin the flow-sync caller to @v3 by hand, and merge that one-line PR first.
+sed -i "s|\(_flow-sync\.yml\)@v2$|\1@v3|" .github/workflows/flow-sync.yml
+
+# 2. Only then dispatch the sync. It now runs the v3 reusable, which adopts the skills.
 gh workflow run flow-sync.yml -R <owner>/<repo> -f canonical_ref=v3
 ```
 
-By hand it is the ordinary `sed` plus that one grant:
+**Why.** `canonical_ref` chooses which canonical tree is copied *from*; the caller's `uses:` pin
+chooses which reusable does the *copying*. Dispatch before step 1 and a repo still on `@v2` runs
+`_flow-sync.yml@v2` — 2.2.0, which predates flow-0081 and copies no `.claude/skills/` at all — so
+it brings 3.0.0's `.flow/bin` and none of the skills that tooling now tests for. The synced
+`allocate-task-id.test.mjs` fails on the `task-writer` skill's missing `queue_cap` paragraph, and
+the repo's own flow-tooling check goes red on the adoption PR itself.
+
+If you have already dispatched from `@v2` and that PR is red, it is the same two steps with the
+merge in between: merge it anyway — its callers *are* `@v3`, which is what step 1 would have
+done — then run the sync a second time to pick up the skills. Repinning first is cheaper, because
+nothing goes red.
+
+By hand there is no such trap: the `sed` below moves `flow-sync.yml` with the other callers, so the
+next sync already runs the v3 reusable. It is the ordinary `sed` plus that one grant:
 
 ```bash
 FROM="v2"; TO="v3"

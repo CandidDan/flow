@@ -45,6 +45,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { changelogEntry } from "./changelog-entry.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
@@ -390,4 +391,84 @@ test("a comment quoting the fallback cannot stand in for the code (flow-0105)", 
   assert.equal(code.match(CANONICAL_REF_FALLBACK)?.[2], "v2");
   assert.equal(commentOnly.match(CANONICAL_REF_FALLBACK), null,
     "a guard satisfied by prose is the green gate that checked nothing");
+});
+
+// ---------------------------------------------------------------------------------------------
+// Criterion (flow-0130): the section's easy path has to run the NEW major's sync, not the old one.
+//
+// `canonical_ref` and the caller's `uses:` pin are two different refs doing two different jobs:
+// the input chooses which canonical tree is copied FROM, the pin chooses which reusable does the
+// copying. The doc's one-liner only ever set the first, so a repo still pinned at the previous
+// major dispatched `_flow-sync.yml@v2` — 2.2.0, which predates flow-0081 and copies no
+// `.claude/skills/` at all — and adopted 3.0.0's `.flow/bin` with none of the skills that tooling
+// tests for. `allocate-task-id.test.mjs` then failed on the `task-writer` skill's missing
+// `queue_cap` paragraph, so the flow-tooling check went red on the adoption PR itself. Found by the
+// v3 canary on progress PR #115.
+//
+// So the fix is an ORDER, and an order is only checkable positionally: the repin of the flow-sync
+// caller has to appear before the dispatch that depends on it. Both refs are derived from root
+// VERSION — current major and the one below it — because this section is always about reaching the
+// major that is current from the one before it, and the test above already fails if no such
+// section exists.
+// ---------------------------------------------------------------------------------------------
+
+/** The section of the repinning doc that covers reaching the current major, as text. */
+const majorSection = (doc, want) => {
+  const heading = doc.split("\n").find((l) => l.startsWith("## ") && l.includes(`@${want}`));
+  assert.ok(heading, `no "## " section naming @${want} in docs/repinning-a-consuming-repo.md`);
+  return doc.slice(doc.indexOf(heading)).split(/^---$/m)[0];
+};
+
+test("the current-major section repins the flow-sync caller BEFORE dispatching the sync", () => {
+  const want = expectedRef(readFileSync(VERSION_FILE, "utf8"));
+  const prev = `v${Number(want.slice(1)) - 1}`;
+  const section = majorSection(readFileSync(join(REPO, "docs/repinning-a-consuming-repo.md"), "utf8"), want);
+
+  // Backslashes stripped first: the repin is written as a `sed` expression, so the pin reads
+  // `_flow-sync\.yml\)@v2` on the page. Relative order survives the strip, and order is the
+  // only thing being measured here.
+  const plain = section.replace(/\\/g, "");
+  const repin = plain.search(new RegExp(`_flow-sync\\.yml\\)?@${prev}`));
+  const dispatch = plain.search(/gh workflow run flow-sync\.yml/);
+
+  assert.ok(dispatch >= 0,
+    `the section must still offer the dispatch as the easy path — ${prev} to ${want} is the one ` +
+    `repin where re-syncing carries the caller grant, and dropping it sends every adopter to the sed`);
+  assert.ok(repin >= 0,
+    `the section must tell the reader to repin their _flow-sync.yml@${prev} caller to @${want}. ` +
+    `Without that, the dispatch runs the ${prev} reusable, which copies the ${want} tree with none ` +
+    `of its skills.`);
+  assert.ok(repin < dispatch,
+    `the repin must come BEFORE the dispatch (repin at ${repin}, dispatch at ${dispatch}). ` +
+    `The order IS the fix: a dispatch made first runs the old reusable, and the whole point is ` +
+    `that \`canonical_ref\` cannot change which reusable copies.`);
+});
+
+test("…and it says why, naming the skills and the second run that recovers a red sync", () => {
+  const want = expectedRef(readFileSync(VERSION_FILE, "utf8"));
+  const section = majorSection(readFileSync(join(REPO, "docs/repinning-a-consuming-repo.md"), "utf8"), want);
+
+  assert.match(section, /skills/i,
+    "the reason has to name what the old reusable leaves out — skills — or the order reads as " +
+    "superstition and the next reader shortens it back to one command");
+  assert.match(section, /canonical_ref/,
+    "…and it has to distinguish the input from the pin, because a reader who has set " +
+    "`canonical_ref` reasonably believes they have already chosen the version");
+  assert.match(section, /second time|again|once more/i,
+    "…and it must give the way out for a repo that already dispatched from the old pin: merge " +
+    "that PR and run the sync again. A doc that only describes the happy order abandons every " +
+    "repo that hit this before it was written.");
+});
+
+test("changes/flow-0130.md exists and points a caller at the repinning doc", () => {
+  // Fragment while pending; assembled CHANGELOG entry after a release (flow-0098) — reading only
+  // the fragment goes red on the release PR that folds it in.
+  const text = changelogEntry(REPO, "flow-0130");
+  assert.ok(text, "a change to the adoption order owes the changelog an entry — the entry IS the release note");
+  assert.match(text, /docs\/repinning-a-consuming-repo\.md/,
+    "the caller action is to follow the doc's order, so the entry has to name the doc");
+  assert.match(text, /v2|v3/,
+    "…and the majors it is about, because a repo already on the current major has nothing to do");
+  assert.ok(!/^#/m.test(text),
+    "a fragment is assembled verbatim under `## Unreleased` — it carries no heading of its own");
 });
