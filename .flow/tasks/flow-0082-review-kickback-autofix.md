@@ -28,6 +28,7 @@ touches:
   - "changes/flow-0082.md"
 labels: [flow-infra, review, automation]
 notes:
+  - "2026-10-04 (worker): branch flow/flow-0082-kickback-auto-fix pushed. DONE: project-template/.flow/bin/flow-kickback.mjs (decide, countRounds, weakensTests, decisionCard, parseOutcome, CLI), its 54-test proving suite, and canonical's .flow/bin/flow-kickback.mjs adapter. NOT YET DONE: _flow-kickback.yml + the two callers, the workflow-structure tests, both config.yml edits, docs and changes/flow-0082.md. NEXT: write .github/workflows/_flow-kickback.yml."
   - "2026-10-02 (orchestrator): unblocked on the human's say-so. Every blocked_by entry had landed (checked against main), and inflight listed it as UNBLOCK."
   - "2026-09-25 (orchestrator): From the human, after PR #108 (flow-0076) sat red on a precise, mechanical code-review finding (a CRLF gap) until a human noticed and started a session. PR #109 (flow-0077) then did the same thing the same day. The protocol calls a red review check a kickback (PROTOCOL.md step 9), but nothing dispatches one: the worker stops at `gh pr ready` and the queue runner only takes `ready` tasks. The human was acting as a relay."
   - "2026-09-25 (orchestrator): DECIDED WITH THE HUMAN: automatic, bounded, and off by default. Rounds are capped (default 2, hard max 3, with a warning above that). qa and code-review only; a failed security check is never auto-fixed. Gated behind FLOW_AI like the other AI workflows. The fixer may dispute a finding, which hands the PR to the human."
