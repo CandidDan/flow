@@ -178,16 +178,19 @@ test("every template caller pins the major root VERSION declares", () => {
     "adopts the stamp must get the reusables that go with it");
 });
 
-test("all ten callers are covered, and each carries exactly one resolved reusable pin", () => {
-  // The count is the part a hand-sweep gets wrong: ten files edited by hand is exactly where one
-  // gets missed, and a missed pin is invisible until that repo's CI fails weeks later.
+test("all eleven callers are covered, and each carries exactly one resolved reusable pin", () => {
+  // The count is the part a hand-sweep gets wrong: eleven files edited by hand is exactly where
+  // one gets missed, and a missed pin is invisible until that repo's CI fails weeks later.
+  // The literal below moves whenever a task publishes a new caller — flow-0082 added
+  // flow-kickback.yml, taking it from ten to eleven. That it must be edited is the point: a
+  // derived count would pass a sweep that silently dropped a caller.
   const callers = workflowsIn(TEMPLATE_DIR);
   const pins = callers.map(({ name, text }) => {
     const found = text.split("\n").map((l) => l.match(USES_REUSABLE)).filter(Boolean);
     assert.equal(found.length, 1, `${name} should reference exactly one canonical reusable`);
     return `${name} -> @${found[0][2]}`;
   });
-  assert.equal(pins.length, 10, `expected ten published callers, got:\n${pins.join("\n")}`);
+  assert.equal(pins.length, 11, `expected eleven published callers, got:\n${pins.join("\n")}`);
   const want = expectedRef(readFileSync(VERSION_FILE, "utf8"));
   for (const pin of pins) assert.ok(pin.endsWith(`@${want}`), pin);
 });

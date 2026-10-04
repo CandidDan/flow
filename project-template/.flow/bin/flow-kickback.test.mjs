@@ -655,5 +655,5 @@ test("an unknown subcommand exits 2 with a usage line rather than succeeding sil
 test("the hand-back location is one named constant, so the prompt and the workflow cannot drift apart", () => {
   assert.equal(OUTCOME_DIR, ".flow-kickback");
   assert.equal(OUTCOME_FILE, "outcome.json");
-  assert.equal(MESSAGE_SEPARATOR, " ");
+  assert.equal(MESSAGE_SEPARATOR, "\0");
 });

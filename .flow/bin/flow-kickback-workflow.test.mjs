@@ -356,7 +356,6 @@ test("the security escalation never routes through the fix job", { skip }, () =>
 const TEMPLATE_CONFIG = join(REPO, "project-template", ".flow", "config.yml");
 const CANON_CONFIG = join(REPO, ".flow", "config.yml");
 const DOCS = join(REPO, "docs", "flow-reusable-workflows.md");
-const FRAGMENT = join(REPO, "changes", "flow-0082.md");
 
 test("the template ships auto_fix_rounds COMMENTED OUT; canonical sets it to 2", () => {
   const template = src(TEMPLATE_CONFIG).split("\n")
@@ -400,11 +399,11 @@ test("the template caller's header documents the same five things", () => {
   assert.match(header, /hard maximum is 3/i);
 });
 
-test("changes/flow-0082.md exists and states the caller action", () => {
-  assert.ok(existsSync(FRAGMENT), "every task that changes anything user-visible leaves a fragment");
-  // Read through changelogEntry, not off disk: assembling a release DELETES the fragment, so a
-  // test that reads `changes/<id>.md` is green until the next release and red on the release's
-  // own PR. The protocol names this trap by name.
+test("flow-0082's changelog entry exists and states the caller action", () => {
+  // Read through changelogEntry, not off disk, and do not assert the FRAGMENT exists either:
+  // assembling a release DELETES `changes/<id>.md` and folds it into CHANGELOG.md, so both
+  // reading the fragment and asserting its existence are green until the next release and red on
+  // the release's own PR (flow-0098). The entry is what must survive; the file it lives in is not.
   const text = changelogEntry(REPO, "flow-0082");
   assert.ok(text.length > 0, "the entry must survive the release that folds it into CHANGELOG.md");
   assert.match(text, /flow-0082\)/, "the bullet's file list must end `, flow-0082)` — that is how assembly finds it");
