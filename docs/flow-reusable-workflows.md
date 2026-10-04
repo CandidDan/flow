@@ -36,6 +36,7 @@ them. They are:
 | `_flow-triage.yml` | Scheduled issue triage (off unless `FLOW_AI=true`) | secret `CLAUDE_CODE_OAUTH_TOKEN` |
 | `_flow-review.yml` | The three Definition-of-Done review checks on a PR — qa, code-review and a conditional security review (flow-0007). **Skipped entirely while the PR is a draft** (flow-0039) — the `plan` job carries the condition and the other three `needs: plan` — so the reviewers run once, when the worker marks the PR ready, not on every work-in-progress push. Runs for **any** PR author, not just `flow/` branches; model and security-trigger paths come from the caller's `.flow/config.yml` `review:` block, and `.flow/bin/flow-review.mjs` turns each written verdict into an exit code (fail-closed). Off unless `FLOW_AI=true` | input `node_version`; secret `CLAUDE_CODE_OAUTH_TOKEN` |
 | `_flow-queue-runner.yml` | Picks a ready task → dispatches a fresh worker (off unless `FLOW_AI=true`). Its caller ticks **hourly** and a small `schedule-gate` job decides which tick is the day's run, from the three repo variables below (flow-0080) — so the pause switch and the local-time schedule need no file edit and survive a sync. `workflow_dispatch` bypasses the gate entirely | input `task_id`; secrets `CLAUDE_CODE_OAUTH_TOKEN` + `FLOW_PAT` (CAN-58 — so the worker's own push fires `flow-open-pr`; both are forwarded by **both** thin callers since flow-0095); caller grant `actions: read` |
+| `_flow-kickback.yml` | **The bounded auto-fix round** (flow-0082). When the `flow-review` run on a PR concludes `failure`, dispatches ONE auto-fix worker onto that same PR to address the reviewers' **blocking** findings, then re-requests review — so a red check starts the kickback instead of waiting for a human to notice. The worker **commits and does not push**; the workflow checks the round and pushes, which is what lets the test-weakening guard sit between the two. Off unless `FLOW_AI=true` **and** `review.auto_fix_rounds` is set (see below) | input `node_version`; secrets `CLAUDE_CODE_OAUTH_TOKEN` + `FLOW_PAT` (**required**, not optional — see below) |
 | `_flow-sync.yml` | The adopt mechanism (Phase 4): when the repo's `.flow/VERSION` is behind canonical, copies the updated `.flow/bin/*` + thin callers in, bumps the stamp, and opens a **reviewed PR**. Safe to run anytime (only opens a PR; no `FLOW_AI` gate). The ref it adopts from is **read off the caller's own `uses:` pin** when `canonical_ref` is empty — which is every scheduled run (flow-0105) | input `canonical_ref` (overrides the pin; empty ⇒ resolved from the caller, `v2` only if no caller pins one); secret `FLOW_PAT` (optional) |
 
 ### Queue-runner timing — three repo variables, never a caller edit (flow-0080)
@@ -154,6 +155,65 @@ no repository setting grants `GITHUB_TOKEN` the `workflows` permission, because 
 Because `actions/checkout` in a reusable workflow checks out the **caller's** repo, every
 `node .flow/bin/…` and `.flow/config.yml` reference resolves to the *consuming project's* store and
 tooling — exactly what the gate must read.
+
+### The auto-fix round — `review.auto_fix_rounds`, and what it will never do (flow-0082)
+
+`_flow-kickback.yml` is the only workflow in the fleet that lets a model change a PR without a
+human asking it to, so every bound on it is stated here rather than left to the file.
+
+**It is off twice over.** `vars.FLOW_AI` must be `true`, *and* the consuming repo's
+`.flow/config.yml` must set `review.auto_fix_rounds` to a round count. The template ships the key
+**commented out**, so adopting the caller turns nothing on.
+
+| `review.auto_fix_rounds` | Effect |
+|---|---|
+| absent, or `0` | **Off.** A failed review check does exactly what it did before: nothing automatic. |
+| `1`–`3` | At most that many auto-fix rounds per PR, then the PR escalates to a human. |
+| above `3` | Clamped to **3**, with a warning on the run naming the value you configured. The hard maximum is not a knob: the fixer and the reviewer are both models, and more rounds between them converge on agreement rather than on correctness. |
+
+**`FLOW_PAT` is required, not optional.** A push made with `GITHUB_TOKEN` triggers no workflows
+(GitHub's recursion guard), so a fix pushed with it would never be re-reviewed — the round would
+look successful and prove nothing. With no `FLOW_PAT` the workflow **skips**, visibly, saying so.
+
+**Rounds are counted on the PR, never on `main`.** Each pushed round carries exactly one commit
+stamped with the git trailer `Flow-Auto-Fix-Round: N/CAP` — stamped by the *workflow*, after the
+guards, so the thing being bounded cannot write its own bound. Rounds used is how many of the
+PR's commits carry one, which a human can read straight off the commit list. That is also why
+this workflow needs **no write access to the default branch at all**: its `permissions:` are
+`contents: read`, `pull-requests: write`, `id-token: write`, and nothing else.
+
+**What it will never do:**
+
+- **Auto-fix a failed `security` check.** Alone or alongside others, security escalates.
+- **Push a round that weakened the tests.** The easiest way for a model to satisfy "criterion X
+  has no proving test" is to loosen an assertion, so the workflow diffs the round and escalates
+  if it deleted or renamed a test file, removed a test declaration or an assertion, or added a
+  `.skip` / `.only`. Adding tests and strengthening assertions is always allowed. The check is a
+  line heuristic and deliberately errs towards escalating; a rewrite that really is stronger
+  costs one tap on the card.
+- **Push a round that disputed the finding, handed back nothing, or claimed a fix and changed
+  nothing.** Each escalates instead.
+- **Merge anything.** Merge stays human, as it always has.
+
+**Every escalation is one decision card, plus the `flow:needs-human` label.** The card is a PR
+comment in the G12 shape — the finding, what was tried or disputed, exactly one recommendation
+("merge as is", or "kick back with: *a named change*"), the alternative it was chosen over, and
+a footer with the rounds used. It is capped at 1,500 characters and links to the reviewer's full
+verdict rather than quoting it, so it is readable from a phone. A recommendation the model
+failed to produce renders a **fallback card** that says so and still carries the finding and the
+link — the failure is visible, never silent. **No path adds the label without first posting a
+card.**
+
+**The label is also that PR's off switch.** The workflow never acts on a PR carrying
+`flow:needs-human`; removing the label re-arms it.
+
+**Why it is safe for this workflow to hold credentials.** A `workflow_run` event always runs the
+workflow **file from the default branch**, never from the PR head — so a PR cannot edit the
+workflow, the fixer's prompt or the guards that are about to judge it. For the same reason the
+test-weakening guard is run from the default branch's copy of `.flow/bin/flow-kickback.mjs`,
+pinned by a SHA resolved *before* the fixer gets the runner (flow-0079's rule: everything that
+decides comes from base). Fork PRs are skipped outright, matching the fork fence in
+`_flow-review.yml`.
 
 ### Which copy of a helper CI runs — and why there are two (flow-0094)
 
@@ -278,7 +338,7 @@ jobs:
   workflows push state to `main`). The reusable workflows declare their own `permissions:`; the
   effective token is the intersection, so the repo setting must allow write.
 - **`id-token: write` for the claude-code-action workflows** (`flow-queue-runner`, `flow-triage`,
-  `flow-review`): the action mints an OIDC token, but `id-token` is *never* in the default
+  `flow-review`, `flow-kickback`): the action mints an OIDC token, but `id-token` is *never* in the default
   `GITHUB_TOKEN` and a reusable workflow can't raise a permission above its caller's grant — so it's
   declared on **both** the reusable file and the thin caller's job. Because a caller `permissions:`
   block is exhaustive (anything unlisted drops to `none`), those callers re-list every permission

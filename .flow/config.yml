@@ -90,6 +90,22 @@ source_roots:
   - path: ".github/workflows/"
     check: "npm run build"
 
+# The review gate's auto-fix round (flow-0082). A failed qa or code-review check dispatches ONE
+# bounded auto-fix worker onto the same PR, which commits; the workflow checks the round and
+# pushes, and the three reviewers run again from scratch. Merge stays human.
+#
+# Everything else under `review:` is DATA the reusable reads rather than names — canonical has
+# never set `model` or `security_paths`, which means the default model and a security review on
+# EVERY PR, and that is the correct posture for the repo whose product is other repos' CI.
+review:
+  # Two rounds, then a human. MEASURED against the case this exists for: PRs #108 and #109 each
+  # sat red on ONE precise, mechanical code-review finding that a single round would have closed.
+  # Two leaves room for a second finding the first round's fix uncovers, and stops there. The
+  # hard maximum is 3 and raising it is a conversation, not a config edit: the fixer and the
+  # reviewer are both models, and more rounds between them converge on agreement rather than on
+  # correctness. Set it to 0, or delete the key, to switch auto-fix off entirely.
+  auto_fix_rounds: 2
+
 security:
   secrets_scan: true
   dependency_audit: true

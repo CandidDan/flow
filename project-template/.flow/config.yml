@@ -165,6 +165,28 @@ review:
   # the limit on its own diff.
   # max_diff_bytes: 900000
 
+  # OPTIONAL — the auto-fix round (flow-0082). COMMENTED OUT, and that is the default: with no
+  # `auto_fix_rounds`, a failed review check does nothing automatic, exactly as before.
+  #
+  # Set it and a failed `qa` or `code-review` check dispatches ONE bounded auto-fix worker onto
+  # the same PR (`flow-kickback.yml`). The worker reads the reviewers' blocking findings, fixes
+  # them on the PR's own branch and COMMITS; the workflow checks the round and pushes, and the
+  # three reviewers then run again from scratch. Merge stays human, always.
+  #
+  # The number is a MAXIMUM of rounds per PR, and the HARD MAXIMUM IS 3 — a larger value is
+  # clamped to 3 with a warning on the run naming what you configured. The cap is the point: the
+  # fixer and the reviewer are both models, and more rounds between them converge on agreement,
+  # not necessarily on correctness. 2 is a sensible opt-in.
+  #
+  # IT NEEDS FLOW_PAT. A push made with GITHUB_TOKEN triggers no workflows, so a fix pushed with
+  # it would never be re-reviewed; without the secret the workflow skips and says so.
+  #
+  # WHAT IT WILL NEVER DO: auto-fix a failed SECURITY check, push a round that deleted a test or
+  # removed an assertion, or merge anything. Each of those posts one decision card on the PR and
+  # adds the `flow:needs-human` label — which is also that PR's off switch, since the workflow
+  # never acts on a labelled PR and removing the label re-arms it.
+  # auto_fix_rounds: 2
+
   # The security review is CONDITIONAL: it runs when the diff touches one of these globs, and
   # is skipped — visibly, with the reason on the run — when it does not. It earns its keep on
   # auth, external input, data access and dependency diffs, and has little to chew on in a copy
