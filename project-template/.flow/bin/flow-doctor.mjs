@@ -102,6 +102,7 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { STATUSES } from "./apply-board-edits.mjs";
+import { parseAsks } from "./asks.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -282,19 +283,61 @@ function rootCovers(declaredPath, topDir) {
 // (A naive same-line scan misses the multi-line form — it would read those tasks as having
 // empty touches, silencing both the empty-touches warning and overlap detection below.)
 // Exported for pick-task.mjs (flow-0111): one list parser for the whole store, not three.
+// A YAML scalar as written on one line: strip a trailing `# comment` ONLY outside quotes (YAML
+// needs whitespace before the `#`), then drop the surrounding quotes. Splitting on the first `#`
+// truncated any quoted value carrying a PR or issue reference ("see PR #127") — flow-0119's review.
+export function stripYamlComment(s) {
+  let q = null;
+  // A quote opens a quoted scalar only where a scalar can START: at the beginning of the value
+  // or of an inline-list item (after `[` or `,`), with only whitespace between. An apostrophe in
+  // the middle of a plain value ("it's simpler") is just a character, as it is in YAML.
+  let atScalarStart = true;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) {
+      if (c === "\\" && q === '"') { i++; continue; }
+      if (c === q) {
+        if (q === "'" && s[i + 1] === "'") { i++; continue; } // '' is an escaped quote
+        q = null;
+      }
+      continue;
+    }
+    if ((c === '"' || c === "'") && atScalarStart) { q = c; atScalarStart = false; continue; }
+    if (c === "#" && (i === 0 || /\s/.test(s[i - 1]))) return s.slice(0, i);
+    if (c === "[" || c === ",") { atScalarStart = true; continue; }
+    if (!/\s/.test(c)) atScalarStart = false;
+  }
+  return s;
+}
+
+export function yamlScalar(raw) {
+  const v = stripYamlComment(raw).trim();
+  const dq = v.match(/^"((?:[^"\\]|\\.)*)"$/);
+  if (dq) return dq[1].replace(/\\(["\\])/g, "$1");
+  const sq = v.match(/^'((?:[^']|'')*)'$/);
+  if (sq) return sq[1].replace(/''/g, "'");
+  return v;
+}
+
+const QUOTED_ITEM = /"((?:[^"\\]|\\.)*)"|'((?:[^']|'')*)'/g;
+
 export function parseListField(head, key) {
   const lines = head.split("\n");
   const i = lines.findIndex((l) => new RegExp(`^\\s*${key}:`).test(l));
   if (i === -1) return [];
-  const inline = lines[i].replace(new RegExp(`^\\s*${key}:\\s*`), "").split("#")[0].trim();
-  if (inline.startsWith("[")) return [...inline.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]);
+  const inline = stripYamlComment(lines[i].replace(new RegExp(`^\\s*${key}:\\s*`), "")).trim();
+  if (inline.startsWith("[")) {
+    return [...inline.matchAll(QUOTED_ITEM)]
+      .map((m) => (m[1] !== undefined ? m[1].replace(/\\(["\\])/g, "$1") : m[2].replace(/''/g, "'")))
+      .filter(Boolean);
+  }
   const out = [];
   for (let j = i + 1; j < lines.length; j++) {
     const t = lines[j].trim();
     if (t === "" || t.startsWith("#")) continue;
     const m = t.match(/^-\s*(.+)$/);
     if (!m) break; // dedent to the next key → list done
-    out.push(m[1].split("#")[0].trim().replace(/^["'](.*)["']$/, "$1"));
+    out.push(yamlScalar(m[1]));
   }
   return out.filter(Boolean);
 }
@@ -356,6 +399,22 @@ export function blockedByFindings(task) {
         "each entry must be a task id (PROJ-0007) or a PR url (https://…)");
 
   return { problems, warnings };
+}
+
+// ── asks (flow-0119) ──
+// `notes` is the handoff to the next SESSION; `asks` is the queue for the HUMAN. The split only
+// means anything if the shape is enforced, because the consumers (the PR comment, inflight) route
+// on the kind and would silently drop an entry they could not read — reproducing the bug `asks`
+// was written to fix, one layer further down where nobody is looking for it.
+//
+// Every finding here is a PROBLEM, not a warning, and that is a deliberate departure from
+// `blocked_by`'s graceful-adoption posture above. `blocked_by` could trip on history: every
+// blocked task in every already-adopted repo predates the field. `asks` cannot — a task with no
+// `asks:` key parses as an empty list and raises nothing, so the only way to be malformed here is
+// to have been written after this change. There is no history to punish.
+export function asksFindings(task) {
+  const { errors } = parseAsks(task.asksList ?? []);
+  return { problems: errors.map((e) => `${task.id}: ${e}`), warnings: [] };
 }
 
 // ── readiness bar (flow-0010) ──
@@ -810,7 +869,7 @@ function splitFrontmatter(text) {
 function scalarReader(head) {
   return (k) => {
     const m = head.match(new RegExp(`^${k}:\\s*(.*)$`, "m"));
-    return m ? m[1].split("#")[0].trim().replace(/^"(.*)"$/, "$1") : undefined;
+    return m ? yamlScalar(m[1]) : undefined;
   };
 }
 
@@ -824,7 +883,8 @@ function parseTask(text) {
            blocked_reason: get("blocked_reason"), touches: get("touches"),
            touchesList: parseListField(head, "touches"),
            blockedByList: parseListField(head, "blocked_by"),
-           servesList: parseListField(head, "serves"), body };
+           servesList: parseListField(head, "serves"),
+           asksList: parseListField(head, "asks"), body };
 }
 
 export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
@@ -866,6 +926,11 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
       const b = blockedByFindings(t);
       problems.push(...b.problems);
       warnings.push(...b.warnings);
+    }
+    {
+      const a = asksFindings(t);
+      problems.push(...a.problems);
+      warnings.push(...a.warnings);
     }
     if (t.status === "in_progress" && (!t.owner || !t.started))
       problems.push(`${t.id}: in_progress but ${!t.owner ? "owner" : "started"} is empty — claim was not completed properly`);

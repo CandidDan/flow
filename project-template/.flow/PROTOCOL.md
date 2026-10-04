@@ -106,7 +106,10 @@ ready  →  in_progress  →  in_review  →  done
   task correctly stays `in_progress`, and `flow-status` records `branch` and `pr` on it anyway. A
   PR that someone opens directly as non-draft still transitions on `opened`, as before.
 - `done` — set automatically by `flow-done` when the PR **merges**. Never by hand.
-- `blocked` — you hit something undecidable. Set `blocked_reason`, stop, surface it. Also fill
+- `blocked` — you hit something undecidable. Set `blocked_reason`, stop, surface it. Put the
+  decision in **`asks`** too, as a `decision` ask carrying its `Recommend:` — `blocked_reason` is
+  prose a human reads only once they are already looking at the task, and `asks` is what brings
+  them there. Also fill
   **`blocked_by`**: the list of things the block is waiting on, each entry a task id in this repo
   (`"PROJ-0007"`) or a PR url. `blocked_reason` is the sentence a person reads; `blocked_by` is the
   same fact in a shape a machine can act on, and it never replaces the sentence. This matters
@@ -259,6 +262,34 @@ doc (see *The store*). Append a `notes` entry on `main` covering:
 
 Commit it to `main` *before* you stop. A session that ends without this has spent its
 whole context for nothing: the next one pays all over again to learn what you already knew.
+
+**`notes` is for the next session. `asks` is for the human.** This is the one split in the task
+file that routes, and getting it wrong is how work goes silently missing. `notes` is read by
+whatever session picks the task up next; the human never opens task frontmatter, so an item only
+a *person* can act on reaches nobody when it is written as a note. Prose cannot be routed —
+nothing can tell "for the next worker" from "for you". So put it in **`asks`**: a list of
+strings, one per open item, each prefixed with its kind. There are exactly three:
+
+```yaml
+asks:
+  - "decision: v2 or v3 in the schema id? Recommend: v3, the id should say the shape"
+  - "follow-up: the retry path needs its own task, it is out of scope here"
+  - "fyi: the fixture store moved, so a stale checkout fails one test"
+```
+
+- **`decision`** — a ruling that is not yours to make. It **must** carry `Recommend: <the option
+  and why>`: a decision reaches the human with the recommendation you are already holding, or it
+  hands back thinking that was already done. `flow-doctor` fails a `decision` without one.
+- **`follow-up`** — a task that should exist and doesn't. You never create it (the orchestrator
+  writes tasks); you name it in one sentence.
+- **`fyi`** — what the reviewer should know before merging.
+
+`flow-doctor` fails a malformed ask — an unknown kind, empty text, a `decision` with no
+`Recommend:` — naming the task and the ask. `flow-state --json` reports every task's asks parsed,
+which is what the human's surfaces read. **Resolving an ask removes it from `asks` and appends a
+`notes` line recording the answer**; an ask left in place after it is answered is an item a
+person is asked twice. A task with no `asks:` key has nothing to ask, which is why every task
+written before this field is already correct.
 
 **Orchestrator sessions are on the same budget.** An orchestrator that plans for hours and
 writes nothing down is the most expensive failure in this system — nothing survives the

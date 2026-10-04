@@ -25,7 +25,7 @@ import {
 const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
 const SCRIPT = join(BIN, "flightdeck-state.mjs");
-const FLOW_STATE_SRC = join(REPO, "project-template", ".flow", "bin", "flow-state.mjs");
+const FLOW_BIN_SRC = join(REPO, "project-template", ".flow", "bin");
 
 const tmp = (n) => mkdtempSync(join(tmpdir(), `flow-fd-${n}-`));
 const git = (cwd, ...args) =>
@@ -37,7 +37,11 @@ function makeProject(root, { id = "demo-0001", status = "ready", withResolver = 
   mkdirSync(join(root, ".flow", "bin"), { recursive: true });
   writeFileSync(join(root, ".flow", "tasks", `${id}.md`),
     `---\nid: "${id}"\ntitle: "A task"\nstatus: "${status}"\npriority: 2\ntouches: ["src/**"]\n---\n\n## Context\n`);
-  if (withResolver) cpSync(FLOW_STATE_SRC, join(root, RESOLVER));
+  // The WHOLE bin directory, not flow-state.mjs alone. The resolver has relative imports
+  // (flow-0119 added `./asks.mjs`), and a real adopting repo always has all of them —
+  // `_flow-sync.yml` rsyncs the directory. A fixture that copied one file would fail with
+  // ERR_MODULE_NOT_FOUND and report it as the aggregator's bug, not the fixture's.
+  if (withResolver) cpSync(FLOW_BIN_SRC, join(root, ".flow", "bin"), { recursive: true });
 
   git(root, "init", "--quiet");
   git(root, "config", "user.email", "t@example.com");

@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync, lstatSync,
 import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runDoctor, parseSourceRootsIgnore, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES } from "./flow-doctor.mjs";
+import { runDoctor, parseSourceRootsIgnore, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, asksFindings, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES } from "./flow-doctor.mjs";
 
 // The vision every fixture gets unless it asks for none: two live goals, one non-goal, one
 // retired goal. Written in the shape flow-doctor's line regex reads, deliberately mixing the
@@ -109,7 +109,7 @@ started: "${f.started ?? ""}"
 branch: "${f.branch ?? ""}"
 pr: "${f.pr ?? ""}"
 blocked_reason: "${f.blocked_reason ?? ""}"
-${f.blocked_by === undefined ? "" : `blocked_by: ${f.blocked_by}\n`}serves: ${f.serves ?? '["G1"]'}
+${f.blocked_by === undefined ? "" : `blocked_by: ${f.blocked_by}\n`}${f.asks === undefined ? "" : `asks:\n${f.asks.map((a) => `  - ${JSON.stringify(a)}`).join("\n")}\n`}serves: ${f.serves ?? '["G1"]'}
 touches: ${f.touches ?? '["src/**"]'}
 ---
 ${f.body ?? READY_BODY}`;
@@ -940,7 +940,10 @@ test("parseVisionGoals: ids, kinds, retirement — by line regex, never a Markdo
 function cliFixture(files, opts) {
   const flowDir = fixture(files, opts);
   mkdirSync(join(flowDir, "bin"), { recursive: true });
-  for (const f of ["flow-doctor.mjs", "apply-board-edits.mjs"])
+  // Every module flow-doctor imports, not just the entry point: a missing one is an
+  // ERR_MODULE_NOT_FOUND on stderr with exit 1, which an exit-code assertion reads as "the
+  // problem was found". Add to this list whenever flow-doctor gains a relative import.
+  for (const f of ["flow-doctor.mjs", "apply-board-edits.mjs", "asks.mjs"])
     copyFileSync(join(import.meta.dirname, f), join(flowDir, "bin", f));
   return flowDir;
 }
@@ -1855,3 +1858,115 @@ test("criterion 6: canonical's .flow/bin/flow-doctor.mjs ADAPTS this scan — it
       assert.ok(!new RegExp(`function\\s+${fn}\\s*\\(`).test(src),
         `${fn} is re-implemented in the adapter — that is the drift this criterion forbids`);
   });
+
+// ── asks (flow-0119) ──
+// `asks` is the queue for the human, and its consumers (the PR comment, inflight) route on the
+// kind. A malformed entry they cannot read would be dropped silently — the exact bug `asks` was
+// written to fix, one layer further down. So flow-doctor fails it on `main`, before any consumer
+// ever sees the store.
+
+test("criterion 3: flow-doctor fails a task whose decision ask carries no Recommend:", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { asks: ["decision: pick one"] }) });
+  const r = runDoctor({ flowDir: d });
+  const hit = r.problems.filter((p) => p.includes("P-0001") && /Recommend/.test(p));
+  assert.equal(hit.length, 1, `expected one problem naming the task and the clause, got ${JSON.stringify(r.problems)}`);
+  assert.match(hit[0], /decision: pick one/, "the problem must quote the ask, not just the task");
+  cleanup(d);
+});
+
+test("criterion 3: flow-doctor fails an unknown ask kind, naming the task and the ask", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { asks: ["todo: x"] }) });
+  const r = runDoctor({ flowDir: d });
+  const hit = r.problems.filter((p) => p.startsWith("P-0001:") && /unknown kind "todo"/.test(p));
+  assert.equal(hit.length, 1, JSON.stringify(r.problems));
+  cleanup(d);
+});
+
+test("criterion 3: flow-doctor fails an ask with empty text", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { asks: ["fyi:"] }) });
+  const r = runDoctor({ flowDir: d });
+  assert.equal(r.problems.filter((p) => p.startsWith("P-0001:") && /empty text/.test(p)).length, 1,
+    JSON.stringify(r.problems));
+  cleanup(d);
+});
+
+test("criterion 3: flow-doctor passes a task carrying one valid ask of each kind", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { asks: [
+    "decision: v2 or v3 in the schema id? Recommend: v3, the id should say the shape",
+    "follow-up: the retry path needs its own task, it is out of scope here",
+    "fyi: the fixture store moved, so a stale checkout fails one test",
+  ] }) });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.warnings, [], "a valid asks list must not even warn");
+  cleanup(d);
+});
+
+test("every malformed ask on a task is reported, not just the first", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { asks: ["todo: x", "fyi:", "decision: pick one"] }) });
+  const r = runDoctor({ flowDir: d });
+  assert.equal(r.problems.filter((p) => p.startsWith("P-0001:")).length, 3, JSON.stringify(r.problems));
+  cleanup(d);
+});
+
+test("criterion 4: a task with no asks field at all is healthy", () => {
+  // Every task in every already-adopted repo. Unlike `blocked_by`, this check CANNOT trip on
+  // history — an absent key parses as an empty list — so the findings above can be problems
+  // rather than warnings without punishing anyone for the past.
+  const d = fixture({ "0001-a.md": task("P-0001") });
+  assert.doesNotMatch(readFileSync(join(dirname(d), ".flow", "tasks", "0001-a.md"), "utf8"), /^asks:/m,
+    "the fixture must genuinely omit the field, or this proves nothing");
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.warnings, []);
+  cleanup(d);
+});
+
+test("asksFindings on a task object: absent, empty and valid all find nothing", () => {
+  for (const asksList of [undefined, [], ["fyi: all good"]])
+    assert.deepEqual(asksFindings({ id: "P-1", asksList }), { problems: [], warnings: [] });
+});
+
+test("asksFindings prefixes every finding with the task id", () => {
+  const { problems, warnings } = asksFindings({ id: "P-1", asksList: ["todo: x"] });
+  assert.equal(warnings.length, 0, "a malformed ask is a problem, never a warning");
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /^P-1: /);
+});
+
+test("the inline asks form parses too, like every other list field in the store", () => {
+  // `parseListField` reads both YAML list shapes; an ask written inline must not read as absent,
+  // because "absent" is the one state that raises nothing at all.
+  const body = task("P-0001").replace(/^serves:/m, 'asks: ["todo: x"]\nserves:');
+  const d = fixture({ "0001-a.md": body });
+  assert.equal(runDoctor({ flowDir: d }).problems.filter((p) => /unknown kind "todo"/.test(p)).length, 1);
+  cleanup(d);
+});
+
+// Code review on #175. flow-doctor must judge the ask the author WROTE, not a version cut at its
+// first `#`: a legal ask quoting an issue number is clean, and a malformed one is quoted back whole.
+test("flow-0119: an ask carrying `#` is read whole by flow-doctor, in block and inline lists", async () => {
+  const { parseListField, yamlScalar } = await import("./flow-doctor.mjs");
+  assert.deepEqual(parseListField(`asks:\n  - "fyi: see PR #127 for context"  # note\n`, "asks"),
+    ["fyi: see PR #127 for context"]);
+  assert.deepEqual(parseListField(`asks: ["fyi: see #127", 'follow-up: it''s #9'] # c\n`, "asks"),
+    ["fyi: see #127", "follow-up: it's #9"]);
+  assert.deepEqual(parseListField(`touches:\n  - src/a.ts # why\n  - "b/**"\n`, "touches"), ["src/a.ts", "b/**"],
+    "an unquoted entry with a trailing comment is still cut at the comment");
+  assert.equal(yamlScalar(`"waits for #172 \\"x\\"" # note`), 'waits for #172 "x"');
+  assert.equal(yamlScalar(`ready # c`), "ready");
+  assert.deepEqual(asksFindings({ id: "CAN-1", asksList: parseListField(`asks:\n  - "decision: #12 or #13? Recommend: #13"\n`, "asks") }).problems, [],
+    "a legal ask with # in it is not a finding");
+});
+
+// Code review on #175, second pass: an apostrophe inside a PLAIN value is not a quote. Treating it
+// as one kept a genuine trailing comment in the data ("it's simpler # ask Dan" leaked into recommend).
+test("flow-0119: an apostrophe in an unquoted value does not open a quote, so a trailing comment is still dropped", async () => {
+  const { parseListField, yamlScalar } = await import("./flow-doctor.mjs");
+  assert.deepEqual(
+    parseListField(`asks:\n  - decision: v2 or v3? Recommend: v3, it's simpler # ask Dan directly\n`, "asks"),
+    ["decision: v2 or v3? Recommend: v3, it's simpler"]);
+  assert.equal(yamlScalar(`don't # note`), "don't");
+  assert.equal(yamlScalar(`'it''s #1' # note`), "it's #1", "a single-quoted scalar still keeps its # and its escaped quote");
+  assert.deepEqual(parseListField(`asks: ["fyi: it's #1", 'follow-up: x'] # c\n`, "asks"), ["fyi: it's #1", "follow-up: x"]);
+});
