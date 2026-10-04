@@ -455,14 +455,53 @@ export const RELEASE_PR_PATHS = Object.freeze([
   ".flow/VERSION",
 ]);
 
+// The canonical-named skill directories `_flow-sync.yml` mirrors (flow-0081). NAMED, one per
+// directory canonical's `project-template/.claude/skills/` ships, and deliberately NOT
+// `.claude/skills/**`: the sync loop iterates CANONICAL's directories, so a skill the adopting
+// repo invented is never written by a sync. `.claude/skills/**` would therefore grant the fixed
+// PASS line to a `flow-sync/` branch that added a repo's own skill — a file canonical does not
+// have, which the three reviewers must read in full like any other change.
+//
+// A LITERAL LIST, and here is why that is not the flow-0058 hazard it looks like. There is
+// nothing in an adopting repo to derive these names from: the repo's own `.claude/skills/` holds
+// its inventions alongside canonical's, which is the distinction being drawn. What keeps the list
+// honest is that it travels ON the surface it describes — this helper is itself synced out of
+// `project-template/.flow/bin/`, so a skill canonical adds and the list that names it arrive in
+// the same sync commit — plus two tests: one pins the list against canonical's directories on
+// disk, the other against `_flow-sync.yml`'s own header (flow-0128).
+//
+// One honest edge, in the fail-closed direction. `_flow-review.yml` plans from the BASE branch's
+// copy of this helper, so the very sync PR that introduces a brand-new canonical skill is planned
+// by a list that predates it and is not classified. The cost is one sync PR reviewed the way
+// every other PR is reviewed; the next sync, carrying the widened list, classifies normally.
+export const CANONICAL_SKILLS = Object.freeze([
+  "board-builder",
+  "flow-compass",
+  "show-me",
+  "task-writer",
+  "vision-writer",
+]);
+
+// A skill directory is mirrored WHOLESALE (`rsync -a --delete`), so the surface is every file
+// under it at any depth — a `references/` subdirectory included — not just `SKILL.md`.
+export const skillSurfaceGlob = (name) => `.claude/skills/${name}/**`;
+
 // The surface `_flow-sync.yml` copies, exactly as that workflow's own header lists it. A sync PR
 // is canonical's tooling arriving in an adopting repo; anything else in the diff means something
 // other than a sync produced it. This case matters more than the release one — it fires in every
 // adopting repo on every sync, not only in canonical.
+//
+// Order follows the header's list, so the two can be read side by side. The skills entry was
+// absent for the whole of v2 (flow-0128): flow-0081 added `.claude/skills/<name>/` to the copied
+// surface and this constant was not widened with it, so every v3 sync that shipped a skill —
+// which is every sync that changes one — failed to classify, and the reviewers then read it as a
+// feature PR: qa failed it for having no task, and a large sync failed again on diff truncation.
+// Found by the v3 canary on progress PR #115.
 export const SYNC_PR_PATHS = Object.freeze([
   ".flow/bin/**",
   ".github/workflows/flow-*.yml",
   ".flow/PROTOCOL.md",
+  ...CANONICAL_SKILLS.map(skillSurfaceGlob),
   ".flow/VERSION",
 ]);
 
@@ -540,8 +579,10 @@ const SHA40 = /^[0-9a-f]{40}$/;
 
 // The whole path mapping, because the sync has exactly one source root: every file in the copied
 // surface comes out of canonical's `project-template/`. `.flow/bin/x.mjs` here is
-// `project-template/.flow/bin/x.mjs` there, and so are the thin callers, the protocol and the
-// stamp.
+// `project-template/.flow/bin/x.mjs` there, and so are the thin callers, the protocol, the
+// canonical-named skill directories and the stamp. The skills need nothing special (flow-0128):
+// `rsync -a` copies them byte for byte, so the ordinary byte-compare below is the right check,
+// and a skill file edited after the sync is caught exactly as an edited helper is.
 export const SYNC_SOURCE_ROOT = "project-template/";
 export const canonicalPathFor = (path) => `${SYNC_SOURCE_ROOT}${path}`;
 
