@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0082"
 title: "A failed qa or code-review check dispatches a bounded auto-fix worker onto the same PR"
-status: "blocked"
+status: "in_progress"
 priority: 2
 project: "flow"
 owner: "claude-worker"
@@ -11,7 +11,7 @@ started: "2026-10-04T15:03:37Z"
 branch: "flow/flow-0082-kickback-auto-fix"
 pr: "https://github.com/CandidDan/flow/pull/179"
 issue: ""
-blocked_reason: "Implementation is complete and pushed on flow/flow-0082-kickback-auto-fix; build, lint and coverage (97.06% vs the 83.5 floor) are green and all 83 of this task's own new tests pass. But `npm test` is red on FOUR assertions in two files that hardcode a count of the fleet's workflows, and both files are OUTSIDE this task's declared `touches`. Adding a template caller is a deliverable this task names explicitly, so the counts cannot stay right and the task be done. Widening `touches` is the orchestrator's call, not mine, and one of the two files is touches-guard-enforced, so editing it would fail the PR rather than fix it. NOT MACHINE-CHECKABLE: this waits on a human/orchestrator edit to this task file, not on another task or PR. THE FIX IS TWO LINES OF BOOKKEEPING: add `.flow/bin/caller-pins.test.mjs` and `docs/adr/0005-split-authoring-from-release.md` to `touches`, then (a) caller-pins.test.mjs ~line 181: `assert.equal(pins.length, 10)` -> 11, and retitle \"all ten callers\" -> eleven; (b) ADR-0005 lines 292/298/299/307: 48 -> 51 files, 19 -> 21 resolved `uses:`, 10 -> 11 template callers, \"all 10 callers fail to resolve\" -> 11. release-assemble.test.mjs then goes green on its own — it only re-runs the other two."
+blocked_reason: ""
 blocked_by: []
 serves: ["G12", "G10"]    # G12: every escalation is one decision card. G10: a fix may not pass review by weakening the tests.
 touches:
@@ -26,8 +26,11 @@ touches:
   - ".flow/config.yml"
   - "docs/flow-reusable-workflows.md"
   - "changes/flow-0082.md"
+  - ".flow/bin/caller-pins.test.mjs"
+  - "docs/adr/0005-split-authoring-from-release.md"
 labels: [flow-infra, review, automation]
 notes:
+  - "2026-10-04 orchestrator: agreed. A new template caller necessarily moves the fleet's caller counts. Added .flow/bin/caller-pins.test.mjs and docs/adr/0005-split-authoring-from-release.md to touches, and set the task back to in_progress. Make exactly the count edits you listed: 10→11 callers and the retitle; ADR-0005 48→51 files, 19→21 resolved uses:, 10→11 callers. Then run the gate and mark #179 ready."
   - "2026-10-04 (worker): BLOCKED at the gate, not at the work. GENUINELY DONE and pushed on flow/flow-0082-kickback-auto-fix: project-template/.flow/bin/flow-kickback.mjs (decide, countRounds, weakensTests, decisionCard, parseOutcome, the CLI) + 54 unit tests; canonical's .flow/bin/flow-kickback.mjs adapter; .github/workflows/_flow-kickback.yml with the plan/fix/escalate jobs, the four ordered guards, the workflow-side round stamp and both escalation paths; both thin callers (@main and @v3); .flow/bin/flow-kickback-workflow.test.mjs + 29 structure tests; auto_fix_rounds: 2 in canonical config and commented out in the template's; the docs section; changes/flow-0082.md. Every acceptance criterion has a proving test and all 83 pass. ONLY LOOKS DONE: nothing — the gate is red solely on the four out-of-scope count assertions in blocked_reason. NEXT ACTION: widen touches by the two files named in blocked_reason, set the task back to in_progress, update the four counts on the existing branch, re-run `npm test` (expect 1876 pass / 0 fail), then open the PR. Do NOT re-implement anything. DECISION NOT TO RE-LITIGATE: concurrency lives on the CALLERS, not the reusable — a called workflow sharing its caller's group name would wait for the caller and deadlock; flow-kickback-workflow.test.mjs pins that both ways."
   - "2026-10-04 (worker): branch flow/flow-0082-kickback-auto-fix pushed. DONE: project-template/.flow/bin/flow-kickback.mjs (decide, countRounds, weakensTests, decisionCard, parseOutcome, CLI), its 54-test proving suite, and canonical's .flow/bin/flow-kickback.mjs adapter. NOT YET DONE: _flow-kickback.yml + the two callers, the workflow-structure tests, both config.yml edits, docs and changes/flow-0082.md. NEXT: write .github/workflows/_flow-kickback.yml."
   - "2026-10-02 (orchestrator): unblocked on the human's say-so. Every blocked_by entry had landed (checked against main), and inflight listed it as UNBLOCK."
