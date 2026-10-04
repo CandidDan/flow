@@ -43,9 +43,9 @@ Two designs. **Dan chose A on 2026-10-04.**
 - When a sync would change a skill that has no `LOCAL.md` and is not byte-identical to the template, list that skill in the sync PR body as "local edits will be replaced; move them to LOCAL.md". That covers the repos that already diverged.
 - Repinning doc: one paragraph.
 
-## Acceptance
+## Acceptance criteria
 
-1. A sync into a repo with `.claude/skills/task-writer/LOCAL.md` leaves that file byte-identical.
-2. A sync into a repo whose `SKILL.md` diverges from the template names that skill in the PR body.
-3. Every canonical skill carries the `LOCAL.md` line, and a test proves it.
-4. `changes/flow-0129.md` exists. Caller action: none, though a repo with edited skills should move them to `LOCAL.md` before its next sync.
+- [ ] A sync into a repo with `.claude/skills/task-writer/LOCAL.md` leaves that file byte-identical.
+- [ ] A sync into a repo whose `SKILL.md` diverges from the template names that skill in the PR body.
+- [ ] Every canonical skill carries the `LOCAL.md` line, and a test proves it.
+- [ ] `changes/flow-0129.md` exists. Caller action: none, though a repo with edited skills should move them to `LOCAL.md` before its next sync.
