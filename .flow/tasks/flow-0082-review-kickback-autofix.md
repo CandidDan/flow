@@ -7,7 +7,7 @@ priority: 2
 project: "flow"
 owner: "claude-worker"
 created: "2026-09-25"
-started: "2026-10-04T19:03:07Z"
+started: "2026-10-04T20:34:57Z"
 branch: "flow/flow-0082-kickback-auto-fix"
 pr: "https://github.com/CandidDan/flow/pull/179"
 issue: ""
