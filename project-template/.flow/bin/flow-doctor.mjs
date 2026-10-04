@@ -288,16 +288,24 @@ function rootCovers(declaredPath, topDir) {
 // truncated any quoted value carrying a PR or issue reference ("see PR #127") — flow-0119's review.
 export function stripYamlComment(s) {
   let q = null;
+  // A quote opens a quoted scalar only where a scalar can START: at the beginning of the value
+  // or of an inline-list item (after `[` or `,`), with only whitespace between. An apostrophe in
+  // the middle of a plain value ("it's simpler") is just a character, as it is in YAML.
+  let atScalarStart = true;
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (q) {
       if (c === "\\" && q === '"') { i++; continue; }
-      if (c === q) q = null;
-    } else if (c === '"' || c === "'") {
-      q = c;
-    } else if (c === "#" && (i === 0 || /\s/.test(s[i - 1]))) {
-      return s.slice(0, i);
+      if (c === q) {
+        if (q === "'" && s[i + 1] === "'") { i++; continue; } // '' is an escaped quote
+        q = null;
+      }
+      continue;
     }
+    if ((c === '"' || c === "'") && atScalarStart) { q = c; atScalarStart = false; continue; }
+    if (c === "#" && (i === 0 || /\s/.test(s[i - 1]))) return s.slice(0, i);
+    if (c === "[" || c === ",") { atScalarStart = true; continue; }
+    if (!/\s/.test(c)) atScalarStart = false;
   }
   return s;
 }

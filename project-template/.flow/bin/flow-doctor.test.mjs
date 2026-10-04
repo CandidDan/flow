@@ -1958,3 +1958,15 @@ test("flow-0119: an ask carrying `#` is read whole by flow-doctor, in block and 
   assert.deepEqual(asksFindings({ id: "CAN-1", asksList: parseListField(`asks:\n  - "decision: #12 or #13? Recommend: #13"\n`, "asks") }).problems, [],
     "a legal ask with # in it is not a finding");
 });
+
+// Code review on #175, second pass: an apostrophe inside a PLAIN value is not a quote. Treating it
+// as one kept a genuine trailing comment in the data ("it's simpler # ask Dan" leaked into recommend).
+test("flow-0119: an apostrophe in an unquoted value does not open a quote, so a trailing comment is still dropped", async () => {
+  const { parseListField, yamlScalar } = await import("./flow-doctor.mjs");
+  assert.deepEqual(
+    parseListField(`asks:\n  - decision: v2 or v3? Recommend: v3, it's simpler # ask Dan directly\n`, "asks"),
+    ["decision: v2 or v3? Recommend: v3, it's simpler"]);
+  assert.equal(yamlScalar(`don't # note`), "don't");
+  assert.equal(yamlScalar(`'it''s #1' # note`), "it's #1", "a single-quoted scalar still keeps its # and its escaped quote");
+  assert.deepEqual(parseListField(`asks: ["fyi: it's #1", 'follow-up: x'] # c\n`, "asks"), ["fyi: it's #1", "follow-up: x"]);
+});
