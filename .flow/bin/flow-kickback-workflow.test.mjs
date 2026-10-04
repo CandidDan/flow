@@ -125,6 +125,16 @@ test("the fixer step disallows `git push` and `gh pr ready`", { skip }, () => {
     assert.ok(args.includes(`Bash(${route}:*)`),
       `\`${route}\` is an unlisted route past "no push" and "no re-ready"`);
   }
+  // Defence in depth for the HIGH finding below. With the `fix` job's read-only token these
+  // would all fail anyway, so none of them is the boundary — they are here so that the day
+  // someone widens that job's permissions, the deny-list is already standing. `gh pr edit` is
+  // the one that matters most: it is how a session would REMOVE `flow:needs-human` and re-arm
+  // a PR a human had deliberately stopped.
+  for (const act of ["gh pr merge", "gh pr edit", "gh pr comment", "gh pr close", "gh pr review",
+                     "gh label", "gh issue"]) {
+    assert.ok(args.includes(`Bash(${act}:*)`),
+      `\`${act}\` changes the PR's own state, and a session a PR comment can address must not reach for it`);
+  }
 });
 
 // The CRITICAL finding on PR #179, pinned so it cannot come back. The fixer is a model running
@@ -275,25 +285,122 @@ test("there is exactly one push in the file, and it targets the PR's branch, nev
 // Permissions
 // ═════════════════════════════════════════════════════════════════════════════════════════
 
-test("the reusable's permissions name only what its steps use, and never grant workflows:", { skip }, () => {
-  const perms = parse(REUSABLE).permissions;
-  assert.deepEqual(perms,
-    { contents: "read", "pull-requests": "write", issues: "write", "id-token": "write" },
-    "contents: read is the checkout; pull-requests: write is the draft toggle and the card; issues: write is the label, because GitHub's label endpoints live under issues; id-token: write is OIDC for claude-code-action. Nothing else is used, so nothing else is granted.");
-  for (const scope of ["workflows", "actions", "packages", "deployments", "security-events"]) {
-    assert.ok(!(scope in perms), `${scope}: is granted but no step uses it`);
+// The HIGH finding on PR #179's second review, pinned so it cannot come back. The fixer and
+// the card writer are models told to read PR comments as input, so on a non-fork PR anyone who
+// can comment can address them. This file used to declare ONE workflow-level block holding
+// `pull-requests: write` and `issues: write`, and every job inherited it — which put both
+// scopes in the GITHUB_TOKEN those sessions were handed. An injected comment could then have
+// run `gh pr review --approve`, `gh pr close`, or `gh pr edit --remove-label flow:needs-human`
+// to re-arm a PR a human had deliberately stopped. The fix is structural, not a prompt rule:
+// the write scopes moved onto jobs that run no model, and the model jobs hold reads only.
+//
+// MODEL_JOBS and WRITER_JOBS are asserted to be disjoint and to cover every job that is one or
+// the other, so adding a model call to a job holding writes fails here rather than in the wild.
+const MODEL_JOBS = ["fix", "card"];
+const WRITER_JOBS = ["undraft", "escalate-round", "escalate"];
+const WRITE_SCOPES = ["write", "admin"];
+const writes = (perms) =>
+  Object.entries(perms ?? {}).filter(([, v]) => WRITE_SCOPES.includes(v)).map(([k]) => k);
+const runsAModel = (job) =>
+  (job.steps ?? []).some((st) => /claude-code-action/.test(st.uses ?? ""));
+
+test("no job that runs a model holds a write scope — not one, not even issues:", { skip }, () => {
+  const wf = parse(REUSABLE);
+  const found = Object.entries(wf.jobs).filter(([, j]) => runsAModel(j)).map(([n]) => n);
+  assert.deepEqual(found.sort(), [...MODEL_JOBS].sort(),
+    "an empty or unexpected scan is a failure, not a pass — this test exists to find the model jobs and check their tokens");
+  for (const name of found) {
+    const perms = wf.jobs[name].permissions;
+    assert.ok(perms, `${name} must declare its own permissions; inheriting the workflow default is how this finding happened`);
+    assert.deepEqual(writes(perms), ["id-token"],
+      `${name} runs a model over PR comments and holds a write scope. id-token: write is OIDC minting and reaches nothing in this repo; any other write — pull-requests, issues, contents — is one injected comment away from \`gh pr review --approve\`, \`gh pr close\` or removing the flow:needs-human label.`);
+    assert.equal(perms["pull-requests"], "read",
+      `${name}'s prompt tells it to read the reviewers' verdicts, so it needs pull-requests: READ and must never have write`);
   }
-  assert.notEqual(perms.contents, "write",
-    "contents: write would be write access to the DEFAULT branch. The round count lives on the PR so that this grant is never needed.");
 });
 
-test("both callers grant exactly the reusable's permissions — a reusable cannot raise them", { skip }, () => {
-  const wanted = parse(REUSABLE).permissions;
+test("the jobs that hold the write scopes run no model at all", { skip }, () => {
+  const wf = parse(REUSABLE);
+  const found = Object.entries(wf.jobs)
+    .filter(([, j]) => writes(j.permissions).some((sc) => sc !== "id-token")).map(([n]) => n);
+  assert.deepEqual(found.sort(), [...WRITER_JOBS].sort(),
+    "an empty or unexpected scan is a failure, not a pass");
+  for (const name of found) {
+    assert.ok(!runsAModel(wf.jobs[name]),
+      `${name} holds a write scope, so it may not run a model — the undraft, the card and the label are fixed shell over values that arrive through env: or a file`);
+  }
+  // And the split is total: no job is in neither list but holds a write, and none is in both.
+  assert.deepEqual(MODEL_JOBS.filter((j) => WRITER_JOBS.includes(j)), []);
+});
+
+test("the model's hand-back crosses the job boundary as base64, never as raw text", { skip }, () => {
+  const wf = parse(REUSABLE);
+  // Splitting the model off from the poster means outcome.json has to travel between runners.
+  // Every field in it is model-written, so it travels in an alphabet that cannot carry a quote,
+  // a newline, a backtick or a `$` — the same reason `facts` base64s commit messages.
+  for (const [producer, out] of [["fix", "handback"], ["card", "handback"]]) {
+    assert.ok(wf.jobs[producer].outputs?.[out],
+      `${producer} must expose the hand-back as a job output; there is no shared filesystem between jobs`);
+  }
+  const encoders = MODEL_JOBS.flatMap((j) => steps(wf, j))
+    .filter((st) => typeof st.run === "string" && /base64/.test(st.run));
+  assert.equal(encoders.length, 2, "one encoder per model job");
+  for (const st of encoders) {
+    assert.match(st.run, /base64 -w0/, "the hand-back is encoded, not echoed");
+    assert.match(st.run, /head -c \d+/, "a job output is bounded; an unbounded one fails the run instead of falling back");
+    assert.match(st.if ?? "", /always\(\)/, "a round that failed its guard is exactly when the hand-back is needed");
+  }
+  const decoders = WRITER_JOBS.flatMap((j) => steps(wf, j))
+    .filter((st) => typeof st.run === "string" && /base64 -d/.test(st.run));
+  assert.equal(decoders.length, 2, "one decoder per card-posting job");
+  for (const st of decoders) {
+    assert.match(st.run, /base64 -d > "\$handback"/,
+      "decoded into a FILE, which is what the card renderer reads — never into a shell word");
+    assert.match(st.run, /flow-kickback\.mjs card "\$handback"/,
+      "and the file the renderer reads is the one that was just decoded");
+  }
+});
+
+test("every job declares its own permissions, and the file's default is read-only", { skip }, () => {
+  const wf = parse(REUSABLE);
+  assert.deepEqual(wf.permissions, { contents: "read" },
+    "the top-level block is the FLOOR, not the budget: a job added later is read-only until someone writes a block saying otherwise. A workflow-level write is a write every job gets, which is the shape of the finding this file was kicked back for.");
+  for (const [name, job] of Object.entries(wf.jobs)) {
+    assert.ok(job.permissions, `${name} inherits the workflow default instead of saying what it needs`);
+    for (const scope of ["workflows", "packages", "deployments", "security-events"]) {
+      assert.ok(!(scope in job.permissions), `${name} grants ${scope}: but no step uses it`);
+    }
+    assert.notEqual(job.permissions.contents, "write",
+      `${name}: contents: write is write access to the DEFAULT branch. The round count lives on the PR so that this grant is never needed anywhere in this file.`);
+    assert.notEqual(job.permissions.actions, "write",
+      `${name}: nothing here re-runs or cancels a workflow`);
+  }
+  // `actions: read` is one job's, for one API call, and no other job can reach the Actions API.
+  const withActions = Object.entries(wf.jobs).filter(([, j]) => j.permissions.actions).map(([n]) => n);
+  assert.deepEqual(withActions, ["plan"],
+    "the jobs API (`.../actions/runs/<id>/jobs`) is how `plan` learns WHICH review job failed, and it is the only step in the file that needs the Actions API at all");
+  assert.match(steps(wf, "plan").find((st) => st.id === "failed").run, /actions\/runs\/\$RUN_ID\/jobs/,
+    "the grant has to be justified by a call that actually exists, or it is an over-grant with a comment");
+});
+
+test("both callers grant exactly the UNION of the reusable's job permissions", { skip }, () => {
+  const wf = parse(REUSABLE);
+  // A reusable can never raise a scope above its caller's, so the caller grants the union —
+  // and the reusable then hands each job only its own share. The union is what the test
+  // computes rather than what it hardcodes, so a job that quietly needs more fails here.
+  const rank = { read: 1, write: 2, admin: 3 };
+  const union = {};
+  for (const job of Object.values(wf.jobs)) {
+    for (const [scope, level] of Object.entries(job.permissions ?? {})) {
+      if (!union[scope] || rank[level] > rank[union[scope]]) union[scope] = level;
+    }
+  }
   for (const file of [CANON_CALLER, TEMPLATE_CALLER]) {
     const jobs = Object.values(parse(file).jobs);
     assert.equal(jobs.length, 1, `${file} must be a thin caller: exactly one job`);
-    assert.deepEqual(jobs[0].permissions, wanted,
-      `${file}: id-token is never in the default GITHUB_TOKEN and a reusable cannot raise a grant above its caller's`);
+    assert.deepEqual(jobs[0].permissions, union,
+      `${file}: a caller that grants less silently 403s the job that needed it, and one that grants more hands the extra to every job in the reusable. id-token is never in the default GITHUB_TOKEN, so it has to be here.`);
+    assert.ok(!("workflows" in jobs[0].permissions), `${file}: workflows: is not a grantable GITHUB_TOKEN permission and would never take effect`);
   }
 });
 
@@ -388,23 +495,43 @@ test("no card step guards its render with a dead `||` — the card command canno
 });
 
 test("a round that died part-way still escalates — the if: always() backstop", { skip }, () => {
-  const escalate = steps(parse(REUSABLE), "fix").find((s) => s.id === "escalate");
-  assert.ok(escalate, "the fix job must carry its own escalation step");
-  assert.match(escalate.if, /always\(\)/,
+  const wf = parse(REUSABLE);
+  // The backstop is now a JOB, because posting the card needs `pull-requests: write` and the
+  // job that ran the model must not have it. `always()` on the job is what makes it fire for
+  // every exit, including the ones nobody predicted: a failed guard, a crashed action, a
+  // cancelled job, and — new with the split — an `undraft` that never succeeded, which skips
+  // `fix` entirely and leaves `needs.fix.outputs.pushed` empty.
+  const job = wf.jobs["escalate-round"];
+  assert.ok(job, "the dead-round backstop must be a job of its own");
+  assert.match(job.if, /always\(\)/,
     "a crashed or cancelled round must not leave a draft PR that nothing is watching");
-  assert.match(escalate.if, /stamp-and-push\.outputs\.pushed != 'true'/,
+  assert.match(job.if, /needs\.fix\.outputs\.pushed != 'true'/,
     "a round that pushed is not an escalation — the reviewers get it next");
-  // Each guard's own sentence is what the card leads with, so the human is told WHICH check fired.
+  assert.match(job.if, /needs\.plan\.outputs\.action == 'dispatch'/,
+    "and a run that never dispatched a round has nothing to escalate here");
+  assert.deepEqual(job.needs, ["plan", "fix"],
+    "it needs `fix` for the verdict and `plan` for the PR — and `needs` plus `always()` is what makes it run when `fix` was skipped");
+  // Each guard's own sentence is what the card leads with, so the human is told WHICH check
+  // fired. The sentences now cross a job boundary: guard -> the `verdict` step's output ->
+  // the job output -> this job's env. Every link is asserted, because a broken one is silent.
+  const verdict = steps(wf, "fix").find((st) => st.id === "verdict");
+  assert.ok(verdict, "the fix job must carry the sentence out as a job output");
   for (const id of GUARD_ORDER) {
-    const step = steps(parse(REUSABLE), "fix").find((s) => s.id === id);
+    const step = steps(wf, "fix").find((st) => st.id === id);
     assert.match(step.run, /amend=/, `\`${id}\` must write the sentence its own failure puts on the card`);
-    assert.ok(Object.values(escalate.env).some((v) => String(v).includes(`${id}.outputs.amend`)),
-      `\`${id}\`'s sentence must actually reach the card`);
+    assert.ok(Object.values(verdict.env).some((v) => String(v).includes(`${id}.outputs.amend`)),
+      `\`${id}\`'s sentence must reach the step that carries it out of the job`);
   }
+  assert.match(wf.jobs.fix.outputs.amend, /steps\.verdict\.outputs\.amend/);
+  const post = (job.steps ?? []).find((st) => typeof st.run === "string" && st.run.includes("--add-label"));
+  assert.ok(Object.values(post.env).some((v) => String(v).includes("needs.fix.outputs.amend")),
+    "and the job output must actually reach the card");
+  assert.match(post.run, /\$\{ROUND_AMEND:-[^}]+\}/,
+    "a `fix` that never reached its verdict step hands this job an empty sentence, and a card whose lead line is blank tells the human nothing — the shell default is the honest account of that case");
 });
 
-test("the escalate job never checks out the PR's code and its model call cannot write to the PR", { skip }, () => {
-  const job = parse(REUSABLE).jobs.escalate;
+test("the card writer never checks out the PR's code and its model call cannot write to the PR", { skip }, () => {
+  const job = parse(REUSABLE).jobs.card;
   const checkout = (job.steps ?? []).find((s) => /actions\/checkout@/.test(s.uses ?? ""));
   assert.match(checkout.with.ref, /default_branch/,
     "a security escalation must not run anything out of the PR it is escalating");
@@ -414,11 +541,18 @@ test("the escalate job never checks out the PR's code and its model call cannot 
       `the card writer must not be able to run \`${forbidden}\` — it writes a card, it does not act`);
   }
   assert.match(model.with.prompt, /DO NOT fix anything/);
+  // And the job it hands the card to is the one that posts it, so the deny-list above is not
+  // the only thing standing between a model and a PR comment: the token is (see the
+  // write-scope tests). `escalate` carries the write scopes and runs no model.
+  assert.deepEqual(parse(REUSABLE).jobs.escalate.needs, ["plan", "card"]);
 });
 
 test("the security escalation never routes through the fix job", { skip }, () => {
   const wf = parse(REUSABLE);
   assert.match(wf.jobs.fix.if, /action == 'dispatch'/);
+  assert.match(wf.jobs.undraft.if, /action == 'dispatch'/,
+    "the draft toggle is the round's first act, so it is fenced by the same decision");
+  assert.match(wf.jobs.card.if, /action == 'escalate'/);
   assert.match(wf.jobs.escalate.if, /action == 'escalate'/);
   assert.ok(!/security/.test(wf.jobs.fix.if ?? ""),
     "the security fence is in `decide`, where it is unit-tested, and must not be duplicated as a second YAML condition that can disagree with it");
