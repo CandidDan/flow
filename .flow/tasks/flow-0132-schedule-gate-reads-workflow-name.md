@@ -1,7 +1,7 @@
 ---
 id: "flow-0132"
 title: "The schedule gate names its caller workflow from a workflow_ref whose ref holds slashes, so a scheduled tick can list its own runs"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "orchestrator-cowork-2026-10-05"
