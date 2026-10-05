@@ -14,6 +14,7 @@ import {
   EVENT_FAILURE_STREAK,
   eventLiveness,
   isCompletedRun,
+  MIN_CRIT_HOURS,
   PR_STREAK_DISTINCT_BRANCHES,
   extractCronExpressions,
   parseCronExpr,
@@ -180,15 +181,21 @@ test("flow-0057 criterion 4: a genuinely dead clustered workflow still goes crit
   assert.match(r.reason, /^last success 210\.0h ago, cron interval ~3\.4h,/);
 });
 
-test("flow-0057 criterion 5: evenly spaced crons classify IDENTICALLY to the old 2x-average rule", () => {
+test("flow-0057 criterion 5: evenly spaced crons classify IDENTICALLY to the old 2x-average rule, above flow-0066's floor", () => {
   // For an evenly spaced cron the longest gap IS the average, so maxGap + interval === interval * 2
   // to the digit. This is what confines the change to the clustered case.
   for (const cron of ["*/5 * * * *", "0 8 * * *", "0 */6 * * *", "0 */4 * * *"]) {
     assert.equal(cronMaxGapHours(cron), cronIntervalHours(cron), `${cron}: gap should equal average`);
   }
-  // `*/5 * * * *` — crit was, and remains, past 10 minutes.
+  // `*/5 * * * *` — the warn band is untouched: past its 5-minute gap it still warns at 9 minutes.
   assert.equal(at("2026-09-16T12:09:00Z", "*/5 * * * *", "2026-09-16T12:00:00Z").state, "warn");
-  assert.equal(at("2026-09-16T12:11:00Z", "*/5 * * * *", "2026-09-16T12:00:00Z").state, "crit");
+  // THE NEXT TWO LINES WERE AMENDED BY flow-0066, deliberately, and this is the one place where
+  // the floor changes an assertion flow-0057 made. 12:11 used to be crit, because the derived
+  // bound for this cron is ten minutes — which is well inside GitHub's own scheduler jitter.
+  // flow-0057's actual claim is the identity above (`maxGap === interval`, so the derived bound is
+  // still `interval * 2` to the digit); what moved is only which of the two bounds is the larger.
+  assert.equal(at("2026-09-16T12:11:00Z", "*/5 * * * *", "2026-09-16T12:00:00Z").state, "warn");
+  assert.equal(at("2026-09-16T14:01:00Z", "*/5 * * * *", "2026-09-16T12:00:00Z").state, "crit");
   // `0 8 * * *` — crit was, and remains, past 48h.
   assert.equal(at("2026-09-18T07:00:00Z", "0 8 * * *", "2026-09-16T08:00:00Z").state, "warn");
   assert.equal(at("2026-09-18T09:00:00Z", "0 8 * * *", "2026-09-16T08:00:00Z").state, "crit");
@@ -241,6 +248,80 @@ test("flow-0057: the Nudge#289 sweep instant reads good, where the old rule read
   assert.equal(r.state, "good");
   assert.ok(r.ageHours > 13 && r.ageHours < 15, `age should be ~14.1h, got ${r.ageHours}`);
   assert.ok(r.ageHours > cronIntervalHours(CLUSTERED) * 2, "and the old rule would have called this crit");
+});
+
+// ── flow-0066: a minimum crit bound, so a frequent cron is not judged inside GitHub's jitter ──
+//
+// `*/30 * * * *` is Nudge's `flow-recover`: evenly spaced, so maxGap and interval are both 0.5h and
+// the derived bound is exactly 1.0h. Measured on 2026-09-21, while that workflow was entirely
+// healthy, the gaps between consecutive SUCCESSFUL runs were 31, 27, 29, 42 and 42 minutes — the
+// largest 70% of the bound it was being judged against.
+const FREQUENT = "*/30 * * * *";      // maxGap 0.5h, interval 0.5h -> derived bound 1.0h
+const THREE_HOURLY = "0 */3 * * *";   // maxGap 3h, interval 3h -> derived bound 6h, already > floor
+
+test("flow-0066 criterion 1: */30 cron with a last success 1.1h ago is NOT crit — the floor holds the bound above the observed jitter envelope", () => {
+  const r = at("2026-09-16T13:06:00Z", FREQUENT, "2026-09-16T12:00:00Z");
+  assert.notEqual(r.state, "crit", `expected not crit, got ${r.state} (${r.reason})`);
+  // Specifically `warn`, not `good`: the floor raises the crit bound and leaves the warn band
+  // exactly where flow-0057 put it, at the longest scheduled gap.
+  assert.equal(r.state, "warn");
+  // And the old rule is what this is being held against: 1.1h really is past the derived bound.
+  assert.equal(cronMaxGapHours(FREQUENT) + cronIntervalHours(FREQUENT), 1);
+  assert.ok(r.ageHours > 1, `age should exceed the 1.0h derived bound, got ${r.ageHours}`);
+});
+
+test("flow-0066 criterion 2: */30 cron with a last success 2.1h ago IS crit — the floor delays the alarm, it never removes it", () => {
+  const r = at("2026-09-16T14:06:00Z", FREQUENT, "2026-09-16T12:00:00Z");
+  assert.equal(r.state, "crit", `expected crit, got ${r.state} (${r.reason})`);
+  // The reason names the bound that actually fired, rather than the derived number it is not.
+  assert.match(r.reason, /past the 2h minimum bound/);
+  assert.match(r.reason, /only ~1\.0h, inside GitHub's scheduler jitter/);
+});
+
+test("flow-0066 criterion 3: a 3-hourly cron (6h derived bound, already above the floor) is crit at 6.1h — the floor never lowers a bound", () => {
+  const r = at("2026-09-16T18:06:00Z", THREE_HOURLY, "2026-09-16T12:00:00Z");
+  assert.equal(r.state, "crit", `expected crit, got ${r.state} (${r.reason})`);
+  // Judged against its own schedule, not against the floor: the floor is not mentioned at all.
+  assert.match(r.reason, /past that gap plus one interval of slack$/);
+  assert.equal(cronMaxGapHours(THREE_HOURLY) + cronIntervalHours(THREE_HOURLY), 6);
+  // And it is not raised to the floor either — 2.1h on this cron is still good, well inside 3h.
+  assert.equal(at("2026-09-16T14:06:00Z", THREE_HOURLY, "2026-09-16T12:00:00Z").state, "good");
+});
+
+test("flow-0066 criterion 4: the clustered cron at 14h is still NOT crit — flow-0057's behaviour is unchanged by the floor", () => {
+  const r = at("2026-09-17T08:00:00Z", CLUSTERED, "2026-09-16T18:00:00Z");
+  assert.notEqual(r.state, "crit", `expected not crit, got ${r.state} (${r.reason})`);
+  assert.equal(r.state, "good");
+  // Taking the larger of the two is what makes this hold: 66.4h >> 2h, so the floor is inert here.
+  assert.ok(cronMaxGapHours(CLUSTERED) + cronIntervalHours(CLUSTERED) > MIN_CRIT_HOURS);
+});
+
+test("flow-0066 criterion 5: MIN_CRIT_HOURS is a named export pinned to its exact value, so a change to it is a reviewed edit", () => {
+  assert.equal(MIN_CRIT_HOURS, 2);
+  assert.equal(typeof MIN_CRIT_HOURS, "number");
+  // It is a module constant and not a knob: `scheduledLiveness` accepts no argument that can move
+  // it, so no caller — and no repo's config — can silence a genuinely dead workflow.
+  const withKnob = scheduledLiveness({
+    crons: FREQUENT, lastSuccessAt: "2026-09-16T12:00:00Z",
+    now: Date.parse("2026-09-17T12:00:00Z"), disabled: false,
+    minCritHours: 48, critAfterHours: 48, // ignored: there is nothing to pass
+  });
+  assert.equal(withKnob.state, "crit");
+});
+
+test("flow-0066 criterion 6: every crit reason still begins `last success Xh ago, cron interval ~Yh` verbatim, so watchdog.test.mjs passes unmodified", () => {
+  const crits = [
+    at("2026-09-16T14:06:00Z", FREQUENT, "2026-09-16T12:00:00Z"),       // floor governs
+    at("2026-09-16T18:06:00Z", THREE_HOURLY, "2026-09-16T12:00:00Z"),   // derived bound governs
+    at("2026-09-25T12:00:00Z", CLUSTERED, "2026-09-16T18:00:00Z"),      // clustered, genuinely dead
+    at("2026-09-22T12:00:00Z", SPARSE, "2026-09-16T07:00:00Z"),         // sparse, genuinely dead
+  ];
+  for (const r of crits) {
+    assert.equal(r.state, "crit", `expected crit, got ${r.state} (${r.reason})`);
+    assert.match(r.reason, /^last success \d+\.\d+h ago, cron interval ~\d+\.\d+h, longest scheduled gap ~\d+\.\d+h — /);
+  }
+  // The exact prefix watchdog.test.mjs matches, on the shape the floor now governs.
+  assert.match(crits[0].reason, /^last success 2\.1h ago, cron interval ~0\.5h,/);
 });
 
 // ── eventLiveness ────────────────────────────────────────────────────────────────────────────

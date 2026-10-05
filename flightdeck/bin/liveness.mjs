@@ -211,6 +211,38 @@ export function cronMaxGapHours(crons, opts) {
 // ~66h rather than ~6.7h. That is the honest price of not crying wolf every night, and it is not
 // unbounded — a workflow that has genuinely stopped still alarms, roughly one weekend late at the
 // worst, because the bound tracks the schedule's own shape instead of a constant.
+// THE FLOOR, AND WHY THE BOUND NEEDS ONE (flow-0066).
+//
+// The bound above derives entirely from the cron text, which is what keeps the rule free of a
+// tuning knob — but it also means the bound SHRINKS as the schedule gets more frequent, with no
+// lower limit. For an evenly spaced cron `maxGap + interval` is `interval * 2`, so `*/30 * * * *`
+// is judged at 1.0h and `*/5 * * * *` at ten minutes. GitHub documents that scheduled workflows
+// may be delayed, and dropped entirely, during periods of high load, so at that scale the bound
+// has fallen inside the scheduler's own jitter: Nudge's `flow-recover` (`*/30 * * * *`) was
+// measured on 2026-09-21 producing healthy gaps of 31, 27, 29, 42 and 42 minutes between
+// consecutive SUCCESSFUL runs — the largest 70% of its own crit bound. One dropped firing on a
+// 30-minute cron is a ~60-72m gap, which crosses the bound with nothing wrong.
+//
+// WHY A FLOOR COSTS NO DETECTION LATENCY HERE. `flow-watchdog.yml` runs `0 8 * * *` — once a day.
+// Detection granularity is therefore already ~24h, so any floor well under that changes nothing
+// about WHEN a dead workflow is reported; it only decides whether a healthy-but-jittery workflow
+// happens to LOOK dead at the single instant the daily sweep reads it. A 1.0h bound against 42m of
+// observed jitter is close to a coin flip at sweep time; 2h is not. On the real 2026-09-21 outage
+// (runners stopped being allocated at ~07:46Z) a 2h floor would have alarmed on the same sweep.
+//
+// IT IS NOT A KNOB, AND THIS IS THE DISTINCTION THAT MATTERS. A knob would let a genuinely dead
+// workflow be silenced by configuration, which is the one thing a watchdog must not permit. This
+// is a single module constant: it cannot be set per repo or per workflow, it is visible in
+// canonical's own diff, and a test pins its exact value — so changing it is a reviewed edit rather
+// than a configuration act.
+//
+// IT COMPOSES WITH flow-0057 RATHER THAN REPLACING IT. flow-0057 fixed the CLUSTERED case, where
+// the average interval collapses under a long scheduled gap; the floor fixes the EVENLY-SPACED
+// SHORT case, where both numbers are small and genuinely equal. The bound takes the LARGER of the
+// two, so the floor never lowers a bound that is already above it — `0 9-18 * * 1-5` keeps its
+// ~66h and `0 */6 * * *` its 12h, untouched.
+export const MIN_CRIT_HOURS = 2;
+
 export function scheduledLiveness({ crons, lastSuccessAt, now, disabled }) {
   if (disabled) return { state: "off", reason: "workflow disabled" };
 
@@ -227,16 +259,25 @@ export function scheduledLiveness({ crons, lastSuccessAt, now, disabled }) {
     return { state: "crit", intervalHours, maxGapHours, reason: `unparseable lastSuccessAt: ${lastSuccessAt}` };
   }
   const ageHours = (now - lastSuccessMs) / 3600000;
-  const critAfterHours = maxGapHours + intervalHours;
+  // The larger of the schedule-derived bound and the floor — see MIN_CRIT_HOURS above.
+  const derivedCritAfterHours = maxGapHours + intervalHours;
+  const critAfterHours = Math.max(derivedCritAfterHours, MIN_CRIT_HOURS);
   // The reason names the age AND the gap it is being judged against, because "14.1h ago" alone
   // sent a reader looking for an outage that the schedule fully explains (see flow-0057's notes).
   // The `last success Xh ago, cron interval ~Yh` prefix is KEPT VERBATIM: watchdog.test.mjs
   // matches it when asserting the issue body carries the maths, and that file is outside this
   // task's `touches`. The gap is added to the reason, never substituted for the interval.
+  //
+  // The trailing clause names WHICH of the two bounds actually fired. When the floor governs, the
+  // schedule-derived number is no longer the thing that was crossed, and saying it was would send
+  // the reader to the same kind of wrong conclusion flow-0057's wording fixed.
   if (ageHours > critAfterHours) {
+    const bound = critAfterHours > derivedCritAfterHours
+      ? `the ${MIN_CRIT_HOURS}h minimum bound (that gap plus one interval of slack is only ~${derivedCritAfterHours.toFixed(1)}h, inside GitHub's scheduler jitter)`
+      : "that gap plus one interval of slack";
     return {
       state: "crit", intervalHours, maxGapHours, ageHours,
-      reason: `last success ${ageHours.toFixed(1)}h ago, cron interval ~${intervalHours.toFixed(1)}h, longest scheduled gap ~${maxGapHours.toFixed(1)}h — past that gap plus one interval of slack`,
+      reason: `last success ${ageHours.toFixed(1)}h ago, cron interval ~${intervalHours.toFixed(1)}h, longest scheduled gap ~${maxGapHours.toFixed(1)}h — past ${bound}`,
     };
   }
   if (ageHours > maxGapHours) {
