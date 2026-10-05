@@ -6,6 +6,24 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 3.1.1 — 2026-10-05
+
+**PATCH: the 3.1.0 sync PRs go green in adopting repos.** One canonical test (flow-0119's asks
+prose check) read an adopting repo's own `CLAUDE.md` and task template, which flow-sync never
+touches, so every 3.1.0 sync PR failed `flow-tooling`. Fixed by flow-0133. **No caller action.**
+Re-run flow-sync to pick it up.
+
+- **An adopting repo's own `CLAUDE.md` and task template no longer fail `flow-tooling`**
+  (`project-template/.flow/bin/asks.test.mjs`, flow-0133). **No caller action**. The fix arrives
+  with the next flow-sync.
+
+  flow-0119's criterion-7 tests check that three documents teach the notes/asks split. They resolve
+  them relative to `project-template/`. In canonical that is the template; in an adopting repo it is
+  the repo root, where `CLAUDE.md` and `.flow/tasks/_TEMPLATE.md` are the repo's own and flow-sync
+  never touches them. Every 3.1.0 sync PR therefore failed `flow-tooling` (tests 73–76). An adopting
+  repo now checks only the synced `.flow/PROTOCOL.md`. Canonical still checks all three, and a
+  canonical-only test fails if that ever narrows.
+
 ## 3.1.0 — 2026-10-05
 
 **MINOR: the first fleet release of v3. 3.0.0's scheduled queue runs never dispatched, and this
