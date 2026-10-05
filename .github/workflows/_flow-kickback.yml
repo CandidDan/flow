@@ -1,0 +1,921 @@
+name: _flow-kickback (reusable)
+
+# Reusable form of the bounded auto-fix round (flow-0082). Repos call it from a thin caller that
+# owns the `workflow_run` trigger and the per-PR concurrency group; the logic is authored once in
+# canonical. See docs/flow-reusable-workflows.md.
+#
+# WHAT IT DOES. When the flow-review run on a PR concludes `failure`, this dispatches ONE bounded
+# auto-fix worker onto that same PR, then re-requests review. The protocol already calls a red
+# review check a kickback; nothing started that work, so an `in_review` task with a precise,
+# mechanical finding sat until a human noticed and opened a session. The human was a relay.
+#
+# WHY `workflow_run` IS WHAT MAKES THIS SAFE. GitHub always runs the workflow FILE from the
+# default branch on a `workflow_run` event, never from the PR head. So the credentials below, the
+# fixer's prompt and every guard here are the ones on the default branch — a PR cannot edit the
+# thing that is about to run a model over it. `_flow-review.yml` explains its fork fence the same
+# way, and the fork fence here (`decide`, check 4) matches it: fork-authored code never runs.
+#
+# THE BOUNDS, all of them decided with the human and none of them decoration:
+#   · OFF BY DEFAULT. `review.auto_fix_rounds` in the consuming repo's .flow/config.yml, absent
+#     or 0, means off. Plus `vars.FLOW_AI == 'true'`, like every other AI workflow.
+#   · ROUNDS ARE CAPPED. Hard maximum 3 — raising that needs a conversation, not a config edit.
+#     The count lives on the PR: each pushed round carries one commit with a
+#     `Flow-Auto-Fix-Round: N/CAP` trailer, and rounds used is how many of the PR's commits carry
+#     one. THIS WORKFLOW NEVER WRITES TO THE DEFAULT BRANCH, which is why it needs no write
+#     access there.
+#   · SECURITY IS NEVER AUTO-FIXED. A failed security check escalates, alone or alongside others.
+#   · A ROUND MAY NOT PASS REVIEW BY WEAKENING THE TESTS. The easiest way for a model to satisfy
+#     "criterion X has no proving test" is to loosen an assertion. `weakensTests` sits between
+#     the fixer's commit and the push — which is also why the WORKFLOW pushes and the fixer does
+#     not, and why the guard is run from the default branch's copy of the helper rather than the
+#     PR's (flow-0079's rule: everything that DECIDES comes from base).
+#   · EVERY ESCALATION IS ONE DECISION CARD. A label alone is a PR to dig through. The card names
+#     the finding, what was tried or disputed, one recommendation and the alternative, and is
+#     readable from a phone. The `flow:needs-human` label is also the off switch for that PR:
+#     this workflow never acts on a labelled PR, and removing the label re-arms it.
+#
+# The decision logic is CODE, not `if:` expressions: `.flow/bin/flow-kickback.mjs` in the
+# consuming repo. A decision expressed in YAML has no unit tests and no reason string.
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: "Node used to run .flow/bin/flow-kickback.mjs (the helper is dependency-free)."
+        required: false
+        type: string
+        default: "22"
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      FLOW_PAT:
+        required: false
+
+# Least privilege, and it is declared PER JOB. This top-level block is the FLOOR, not the
+# budget: it grants `contents: read` and nothing else, so a job added here later is read-only
+# until someone writes a block saying otherwise. Every job below carries its own exhaustive
+# `permissions:`, and the union of them is what a caller must grant (a reusable workflow can
+# never raise a scope above its caller's).
+#
+# THE SPLIT IS THE SECURITY PROPERTY, NOT A TIDINESS ONE. Three jobs here run a model, and all
+# three are told to read PR comments as input — so on a non-fork PR, anyone who can comment can
+# address those sessions. Not one of them holds a single write scope: `fix`, `card` and
+# `round-card` get `contents: read` + `pull-requests: read`, which cannot label, comment, approve,
+# close, edit or merge anything. The jobs that DO hold write scopes — `undraft`, `escalate-round`,
+# `escalate` — run no model at all; they run fixed shell over values that arrive through `env:` or
+# a file.
+# A single workflow-level `pull-requests: write` would have handed that scope to the fixer's
+# GITHUB_TOKEN, and `gh pr review --approve` or `gh pr edit --remove-label flow:needs-human`
+# would have been one injected comment away.
+#
+#   job              writes        model   why
+#   ───────────────────────────────────────────────────────────────────────────────────────────
+#   plan             none          no      reads the run's jobs, the PR and the task's status
+#   undraft          PRs           no      one `gh pr ready --undo`, nothing else
+#   fix              NONE          YES     the round: commit-only, then the guards, then a
+#                                          push made with FLOW_PAT and no GITHUB_TOKEN scope
+#   round-card       NONE          YES     writes the card for a round that handed nothing back
+#   escalate-round   PRs, issues   no      posts the card and the label for a round that failed
+#   card             NONE          YES     writes the card's four fields, read-only
+#   escalate         PRs, issues   no      posts that card and the label
+#
+# `actions: read` is `plan`'s alone — the jobs API is how it learns WHICH review job failed —
+# and it is job-scoped for the same reason _flow-queue-runner.yml scopes its own: a top-level
+# entry would demand the scope from every caller including the jobs that never touch it.
+#
+# WHERE FLOW_PAT GOES, AND WHERE IT DOES NOT. It appears in exactly one step, `stamp-and-push`,
+# which runs only after all four guards have passed. It is deliberately absent from the fixer
+# step: a push-capable credential in that process's environment is reachable by any command a
+# deny-list does not textually match, and is exfiltratable over a hosted runner's open egress.
+# GITHUB_TOKEN as scoped by the `fix` job cannot push, which is what makes the guard set a
+# boundary rather than a request.
+permissions:
+  contents: read
+
+jobs:
+  # ── plan ───────────────────────────────────────────────────────────────────────────────
+  # Gathers the facts and hands them to `decide`. Everything that JUDGES is in the helper; this
+  # job only looks things up. It runs on the DEFAULT branch's checkout — the helper, the config
+  # and the task status all come from there, so a PR cannot change the rules it is judged by.
+  plan:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    # Reads, and only reads. `actions: read` is the jobs API (`.../actions/runs/<id>/jobs`),
+    # which is the only way to learn WHICH review job failed — the event payload carries the
+    # run's conclusion and not its jobs. It is job-scoped, as _flow-queue-runner.yml scopes its
+    # own, so no other job here can reach the Actions API at all.
+    permissions:
+      contents: read          # the default-branch checkout: the helper, the config, the store
+      pull-requests: read     # `gh pr list` / `gh pr view` / the PR's commits
+      actions: read           # the jobs API: which review job concluded `failure`
+    outputs:
+      action: ${{ steps.decide.outputs.action }}
+      reason: ${{ steps.decide.outputs.reason }}
+      round: ${{ steps.decide.outputs.round }}
+      rounds_used: ${{ steps.decide.outputs.rounds_used }}
+      cap: ${{ steps.decide.outputs.cap }}
+      trailer: ${{ steps.decide.outputs.trailer }}
+      pr: ${{ steps.pr.outputs.number }}
+      head_ref: ${{ steps.pr.outputs.head_ref }}
+      failed: ${{ steps.failed.outputs.checks }}
+      link: ${{ steps.failed.outputs.link }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The DEFAULT branch, explicitly. `workflow_run` checks this out by default too, but an
+          # implicit version of a security property is one nobody can see holding.
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Resolve the PR this review run belongs to
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # A branch name is attacker-influenced text. It reaches the shell through `env:`, never
+          # through `${{ }}` in a `run:` body — the same rule _flow-review.yml keeps for the PR
+          # title, and cheaper to keep everywhere than to reason about case by case.
+          EVENT_PR: ${{ github.event.workflow_run.pull_requests[0].number }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -eu
+          number="$EVENT_PR"
+          if [ -z "$number" ]; then
+            number="$(gh pr list --head "$HEAD_BRANCH" --state open --json number --jq '.[0].number // empty')"
+          fi
+          if [ -z "$number" ]; then
+            echo "No open PR for this review run — nothing to kick back."
+            echo "number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # One JSON file, read with jq from here on. No PR-controlled string is ever expanded by
+          # the shell or interpolated into a later `run:` body.
+          gh pr view "$number" \
+            --json number,isDraft,title,headRefName,headRefOid,labels,isCrossRepository,url \
+            > "$RUNNER_TEMP/pr.json"
+          {
+            echo "number=$number"
+            echo "head_ref=$(jq -r .headRefName "$RUNNER_TEMP/pr.json")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Which review jobs failed
+        id: failed
+        if: ${{ steps.pr.outputs.number != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -eu
+          # A reusable workflow's jobs are named `<caller job> / <job>`, so take the last segment:
+          # `flow-review / code-review` is the `code-review` check.
+          checks="$(gh api --paginate "repos/{owner}/{repo}/actions/runs/$RUN_ID/jobs" \
+            --jq '.jobs[] | select(.conclusion == "failure") | .name | split(" / ") | last' \
+            | sort -u | tr '\n' ' ')"
+          {
+            echo "checks=$checks"
+            # The card's one link. The run page is where each reviewer's full verdict is, which
+            # is what the card points at instead of quoting it.
+            echo "link=$RUN_URL"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: The task, and the rounds already used
+        id: facts
+        if: ${{ steps.pr.outputs.number != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -eu
+          # The id resolves from the branch or the PR title, exactly as flow-status does. Both
+          # come out of the JSON file through jq; neither is interpolated.
+          branch="$(jq -r .headRefName "$RUNNER_TEMP/pr.json")"
+          title="$(jq -r .title "$RUNNER_TEMP/pr.json")"
+          id="$(node .flow/bin/parse-task-id.mjs "$branch" "$title")"
+          status=""
+          if [ -n "$id" ]; then
+            # The status on the DEFAULT branch — this checkout — never the PR's frozen snapshot.
+            file="$(ls .flow/tasks/"$id"*.md 2>/dev/null | head -n1 || true)"
+            if [ -n "$file" ]; then
+              status="$(sed -n 's/^status:[[:space:]]*"\{0,1\}\([a-z_]*\)"\{0,1\}[[:space:]]*$/\1/p' "$file" | head -n1)"
+            fi
+          fi
+          # NUL-delimited, via base64: a commit message contains newlines and blank lines by
+          # definition, so newline-joining them would make one message's body the next one's
+          # trailer block — and base64 keeps the message text out of the shell entirely.
+          gh api --paginate "repos/{owner}/{repo}/pulls/$PR_NUMBER/commits" \
+            --jq '.[].commit.message | @base64' > "$RUNNER_TEMP/commits.b64"
+          : > "$RUNNER_TEMP/commits.txt"
+          while IFS= read -r encoded; do
+            printf '%s' "$encoded" | base64 -d >> "$RUNNER_TEMP/commits.txt"
+            printf '\000' >> "$RUNNER_TEMP/commits.txt"
+          done < "$RUNNER_TEMP/commits.b64"
+          {
+            echo "task_id=$id"
+            echo "task_status=$status"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Decide — dispatch, skip or escalate
+        id: decide
+        if: ${{ steps.pr.outputs.number != '' }}
+        env:
+          FLOW_AI: ${{ vars.FLOW_AI }}
+          FLOW_CONFIG: .flow/config.yml
+          KICKBACK_COMMITS_FILE: ${{ runner.temp }}/commits.txt
+          KICKBACK_FAILED_CHECKS: ${{ steps.failed.outputs.checks }}
+          KICKBACK_TASK_ID: ${{ steps.facts.outputs.task_id }}
+          KICKBACK_TASK_STATUS: ${{ steps.facts.outputs.task_status }}
+          # `secrets.FLOW_PAT != ''` is the only thing read here — the secret itself never enters
+          # the environment of a step that does not use it.
+          KICKBACK_HAS_PAT: ${{ secrets.FLOW_PAT != '' }}
+        run: |
+          set -eu
+          KICKBACK_DRAFT="$(jq -r .isDraft "$RUNNER_TEMP/pr.json")" \
+          KICKBACK_FORK="$(jq -r .isCrossRepository "$RUNNER_TEMP/pr.json")" \
+          KICKBACK_LABELS="$(jq -r '[.labels[].name] | join(",")' "$RUNNER_TEMP/pr.json")" \
+            node .flow/bin/flow-kickback.mjs decide
+
+      - name: Say what was decided, and on what
+        if: ${{ always() && steps.pr.outputs.number != '' }}
+        env:
+          DECISION: ${{ steps.decide.outputs.action }}
+          REASON: ${{ steps.decide.outputs.reason }}
+          ROUND: ${{ steps.decide.outputs.round }}
+          CAP: ${{ steps.decide.outputs.cap }}
+          FAILED: ${{ steps.failed.outputs.checks }}
+          WARNING: ${{ steps.decide.outputs.warning }}
+        run: |
+          {
+            printf '### Flow auto-fix — %s\n\n' "${DECISION:-no decision}"
+            printf -- '- Failing review checks: `%s`\n' "${FAILED:-none}"
+            printf -- '- Round: %s of %s\n' "${ROUND:-?}" "${CAP:-?}"
+            printf -- '- Reason: %s\n' "${REASON:-(the plan step did not complete)}"
+            if [ -n "${WARNING:-}" ]; then printf -- '- :warning: %s\n' "$WARNING"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── undraft ────────────────────────────────────────────────────────────────────────────
+  # Its own job for one reason: it needs `pull-requests: write`, and `fix` must not have it.
+  # One command, no model, no checkout — so the scope it holds is never in the same GITHUB_TOKEN
+  # as a session a PR comment can address. If this fails, `fix` is skipped and `escalate-round`
+  # still runs, which is the draft-skip case the task asks for: do not force it.
+  undraft:
+    needs: plan
+    if: ${{ needs.plan.outputs.action == 'dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write    # `gh pr ready --undo`, and nothing else in this job
+    steps:
+      - name: Convert the PR to a draft for the duration of the round
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.plan.outputs.pr }}
+        run: |
+          set -eu
+          # So the round's own work does not start three reviewers part-way through. `decide`
+          # skips an already-draft PR, so reaching here means this is a real transition — if it
+          # fails anyway, the round ends and the `always()` step escalates. Do not force it.
+          gh pr ready "$PR_NUMBER" --undo
+
+
+  # ── fix ────────────────────────────────────────────────────────────────────────────────
+  # ONE bounded round. The worker commits; the WORKFLOW checks and pushes. Everything between
+  # those two sentences is the guard set, and it runs in the order the task states.
+  #
+  # THIS IS THE JOB THAT RUNS A MODEL OVER PR COMMENTS, so it is the job that holds no write
+  # scope of any kind. `contents: read` is the checkout; `pull-requests: read` is the fixer
+  # reading the reviewers' verdicts, which its prompt requires and which cannot label, comment,
+  # approve, close, edit or merge. The draft toggle and every escalation are separate jobs that
+  # hold the write scopes and run no model. The one write this job makes — the push — goes out
+  # as FLOW_PAT from a single step, after all four guards.
+  fix:
+    needs: [plan, undraft]
+    if: ${{ needs.plan.outputs.action == 'dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read          # the checkout. NOT write: see the header's table.
+      pull-requests: read     # `gh pr view --comments` — the verdicts the round is addressing
+      id-token: write         # OIDC minting for claude-code-action
+    outputs:
+      pushed: ${{ steps.stamp-and-push.outputs.pushed }}
+      amend: ${{ steps.verdict.outputs.amend }}
+      handback: ${{ steps.verdict.outputs.handback }}
+      # Whether the hand-back is USABLE, which is what routes the escalation: a round that
+      # handed back `fixed` or `disputed` is described by its own four fields, and anything else
+      # is the dead round `round-card` writes a card for.
+      handback_ok: ${{ steps.verdict.outputs.handback_ok }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.plan.outputs.head_ref }}
+          # Every branch and tag, so the default-branch copy of the guard can be materialised
+          # below without a second authenticated fetch.
+          fetch-depth: 0
+          # NO PERSISTED CREDENTIAL. The fixer runs `--permission-mode bypassPermissions` on this
+          # checkout; a credential left in .git/config is a credential it can push with, and the
+          # whole point of this round is that the guard sits between the commit and the push. The
+          # stamp-and-push step supplies FLOW_PAT explicitly, once, after every check has passed.
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Record this round's base, and the guard's commit
+        id: base
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -eu
+          {
+            echo "sha=$(git rev-parse HEAD)"
+            # Resolved BEFORE the fixer runs and pinned by SHA, so the guard materialised after
+            # it is the default branch's code whatever the fixer did to the working tree. A SHA
+            # is content-addressed: it cannot be made to name a different tree.
+            echo "guard_sha=$(git rev-parse "origin/$DEFAULT_BRANCH")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: The auto-fix round (a fresh worker session, commit-only)
+        id: worker
+        uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          # The same action pin and model settings as _flow-queue-runner.yml's worker — this IS
+          # that worker, pointed at a narrower job — with three limits, in increasing order of
+          # how much they actually hold.
+          #
+          #   1. A TOKEN THAT CAN ONLY READ. The token above is GITHUB_TOKEN, scoped by the
+          #      `fix` JOB's own `permissions:` block to `contents: read` + `pull-requests:
+          #      read`. Read is what this session needs (its prompt tells it to read the
+          #      reviewers' verdicts) and read is all it gets: no `pull-requests: write`, so no
+          #      `gh pr review --approve`, no `gh pr comment`, no `gh pr close`; no `issues:
+          #      write`, so it cannot add or remove a label, including the `flow:needs-human`
+          #      that is this PR's off switch; no `contents: write`, so no push. FLOW_PAT
+          #      reaches only `stamp-and-push`, after every guard.
+          #
+          #      THIS IS A JOB-LEVEL FACT, NOT A WORKFLOW-LEVEL ONE, and the distinction is the
+          #      whole fix: the write scopes this workflow does use live on `undraft`,
+          #      `escalate-round` and `escalate`, which run no model. Granting them at the top
+          #      level — as this file once did — would have put them in THIS token, and then an
+          #      injected PR comment could have had the session undo its own escalation.
+          #   2. NO PERSISTED CREDENTIAL in .git/config, from the checkout above.
+          #   3. A DENY-LIST, which is a statement of intent and nothing stronger. Under
+          #      `bypassPermissions` it only pattern-matches command prefixes, so it is listed
+          #      last on purpose: it names the routes to the network, to the git remote and to
+          #      the PR's own state so a round that reaches for one is a visible act rather than
+          #      an accident. Do not read it as the thing keeping the round honest — limit 1 is.
+          #      The `gh pr` entries are defence in depth only: with the token above they would
+          #      all fail anyway, and they are listed so that the day someone widens the job's
+          #      permissions, the deny-list is already there.
+          claude_args: >-
+            --max-turns 60 --model opus --permission-mode bypassPermissions
+            --disallowedTools "Bash(git push:*)" "Bash(gh pr ready:*)" "Bash(gh api:*)"
+            "Bash(curl:*)" "Bash(wget:*)" "Bash(gh pr merge:*)" "Bash(gh pr edit:*)"
+            "Bash(gh pr comment:*)" "Bash(gh pr close:*)" "Bash(gh pr review:*)"
+            "Bash(gh label:*)" "Bash(gh issue:*)"
+          prompt: |
+            You are a Flow auto-fix round on an open pull request. A Definition-of-Done review
+            check went red, and your job is to address it on this branch — nothing else.
+
+            This is round ${{ needs.plan.outputs.round }} of ${{ needs.plan.outputs.cap }}. The
+            failing checks are: ${{ needs.plan.outputs.failed }}.
+
+            1. READ THE VERDICTS. Run `gh pr view ${{ needs.plan.outputs.pr }} --comments` and
+               read what the failing reviewers posted. Address their BLOCKING findings only. A
+               non-blocking note is an observation, not a mandate, and acting on one widens a
+               diff a human has to re-read.
+            2. STAY IN SCOPE. The task's declared `touches` is the blast radius, and the
+               touches-guard check enforces it anyway. If a finding cannot be addressed inside
+               `touches`, do not widen it — dispute, as described below.
+            3. NEVER WEAKEN A TEST. You may add tests and strengthen assertions, always. You may
+               NOT delete, rename or skip a test, and you may NOT remove or loosen an assertion,
+               including by replacing a precise assertion with a vaguer one. The workflow checks
+               your diff for exactly this before it pushes anything, and a round that trips the
+               check is thrown away and handed to a human. If the honest fix really does require
+               changing an assertion, dispute instead.
+            4. RUN THE GATE. Every command in `.flow/config.yml` — install, build, lint, test,
+               coverage — and fix what they find. Never lower the coverage floor to go green.
+            5. COMMIT, DO NOT PUSH. Commit your work to this branch with a clear message. Do NOT
+               run `git push`. Do NOT run `gh pr ready`. The workflow stamps the round, pushes it
+               and re-requests review; that ordering is what lets the guard run at all.
+            6. NEVER EDIT THE TASK STORE. Nothing under the `.flow/tasks` directory, for any
+               reason. Rewriting the acceptance criteria is the cheapest way to turn qa green,
+               and it is the one thing this system refuses outright.
+            7. NEVER SPAWN A REVIEW AGENT. qa, security and code-review are checks on this PR,
+               deliberately outside your session. Your job is to make them pass, not to run them.
+
+            DISPUTING IS ALLOWED, and is the right move when the finding is wrong. Change no code
+            for a finding you dispute. Say so in your hand-back, and the PR goes to a human with
+            your reasoning on it.
+
+            HAND BACK, ALWAYS. Before you finish, write a file named outcome.json inside a
+            directory named `.flow-kickback` at the repository root (create the directory; it is
+            never committed). It holds exactly this shape:
+
+              {"outcome": "fixed" | "disputed",
+               "finding": "the blocking finding, in one or two sentences",
+               "tried": "what you changed, or why you dispute it",
+               "recommendation": {"action": "merge" | "kickback", "change": "the named change"},
+               "alternative": "the other option, and what it costs"}
+
+            Fill in every field even when the outcome is `fixed`: if a later check stops this
+            round, those four fields become the decision card a human reads on their phone, and a
+            card with a blank field is a card that gets ignored. `change` is required when the
+            action is `kickback`, and must name a specific change rather than a direction.
+
+      - name: Materialise the guard from the default branch
+        if: ${{ always() }}
+        env:
+          GUARD_SHA: ${{ steps.base.outputs.guard_sha }}
+        run: |
+          set -eu
+          # flow-0079's rule: everything that DECIDES comes from base, everything DECIDED ABOUT
+          # comes from the PR. The guard below is the thing deciding whether to push, so running
+          # the PR's copy of it would let a round edit the check that is about to judge it.
+          dir="$RUNNER_TEMP/flow-kickback-guard"
+          rm -rf "$dir"
+          git worktree prune
+          git worktree add -q --detach "$dir" "$GUARD_SHA"
+          echo "KICKBACK_BIN=$dir/.flow/bin" >> "$GITHUB_ENV"
+
+      # ── the guard set. The FIRST check that fails escalates, and NOTHING is pushed. ──
+
+      - name: Check 1 — the round handed back
+        id: check-outcome
+        run: |
+          set -eu
+          f=".flow-kickback/outcome.json"
+          if [ ! -f "$f" ]; then
+            echo "amend=The round ended without writing a hand-back, so there is no account of what it did." >> "$GITHUB_OUTPUT"
+            echo "::error::the round did not hand back"
+            exit 1
+          fi
+          cp "$f" "$RUNNER_TEMP/outcome.json"
+          outcome="$(jq -r '.outcome // ""' "$RUNNER_TEMP/outcome.json" 2>/dev/null || echo "")"
+          echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+          if [ "$outcome" = "disputed" ]; then
+            echo "amend=The round DISPUTED the finding and changed no code for it." >> "$GITHUB_OUTPUT"
+            echo "::notice::the round disputed the finding"
+            exit 1
+          fi
+          if [ "$outcome" != "fixed" ]; then
+            echo "amend=The round's hand-back named no known outcome, so nothing about the round can be trusted." >> "$GITHUB_OUTPUT"
+            echo "::error::unusable hand-back"
+            exit 1
+          fi
+
+      - name: Check 2 — the remote branch head has not moved
+        id: check-remote-head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+          HEAD_REF: ${{ needs.plan.outputs.head_ref }}
+        run: |
+          set -eu
+          remote="$(gh api "repos/{owner}/{repo}/commits/$HEAD_REF" --jq .sha)"
+          if [ "$remote" != "$BASE_SHA" ]; then
+            echo "amend=The remote branch moved during the round, so either the fixer pushed despite the limit or a human did. Nothing was pushed by this round." >> "$GITHUB_OUTPUT"
+            echo "::error::remote head $remote is not this round's base $BASE_SHA"
+            exit 1
+          fi
+
+      - name: Check 3 — the round did not weaken the tests
+        id: check-weakens
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+        run: |
+          set -eu
+          git diff "$BASE_SHA"..HEAD > "$RUNNER_TEMP/round.diff"
+          # No pipe into tee here, deliberately: a pipeline reports the LAST command's status, so
+          # `node … | tee` would report tee's 0 and the guard would never trip.
+          if node "$KICKBACK_BIN/flow-kickback.mjs" weakens "$RUNNER_TEMP/round.diff" \
+               > "$RUNNER_TEMP/weakens.txt"; then
+            cat "$RUNNER_TEMP/weakens.txt" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo '### Flow auto-fix — the round weakened the tests, so nothing was pushed'
+              echo '```'
+              cat "$RUNNER_TEMP/weakens.txt"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "amend=The round WEAKENED THE TESTS — it removed a test or an assertion. The change was thrown away, not pushed." >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Check 4 — a round that claims to have fixed something changed something
+        id: check-commits
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+        run: |
+          set -eu
+          n="$(git rev-list --count "$BASE_SHA"..HEAD)"
+          if [ "$n" -eq 0 ]; then
+            echo "amend=The round reported a fix and committed nothing, so the finding is still open." >> "$GITHUB_OUTPUT"
+            echo "::error::claimed fixed, changed nothing"
+            exit 1
+          fi
+
+      - name: Stamp the round, push it, and re-request review
+        id: stamp-and-push
+        env:
+          GH_TOKEN: ${{ secrets.FLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.plan.outputs.pr }}
+          HEAD_REF: ${{ needs.plan.outputs.head_ref }}
+          ROUND_TRAILER_LINE: ${{ needs.plan.outputs.trailer }}
+          FLOW_PAT: ${{ secrets.FLOW_PAT }}
+        run: |
+          set -eu
+          git config user.name "flow-kickback"
+          git config user.email "flow-kickback@users.noreply.github.com"
+          # The ONE amend. It adds the round trailer and changes no content, and it happens here
+          # rather than in the fixer so the stamp the cap is counted from cannot be written by the
+          # thing the cap is bounding.
+          git commit --amend --no-edit --trailer "$ROUND_TRAILER_LINE"
+          # FLOW_PAT, not GITHUB_TOKEN: a push made with GITHUB_TOKEN triggers no workflows, so a
+          # fix pushed with it would never be re-reviewed. `decide` skips the whole round when
+          # the secret is absent, so reaching this line means it is set. The URL is built from
+          # env, and the credential never reaches a remote stored in .git/config.
+          git push "https://x-access-token:$FLOW_PAT@github.com/$GH_REPO.git" "HEAD:$HEAD_REF"
+          # And this is what starts the three reviewers again. Whatever they say re-enters at
+          # `plan`, one round further along.
+          gh pr ready "$PR_NUMBER"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      # ── carrying the round's verdict out of this job ──────────────────────────────────
+      # `escalate-round` posts the card, because posting needs `pull-requests: write` and this
+      # job must not have it. That job is a different runner with a different filesystem, so the
+      # two things it needs travel as job outputs: the guard's own sentence, and the round's
+      # hand-back.
+      #
+      # THE HAND-BACK TRAVELS AS BASE64. Every field in it is model-written text, and base64 is
+      # the alphabet [A-Za-z0-9+/=] — it cannot carry a newline, a quote, a backtick or a `$`,
+      # so it is inert whether it is read through `env:` or expanded by anything else. `facts`
+      # above base64s commit messages for exactly the same reason. The 16 KiB cap bounds the job
+      # output; a hand-back over it decodes to invalid JSON and `card` renders the fallback,
+      # which is visible rather than silent.
+      - name: Carry this round's verdict to the job that may post it
+        id: verdict
+        if: ${{ always() }}
+        env:
+          # Each guard wrote the sentence that explains ITS failure; the first non-empty one is
+          # the one that stopped the round.
+          AMEND_1: ${{ steps.check-outcome.outputs.amend }}
+          AMEND_2: ${{ steps.check-remote-head.outputs.amend }}
+          AMEND_3: ${{ steps.check-weakens.outputs.amend }}
+          AMEND_4: ${{ steps.check-commits.outputs.amend }}
+          # `fixed` or `disputed` means the round parsed and named an outcome the protocol knows;
+          # anything else — no file, unreadable JSON, an outcome nobody knows — is the dead round.
+          OUTCOME: ${{ steps.check-outcome.outputs.outcome }}
+        run: |
+          set -eu
+          amend="${AMEND_1:-${AMEND_2:-${AMEND_3:-${AMEND_4:-}}}}"
+          # One line, always: a job output with an embedded newline would need a heredoc
+          # delimiter, and every amend sentence is authored right here in this file as one line.
+          printf 'amend=%s\n' "$(printf '%s' "$amend" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+          # check-outcome copied the hand-back here before it judged it, so this is present for
+          # a disputed round and absent for a round that never wrote one.
+          f="$RUNNER_TEMP/outcome.json"
+          if [ -f "$f" ]; then
+            printf 'handback=%s\n' "$(head -c 16384 "$f" | base64 -w0)" >> "$GITHUB_OUTPUT"
+          else
+            printf 'handback=\n' >> "$GITHUB_OUTPUT"
+          fi
+          # And whether that hand-back can describe the round at all. Only a hand-back that
+          # PARSED and named a known outcome can: the round's own four fields are the one account
+          # of what it tried. Everything else routes to `round-card`, because the alternative is
+          # the context-free fallback card, which is a PR to dig through rather than a decision.
+          case "$OUTCOME" in
+            fixed|disputed) printf 'handback_ok=true\n' >> "$GITHUB_OUTPUT" ;;
+            *)              printf 'handback_ok=false\n' >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  # ── round-card ─────────────────────────────────────────────────────────────────────────
+  # THE DEAD ROUND'S CARD. A round that crashed, timed out, was cancelled, or simply never wrote
+  # `outcome.json` has no account of itself — and the task's Scope puts that case with security and
+  # the exhausted cap: it gets ONE bounded, READ-ONLY model call that reads the verdicts, the round
+  # trailers and the diff and writes the card's four fields. Without this job a dead round handed
+  # the human the context-free fallback card ("recommendation unavailable"), which is the "12
+  # questions" problem the card exists to replace (G12).
+  #
+  # The routing is on whether a USABLE hand-back exists, which is exactly the split the Scope
+  # makes between its two buckets:
+  #
+  #   handed back `fixed` or `disputed`      -> `escalate-round` renders the round's OWN four
+  #   (so: a dispute, or a guard that             fields, amended with the guard's sentence. The
+  #   stopped an otherwise-finished round)        round is the only thing that knows what it tried,
+  #                                              and a model re-reading the PR would not.
+  #   anything else                          -> THIS JOB writes the four fields instead: no file,
+  #                                              unparseable JSON, an outcome nobody knows, or a
+  #                                              `fix` that never reached its verdict step at all.
+  #
+  # Read-only, and for the same reason as `card`: it is a model reading PR comments, so it holds no
+  # write scope at all and `escalate-round` is what posts what it wrote.
+  round-card:
+    needs: [plan, fix]
+    if: ${{ always() && needs.plan.outputs.action == 'dispatch' && needs.fix.outputs.pushed != 'true' && needs.fix.outputs.handback_ok != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read          # the default-branch checkout
+      pull-requests: read     # the verdicts, the diff and the commit list it is summarising
+      id-token: write         # OIDC minting for claude-code-action
+    outputs:
+      handback: ${{ steps.handback.outputs.b64 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The DEFAULT branch. This job reads the PR through `gh`; what it RUNS comes from base,
+          # so a PR cannot edit the thing writing the card about it (flow-0079's rule).
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Write the dead round's card fields (read-only)
+        id: write-card
+        uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          # The same bounds as `card`: it may not commit, push, re-ready, merge, comment or label,
+          # and the only thing it produces is a JSON file this job then validates in code.
+          claude_args: >-
+            --max-turns 20 --model sonnet --permission-mode bypassPermissions
+            --disallowedTools "Bash(git push:*)" "Bash(git commit:*)" "Bash(gh pr ready:*)" "Bash(gh pr merge:*)" "Bash(gh pr edit:*)" "Bash(gh pr comment:*)" "Bash(gh pr close:*)"
+          prompt: |
+            A Flow auto-fix round was dispatched on pull request #${{ needs.plan.outputs.pr }} and
+            handed nothing usable back, so the PR now needs a human decision.
+
+            What stopped the round: ${{ needs.fix.outputs.amend }}
+            Failing review checks: ${{ needs.plan.outputs.failed }}
+            Auto-fix rounds used: ${{ needs.plan.outputs.rounds_used }} of ${{ needs.plan.outputs.cap }}
+
+            You are writing the decision card a human will read on their phone, and nothing else.
+            DO NOT fix anything, do not change any file other than the hand-back below, and do
+            not push. Whatever that round did was NEVER PUSHED and is not on the PR, so do not
+            describe the PR as if it had been fixed. Read only:
+
+            - `gh pr view ${{ needs.plan.outputs.pr }} --comments` for the reviewers' verdicts;
+            - `gh pr diff ${{ needs.plan.outputs.pr }}` for what the PR changes;
+            - `gh pr view ${{ needs.plan.outputs.pr }} --json commits` for the round history.
+
+            Then write a file named outcome.json inside a directory named `.flow-kickback` at the
+            repository root, holding exactly this shape:
+
+              {"outcome": "disputed",
+               "finding": "the blocking finding, in one or two sentences — never a quote of the whole comment",
+               "tried": "what the round appears to have attempted, and that it handed nothing back",
+               "recommendation": {"action": "merge" | "kickback", "change": "the named change"},
+               "alternative": "the other option, and what it costs"}
+
+            Exactly one recommendation, and it must be a decision rather than a summary: either
+            `merge` (the PR is good enough to ship as it stands) or `kickback` with `change`
+            naming the specific change to make. "Investigate further" is not a recommendation.
+            Fill in every field; a card with a blank field is a card that gets ignored.
+
+      # Base64, into a bounded job output — the same shape and the same reason as `fix`'s verdict
+      # and `card`'s hand-back: every field below is model-written text, and base64 cannot carry a
+      # quote, a newline, a backtick or a `$`. Absent or over-long decodes to nothing readable, and
+      # `escalate-round` posts the fallback card, which is visible rather than silent.
+      - name: Carry the hand-back to the job that may post it
+        id: handback
+        if: ${{ always() }}
+        run: |
+          set -eu
+          f=".flow-kickback/outcome.json"
+          if [ -f "$f" ]; then
+            printf 'b64=%s\n' "$(head -c 16384 "$f" | base64 -w0)" >> "$GITHUB_OUTPUT"
+          else
+            printf 'b64=\n' >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── escalate-round ─────────────────────────────────────────────────────────────────────
+  # THE DEAD-ROUND BACKSTOP. A round that died part-way — a failed guard, a crashed action, a
+  # cancelled job, an `undraft` that never succeeded — must never leave a draft PR that nothing
+  # is watching. `always()` is what makes that true of every exit, including the ones nobody
+  # predicted: `needs.fix.outputs.pushed` is empty when `fix` was skipped or cancelled, so the
+  # condition holds and the card still gets posted.
+  #
+  # This is a separate job from `fix` because posting a comment and adding a label need
+  # `pull-requests: write` and `issues: write`, and `fix` runs a model on PR comments. No model
+  # runs here: it renders a card from values that arrive through `env:` and a file, and posts it.
+  #
+  # The four fields it renders come from one of two places, and `round-card` above says which:
+  # the round's own hand-back when it handed one back, and `round-card`'s read-only model call
+  # when it did not. `needs` plus `always()` is what makes this run whichever of them was skipped.
+  escalate-round:
+    needs: [plan, fix, round-card]
+    if: ${{ always() && needs.plan.outputs.action == 'dispatch' && needs.fix.outputs.pushed != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read          # the default-branch checkout, for the card renderer
+      pull-requests: write    # `gh pr comment` — the card
+      issues: write           # the `flow:needs-human` label; GitHub's label endpoints are issues
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The DEFAULT branch. The card renderer is a thing that decides what a human is told,
+          # so it comes from base and never from the PR (flow-0079's rule).
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Escalate — one decision card, then the label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.plan.outputs.pr }}
+          KICKBACK_CHECK: ${{ needs.plan.outputs.failed }}
+          KICKBACK_LINK: ${{ needs.plan.outputs.link }}
+          KICKBACK_ROUNDS_USED: ${{ needs.plan.outputs.rounds_used }}
+          KICKBACK_CAP: ${{ needs.plan.outputs.cap }}
+          # The guard's own sentence, carried out of `fix` as a job output — so the human is
+          # told WHICH check fired. Empty means `fix` never reached its verdict step at all,
+          # and the sentence in the shell default below is the honest account of that.
+          ROUND_AMEND: ${{ needs.fix.outputs.amend }}
+          # WHOSE four fields the card carries. A round that handed back `fixed` or `disputed`
+          # describes itself — it is the only thing that knows what it tried. A round that handed
+          # back nothing usable cannot, so the fields come from `round-card`'s read-only model
+          # call, which read the verdicts, the diff and the round history instead. `round-card` is
+          # skipped on the first branch, so its output is empty exactly when it is not wanted.
+          HANDBACK_B64: ${{ needs.fix.outputs.handback_ok == 'true' && needs.fix.outputs.handback || needs['round-card'].outputs.handback }}
+        run: |
+          set -eu
+          export KICKBACK_AMEND="${ROUND_AMEND:-The round never ran to completion: it was skipped, crashed or was cancelled before it could hand anything back. Nothing was pushed.}"
+          # Decoded from base64 into a FILE. Every field in it is model-written text, and it has
+          # reached here through an alphabet that cannot carry a quote, a backtick or a `$`. A
+          # hand-back lost in transit — truncated past the cap, or a `round-card` that crashed —
+          # leaves nothing readable, and the renderer falls back to KICKBACK_AMEND and
+          # KICKBACK_LINK alone, which is visible rather than silent.
+          handback="$RUNNER_TEMP/outcome.json"
+          printf '%s' "$HANDBACK_B64" | base64 -d > "$handback" 2>/dev/null || : > "$handback"
+          card="$RUNNER_TEMP/card.md"
+          # ONE invocation, and no `||` fallback after it. `card` renders a card whatever it is
+          # given: a missing, unreadable or unparseable hand-back becomes the fallback card, and
+          # the command still exits 0. A second attempt behind `||` would be dead code that read
+          # like a safety net.
+          node .flow/bin/flow-kickback.mjs card "$handback" > "$card"
+          # The card FIRST. A label with no card is the "12 questions" problem this replaces, so
+          # the order is the guarantee: if the comment fails, the label is never added.
+          gh pr comment "$PR_NUMBER" --body-file "$card"
+          gh label create "flow:needs-human" --color "B60205" \
+            --description "Flow auto-fix stopped; a human decision is needed" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --add-label "flow:needs-human"
+          cat "$card" >> "$GITHUB_STEP_SUMMARY"
+
+  # ── card ───────────────────────────────────────────────────────────────────────────────
+  # The escalations `plan` itself decided: a failed security check, and an exhausted cap. No
+  # round runs, the PR's code is never checked out, and the only model call is READ-ONLY — it
+  # reads the verdicts, the round trailers and the diff, and writes the card's four fields. It
+  # fixes nothing, and what it writes is validated in code (`decisionCard` renders the fallback
+  # card on anything malformed) before a word of it reaches the PR.
+  #
+  # THIS JOB RUNS A MODEL OVER PR COMMENTS, so like `fix` it holds no write scope. Posting the
+  # card it writes is the next job's work, for exactly that reason: a session that can be
+  # addressed by a PR comment must not be able to comment, label, approve or close one itself.
+  card:
+    needs: plan
+    if: ${{ needs.plan.outputs.action == 'escalate' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read          # the default-branch checkout
+      pull-requests: read     # the verdicts, the diff and the commit list it is summarising
+      id-token: write         # OIDC minting for claude-code-action
+    outputs:
+      handback: ${{ steps.handback.outputs.b64 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Write the card's four fields (read-only)
+        id: write-card
+        uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          # Bounded and read-only with respect to the PR: it may not commit, push, re-ready,
+          # merge, comment or label. The only thing it produces is a JSON file this job then
+          # validates in code.
+          claude_args: >-
+            --max-turns 20 --model sonnet --permission-mode bypassPermissions
+            --disallowedTools "Bash(git push:*)" "Bash(git commit:*)" "Bash(gh pr ready:*)" "Bash(gh pr merge:*)" "Bash(gh pr edit:*)" "Bash(gh pr comment:*)" "Bash(gh pr close:*)"
+          prompt: |
+            A Flow auto-fix round was NOT run on pull request #${{ needs.plan.outputs.pr }}, and
+            the PR now needs a human decision.
+
+            Why no round ran: ${{ needs.plan.outputs.reason }}
+            Failing review checks: ${{ needs.plan.outputs.failed }}
+            Auto-fix rounds used: ${{ needs.plan.outputs.rounds_used }} of ${{ needs.plan.outputs.cap }}
+
+            You are writing the decision card a human will read on their phone, and nothing else.
+            DO NOT fix anything, do not change any file other than the hand-back below, and do
+            not push. Read only:
+
+            - `gh pr view ${{ needs.plan.outputs.pr }} --comments` for the reviewers' verdicts;
+            - `gh pr diff ${{ needs.plan.outputs.pr }}` for what the PR changes;
+            - `gh pr view ${{ needs.plan.outputs.pr }} --json commits` for the round history.
+
+            Then write a file named outcome.json inside a directory named `.flow-kickback` at the
+            repository root, holding exactly this shape:
+
+              {"outcome": "disputed",
+               "finding": "the blocking finding, in one or two sentences — never a quote of the whole comment",
+               "tried": "what the earlier rounds tried, or why nothing was attempted",
+               "recommendation": {"action": "merge" | "kickback", "change": "the named change"},
+               "alternative": "the other option, and what it costs"}
+
+            Exactly one recommendation, and it must be a decision rather than a summary: either
+            `merge` (the PR is good enough to ship as it stands) or `kickback` with `change`
+            naming the specific change to make. "Investigate further" is not a recommendation.
+            Fill in every field; a card with a blank field is a card that gets ignored.
+
+      # Base64, into a job output, for the same reason the round's verdict travels that way:
+      # every field below is model-written text, and base64 cannot carry a quote, a newline, a
+      # backtick or a `$`. An absent or over-long hand-back decodes to nothing readable and the
+      # next job posts the fallback card, which is visible rather than silent.
+      - name: Carry the hand-back to the job that may post it
+        id: handback
+        if: ${{ always() }}
+        run: |
+          set -eu
+          f=".flow-kickback/outcome.json"
+          if [ -f "$f" ]; then
+            printf 'b64=%s\n' "$(head -c 16384 "$f" | base64 -w0)" >> "$GITHUB_OUTPUT"
+          else
+            printf 'b64=\n' >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── escalate ───────────────────────────────────────────────────────────────────────────
+  # Posts the card `card` wrote, then adds the label. `always()` so a model call that crashed
+  # still ends in an escalation: the fallback card says the recommendation is unavailable and
+  # why, which is the whole point of validating the card in code rather than trusting it.
+  # No model runs here — this is the job that holds the write scopes.
+  escalate:
+    needs: [plan, card]
+    if: ${{ always() && needs.plan.outputs.action == 'escalate' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read          # the default-branch checkout, for the card renderer
+      pull-requests: write    # `gh pr comment` — the card
+      issues: write           # the `flow:needs-human` label; GitHub's label endpoints are issues
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      # No step-level `if:` here. The JOB's `always()` is the backstop; a second one on the step
+      # would guard against a failed checkout it cannot do anything about anyway.
+      - name: Post the card, then the label
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.plan.outputs.pr }}
+          KICKBACK_CHECK: ${{ needs.plan.outputs.failed }}
+          KICKBACK_LINK: ${{ needs.plan.outputs.link }}
+          KICKBACK_ROUNDS_USED: ${{ needs.plan.outputs.rounds_used }}
+          KICKBACK_CAP: ${{ needs.plan.outputs.cap }}
+          KICKBACK_AMEND: ${{ needs.plan.outputs.reason }}
+          HANDBACK_B64: ${{ needs.card.outputs.handback }}
+        run: |
+          set -eu
+          # Decoded from base64 into a FILE, never interpolated: every field in it was written
+          # by the model in the `card` job. A crashed or over-long hand-back leaves nothing
+          # readable here, and `card` renders the fallback from KICKBACK_AMEND — which on this
+          # path is `plan`'s own reason, so the human still learns why no round ran.
+          handback="$RUNNER_TEMP/outcome.json"
+          printf '%s' "$HANDBACK_B64" | base64 -d > "$handback" 2>/dev/null || : > "$handback"
+          card="$RUNNER_TEMP/card.md"
+          # ONE invocation, same reason as the round's own escalation step: `card` never fails,
+          # it falls back, so a `||` after it would be dead code dressed as a safety net.
+          node .flow/bin/flow-kickback.mjs card "$handback" > "$card"
+          # The card FIRST, then the label — the same order and the same guarantee as the round's
+          # own escalation: no path adds the label without a card.
+          gh pr comment "$PR_NUMBER" --body-file "$card"
+          gh label create "flow:needs-human" --color "B60205" \
+            --description "Flow auto-fix stopped; a human decision is needed" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --add-label "flow:needs-human"
+          cat "$card" >> "$GITHUB_STEP_SUMMARY"
