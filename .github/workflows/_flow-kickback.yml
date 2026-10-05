@@ -57,12 +57,13 @@ on:
 # `permissions:`, and the union of them is what a caller must grant (a reusable workflow can
 # never raise a scope above its caller's).
 #
-# THE SPLIT IS THE SECURITY PROPERTY, NOT A TIDINESS ONE. Two jobs here run a model, and both
-# are told to read PR comments as input — so on a non-fork PR, anyone who can comment can
-# address those sessions. Neither job holds a single write scope: `fix` and `card` get
-# `contents: read` + `pull-requests: read`, which cannot label, comment, approve, close, edit or
-# merge anything. The jobs that DO hold write scopes — `undraft`, `escalate-round`, `escalate` —
-# run no model at all; they run fixed shell over values that arrive through `env:` or a file.
+# THE SPLIT IS THE SECURITY PROPERTY, NOT A TIDINESS ONE. Three jobs here run a model, and all
+# three are told to read PR comments as input — so on a non-fork PR, anyone who can comment can
+# address those sessions. Not one of them holds a single write scope: `fix`, `card` and
+# `round-card` get `contents: read` + `pull-requests: read`, which cannot label, comment, approve,
+# close, edit or merge anything. The jobs that DO hold write scopes — `undraft`, `escalate-round`,
+# `escalate` — run no model at all; they run fixed shell over values that arrive through `env:` or
+# a file.
 # A single workflow-level `pull-requests: write` would have handed that scope to the fixer's
 # GITHUB_TOKEN, and `gh pr review --approve` or `gh pr edit --remove-label flow:needs-human`
 # would have been one injected comment away.
@@ -73,6 +74,7 @@ on:
 #   undraft          PRs           no      one `gh pr ready --undo`, nothing else
 #   fix              NONE          YES     the round: commit-only, then the guards, then a
 #                                          push made with FLOW_PAT and no GITHUB_TOKEN scope
+#   round-card       NONE          YES     writes the card for a round that handed nothing back
 #   escalate-round   PRs, issues   no      posts the card and the label for a round that failed
 #   card             NONE          YES     writes the card's four fields, read-only
 #   escalate         PRs, issues   no      posts that card and the label
@@ -303,6 +305,10 @@ jobs:
       pushed: ${{ steps.stamp-and-push.outputs.pushed }}
       amend: ${{ steps.verdict.outputs.amend }}
       handback: ${{ steps.verdict.outputs.handback }}
+      # Whether the hand-back is USABLE, which is what routes the escalation: a round that
+      # handed back `fixed` or `disputed` is described by its own four fields, and anything else
+      # is the dead round `round-card` writes a card for.
+      handback_ok: ${{ steps.verdict.outputs.handback_ok }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -566,6 +572,9 @@ jobs:
           AMEND_2: ${{ steps.check-remote-head.outputs.amend }}
           AMEND_3: ${{ steps.check-weakens.outputs.amend }}
           AMEND_4: ${{ steps.check-commits.outputs.amend }}
+          # `fixed` or `disputed` means the round parsed and named an outcome the protocol knows;
+          # anything else — no file, unreadable JSON, an outcome nobody knows — is the dead round.
+          OUTCOME: ${{ steps.check-outcome.outputs.outcome }}
         run: |
           set -eu
           amend="${AMEND_1:-${AMEND_2:-${AMEND_3:-${AMEND_4:-}}}}"
@@ -580,6 +589,116 @@ jobs:
           else
             printf 'handback=\n' >> "$GITHUB_OUTPUT"
           fi
+          # And whether that hand-back can describe the round at all. Only a hand-back that
+          # PARSED and named a known outcome can: the round's own four fields are the one account
+          # of what it tried. Everything else routes to `round-card`, because the alternative is
+          # the context-free fallback card, which is a PR to dig through rather than a decision.
+          case "$OUTCOME" in
+            fixed|disputed) printf 'handback_ok=true\n' >> "$GITHUB_OUTPUT" ;;
+            *)              printf 'handback_ok=false\n' >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  # ── round-card ─────────────────────────────────────────────────────────────────────────
+  # THE DEAD ROUND'S CARD. A round that crashed, timed out, was cancelled, or simply never wrote
+  # `outcome.json` has no account of itself — and the task's Scope puts that case with security and
+  # the exhausted cap: it gets ONE bounded, READ-ONLY model call that reads the verdicts, the round
+  # trailers and the diff and writes the card's four fields. Without this job a dead round handed
+  # the human the context-free fallback card ("recommendation unavailable"), which is the "12
+  # questions" problem the card exists to replace (G12).
+  #
+  # The routing is on whether a USABLE hand-back exists, which is exactly the split the Scope
+  # makes between its two buckets:
+  #
+  #   handed back `fixed` or `disputed`      -> `escalate-round` renders the round's OWN four
+  #   (so: a dispute, or a guard that             fields, amended with the guard's sentence. The
+  #   stopped an otherwise-finished round)        round is the only thing that knows what it tried,
+  #                                              and a model re-reading the PR would not.
+  #   anything else                          -> THIS JOB writes the four fields instead: no file,
+  #                                              unparseable JSON, an outcome nobody knows, or a
+  #                                              `fix` that never reached its verdict step at all.
+  #
+  # Read-only, and for the same reason as `card`: it is a model reading PR comments, so it holds no
+  # write scope at all and `escalate-round` is what posts what it wrote.
+  round-card:
+    needs: [plan, fix]
+    if: ${{ always() && needs.plan.outputs.action == 'dispatch' && needs.fix.outputs.pushed != 'true' && needs.fix.outputs.handback_ok != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read          # the default-branch checkout
+      pull-requests: read     # the verdicts, the diff and the commit list it is summarising
+      id-token: write         # OIDC minting for claude-code-action
+    outputs:
+      handback: ${{ steps.handback.outputs.b64 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The DEFAULT branch. This job reads the PR through `gh`; what it RUNS comes from base,
+          # so a PR cannot edit the thing writing the card about it (flow-0079's rule).
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Write the dead round's card fields (read-only)
+        id: write-card
+        uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          # The same bounds as `card`: it may not commit, push, re-ready, merge, comment or label,
+          # and the only thing it produces is a JSON file this job then validates in code.
+          claude_args: >-
+            --max-turns 20 --model sonnet --permission-mode bypassPermissions
+            --disallowedTools "Bash(git push:*)" "Bash(git commit:*)" "Bash(gh pr ready:*)" "Bash(gh pr merge:*)" "Bash(gh pr edit:*)" "Bash(gh pr comment:*)" "Bash(gh pr close:*)"
+          prompt: |
+            A Flow auto-fix round was dispatched on pull request #${{ needs.plan.outputs.pr }} and
+            handed nothing usable back, so the PR now needs a human decision.
+
+            What stopped the round: ${{ needs.fix.outputs.amend }}
+            Failing review checks: ${{ needs.plan.outputs.failed }}
+            Auto-fix rounds used: ${{ needs.plan.outputs.rounds_used }} of ${{ needs.plan.outputs.cap }}
+
+            You are writing the decision card a human will read on their phone, and nothing else.
+            DO NOT fix anything, do not change any file other than the hand-back below, and do
+            not push. Whatever that round did was NEVER PUSHED and is not on the PR, so do not
+            describe the PR as if it had been fixed. Read only:
+
+            - `gh pr view ${{ needs.plan.outputs.pr }} --comments` for the reviewers' verdicts;
+            - `gh pr diff ${{ needs.plan.outputs.pr }}` for what the PR changes;
+            - `gh pr view ${{ needs.plan.outputs.pr }} --json commits` for the round history.
+
+            Then write a file named outcome.json inside a directory named `.flow-kickback` at the
+            repository root, holding exactly this shape:
+
+              {"outcome": "disputed",
+               "finding": "the blocking finding, in one or two sentences — never a quote of the whole comment",
+               "tried": "what the round appears to have attempted, and that it handed nothing back",
+               "recommendation": {"action": "merge" | "kickback", "change": "the named change"},
+               "alternative": "the other option, and what it costs"}
+
+            Exactly one recommendation, and it must be a decision rather than a summary: either
+            `merge` (the PR is good enough to ship as it stands) or `kickback` with `change`
+            naming the specific change to make. "Investigate further" is not a recommendation.
+            Fill in every field; a card with a blank field is a card that gets ignored.
+
+      # Base64, into a bounded job output — the same shape and the same reason as `fix`'s verdict
+      # and `card`'s hand-back: every field below is model-written text, and base64 cannot carry a
+      # quote, a newline, a backtick or a `$`. Absent or over-long decodes to nothing readable, and
+      # `escalate-round` posts the fallback card, which is visible rather than silent.
+      - name: Carry the hand-back to the job that may post it
+        id: handback
+        if: ${{ always() }}
+        run: |
+          set -eu
+          f=".flow-kickback/outcome.json"
+          if [ -f "$f" ]; then
+            printf 'b64=%s\n' "$(head -c 16384 "$f" | base64 -w0)" >> "$GITHUB_OUTPUT"
+          else
+            printf 'b64=\n' >> "$GITHUB_OUTPUT"
+          fi
 
   # ── escalate-round ─────────────────────────────────────────────────────────────────────
   # THE DEAD-ROUND BACKSTOP. A round that died part-way — a failed guard, a crashed action, a
@@ -591,8 +710,12 @@ jobs:
   # This is a separate job from `fix` because posting a comment and adding a label need
   # `pull-requests: write` and `issues: write`, and `fix` runs a model on PR comments. No model
   # runs here: it renders a card from values that arrive through `env:` and a file, and posts it.
+  #
+  # The four fields it renders come from one of two places, and `round-card` above says which:
+  # the round's own hand-back when it handed one back, and `round-card`'s read-only model call
+  # when it did not. `needs` plus `always()` is what makes this run whichever of them was skipped.
   escalate-round:
-    needs: [plan, fix]
+    needs: [plan, fix, round-card]
     if: ${{ always() && needs.plan.outputs.action == 'dispatch' && needs.fix.outputs.pushed != 'true' }}
     runs-on: ubuntu-latest
     permissions:
@@ -623,14 +746,20 @@ jobs:
           # told WHICH check fired. Empty means `fix` never reached its verdict step at all,
           # and the sentence in the shell default below is the honest account of that.
           ROUND_AMEND: ${{ needs.fix.outputs.amend }}
-          HANDBACK_B64: ${{ needs.fix.outputs.handback }}
+          # WHOSE four fields the card carries. A round that handed back `fixed` or `disputed`
+          # describes itself — it is the only thing that knows what it tried. A round that handed
+          # back nothing usable cannot, so the fields come from `round-card`'s read-only model
+          # call, which read the verdicts, the diff and the round history instead. `round-card` is
+          # skipped on the first branch, so its output is empty exactly when it is not wanted.
+          HANDBACK_B64: ${{ needs.fix.outputs.handback_ok == 'true' && needs.fix.outputs.handback || needs['round-card'].outputs.handback }}
         run: |
           set -eu
           export KICKBACK_AMEND="${ROUND_AMEND:-The round never ran to completion: it was skipped, crashed or was cancelled before it could hand anything back. Nothing was pushed.}"
           # Decoded from base64 into a FILE. Every field in it is model-written text, and it has
-          # reached here through an alphabet that cannot carry a quote, a backtick or a `$`. An
-          # absent or truncated hand-back leaves nothing readable, and `card` renders the
-          # fallback from KICKBACK_AMEND and KICKBACK_LINK alone.
+          # reached here through an alphabet that cannot carry a quote, a backtick or a `$`. A
+          # hand-back lost in transit — truncated past the cap, or a `round-card` that crashed —
+          # leaves nothing readable, and the renderer falls back to KICKBACK_AMEND and
+          # KICKBACK_LINK alone, which is visible rather than silent.
           handback="$RUNNER_TEMP/outcome.json"
           printf '%s' "$HANDBACK_B64" | base64 -d > "$handback" 2>/dev/null || : > "$handback"
           card="$RUNNER_TEMP/card.md"

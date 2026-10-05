@@ -296,7 +296,7 @@ test("there is exactly one push in the file, and it targets the PR's branch, nev
 //
 // MODEL_JOBS and WRITER_JOBS are asserted to be disjoint and to cover every job that is one or
 // the other, so adding a model call to a job holding writes fails here rather than in the wild.
-const MODEL_JOBS = ["fix", "card"];
+const MODEL_JOBS = ["fix", "card", "round-card"];
 const WRITER_JOBS = ["undraft", "escalate-round", "escalate"];
 const WRITE_SCOPES = ["write", "admin"];
 const writes = (perms) =>
@@ -338,13 +338,13 @@ test("the model's hand-back crosses the job boundary as base64, never as raw tex
   // Splitting the model off from the poster means outcome.json has to travel between runners.
   // Every field in it is model-written, so it travels in an alphabet that cannot carry a quote,
   // a newline, a backtick or a `$` — the same reason `facts` base64s commit messages.
-  for (const [producer, out] of [["fix", "handback"], ["card", "handback"]]) {
+  for (const [producer, out] of [["fix", "handback"], ["card", "handback"], ["round-card", "handback"]]) {
     assert.ok(wf.jobs[producer].outputs?.[out],
       `${producer} must expose the hand-back as a job output; there is no shared filesystem between jobs`);
   }
   const encoders = MODEL_JOBS.flatMap((j) => steps(wf, j))
     .filter((st) => typeof st.run === "string" && /base64/.test(st.run));
-  assert.equal(encoders.length, 2, "one encoder per model job");
+  assert.equal(encoders.length, MODEL_JOBS.length, "one encoder per model job");
   for (const st of encoders) {
     assert.match(st.run, /base64 -w0/, "the hand-back is encoded, not echoed");
     assert.match(st.run, /head -c \d+/, "a job output is bounded; an unbounded one fails the run instead of falling back");
@@ -509,8 +509,8 @@ test("a round that died part-way still escalates — the if: always() backstop",
     "a round that pushed is not an escalation — the reviewers get it next");
   assert.match(job.if, /needs\.plan\.outputs\.action == 'dispatch'/,
     "and a run that never dispatched a round has nothing to escalate here");
-  assert.deepEqual(job.needs, ["plan", "fix"],
-    "it needs `fix` for the verdict and `plan` for the PR — and `needs` plus `always()` is what makes it run when `fix` was skipped");
+  assert.deepEqual(job.needs, ["plan", "fix", "round-card"],
+    "it needs `fix` for the verdict, `plan` for the PR and `round-card` for a dead round's four fields — and `needs` plus `always()` is what makes it run when any of them was skipped");
   // Each guard's own sentence is what the card leads with, so the human is told WHICH check
   // fired. The sentences now cross a job boundary: guard -> the `verdict` step's output ->
   // the job output -> this job's env. Every link is asserted, because a broken one is silent.
@@ -528,6 +528,73 @@ test("a round that died part-way still escalates — the if: always() backstop",
     "and the job output must actually reach the card");
   assert.match(post.run, /\$\{ROUND_AMEND:-[^}]+\}/,
     "a `fix` that never reached its verdict step hands this job an empty sentence, and a card whose lead line is blank tells the human nothing — the shell default is the honest account of that case");
+});
+
+// The BLOCKING finding on PR #179's third review, pinned so it cannot come back. The task's Scope
+// splits escalations in two: a dispute, or a round a later guard stopped, is described by the
+// round's OWN hand-back; "every other escalation (security, exhausted, DID NOT HAND BACK) runs one
+// bounded, read-only model call". `decide` can never return `escalate` for a dead round — that is a
+// round-level fact discovered inside `fix`, long after `decide` said `dispatch` — so the `card`
+// job could not reach it, and the human got the context-free fallback card ("recommendation
+// unavailable") for the one case that most needs a recommendation: a round that crashed.
+test("a round that handed nothing back gets the read-only model call, not the fallback card", { skip }, () => {
+  const wf = parse(REUSABLE);
+  const job = wf.jobs["round-card"];
+  assert.ok(job,
+    "the dead round's card needs a job of its own: `decide` returns `escalate` only for security and the exhausted cap, so `card` is structurally unreachable from inside a dispatched round");
+
+  // It fires for exactly the dead-round case: dispatched, nothing pushed, no usable hand-back.
+  assert.match(job.if, /always\(\)/,
+    "a `fix` that crashed, timed out or was cancelled never reports success — `always()` is the only thing that reaches it");
+  assert.match(job.if, /needs\.plan\.outputs\.action == 'dispatch'/);
+  assert.match(job.if, /needs\.fix\.outputs\.pushed != 'true'/, "a round that pushed is not an escalation at all");
+  assert.match(job.if, /needs\.fix\.outputs\.handback_ok != 'true'/,
+    "and a round that DID hand back describes itself; the model call is for the round that could not");
+  assert.deepEqual(job.needs, ["plan", "fix"]);
+
+  // `handback_ok` is the routing fact, and it is true only for a hand-back that parsed and named
+  // an outcome the protocol knows. That keeps a guard-stopped round on its own four fields and
+  // sends every other exit here, which is the Scope's split rather than a second one.
+  assert.match(wf.jobs.fix.outputs.handback_ok, /steps\.verdict\.outputs\.handback_ok/,
+    "the fact has to leave the `fix` job as an output, or no `if:` can read it");
+  const verdict = steps(wf, "fix").find((st) => st.id === "verdict");
+  assert.ok(Object.values(verdict.env).some((v) => String(v).includes("check-outcome.outputs.outcome")),
+    "and it must be derived from the guard that actually parsed the hand-back, not re-parsed in YAML");
+  assert.match(verdict.run, /fixed\|disputed\)\s*printf 'handback_ok=true/,
+    "`fixed` and `disputed` are the two outcomes the round can describe itself with");
+  assert.match(verdict.run, /\*\)\s*printf 'handback_ok=false/,
+    "and the catch-all is the dead round: no file, unparseable JSON, or an outcome nobody knows");
+
+  // It is a READ-ONLY model call on the DEFAULT branch, with `card`'s bounds. The token is what
+  // actually holds it (the write-scope tests above cover that); this is what it was asked not to do.
+  const model = (job.steps ?? []).find((s) => /claude-code-action/.test(s.uses ?? ""));
+  assert.ok(model, "the model call IS the fix for this finding — a job here that renders a card in shell changes nothing");
+  for (const forbidden of ["git push", "git commit", "gh pr ready", "gh pr merge", "gh pr edit", "gh pr comment"]) {
+    assert.ok(model.with.claude_args.includes(`Bash(${forbidden}:*)`),
+      `the dead round's card writer must not be able to run \`${forbidden}\` — it writes a card, it does not act`);
+  }
+  assert.match(model.with.prompt, /DO NOT fix anything/, "this is not a second auto-fix round wearing a card's clothes");
+  for (const [re, what] of [[/--comments/, "the reviewers' verdicts"], [/gh pr diff/, "what the PR changes"],
+                            [/json commits/, "the round history"]]) {
+    assert.match(model.with.prompt, re,
+      `the card is built by reading ${what} — reading the PR is the whole difference between a recommendation and a shrug`);
+  }
+  assert.ok(Object.values(model.with).some((v) => String(v).includes("needs.fix.outputs.amend")),
+    "and it must be told WHAT stopped the round, or its card re-describes a failure it cannot see");
+  const checkout = (job.steps ?? []).find((s) => /actions\/checkout@/.test(s.uses ?? ""));
+  assert.match(checkout.with.ref, /default_branch/,
+    "a card written about a PR must not run that PR's code (flow-0079's rule)");
+
+  // And what it writes reaches the human: `escalate-round` posts the round's own hand-back when
+  // there is one, and this job's when there is not.
+  const post = steps(wf, "escalate-round").find((st) => typeof st.run === "string" && st.run.includes("--add-label"));
+  const b64 = String(post.env.HANDBACK_B64);
+  assert.match(b64, /needs\.fix\.outputs\.handback_ok == 'true' && needs\.fix\.outputs\.handback/,
+    "a round that handed back keeps its own four fields — it is the only thing that knows what it tried");
+  assert.match(b64, /needs\['round-card'\]\.outputs\.handback/,
+    "and a dead round gets the four fields the read-only model call wrote");
+  assert.ok((wf.jobs["escalate-round"].needs ?? []).includes("round-card"),
+    "a job output cannot be read from a job this one does not `needs`, so the fallback would be silently empty");
 });
 
 test("the card writer never checks out the PR's code and its model call cannot write to the PR", { skip }, () => {

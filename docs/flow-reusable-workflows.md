@@ -190,7 +190,7 @@ session that was merely *asked* not to push is not.
 `GITHUB_TOKEN` is only as narrow as the job holding it, and a workflow-level `pull-requests:
 write` is a grant *every* job gets, the fixer's session included. With it, an injected PR comment
 is one step from `gh pr review --approve`, `gh pr close`, or `gh pr edit --remove-label
-flow:needs-human` — undoing the escalation that stopped the PR. So the two jobs that run a model
+flow:needs-human` — undoing the escalation that stopped the PR. So the three jobs that run a model
 hold reads only, and the jobs that hold writes run no model:
 
 | job | token can write | runs a model | what it does |
@@ -198,6 +198,7 @@ hold reads only, and the jobs that hold writes run no model:
 | `plan` | nothing | no | reads the run's failed jobs, the PR, and the task's status on the default branch |
 | `undraft` | pull requests | no | one `gh pr ready --undo`, and nothing else |
 | `fix` | **nothing** | **yes** | the round: commit-only, then the four guards, then the one push — made with `FLOW_PAT`, not with this token |
+| `round-card` | **nothing** | **yes** | writes the card's four fields for a round that handed nothing back, read-only |
 | `escalate-round` | pull requests, issues | no | posts the card and the label for a round that did not push |
 | `card` | **nothing** | **yes** | writes the card's four fields, read-only |
 | `escalate` | pull requests, issues | no | posts that card and the label |
@@ -235,7 +236,11 @@ read` is the jobs API, the only way to learn *which* review job failed, and it i
   line heuristic and deliberately errs towards escalating; a rewrite that really is stronger
   costs one tap on the card.
 - **Push a round that disputed the finding, handed back nothing, or claimed a fix and changed
-  nothing.** Each escalates instead.
+  nothing.** Each escalates instead. A dispute, and a round a later guard stopped, are described
+  by the round's own hand-back — it is the only thing that knows what it tried. A round that
+  handed nothing back has no account of itself, so its card comes from the same bounded,
+  **read-only** model call that writes the security and exhausted-cap cards: it reads the
+  verdicts, the diff and the round history and writes the four fields, and it fixes nothing.
 - **Merge anything.** Merge stays human, as it always has.
 
 **Every escalation is one decision card, plus the `flow:needs-human` label.** The card is a PR
