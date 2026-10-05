@@ -8,7 +8,7 @@ owner: "orchestrator-cowork-2026-10-05"
 created: "2026-10-05"
 started: "2026-10-05T04:40:00Z"
 branch: "flow/flow-0133-asks-doc-test-canonical-only"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/182"
 issue: ""
 blocked_reason: ""
 blocked_by: []
