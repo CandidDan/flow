@@ -6,7 +6,139 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
-## 3.0.0 — 2026-10-02 (pending tag + canary)
+## 3.1.0 — 2026-10-05
+
+**MINOR: the first fleet release of v3. 3.0.0's scheduled queue runs never dispatched, and this
+fixes that.** The schedule gate read the caller's workflow name wrongly, so every scheduled tick on
+3.0.0 failed closed (flow-0132). Found on the canary before `v3` was advanced, so no repo ran 3.0.0
+pinned `@v3`. Also: typed `asks:` for the human (flow-0119), an opt-in review auto-fix worker
+(flow-0082), and sync-PR and repin-doc fixes (flow-0128, flow-0130). **No caller edit is required.**
+flow-0082's new `flow-kickback.yml` caller is opt-in and arrives with flow-sync. Moving from `@v2` is
+the 3.0.0 caller action, and `docs/repinning-a-consuming-repo.md` has it.
+
+- **A failed `qa` or `code-review` check now dispatches a bounded auto-fix worker onto the same
+  PR** (`_flow-kickback.yml`, `flow-kickback.yml`, `.flow/bin/flow-kickback.mjs`, flow-0082).
+  **Caller action: adopt the new `flow-kickback.yml` caller** — `flow-sync` delivers it — **then
+  set `review.auto_fix_rounds` in `.flow/config.yml` to opt in.** Adopting the caller alone turns
+  nothing on: the key ships commented out, and with it absent or `0` a red review check does
+  exactly what it did before. Turning it on also needs `FLOW_AI=true` and the `FLOW_PAT` secret.
+
+  The protocol has always called a red review check a kickback, and nothing dispatched one: the
+  worker's session ended at `gh pr ready`, and the queue runner only picks `ready` tasks, so an
+  `in_review` task with a precise, mechanical finding sat until a human noticed. PRs #108 and
+  #109 are the motivating cases — in each, code-review named the file, the line, the cause and
+  the fix, and the human added nothing but the delay.
+
+  The bounds are the substance of the change, not decoration:
+
+  - **Rounds are capped**, at `review.auto_fix_rounds` with a **hard maximum of 3** (a larger
+    value is clamped, with a warning naming what you configured). The count lives on the PR —
+    each pushed round carries one commit stamped `Flow-Auto-Fix-Round: N/CAP` by the *workflow*,
+    not by the fixer — so the kickback workflow never writes to the default branch and needs no
+    `contents: write` there.
+  - **A failed `security` check is never auto-fixed**, alone or alongside others.
+  - **A round may not pass review by weakening the tests.** The workflow diffs the round and
+    throws it away if it deleted or renamed a test file, removed a test declaration or an
+    assertion, or added a `.skip`/`.only`. Adding tests and strengthening assertions is always
+    allowed. This is why the *workflow* pushes and the fixer does not: the check has to sit
+    between the commit and the push.
+  - **Every escalation is ONE decision card**, plus the `flow:needs-human` label — the finding,
+    what was tried or disputed, exactly one recommendation ("merge as is" or "kick back with: a
+    named change"), the alternative, and the rounds used, capped at 1,500 characters and
+    readable from a phone. No path adds the label without first posting a card, and a
+    recommendation the model failed to produce renders a visible fallback card rather than
+    nothing. The label is also that PR's off switch: the workflow never acts on a labelled PR,
+    and removing the label re-arms it. A dispute, and a round a later guard stopped, are
+    described by the round's own hand-back; a security check, an exhausted cap and a round that
+    handed nothing back get their four fields from a bounded **read-only** model call that reads
+    the verdicts, the diff and the round history and changes nothing.
+  - **Merge stays human**, and the fix is re-reviewed in CI from scratch.
+
+  - **The jobs that run a model hold no write scope, and the jobs that hold write scopes run no
+    model.** The fixer is a model under `bypassPermissions` whose prompt tells it to read PR
+    comments as instructions, so on a non-fork PR anyone who can comment can address it — and
+    `--disallowedTools` only pattern-matches command prefixes, which is a statement of intent
+    rather than a boundary. The boundary is the token. So `fix` and the read-only card writer
+    get `contents: read` + `pull-requests: read` and nothing that writes; the draft toggle and
+    both card-posting paths are separate jobs holding `pull-requests: write` + `issues: write`
+    and running no model; and `FLOW_PAT` reaches only `stamp-and-push`, after all four guards.
+    Permissions are declared **per job**, with the file's top-level block `contents: read` as a
+    floor. A workflow-level `pull-requests: write` would have put `gh pr review --approve` and
+    `gh pr edit --remove-label flow:needs-human` one injected comment away.
+
+  Safe to hold credentials because a `workflow_run` event always runs the workflow file from the
+  default branch, never the PR head — and for the same reason the test-weakening guard runs from
+  the default branch's copy of the helper, pinned by a SHA resolved before the fixer gets the
+  runner. Fork PRs are skipped, matching the fork fence in `_flow-review.yml`.
+
+- **A task can now carry `asks:` — the open items for the human, typed and machine-readable**
+  (`project-template/.flow/bin/asks.mjs`, `project-template/.flow/bin/flow-doctor.mjs`,
+  `project-template/.flow/bin/flow-state.mjs`, `project-template/.flow/tasks/_TEMPLATE.md`,
+  `project-template/.flow/PROTOCOL.md`, `project-template/CLAUDE.md`, flow-0119).
+  **No caller action** — a task with no `asks:` key parses as an empty list, so every existing
+  task and every adopting repo stays green, and `flow-state --json` reports `asks: []` for it.
+
+  `notes` is the handoff to the next session; `asks` is the queue for the human. Each entry is one
+  string prefixed with its kind — `decision` (which must carry `Recommend:`), `follow-up` or
+  `fyi` — so every existing frontmatter reader parses it unchanged. `flow-doctor` fails a
+  malformed ask, naming the task and the ask; `flow-state --json` adds a parsed `asks` array to
+  every task row. The new `asks.mjs` imports nothing and uses no Node-only global, so a browser
+  surface can reuse the grammar rather than re-implement it.
+
+- **A sync PR that ships a canonical skill is classified as a sync PR again**
+  (`project-template/.flow/bin/flow-review.mjs`, flow-0128). **No caller action** — the fix
+  travels on the synced surface, so an adopting repo gets it with its next `flow-sync`.
+
+  `SYNC_PR_PATHS` is meant to be the surface `_flow-sync.yml` copies, exactly as that workflow's
+  own header lists it. flow-0081 added `.claude/skills/<name>/` to that header and to the copy
+  step; the constant was never widened, so every v3 sync carrying a skill fell outside the list
+  and was refused the `SYNC PR` classification. The reviewers then read it as an ordinary feature
+  PR — qa failed it for having no task, and a large sync failed again on diff truncation. Found by
+  the v3 canary on progress PR #115.
+
+  Scoped to the skill directories canonical actually ships (`board-builder`, `flow-compass`,
+  `show-me`, `task-writer`, `vision-writer`), each mirrored wholesale, and **not**
+  `.claude/skills/**`: the sync loop only ever writes canonical's own names, so a `flow-sync/`
+  branch adding a skill the repo invented is a change nobody reviewed and still gets read in full.
+  The flow-0115 provenance check covers the skill files unchanged — `rsync -a` copies them byte
+  for byte, so a skill edited after the sync is caught exactly as an edited helper is.
+
+  Two tests stop the list drifting a second time: one pins it against canonical's
+  `project-template/.claude/skills/` on disk, the other parses `_flow-sync.yml`'s own `What it
+  syncs` inventory and fails if the header lists a copied path the constant does not cover.
+
+- **The `@v2`→`@v3` repin doc now says to repin the flow-sync caller *before* dispatching the sync**
+  (`docs/repinning-a-consuming-repo.md`, flow-0130). **Caller action if you are still on `@v2`:**
+  follow that section's two steps in order. Repin `.github/workflows/flow-sync.yml` to
+  `_flow-sync.yml@v3` and merge that one-line PR first, *then* run
+  `gh workflow run flow-sync.yml -f canonical_ref=v3`. If you already dispatched it from `@v2` and
+  its PR is red, merge that PR anyway — its callers are `@v3` — and run the sync a second time.
+
+  `canonical_ref` chooses which canonical tree is copied *from*; the caller's `uses:` pin chooses
+  which reusable does the *copying*. The doc's old one-liner only set the first, so a repo still
+  pinned at `@v2` ran `_flow-sync.yml@v2` — 2.2.0, which predates flow-0081 and copies no
+  `.claude/skills/` at all. It adopted 3.0.0's `.flow/bin` with none of the skills that tooling
+  tests for, and the synced `allocate-task-id.test.mjs` failed on the `task-writer` skill's missing
+  `queue_cap` paragraph: the repo's own flow-tooling check went red on the adoption PR itself.
+  Found by the v3 canary on progress PR #115.
+
+  Three tests in `.flow/bin/caller-pins.test.mjs` pin it. The order is checked positionally — the
+  repin must appear before the dispatch in the section — because an order is the one thing a prose
+  check cannot assert by keyword. Both refs are derived from root `VERSION`, so cutting the next
+  major moves them with it.
+
+- **The queue runner's schedule gate can list its own runs again, so scheduled ticks dispatch**
+  (`.github/workflows/_flow-queue-runner.yml`, flow-0132). **No caller action** — the fix is in the
+  reusable, and a caller already on `@v3` picks it up when the alias moves.
+
+  The run-history step derived the caller's workflow filename from `github.workflow_ref` by
+  stripping the path before the `@<ref>`. The ref is `refs/heads/main` and holds slashes, so the
+  result was `main`, `gh run list --workflow main` failed, and the gate failed closed: on 3.0.0
+  every scheduled tick dispatched nothing. Found on the canary (progress), run 37247213658. Manual
+  dispatch was unaffected, because it skips the gate. The derivation now strips `@<ref>` first, and
+  a test runs the step's own line against branch and tag refs.
+
+## 3.0.0 — 2026-10-02 (tagged; superseded by 3.1.0 before `v3` was advanced)
 
 **MAJOR: one caller contract change, plus the fixes that end TanPlan's hand-set `in_review`.** The
 queue runner can now be paused and timed from repo variables (flow-0080). Its new schedule gate
