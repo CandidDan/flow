@@ -8,7 +8,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { ASK_KINDS, askId, normaliseAskText, parseAsk, parseAsks } from "./asks.mjs";
 
@@ -170,12 +171,35 @@ test("criterion 6: asks.mjs imports nothing from node: and uses no Node-only glo
 // authoritative; `project-template/CLAUDE.md` restates the split alone, deliberately (its
 // maintainer notes say why), and these assertions are what stop the two copies drifting.
 
-const TEMPLATE = new URL("../../", import.meta.url);        // project-template/
-const docs = {
-  "PROTOCOL.md": readFileSync(new URL(".flow/PROTOCOL.md", TEMPLATE), "utf8"),
-  "CLAUDE.md": readFileSync(new URL("CLAUDE.md", TEMPLATE), "utf8"),
-  "_TEMPLATE.md": readFileSync(new URL(".flow/tasks/_TEMPLATE.md", TEMPLATE), "utf8"),
+// flow-0133: `../../` is `project-template/` in canonical, but the REPO ROOT in an adopting repo,
+// where CLAUDE.md and .flow/tasks/_TEMPLATE.md are the repo's own and flow-sync never touches
+// them. Only PROTOCOL.md is synced. So the template's CLAUDE.md and task template are checked
+// where they are authored — canonical — and an adopter checks the one document it receives.
+const ASKS_DOCS = {
+  "PROTOCOL.md": ".flow/PROTOCOL.md",
+  "CLAUDE.md": "CLAUDE.md",
+  "_TEMPLATE.md": ".flow/tasks/_TEMPLATE.md",
 };
+export function asksDocsFor(templateDir) {
+  const inTemplate = basename(templateDir.replace(/[\\/]+$/, "")) === "project-template";
+  return inTemplate ? Object.keys(ASKS_DOCS) : ["PROTOCOL.md"];
+}
+const TEMPLATE = new URL("../../", import.meta.url);        // project-template/ (canonical) or repo root
+const IN_CANONICAL_TEMPLATE = asksDocsFor(fileURLToPath(TEMPLATE)).length === 3;
+const docs = Object.fromEntries(asksDocsFor(fileURLToPath(TEMPLATE))
+  .map((name) => [name, readFileSync(new URL(ASKS_DOCS[name], TEMPLATE), "utf8")]));
+
+test("flow-0133: an adopting repo checks only the synced PROTOCOL.md; canonical checks all three", () => {
+  assert.deepEqual(asksDocsFor("/work/write"), ["PROTOCOL.md"]);
+  assert.deepEqual(asksDocsFor("/work/write/"), ["PROTOCOL.md"]);
+  assert.deepEqual(asksDocsFor("/work/flow/project-template/"),
+    ["PROTOCOL.md", "CLAUDE.md", "_TEMPLATE.md"]);
+});
+
+test("flow-0133: from canonical, the criterion-7 checks still cover all three documents",
+  { skip: !IN_CANONICAL_TEMPLATE && "adopting repo: CLAUDE.md and _TEMPLATE.md are the repo's own" }, () => {
+  assert.deepEqual(Object.keys(docs), ["PROTOCOL.md", "CLAUDE.md", "_TEMPLATE.md"]);
+});
 
 test("criterion 7: each of the three documents states the notes/asks split", () => {
   for (const [name, text] of Object.entries(docs)) {
@@ -212,7 +236,9 @@ test("criterion 7: the examples the three documents carry actually parse", () =>
       checked++;
     }
   }
-  assert.ok(checked >= 9, `expected at least three examples in each of three documents, found ${checked}`);
+  const want = 3 * Object.keys(docs).length;
+  assert.ok(checked >= want,
+    `expected at least three examples in each of ${Object.keys(docs).length} document(s), found ${checked}`);
 });
 
 // ── the changelog entry ──
