@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0082"
 title: "A failed qa or code-review check dispatches a bounded auto-fix worker onto the same PR"
-status: "in_progress"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude-worker"
