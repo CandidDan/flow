@@ -1,7 +1,7 @@
 ---
 id: "flow-0133"
 title: "The asks prose test checks the template's CLAUDE.md and task template only in canonical, so an adopting repo's own files cannot fail flow-tooling"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "orchestrator-cowork-2026-10-05"
