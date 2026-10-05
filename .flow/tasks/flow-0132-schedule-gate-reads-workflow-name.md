@@ -8,7 +8,7 @@ owner: "orchestrator-cowork-2026-10-05"
 created: "2026-10-05"
 started: "2026-10-05T01:00:00Z"
 branch: "flow/flow-0132-schedule-gate-reads-workflow-name"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/180"
 issue: ""
 blocked_reason: ""
 blocked_by: []
