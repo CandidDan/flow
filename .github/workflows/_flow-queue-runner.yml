@@ -111,8 +111,10 @@ jobs:
           fi
           # `github.workflow_ref` is `<owner>/<repo>/.github/workflows/<caller>.yml@<ref>`, and
           # the CALLER's filename is what `gh run list --workflow` matches — inside a reusable
-          # there is no other way to name the workflow whose runs these are.
-          file="${WORKFLOW_REF##*/}"; file="${file%@*}"
+          # there is no other way to name the workflow whose runs these are. Strip the `@<ref>`
+          # FIRST: the ref is `refs/heads/<branch>` and holds slashes, so stripping the path first
+          # leaves the branch name (flow-0132 — every scheduled tick on 3.0.0 failed this way).
+          file="${WORKFLOW_REF%@*}"; file="${file##*/}"
           # 36 hours covers the current local day in every zone (UTC-12 .. UTC+14) with room to
           # spare, so the window can never cut off a run the decision would have counted.
           cutoff="$(date -u -d '36 hours ago' +%Y-%m-%dT%H:%M:%SZ)"

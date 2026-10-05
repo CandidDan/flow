@@ -22,6 +22,7 @@
 // absent there; these tests skip visibly ("# SKIP") in that job and run for real in the
 // per-stack gate job, which does `npm ci` first.
 
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -379,6 +380,37 @@ test("before the repo has synced the helper, the run-history step never calls th
   assert.ok(guard < run.indexOf("gh run list"), "and it comes before the first API call");
   assert.match(run.slice(guard, run.indexOf("gh run list")), /earlier-runs\.json[\s\S]*exit 0/,
     "the bootstrap path writes an empty history and succeeds");
+});
+
+// flow-0132: the canary's first scheduled tick on 3.0.0 failed with "could not find any workflows
+// named main". `github.workflow_ref` ends `@refs/heads/main`, and the ref holds slashes, so the
+// derivation must strip `@<ref>` before the path. Run the step's own line, not a copy of it.
+function deriveFile(line, workflowRef) {
+  const r = spawnSync("bash", ["-c", `${line}\nprintf '%s' "$file"`], {
+    env: { PATH: process.env.PATH, WORKFLOW_REF: workflowRef }, encoding: "utf8",
+  });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout;
+}
+
+test("the run-history step names the caller's workflow file whatever slashes the ref holds", { skip }, () => {
+  const run = String(step("schedule-gate", "Gather this workflow's earlier scheduled runs").run);
+  const line = run.split("\n").find((l) => /^\s*file="\$\{WORKFLOW_REF/.test(l));
+  assert.ok(line, "the step derives $file from WORKFLOW_REF on one line");
+  for (const ref of ["refs/heads/main", "refs/tags/v3.0.0", "refs/heads/flow/flow-0132-x", "main"]) {
+    assert.equal(deriveFile(line, `CandidDan/progress/.github/workflows/flow-queue-runner.yml@${ref}`),
+      "flow-queue-runner.yml", `ref ${ref}`);
+  }
+  // Mutation: the 3.0.0 line, path first, is what the canary ran — it must fail this test.
+  const old = 'file="${WORKFLOW_REF##*/}"; file="${file%@*}"';
+  assert.equal(deriveFile(old, "CandidDan/progress/.github/workflows/flow-queue-runner.yml@refs/heads/main"),
+    "main", "the old derivation yields the branch name, which is the bug");
+});
+
+test("the flow-0132 changelog entry exists and says no caller action is needed", { skip }, () => {
+  const entry = changelogEntry(REPO, "flow-0132");
+  assert.ok(entry.trim(), "changes/flow-0132.md must exist (or be assembled into CHANGELOG.md)");
+  assert.match(entry, /No caller action/);
 });
 
 test("the changelog entry exists and names the re-sync the caller needs", { skip }, () => {
