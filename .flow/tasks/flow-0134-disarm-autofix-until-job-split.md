@@ -8,7 +8,7 @@ owner: "orchestrator-cowork-2026-10-06"
 created: "2026-10-06"
 started: "2026-10-06T05:01:22Z"
 branch: "flow/flow-0134-disarm-autofix-until-job-split"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/186"
 issue: ""
 blocked_reason: ""
 blocked_by: []
