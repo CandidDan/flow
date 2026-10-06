@@ -17,19 +17,24 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse } from "yaml";
 import { parseAutoFixRounds, effectiveCap, decide, SKIP } from "./flow-kickback.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const REUSABLE = join(REPO, ".github", "workflows", "_flow-kickback.yml");
 const CONFIG = join(REPO, ".flow", "config.yml");
 
+// Dynamic, like every other yaml user here: flow-tooling runs these tests WITHOUT `npm ci`, and a
+// static import would crash the whole file there. The per-stack gate job installs yaml and runs
+// them in full; criterion 1 needs no parser and runs everywhere.
+const yamlMod = await import("yaml").then((m) => m, () => null);
+const skip = yamlMod ? false : "needs `npm ci` (yaml) — runs in the per-stack gate job";
+
 const MODEL_ACTION = /^anthropics\/claude-code-action@/;
 const FLOW_PAT = /\bsecrets\.FLOW_PAT\b/;
 
 // The jobs that both run a model and reference FLOW_PAT anywhere (job env, step env, with:, run:).
 export function modelJobsHoldingPat(workflowText) {
-  const jobs = parse(workflowText)?.jobs ?? {};
+  const jobs = yamlMod.parse(workflowText)?.jobs ?? {};
   const out = [];
   for (const [name, job] of Object.entries(jobs)) {
     const steps = Array.isArray(job?.steps) ? job.steps : [];
@@ -48,7 +53,7 @@ export function boundaryViolations(workflowText, configText) {
 const WORKFLOW = readFileSync(REUSABLE, "utf8");
 const armed = (n) => `review:\n  auto_fix_rounds: ${n}\n`;
 
-test("canonical keeps auto-fix off while a model job references FLOW_PAT", () => {
+test("canonical keeps auto-fix off while a model job references FLOW_PAT", { skip }, () => {
   const v = boundaryViolations(WORKFLOW, readFileSync(CONFIG, "utf8"));
   assert.deepEqual(v, [],
     `review.auto_fix_rounds is armed in canonical's .flow/config.yml, but these jobs in ` +
@@ -65,7 +70,7 @@ test("flow-0134 criterion 1: canonical's auto_fix_rounds is 0, so the kickback p
   assert.match(d.reason, /auto-fix off/);
 });
 
-test("flow-0134 criterion 2: today's layout is reported, naming `fix`, when armed — and passes when off", () => {
+test("flow-0134 criterion 2: today's layout is reported, naming `fix`, when armed — and passes when off", { skip }, () => {
   assert.deepEqual(boundaryViolations(WORKFLOW, armed(2)), ["fix"],
     "the predicate must see the same-job layout this task exists for; if this fails because " +
     "flow-0135 has landed, the predicate is doing its job — update this criterion with it");
@@ -73,7 +78,7 @@ test("flow-0134 criterion 2: today's layout is reported, naming `fix`, when arme
   assert.deepEqual(boundaryViolations(WORKFLOW, "review:\n  model: opus\n"), [], "absent key = off");
 });
 
-test("flow-0134 criterion 3: a layout whose model jobs never reference FLOW_PAT passes, armed or not", () => {
+test("flow-0134 criterion 3: a layout whose model jobs never reference FLOW_PAT passes, armed or not", { skip }, () => {
   const split = `
 on: workflow_call
 jobs:
