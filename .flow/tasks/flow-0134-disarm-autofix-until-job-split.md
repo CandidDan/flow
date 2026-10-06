@@ -1,13 +1,13 @@
 ---
 id: "flow-0134"
 title: "Switch auto-fix off in canonical while the fixer's job also holds FLOW_PAT, and pin it off until flow-0135 splits the job"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "orchestrator-cowork-2026-10-06"
 created: "2026-10-06"
-started: ""
-branch: ""
+started: "2026-10-06T05:01:22Z"
+branch: "flow/flow-0134-disarm-autofix-until-job-split"
 pr: ""
 issue: ""
 blocked_reason: ""
