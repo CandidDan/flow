@@ -16,8 +16,10 @@ serves: ["maintenance"]
 touches:
   - ".flow/config.yml"
   - ".flow/bin/kickback-credential-boundary.test.mjs"
+  - ".flow/bin/flow-kickback-workflow.test.mjs"
 labels: [security, kickback, urgent]
 notes:
+  - "2026-10-06 (orchestrator): touches WIDENED by `.flow/bin/flow-kickback-workflow.test.mjs`, which pins canonical's live `auto_fix_rounds` at 2 ('canonical dogfoods the thing it ships'). Disarming is this task's scope, so that pin must move to 0 here; flow-0135 (which already lists the file) moves it back to 2."
   - "2026-10-06 (orchestrator): URGENT, applied with Dan's approval (2026-10-06) — bypasses queue_cap. ORIGIN: the security review on progress#122 (the 3.1.1 sync) rated High: in `_flow-kickback.yml`, the `fix` job runs claude-code-action with `--permission-mode bypassPermissions` over PR comments, and a LATER STEP OF THE SAME JOB (`stamp-and-push`) holds FLOW_PAT and runs `git commit --amend` with hooks enabled. A prompt-injected comment can plant `.git/hooks/pre-commit`, or write `$GITHUB_ENV` (e.g. BASH_ENV) / `$GITHUB_PATH` (a fake `git`), and lift FLOW_PAT — fleet-wide, repo + workflow scope. Verified by the orchestrator against main. Canonical is the only armed repo (`review.auto_fix_rounds: 2`; progress, Nudge, later, inflight, write and tanplan-platform all leave it unset) and is public. The reviewer's second claim — that arming is unreviewed because `.flow/config.yml` is outside `security_paths` — is wrong: `.flow/**` is in flow-review's non-configurable SECURITY_FLOOR_PATHS."
   - "2026-10-06 (orchestrator): this task is the stopgap only. The fix (guards + push in their own job) is flow-0135. Do not touch `_flow-kickback.yml` here."
 ---
