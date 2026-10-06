@@ -64,7 +64,7 @@ function skillSection(heading) {
 // shows up as a mismatch instead of quietly shrinking both sides of the comparison.
 const INTENDED_KEYS = [
   "id", "title", "status", "priority", "project", "owner", "created", "started",
-  "branch", "pr", "issue", "blocked_reason", "blocked_by", "serves", "touches", "labels", "notes",
+  "branch", "pr", "issue", "blocked_reason", "blocked_by", "serves", "intent", "touches", "labels", "notes",
   "asks",
 ];
 // `blocked_by` was added by flow-0040, directly under `blocked_reason` — the machine-readable
@@ -76,6 +76,10 @@ const INTENDED_KEYS = [
 // handoff to the next SESSION, `asks` is the queue for the HUMAN), and a reader who finds one
 // without the other has only half the rule. Last, because it is the only field a human reads
 // before a machine does.
+//
+// `intent` was added by flow-0074, directly under `serves` — the two answer one question from two
+// ends (`serves` names the long-lived goal, `intent` the approved outcome the task was cut from),
+// so a reader filling one should find the other beside it.
 
 test("_TEMPLATE.md carries `serves` between blocked_reason and touches, with the other keys unchanged", () => {
   assert.deepEqual(KEY_ORDER, INTENDED_KEYS,

@@ -201,6 +201,15 @@ review:
     - "package.json"                    # dependency changes, whatever the lockfile stack
     - "package-lock.json"
 
+# The intent rule's start date (ADR-0007 slice 2). Uncomment when this repo starts writing intents
+# (`.flow/intents/`, via the intent-writer skill), set to that day. From then on, a `ready` task
+# created on or after the date and serving anything other than `maintenance` should name the
+# intent it derives from in `intent:`, and flow-doctor WARNS when it doesn't. Tasks created before
+# the date are never asked for one — forward-only, no backfill, no hand-kept grandfather list.
+# While `.flow/intents/` exists and this is unset, flow-doctor reports ONE warning naming the key.
+# intents:
+#   required_from: "YYYY-MM-DD"
+
 # Branch + PR conventions (kept here so agents and CI agree).
 git:
   base_branch: "main"

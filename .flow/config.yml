@@ -70,6 +70,14 @@ claude_md_max: 12000
 # drains below 8. Removing the key switches the cap off entirely.
 queue_cap: 8
 
+# The intent rule's start date (flow-0074, ADR-0007 slice 2). A `ready` task created on or after
+# this date, serving anything other than `maintenance`, should name the intent it derives from in
+# `intent:` — flow-doctor WARNS when it doesn't. Forward-only by construction: tasks created
+# before it are never asked for one, and nothing is backfilled (a backfill would mean a session
+# inventing the human's past reasons). Set to the date flow-0074's PR was opened.
+intents:
+  required_from: "2026-10-06"
+
 # Gate-coverage floor. Note an honest limitation, recorded rather than papered over: every one
 # of canonical's source trees lives under a dot-directory (`.flow/bin/`, `.github/workflows/`,
 # `project-template/.flow/bin/`), and flow-doctor's undeclared-tree scan skips dot-directories.
