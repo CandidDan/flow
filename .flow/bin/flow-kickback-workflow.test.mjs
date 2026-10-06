@@ -633,7 +633,10 @@ const TEMPLATE_CONFIG = join(REPO, "project-template", ".flow", "config.yml");
 const CANON_CONFIG = join(REPO, ".flow", "config.yml");
 const DOCS = join(REPO, "docs", "flow-reusable-workflows.md");
 
-test("the template ships auto_fix_rounds COMMENTED OUT; canonical sets it to 2", () => {
+// Canonical is at 0, not 2, until flow-0135 (flow-0134): the `fix` job runs the model and pushes
+// with FLOW_PAT from the same job, and kickback-credential-boundary.test.mjs keeps auto-fix off
+// while that is true. flow-0135 splits the job and restores 2 here.
+test("the template ships auto_fix_rounds COMMENTED OUT; canonical sets it to 0 until flow-0135", () => {
   const template = src(TEMPLATE_CONFIG).split("\n")
     .filter((l) => l.includes("auto_fix_rounds:"));
   assert.ok(template.length > 0, "the template must document the key, or an adopting repo never learns it exists");
@@ -643,7 +646,8 @@ test("the template ships auto_fix_rounds COMMENTED OUT; canonical sets it to 2",
   }
   const live = src(CANON_CONFIG).split("\n")
     .map((l) => l.trim()).filter((l) => /^auto_fix_rounds:/.test(l));
-  assert.deepEqual(live, ["auto_fix_rounds: 2"], "canonical dogfoods the thing it ships, at 2");
+  assert.deepEqual(live, ["auto_fix_rounds: 0"],
+    "canonical is disarmed until flow-0135 moves FLOW_PAT out of the model's job (flow-0134)");
 });
 
 test("the template's commented key explains the hard maximum and the FLOW_PAT requirement", () => {
