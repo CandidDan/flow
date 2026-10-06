@@ -37,6 +37,17 @@ serves: []                # the VISION.md goal ids this task advances, e.g. ["G1
                           # vision is missing a goal — amend VISION.md first (branch + PR);
                           # (c) drift being born — don't write the task. Surface which one.
                           # Never reach for the nearest plausible id to fill the field.
+intent: ""                # the id of the intent this task derives from — a file in
+                          # .flow/intents/ that is already on `main` (merged by PR, which is
+                          # what approved it; its `status` is not consulted). The link runs
+                          # one way: never edit the intent to point back here.
+                          # Empty only for `serves: ["maintenance"]` work, or for a task
+                          # created before the repo's `intents.required_from` date.
+                          # No intent for product work? Stop and say so: the human approves the
+                          # intent first (intent-writer skill), in its own PR — never write it
+                          # in the session that writes this task.
+                          # flow-doctor: a ready task naming an id no intent declares FAILS; a
+                          # missing one on new product work WARNS.
 touches: []               # path globs this task expects to modify, e.g. ["src/signup/**", "api/subscribe.*"]
                           # concurrency: a ready task is skipped while its touches overlap an in_progress one
 labels: []                # optional, e.g. [frontend, infra, spike]

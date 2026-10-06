@@ -88,6 +88,14 @@ const PRE_MOVE_SECTION_DIGESTS = [
 // same commit as the edit, with a `why` a reader can check against the diff. An entry whose
 // digest equals the pre-move one is noise and fails its own test below.
 const INTENTIONAL_DIVERGENCES = new Map([
+  ["Hard rules", {
+    digest: "6386a64fd65d088f38c297b23386f60d129fec7dc23ee0c0e5ebe358e89acd01",
+    why: "the human's first touchpoint moved from approving each task spec to approving the " +
+         "intent it derives from (ADR-0007 slice 2). A new rule says product work names an " +
+         "intent already on `main`, that the session writing a task never writes its intent, " +
+         "and that `maintenance` is exempt. No existing rule was reworded.",
+    task: "flow-0074",
+  }],
   ["Response style — show, don't tell", {
     digest: "853df84a5dc41392daf887fb708ecbe65f664d8f6d25b3d76797d3e24d23e6d6",
     why: "the section told workers they \"auto-load this file\", which stopped being true the " +
