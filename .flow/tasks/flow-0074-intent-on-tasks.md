@@ -25,9 +25,11 @@ touches:
   - ".flow/config.yml"
   - ".flow/bin/intent-derivation-docs.test.mjs"
   - ".flow/bin/protocol-portability.test.mjs"
+  - ".flow/bin/serves-template.test.mjs"
   - "changes/flow-0074.md"
 labels: [intent-layer, protocol, flow-doctor, task-writer]
 notes:
+  - "2026-10-06 (orchestrator): touches WIDENED by a second path, `.flow/bin/serves-template.test.mjs`. It pins the task template's frontmatter keys in order (INTENDED_KEYS), and its own comment says an addition to the published template is made deliberate by updating that table as the companion edit. Adding `intent` to `_TEMPLATE.md` (in scope) requires it. No other change to scope."
   - "2026-10-06 (orchestrator): touches WIDENED by one path, `.flow/bin/protocol-portability.test.mjs`. The scope requires a new rule under PROTOCOL.md's `## Hard rules`, and that section's digest is pinned there; an intentional edit must be recorded in its INTENTIONAL_DIVERGENCES in the same commit (the test's own procedure). The scope always implied this file; the original touches missed it. No other change to scope."
   - "2026-10-04 (worker): NOT CLAIMED — concurrency refusal, not a block. Dispatched for this task, but its `touches` overlaps flow-0119 (`in_review`, PR #175 open, unmerged) on four paths: `project-template/.flow/tasks/_TEMPLATE.md`, `project-template/.flow/bin/flow-doctor.mjs`, `project-template/.flow/bin/flow-doctor.test.mjs`, `project-template/.flow/PROTOCOL.md`. PROTOCOL.md's Concurrency section makes `in_review` an in-flight status, so this task is ineligible to claim; `node .flow/bin/pick-task.mjs` agrees and returns flow-0066 instead. Status left `ready`, no branch cut, nothing built. NEXT ACTION: re-dispatch flow-0074 once PR #175 merges (or closes) and flow-0119 leaves in-flight — nothing else needs doing first. The 2026-09-24 sequencing note names flow-0052 as the overlap to watch; flow-0119 is the one actually holding it today."
   - "2026-09-27 (orchestrator): unblocked. flow-0063 is done, and ADR-0007 has one commit (30e9769, inside flow-0063), so it did not change at approval and the notes below need no reconciling. Sequencing still holds: flow-0052 (ready) also edits `flow-doctor.mjs`; pick-task keeps them apart."
