@@ -1,7 +1,7 @@
 ---
 id: "flow-0134"
 title: "Switch auto-fix off in canonical while the fixer's job also holds FLOW_PAT, and pin it off until flow-0135 splits the job"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "orchestrator-cowork-2026-10-06"
