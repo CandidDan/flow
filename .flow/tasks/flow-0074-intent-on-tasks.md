@@ -9,7 +9,7 @@ owner: "orchestrator-cowork-2026-10-06"
 created: "2026-09-24"
 started: "2026-10-06T01:12:26Z"
 branch: "flow/flow-0074-intent-on-tasks"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/185"
 issue: ""
 blocked_reason: ""
 blocked_by: []
