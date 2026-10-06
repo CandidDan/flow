@@ -2,13 +2,13 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0074"
 title: "intent: on tasks — a ready task names the intent it derives from (warn-first, forward-only)"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "orchestrator-cowork-2026-10-06"
 created: "2026-09-24"
-started: ""
-branch: ""
+started: "2026-10-06T01:12:26Z"
+branch: "flow/flow-0074-intent-on-tasks"
 pr: ""
 issue: ""
 blocked_reason: ""
