@@ -8,7 +8,7 @@ owner: "orchestrator-cowork-2026-10-08"
 created: "2026-10-08"
 started: "2026-10-07T22:49:27Z"
 branch: "flow/flow-0136-gates-skip-drafts-cancel-superseded"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/187"
 issue: ""
 blocked_reason: ""
 blocked_by: []
