@@ -1,7 +1,7 @@
 ---
 id: "flow-0136"
 title: "PR gates skip drafts, and a newer push cancels the gate and review runs it supersedes"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "orchestrator-cowork-2026-10-08"
