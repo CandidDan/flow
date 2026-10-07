@@ -35,8 +35,17 @@ on:
         type: string
         default: ""
 
+
+# DRAFTS ARE NOT GATED (flow-0136). Every job below skips on a draft `pull_request`; `github.event`
+# here is the CALLER's event. A Flow worker runs this whole gate locally before it marks its PR
+# ready (protocol step 4), so a draft run re-proves what was already proven, and it was the largest
+# line on the fleet's Actions bill: measured 1–8 Oct 2026, gates were ~39% of ~15,300 billed
+# minutes across six private adopters, almost one full run per push. The caller lists
+# `ready_for_review` so the PR is gated the moment it leaves draft, and cancels a superseded run.
+# `workflow_dispatch` is never skipped.
 jobs:
   gate:
+    if: (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -243,6 +252,7 @@ jobs:
   # the foundation's own Definition of Done ("every behaviour has a proving test") applies
   # to the tooling too. Stays independent of the per-stack gate above.
   flow-tooling:
+    if: (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -260,7 +270,7 @@ jobs:
   # Scope enforcement: a task-carrying PR's diff must stay within the task's declared `touches`.
   # Runs in the per-stack gate job (needs the PR diff + base). Mirrors the store-guard.
   touches:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -395,6 +405,7 @@ jobs:
   # TWO JOBS, not one: a matrix cannot be computed by the job that uses it. `plan` reads the config
   # and emits the entries that need their own job; `source-root` fans out over them.
   source-roots-plan:
+    if: (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -502,7 +513,7 @@ jobs:
   # in parentheses when the job runs.
   source-root:
     needs: source-roots-plan
-    if: needs.source-roots-plan.outputs.count != '0'
+    if: needs.source-roots-plan.outputs.count != '0' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     name: source-root
     runs-on: ubuntu-latest
     strategy:
