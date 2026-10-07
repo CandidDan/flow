@@ -1,13 +1,13 @@
 ---
 id: "flow-0136"
 title: "PR gates skip drafts, and a newer push cancels the gate and review runs it supersedes"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "orchestrator-cowork-2026-10-08"
 created: "2026-10-08"
-started: ""
-branch: ""
+started: "2026-10-07T22:49:27Z"
+branch: "flow/flow-0136-gates-skip-drafts-cancel-superseded"
 pr: ""
 issue: ""
 blocked_reason: ""
