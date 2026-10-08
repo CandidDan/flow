@@ -1,7 +1,7 @@
 ---
 id: "flow-0138"
 title: "The task-template intent test runs in canonical only, so an adopting repo's own task template cannot fail flow-tooling"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "orchestrator-cowork-2026-10-08"
