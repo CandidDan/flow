@@ -1,7 +1,7 @@
 ---
 id: "flow-0139"
 title: "The intent rule binds only a repo that has adopted intents, so task-writer no longer refuses product work everywhere else"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "orchestrator-cowork-2026-10-08"
