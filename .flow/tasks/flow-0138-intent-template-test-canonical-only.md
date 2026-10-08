@@ -1,14 +1,14 @@
 ---
 id: "flow-0138"
 title: "The task-template intent test runs in canonical only, so an adopting repo's own task template cannot fail flow-tooling"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "orchestrator-cowork-2026-10-08"
 created: "2026-10-08"
 started: "2026-10-08T00:41:40Z"
 branch: "flow/flow-0138-intent-template-test-canonical-only"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/189"
 issue: ""
 blocked_reason: ""
 blocked_by: []
