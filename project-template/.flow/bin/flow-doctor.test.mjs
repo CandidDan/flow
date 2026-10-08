@@ -2150,11 +2150,17 @@ test("flow-0074: parseIntentsRequiredFrom reads the nested key, and nothing else
   rmSync(dir, { recursive: true, force: true });
 });
 
-// The task template ships in an adopting repo too (flow-sync does not touch a repo's own copy, but
-// flow-init scaffolds it), so this reads the template beside this file wherever it runs.
+// CANONICAL-ONLY (flow-0138). In canonical, `../tasks/_TEMPLATE.md` is project-template's published
+// template. In an adopting repo the same relative path is the repo's OWN task template, which
+// flow-sync never touches, so it carries no `intent:` until the repo adds one, and asserting on it
+// failed flow-tooling in every 3.2.0 sync PR. The flow-0133 lesson, again: a synced test may only
+// read synced files. Run it where the file is canonical's, skip it visibly everywhere else.
 const TASK_TEMPLATE_PATH = join(import.meta.dirname, "..", "tasks", "_TEMPLATE.md");
+const criterion9Skip = (canonical, templateExists) =>
+  !canonical ? "canonical-only: in an adopting repo .flow/tasks/_TEMPLATE.md is the repo's own, never synced"
+    : templateExists ? false : "no .flow/tasks/_TEMPLATE.md beside this file";
 test("flow-0074 criterion 9: the task _TEMPLATE.md declares `intent` as an empty string, and doctor ignores the template",
-  { skip: existsSync(TASK_TEMPLATE_PATH) ? false : "no .flow/tasks/_TEMPLATE.md beside this file" }, () => {
+  { skip: criterion9Skip(inCanonical, existsSync(TASK_TEMPLATE_PATH)) }, () => {
   const text = readFileSync(TASK_TEMPLATE_PATH, "utf8");
   const head = text.slice(3, text.indexOf("\n---", 3));
   const m = head.match(/^intent:\s*(.*)$/m);
@@ -2176,4 +2182,15 @@ test("flow-0074 criterion 12: canonical sets intents.required_from, and its own 
   const r = runDoctor({ flowDir: canonFlow, gitStatus: () => ({ inRepo: false }) });
   assert.deepEqual(r.problems.filter((p) => /\bintent\b|intents\.required_from/.test(p)), []);
   assert.ok(!r.warnings.some((w) => w.includes(INTENTS_REQUIRED_FROM_KEY)), "the key is set, so no unset-key warning");
+});
+
+test("flow-0138: criterion 9 runs in canonical, and skips in an adopting repo naming the repo-owned template", () => {
+  assert.match(String(criterion9Skip(false, true)), /canonical-only.*repo's own, never synced/,
+    "an adopting repo must skip, whatever its template says");
+  assert.equal(criterion9Skip(true, true), false, "canonical with its template must run the check");
+});
+
+test("flow-0138: in canonical, criterion 9 is not skipped", { skip: inCanonical ? false : "canonical-only" }, () => {
+  assert.equal(criterion9Skip(inCanonical, existsSync(TASK_TEMPLATE_PATH)), false,
+    "canonical lost project-template/.flow/tasks/_TEMPLATE.md, or the skip condition widened");
 });
