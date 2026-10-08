@@ -131,9 +131,10 @@ entirely. Don't force them through the readiness bar at capture time, and don't 
   the digest) drafts a full ready-task spec *as a comment on each issue* and labels it
   `proposed`. You approve by flipping the label to `approved` — one tap, works from a phone —
   and the next sweep creates the ready task (linked via `issue:`, issue labelled `triaged`).
-  This approves an issue's conversion into a task; it is not touchpoint 1. Touchpoint 1 is
-  approving the **intent** — merging its PR into `.flow/intents/` — and tasks are derived from
-  it. A triaged task that serves a product goal and names no intent is reported by `flow-doctor`
+  This approves an issue's conversion into a task. In a repo that has adopted intents
+  (`.flow/intents/` exists and `intents.required_from` is set), touchpoint 1 is approving the
+  **intent** — merging its PR into `.flow/intents/` — and tasks are derived from it; until then it
+  is approving the task spec. A triaged task that serves a product goal and names no intent is reported by `flow-doctor`
   as a warning: how triage fits the intent layer is a decision still open, kept visible on purpose.
 - **The `auto-ok` lane** is your pre-authorised fast path: label an issue `auto-ok` (typos, dep
   bumps, the genuinely mechanical) and triage converts it straight to a ready task, no proposal

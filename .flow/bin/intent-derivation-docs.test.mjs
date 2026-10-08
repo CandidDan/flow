@@ -38,14 +38,29 @@ const flat = (s) => s.replace(/\s+/g, " ");
 // ── criterion 10: task-writer ──
 const PROCEDURE = flat(section(SKILL, "Procedure"));
 
+// flow-0139: the requirement binds only a repo that has ADOPTED intents. flow-0074 shipped it
+// unconditionally, so in every repo on 3.2.x task-writer refused all product work, because no
+// adopter had intents yet. These tests now pin the condition, both signals, and the fallback.
+test("flow-0139: task-writer's intent step applies only once the repo has adopted intents, naming both signals", () => {
+  assert.match(PROCEDURE, /only if this repo has adopted intents/);
+  assert.match(PROCEDURE, /`\.flow\/intents\/` exists, \*\*and\*\* `\.flow\/config\.yml` sets `intents\.required_from`/);
+  assert.match(PROCEDURE, /If either is missing, skip this step: leave `intent: ""` and write the task as before/);
+});
+
+test("flow-0139: no document points at an intent-writer skill that does not exist yet", () => {
+  for (const [name, text] of [["task-writer SKILL.md", SKILL], ["PROTOCOL.md", PROTOCOL], ["README.md", README]]) {
+    assert.doesNotMatch(text, /intent-writer/, `${name} references intent-writer, which is not shipped (flow-0072)`);
+  }
+});
+
 test("criterion 10: task-writer's Procedure requires an intent already on main for product work", () => {
   assert.match(PROCEDURE, /intent already on `main`/);
   assert.match(PROCEDURE, /Set `intent` to that intent's `id`/);
   assert.match(PROCEDURE, /If no such intent exists, say so to the human and stop/);
 });
 
-test("criterion 10: task-writer's Procedure forbids writing the intent in the same session, naming intent-writer", () => {
-  assert.match(PROCEDURE, /\*\*intent-writer\*\* skill/);
+test("criterion 10: task-writer's Procedure forbids writing the intent in the same session", () => {
+  assert.match(PROCEDURE, /written and merged in its own PR, by the human or in a separate session/);
   assert.match(PROCEDURE, /Do not write the intent yourself/);
   assert.match(PROCEDURE, /authorship and approval in the same context/);
 });
@@ -55,7 +70,7 @@ test("criterion 10: task-writer's Procedure exempts maintenance work", () => {
 });
 
 test("criterion 10: task-writer's Pre-flight checks that `intent` resolves", () => {
-  assert.match(flat(section(SKILL, "Pre-flight")), /`intent` resolves\..*`\.flow\/intents\/` on `main`/);
+  assert.match(flat(section(SKILL, "Pre-flight")), /`intent` resolves\*\* \(adopted repos only.*`\.flow\/intents\/` on `main`/);
 });
 
 test("task-writer's procedure steps stay numbered 1..n, with the cross-reference following its step", () => {
@@ -68,26 +83,24 @@ test("task-writer's procedure steps stay numbered 1..n, with the cross-reference
 // ── criterion 11: PROTOCOL.md and README.md ──
 const INTRO = flat(PROTOCOL.slice(0, PROTOCOL.indexOf("\n## ")));
 
-test("criterion 11: PROTOCOL.md states touchpoint 1 as approving the intent, and the PR at the end", () => {
-  assert.match(INTRO, /The human approves the \*\*intent\*\* up front/);
-  assert.match(INTRO, /and the PR at the end/);
-});
-
-test("criterion 11: PROTOCOL.md no longer says the human approves the task spec up front", () => {
-  assert.doesNotMatch(flat(PROTOCOL), /approves the spec/i);
-  assert.doesNotMatch(flat(PROTOCOL), /spec up front/i);
+test("criterion 11 / flow-0139: PROTOCOL.md states touchpoint 1 as the intent in an adopted repo, the spec otherwise", () => {
+  assert.match(INTRO, /The human approves work up front and the PR at the end/);
+  assert.match(INTRO, /In a repo that has \*\*adopted intents\*\* \(`\.flow\/intents\/` exists and `\.flow\/config\.yml` sets `intents\.required_from`\), the up-front approval is the \*\*intent\*\*/);
+  assert.match(INTRO, /Until a repo adopts intents, the human approves the task spec/);
 });
 
 test("criterion 11: PROTOCOL.md's Hard rules carry the derive-from-an-intent rule", () => {
   const rules = flat(section(PROTOCOL, "Hard rules"));
-  assert.match(rules, /\*\*Product work derives from an approved intent\.\*\*/);
+  assert.match(rules, /\*\*Product work derives from an approved intent, once the repo has adopted intents\*\*/);
+  assert.match(rules, /until then this rule does not\s+apply/);
   assert.match(rules, /never writes the intent it derives from/);
   assert.match(rules, /`maintenance` work needs no intent/);
 });
 
 test("criterion 11: README.md states touchpoint 1 as approving the intent, and keeps the triage lane", () => {
   const r = flat(README);
-  assert.match(r, /Touchpoint 1 is approving the \*\*intent\*\*/);
+  assert.match(r, /In a repo that has adopted intents .* touchpoint 1 is approving the \*\*intent\*\*/);
+  assert.match(r, /until then it is approving the task spec/);
   assert.match(r, /\*\*Triage proposes; you approve\.\*\*/, "the triage description stays");
 });
 
