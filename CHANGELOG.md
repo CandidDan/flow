@@ -6,6 +6,53 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 3.2.0 — 2026-10-08
+
+**MINOR: PR gates stop running on drafts, which was the fleet's largest Actions cost.** Measured
+1–8 Oct across six private adopters: ~15,300 billed minutes (≈ $30/day). The gate and review were
+~62% of it, mostly re-running on every draft push. Gates now run when a PR leaves draft, and a
+newer push cancels the run it supersedes (flow-0136). Also: tasks name the intent they derive from
+(flow-0074, warn-first). **No required caller action:** re-run flow-sync to pick up the new callers.
+A repo with a customised `flow-gates.yml` ports the gate change by hand (see flow-0136).
+
+- **A task names the intent it derives from, and the human's first touchpoint moves to approving
+  the intent** — ADR-0007 slice 2 (`project-template/.flow/bin/flow-doctor.mjs`,
+  `.flow/tasks/_TEMPLATE.md`, `PROTOCOL.md`, `task-writer` skill, flow-0074). **Caller action, optional:**
+  when your repo starts writing intents, add `intent: ""` to your own `.flow/tasks/_TEMPLATE.md`
+  (flow-sync never touches it) and set `intents.required_from: "YYYY-MM-DD"` in
+  `.flow/config.yml` to that day. Until you set it, a repo that has a `.flow/intents/` directory
+  sees **one** warning naming the key; a repo without one sees nothing new.
+
+  Tasks gain an `intent:` field holding the id of an intent already on `main` in `.flow/intents/`.
+  Merging the intent's PR is the approval, so the intent's `status` is not read. flow-doctor,
+  active only when `.flow/intents/` exists:
+  - a `ready` task created on or after `intents.required_from`, serving anything but
+    `maintenance`, with no `intent` → **warning** (warn-first; escalating it is a later task);
+  - an `intent` naming no intent's `id` → **failure** on a `ready` task, warning otherwise. No
+    task carried the field before, so this cannot redden an existing store;
+  - an `intent` naming a `superseded` intent → warning.
+
+  Forward-only: tasks created before the date are never asked for an intent, and nothing is
+  backfilled. `PROTOCOL.md` now says the human approves the intent up front and the PR at the end,
+  and gains a hard rule: the session that writes a task never writes the intent it derives from.
+  `task-writer` stops and says so when product work has no intent on `main`. The triage lane is
+  unchanged: a triaged product task with no intent warns, which keeps that open question visible.
+
+- **PR gates skip draft PRs, and a newer push cancels the gate and review runs it supersedes**
+  (`.github/workflows/_flow-gates.yml`, the `flow-gates.yml` and `flow-review.yml` callers,
+  flow-0136). **No caller action** beyond the next flow-sync, which delivers the updated callers.
+  **Exception:** a repo that keeps a customised `flow-gates.yml` (tanplan-platform does, for its
+  Postgres-backed suite) does not receive this by sync. Port the `types:`, the per-job draft clause
+  and the `concurrency:` block by hand (tanplan-platform did, in tanplan-0075).
+
+  Measured 1–8 Oct 2026 across six private adopters: ~15,300 billed Actions minutes. The PR gate
+  was ~39% of that and the review ~23%, because the gate ran in full on every push to a draft, and
+  no caller cancelled a superseded run. Now every gate job skips on a draft (`github.event` in the
+  reusable is the caller's event), and the callers fire on `ready_for_review`, so the PR is gated
+  the moment it leaves draft. Both callers also declare a per-PR `concurrency` group that cancels
+  in-flight runs on `pull_request` events only; a manual `workflow_dispatch` run is never
+  cancelled. A cancelled review is not a failure, so it never starts a kickback round.
+
 ## 3.1.1 — 2026-10-05
 
 **PATCH: the 3.1.0 sync PRs go green in adopting repos.** One canonical test (flow-0119's asks
