@@ -170,7 +170,9 @@ test("no reviewer names a model — every one reads it from the plan job", { ski
     "everything else here: it cannot have a knob of its own without a `guide_model` output on the " +
     "plan job, and the point stands either way — no model is named in this file.");
   for (const flag of modelFlags) {
-    assert.match(flag, /^\$\{\{\s*needs\.plan\.outputs\.(security_)?model\s*\}\}$/,
+    // flow-0140: code-review reads `code_review_model`, falling back to `model` with `||` for an
+    // adopter whose base-branch helper predates the key. Still a plan output either way.
+    assert.match(flag, /^\$\{\{\s*needs\.plan\.outputs\.((security_)?model|code_review_model\s*\|\|\s*needs\.plan\.outputs\.model)\s*\}\}$/,
       `"${flag}" hardcodes a model. It belongs in the consuming repo's .flow/config.yml under ` +
       `review.model, so a project tunes its reviewers as data instead of patching shared infra.`);
   }

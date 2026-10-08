@@ -64,7 +64,12 @@ const __isMain = (() => {
 // `_flow-review.yml` names a model, so a repo changes every reviewer by editing config.yml.
 // `plan` reports loudly when it falls back, so an unconfigured repo is visible rather than
 // quietly running on whatever this line happens to say.
-export const DEFAULT_MODEL = "sonnet";
+//
+// A FULL model ID, never an alias (flow-0140). An alias resolves through whatever Claude Code CLI
+// the claude-code-action pin happens to install, and an older CLI resolves it to an older model —
+// which is how every reviewer ran a generation behind with nothing reporting it. A full ID makes
+// a new model a one-line, reviewed change.
+export const DEFAULT_MODEL = "claude-sonnet-5-5";
 
 // Cap on the diff handed to a reviewer, when nothing else says otherwise. The bound is the cost
 // control: reviewers read the diff and its blast radius, never the whole repo. A truncated diff is
@@ -286,6 +291,7 @@ export function parseReviewConfig(src) {
   const model = stringAt(b, "model");
   if (!model) warnings.push(`review.model is not set — falling back to "${DEFAULT_MODEL}".`);
   const securityModel = stringAt(b, "security_model");
+  const codeReviewModel = stringAt(b, "code_review_model");
   const securityPaths = listAt(b, "security_paths");
   // `null`, not the default, when the key is absent. The two facts are different — "this repo
   // chose 300000" and "this repo chose nothing" — and only `resolveMaxDiffBytes` may collapse
@@ -296,6 +302,10 @@ export function parseReviewConfig(src) {
     model: checkModel(model || DEFAULT_MODEL, "model"),
     // A repo that wants a deeper model on security diffs says so; otherwise one model, one knob.
     securityModel: checkModel(securityModel || model || DEFAULT_MODEL, "security_model"),
+    // flow-0140: the code-review check may run a stronger model than qa and the guide — builds
+    // run on Sonnet, and a reviewer of the same model shares the builder's blind spots. Same
+    // shape as `security_model`: optional, falls back to `model`, validated the same way.
+    codeReviewModel: checkModel(codeReviewModel || model || DEFAULT_MODEL, "code_review_model"),
     securityPaths,
     maxDiffBytes,
     configured: block !== null,
@@ -1245,6 +1255,7 @@ export function runReviewCli(argv, {
       emit(env.GITHUB_OUTPUT, [
         `model=${cfg.model}`,
         `security_model=${cfg.securityModel}`,
+        `code_review_model=${cfg.codeReviewModel}`,
         `security_run=${security.run}`,
         `security_reason=${security.reason.replace(/\r?\n/g, " ")}`,
         `changed_count=${changedFiles.length}`,
@@ -1377,6 +1388,8 @@ export function planSummary({
     "### Flow review gate — plan",
     "",
     `- reviewer model: \`${cfg.model}\`${cfg.configured ? "" : " *(default — no `review:` block in .flow/config.yml)*"}`,
+    // `?? cfg.model` so a caller holding an older cfg (no codeReviewModel) still renders the truth.
+    `- code-review model: \`${cfg.codeReviewModel ?? cfg.model}\``,
     `- security reviewer model: \`${cfg.securityModel}\``,
     `- changed files: ${changedFiles.length}`,
     `- diff handed to the reviewers: ${diff.bytes} bytes${diff.truncated ? ` **(truncated from ${diff.fullBytes})**` : ""}`,

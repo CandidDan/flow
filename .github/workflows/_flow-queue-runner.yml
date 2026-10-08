@@ -252,7 +252,7 @@ jobs:
       - name: Work the task (fresh worker session)
         id: work
         if: ${{ steps.pick.outputs.task_id != '' }}
-        uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+        uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         env:
           # The worker shells out to `gh` (pr create, pr ready, issue create) and `gh` reads its
           # credential from the environment, not from the action's `github_token:` input. Without
@@ -283,9 +283,12 @@ jobs:
           github_token: ${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}
           # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}   # pay-per-use alternative
           # The build role gets the strongest model — fewer blocks/kickbacks = fewer human
-          # touchpoints, which is the whole point of the loop. Alias (not a pinned version) so it
-          # tracks the latest Opus. Note: heavier on Max-plan quota than Sonnet. The independent
-          # reviewer (flow-review) is deliberately left on a different model for genuine diversity.
+          # touchpoints, which is the whole point of the loop. A FULL model ID, never an alias
+          # (flow-0140): an alias resolves through whatever CLI the action pin installs, and the
+          # v1.0.219 pin's CLI resolved `opus` to Opus 5, a generation behind, with nothing saying
+          # so. A new model is now a one-line, reviewed change here (flow-0083 makes it per-task).
+          # The step after this one reports the model that actually answered.
+          # Note: heavier on Max-plan quota than Sonnet.
           #
           # model + permissions go through claude_args, NOT as top-level inputs. This action version
           # has no `model` input — passing one emitted "Unexpected input(s) 'model'" and silently fell
@@ -311,7 +314,7 @@ jobs:
           # Confirm work is actually carrying forward (a branch pushed, a `notes` entry on main) before
           # concluding the task genuinely needs more turns. A task that truly cannot fit is oversized:
           # splitting it beats buying turns.
-          claude_args: "--max-turns 120 --model opus --permission-mode bypassPermissions"
+          claude_args: "--max-turns 120 --model claude-opus-5-5 --permission-mode bypassPermissions"
           prompt: |
             You are the Flow worker for a single task. Read CLAUDE.md (the protocol) and the task
             file in .flow/tasks/ whose id is "${{ steps.pick.outputs.task_id }}". Run the full loop:
@@ -351,6 +354,47 @@ jobs:
                 you were planning to write at the end is a note that never gets written.
             A capped run that pushed a branch and left a note costs one cycle. A capped run that
             pushed nothing costs the whole run, and the next worker starts from zero.
+
+      # flow-0140: name the model that actually answered, read from the action's own output,
+      # so a pin whose CLI resolves to a different model can never again run unreported.
+      - name: Report the model that answered
+        if: ${{ always() && steps.pick.outputs.task_id != '' }}
+        env:
+          EXECUTION_FILE: ${{ steps.work.outputs.execution_file }}
+          REQUESTED_MODEL: claude-opus-5-5
+          CLAUDE_STEP: worker
+        run: |
+          # flow-0140. claude-code-action has no output naming the model. Its `execution_file` output is
+          # the SDK message stream as JSON (base-action/src/run-claude-sdk.ts at v1.0.245): the `result`
+          # message's `modelUsage` is keyed by every model that answered, `assistant` messages carry
+          # `message.model`, and `system`/`init` carries the model the CLI resolved. Read in that order.
+          # Every value arrives through env, never an expression. Reporting only: it never fails the job.
+          node - <<'FLOW_MODEL_REPORT'
+          const fs = require("fs");
+          const { EXECUTION_FILE: file = "", REQUESTED_MODEL: want = "", CLAUDE_STEP: step = "claude" } = process.env;
+          let seen = [];
+          try {
+            const msgs = JSON.parse(fs.readFileSync(file, "utf8"));
+            const from = (f) => [...new Set(msgs.flatMap((m) => { try { return f(m) ?? []; } catch { return []; } }))]
+              .filter((v) => typeof v === "string" && /^[A-Za-z0-9][\w.:\[\]-]*$/.test(v));
+            for (const f of [
+              (m) => (m.type === "result" ? Object.keys(m.modelUsage ?? {}) : []),
+              (m) => (m.type === "assistant" ? [m.message.model] : []),
+              (m) => (m.type === "system" && m.subtype === "init" ? [m.model] : []),
+            ]) { seen = from(f); if (seen.length) break; }
+          } catch { seen = []; }
+          const code = (v) => "`" + v + "`";
+          const lines = [`### Model: ${step}`, "",
+            `- requested: ${want ? code(want) : "none passed, so the CLI's default"}`,
+            `- answered: ${seen.length ? seen.map(code).join(", ") : `not reported by the action (requested ${want ? code(want) : "the CLI's default"})`}`];
+          if (want && seen.length && !seen.includes(want)) {
+            lines.push(`- **mismatch:** requested ${code(want)}, answered by ${seen.map(code).join(", ")}`);
+            console.log(`::warning::${step} requested ${want} but was answered by ${seen.join(", ")}`);
+          }
+          const out = lines.join("\n") + "\n\n";
+          process.stdout.write(out);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          FLOW_MODEL_REPORT
 
       # The protocol's definition of a finished run is one of exactly three outcomes: a pushed
       # `flow/<id>-*` branch ahead of main, an open PR, or a `blocked` transition with a reason.

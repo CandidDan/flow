@@ -341,7 +341,7 @@ jobs:
 
       - name: The auto-fix round (a fresh worker session, commit-only)
         id: worker
-        uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+        uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -642,7 +642,7 @@ jobs:
 
       - name: Write the dead round's card fields (read-only)
         id: write-card
-        uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+        uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         env:
           GH_TOKEN: ${{ github.token }}
         with:
@@ -807,7 +807,7 @@ jobs:
 
       - name: Write the card's four fields (read-only)
         id: write-card
-        uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+        uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         env:
           GH_TOKEN: ${{ github.token }}
         with:

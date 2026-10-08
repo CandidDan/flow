@@ -103,9 +103,17 @@ source_roots:
 # pushes, and the three reviewers run again from scratch. Merge stays human.
 #
 # Everything else under `review:` is DATA the reusable reads rather than names — canonical has
-# never set `model` or `security_paths`, which means the default model and a security review on
-# EVERY PR, and that is the correct posture for the repo whose product is other repos' CI.
+# never set `security_paths`, which means a security review on EVERY PR, and that is the correct
+# posture for the repo whose product is other repos' CI.
 review:
+  # Full model IDs, never aliases, mirroring the template (flow-0140) so canonical dogfoods the
+  # split it ships: qa and the guide on Sonnet, code-review on Opus (builds run on Sonnet, and a
+  # Sonnet reviewer shares a Sonnet builder's blind spots), security on Opus — never Fable.
+  model: "claude-sonnet-5-5"
+  code_review_model: "claude-opus-5-5"
+  security_model: "claude-opus-5-5"
+
+
   # Two rounds, then a human. MEASURED against the case this exists for: PRs #108 and #109 each
   # sat red on ONE precise, mechanical code-review finding that a single round would have closed.
   # Two leaves room for a second finding the first round's fix uncovers, and stops there. The

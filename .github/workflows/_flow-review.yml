@@ -23,8 +23,10 @@ name: _flow-review (reusable)
 #                 missing, empty or unparseable verdict fails the check. A reviewer that died
 #                 mid-run must never read as an approval.
 #
-# NO MODEL IS NAMED IN THIS FILE. `review.model` / `review.security_model` in the consuming
-# repo's .flow/config.yml decide it — data the project tunes, not shared infra it has to patch.
+# NO MODEL IS NAMED IN THIS FILE. `review.model` / `review.code_review_model` /
+# `review.security_model` in the consuming repo's .flow/config.yml decide it — data the project
+# tunes, not shared infra it has to patch. Every Claude step is followed by one that reports, in
+# the run summary, the model that actually answered (flow-0140).
 #
 # BLOCKING. These three block, in the same way a failed test blocks. Keep advisory reviewers
 # (e.g. GitHub Copilot code review, enabled repo-side) advisory: two blocking AI reviewers
@@ -119,6 +121,9 @@ jobs:
     outputs:
       model: ${{ steps.plan.outputs.model }}
       security_model: ${{ steps.plan.outputs.security_model }}
+      # flow-0140. Empty when the BASE branch's helper predates the key; the code-review job falls
+      # back to `model` in that case, so an adopting repo that has not synced yet keeps working.
+      code_review_model: ${{ steps.plan.outputs.code_review_model }}
       security_run: ${{ steps.plan.outputs.security_run }}
       security_reason: ${{ steps.plan.outputs.security_reason }}
       task_id: ${{ steps.plan.outputs.task_id }}
@@ -300,7 +305,8 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: node "$FLOW_REVIEW_DIR"/flow-review.mjs plan
-      - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+      - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
+        id: claude
         continue-on-error: true          # the verdict step below decides; never this action's exit
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -373,6 +379,46 @@ jobs:
 
             You review only. Never push commits, never edit source files, never change labels or
             task state. The only file you write is .flow-review/qa.json.
+      # flow-0140: name the model that actually answered, read from the action's own output,
+      # so a pin whose CLI resolves to a different model can never again run unreported.
+      - name: Report the model that answered
+        if: ${{ always() }}
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          REQUESTED_MODEL: ${{ needs.plan.outputs.model }}
+          CLAUDE_STEP: qa
+        run: |
+          # flow-0140. claude-code-action has no output naming the model. Its `execution_file` output is
+          # the SDK message stream as JSON (base-action/src/run-claude-sdk.ts at v1.0.245): the `result`
+          # message's `modelUsage` is keyed by every model that answered, `assistant` messages carry
+          # `message.model`, and `system`/`init` carries the model the CLI resolved. Read in that order.
+          # Every value arrives through env, never an expression. Reporting only: it never fails the job.
+          node - <<'FLOW_MODEL_REPORT'
+          const fs = require("fs");
+          const { EXECUTION_FILE: file = "", REQUESTED_MODEL: want = "", CLAUDE_STEP: step = "claude" } = process.env;
+          let seen = [];
+          try {
+            const msgs = JSON.parse(fs.readFileSync(file, "utf8"));
+            const from = (f) => [...new Set(msgs.flatMap((m) => { try { return f(m) ?? []; } catch { return []; } }))]
+              .filter((v) => typeof v === "string" && /^[A-Za-z0-9][\w.:\[\]-]*$/.test(v));
+            for (const f of [
+              (m) => (m.type === "result" ? Object.keys(m.modelUsage ?? {}) : []),
+              (m) => (m.type === "assistant" ? [m.message.model] : []),
+              (m) => (m.type === "system" && m.subtype === "init" ? [m.model] : []),
+            ]) { seen = from(f); if (seen.length) break; }
+          } catch { seen = []; }
+          const code = (v) => "`" + v + "`";
+          const lines = [`### Model: ${step}`, "",
+            `- requested: ${want ? code(want) : "none passed, so the CLI's default"}`,
+            `- answered: ${seen.length ? seen.map(code).join(", ") : `not reported by the action (requested ${want ? code(want) : "the CLI's default"})`}`];
+          if (want && seen.length && !seen.includes(want)) {
+            lines.push(`- **mismatch:** requested ${code(want)}, answered by ${seen.map(code).join(", ")}`);
+            console.log(`::warning::${step} requested ${want} but was answered by ${seen.join(", ")}`);
+          }
+          const out = lines.join("\n") + "\n\n";
+          process.stdout.write(out);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          FLOW_MODEL_REPORT
       - name: Enforce the qa verdict
         if: always()
         # flow-0103: the plan's truncation fact, from the plan job's output. Through `env:` rather
@@ -470,13 +516,16 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: node "$FLOW_REVIEW_DIR"/flow-review.mjs plan
-      - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+      - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
+        id: claude
         continue-on-error: true
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_bots: "*"
-          claude_args: "--max-turns 60 --model ${{ needs.plan.outputs.model }} --permission-mode bypassPermissions"
+          # review.code_review_model, falling back to review.model (flow-0140). The `||` covers a
+          # base-branch helper too old to emit the key: it then runs on `model`, exactly as before.
+          claude_args: "--max-turns 60 --model ${{ needs.plan.outputs.code_review_model || needs.plan.outputs.model }} --permission-mode bypassPermissions"
           prompt: |
             You are the code-quality gate for this pull request. You did not write this code and
             owe it nothing. Separate findings into blocking (must fix) and non-blocking.
@@ -533,6 +582,46 @@ jobs:
 
             You review only. Never push commits, never edit source files, never change labels or
             task state. The only file you write is .flow-review/code-review.json.
+      # flow-0140: name the model that actually answered, read from the action's own output,
+      # so a pin whose CLI resolves to a different model can never again run unreported.
+      - name: Report the model that answered
+        if: ${{ always() }}
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          REQUESTED_MODEL: ${{ needs.plan.outputs.code_review_model || needs.plan.outputs.model }}
+          CLAUDE_STEP: code-review
+        run: |
+          # flow-0140. claude-code-action has no output naming the model. Its `execution_file` output is
+          # the SDK message stream as JSON (base-action/src/run-claude-sdk.ts at v1.0.245): the `result`
+          # message's `modelUsage` is keyed by every model that answered, `assistant` messages carry
+          # `message.model`, and `system`/`init` carries the model the CLI resolved. Read in that order.
+          # Every value arrives through env, never an expression. Reporting only: it never fails the job.
+          node - <<'FLOW_MODEL_REPORT'
+          const fs = require("fs");
+          const { EXECUTION_FILE: file = "", REQUESTED_MODEL: want = "", CLAUDE_STEP: step = "claude" } = process.env;
+          let seen = [];
+          try {
+            const msgs = JSON.parse(fs.readFileSync(file, "utf8"));
+            const from = (f) => [...new Set(msgs.flatMap((m) => { try { return f(m) ?? []; } catch { return []; } }))]
+              .filter((v) => typeof v === "string" && /^[A-Za-z0-9][\w.:\[\]-]*$/.test(v));
+            for (const f of [
+              (m) => (m.type === "result" ? Object.keys(m.modelUsage ?? {}) : []),
+              (m) => (m.type === "assistant" ? [m.message.model] : []),
+              (m) => (m.type === "system" && m.subtype === "init" ? [m.model] : []),
+            ]) { seen = from(f); if (seen.length) break; }
+          } catch { seen = []; }
+          const code = (v) => "`" + v + "`";
+          const lines = [`### Model: ${step}`, "",
+            `- requested: ${want ? code(want) : "none passed, so the CLI's default"}`,
+            `- answered: ${seen.length ? seen.map(code).join(", ") : `not reported by the action (requested ${want ? code(want) : "the CLI's default"})`}`];
+          if (want && seen.length && !seen.includes(want)) {
+            lines.push(`- **mismatch:** requested ${code(want)}, answered by ${seen.map(code).join(", ")}`);
+            console.log(`::warning::${step} requested ${want} but was answered by ${seen.join(", ")}`);
+          }
+          const out = lines.join("\n") + "\n\n";
+          process.stdout.write(out);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          FLOW_MODEL_REPORT
       - name: Enforce the code-review verdict
         if: always()
         # flow-0103: the plan's truncation fact, from the plan job's output. Through `env:` rather
@@ -653,7 +742,8 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: node "$FLOW_REVIEW_DIR"/flow-review.mjs plan
-      - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+      - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
+        id: claude
         if: ${{ needs.plan.outputs.security_run == 'true' }}
         continue-on-error: true
         with:
@@ -726,6 +816,46 @@ jobs:
 
             You review only. Never push commits, never edit source files, never change labels or
             task state. The only file you write is .flow-review/security.json.
+      # flow-0140: name the model that actually answered, read from the action's own output,
+      # so a pin whose CLI resolves to a different model can never again run unreported.
+      - name: Report the model that answered
+        if: ${{ always() && needs.plan.outputs.security_run == 'true' }}
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          REQUESTED_MODEL: ${{ needs.plan.outputs.security_model }}
+          CLAUDE_STEP: security
+        run: |
+          # flow-0140. claude-code-action has no output naming the model. Its `execution_file` output is
+          # the SDK message stream as JSON (base-action/src/run-claude-sdk.ts at v1.0.245): the `result`
+          # message's `modelUsage` is keyed by every model that answered, `assistant` messages carry
+          # `message.model`, and `system`/`init` carries the model the CLI resolved. Read in that order.
+          # Every value arrives through env, never an expression. Reporting only: it never fails the job.
+          node - <<'FLOW_MODEL_REPORT'
+          const fs = require("fs");
+          const { EXECUTION_FILE: file = "", REQUESTED_MODEL: want = "", CLAUDE_STEP: step = "claude" } = process.env;
+          let seen = [];
+          try {
+            const msgs = JSON.parse(fs.readFileSync(file, "utf8"));
+            const from = (f) => [...new Set(msgs.flatMap((m) => { try { return f(m) ?? []; } catch { return []; } }))]
+              .filter((v) => typeof v === "string" && /^[A-Za-z0-9][\w.:\[\]-]*$/.test(v));
+            for (const f of [
+              (m) => (m.type === "result" ? Object.keys(m.modelUsage ?? {}) : []),
+              (m) => (m.type === "assistant" ? [m.message.model] : []),
+              (m) => (m.type === "system" && m.subtype === "init" ? [m.model] : []),
+            ]) { seen = from(f); if (seen.length) break; }
+          } catch { seen = []; }
+          const code = (v) => "`" + v + "`";
+          const lines = [`### Model: ${step}`, "",
+            `- requested: ${want ? code(want) : "none passed, so the CLI's default"}`,
+            `- answered: ${seen.length ? seen.map(code).join(", ") : `not reported by the action (requested ${want ? code(want) : "the CLI's default"})`}`];
+          if (want && seen.length && !seen.includes(want)) {
+            lines.push(`- **mismatch:** requested ${code(want)}, answered by ${seen.map(code).join(", ")}`);
+            console.log(`::warning::${step} requested ${want} but was answered by ${seen.join(", ")}`);
+          }
+          const out = lines.join("\n") + "\n\n";
+          process.stdout.write(out);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          FLOW_MODEL_REPORT
       - name: Enforce the security verdict
         if: ${{ always() && needs.plan.outputs.security_run == 'true' }}
         # flow-0103: the plan's truncation fact, from the plan job's output. Through `env:` rather
@@ -867,7 +997,8 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           TASK_ID: ${{ needs.plan.outputs.task_id }}
         run: node "$FLOW_REVIEW_DIR"/review-guide.mjs facts
-      - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+      - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
+        id: claude
         continue-on-error: true          # prose is fail-open; the comment posts without it
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -909,6 +1040,46 @@ jobs:
             place; a second comment from you is the noise this whole job exists to remove. Never
             push commits, never edit source files, never change labels or task state. The only file
             you write is .flow-review/guide-prose.json.
+      # flow-0140: name the model that actually answered, read from the action's own output,
+      # so a pin whose CLI resolves to a different model can never again run unreported.
+      - name: Report the model that answered
+        if: ${{ always() }}
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          REQUESTED_MODEL: ${{ needs.plan.outputs.model }}
+          CLAUDE_STEP: guide
+        run: |
+          # flow-0140. claude-code-action has no output naming the model. Its `execution_file` output is
+          # the SDK message stream as JSON (base-action/src/run-claude-sdk.ts at v1.0.245): the `result`
+          # message's `modelUsage` is keyed by every model that answered, `assistant` messages carry
+          # `message.model`, and `system`/`init` carries the model the CLI resolved. Read in that order.
+          # Every value arrives through env, never an expression. Reporting only: it never fails the job.
+          node - <<'FLOW_MODEL_REPORT'
+          const fs = require("fs");
+          const { EXECUTION_FILE: file = "", REQUESTED_MODEL: want = "", CLAUDE_STEP: step = "claude" } = process.env;
+          let seen = [];
+          try {
+            const msgs = JSON.parse(fs.readFileSync(file, "utf8"));
+            const from = (f) => [...new Set(msgs.flatMap((m) => { try { return f(m) ?? []; } catch { return []; } }))]
+              .filter((v) => typeof v === "string" && /^[A-Za-z0-9][\w.:\[\]-]*$/.test(v));
+            for (const f of [
+              (m) => (m.type === "result" ? Object.keys(m.modelUsage ?? {}) : []),
+              (m) => (m.type === "assistant" ? [m.message.model] : []),
+              (m) => (m.type === "system" && m.subtype === "init" ? [m.model] : []),
+            ]) { seen = from(f); if (seen.length) break; }
+          } catch { seen = []; }
+          const code = (v) => "`" + v + "`";
+          const lines = [`### Model: ${step}`, "",
+            `- requested: ${want ? code(want) : "none passed, so the CLI's default"}`,
+            `- answered: ${seen.length ? seen.map(code).join(", ") : `not reported by the action (requested ${want ? code(want) : "the CLI's default"})`}`];
+          if (want && seen.length && !seen.includes(want)) {
+            lines.push(`- **mismatch:** requested ${code(want)}, answered by ${seen.map(code).join(", ")}`);
+            console.log(`::warning::${step} requested ${want} but was answered by ${seen.join(", ")}`);
+          }
+          const out = lines.join("\n") + "\n\n";
+          process.stdout.write(out);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          FLOW_MODEL_REPORT
       - name: Render the guide comment — facts and verdicts, with or without the prose
         # always(), because the model step is `continue-on-error` and this is the step that makes
         # the fail-open real: the three verdicts and every computed fact render whether or not the
