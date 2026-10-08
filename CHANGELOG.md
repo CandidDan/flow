@@ -6,6 +6,22 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 3.2.1 — 2026-10-08
+
+**PATCH: the 3.2.0 sync PRs go green in adopting repos.** One canonical test (flow-0074's
+criterion 9) read an adopting repo's own task template, which flow-sync never touches, so every
+3.2.0 sync PR failed `flow-tooling`. Fixed by flow-0138. **No caller action.** Re-run flow-sync to
+pick it up. It carries 3.2.0's Actions cost fix (flow-0136) with it.
+
+- **An adopting repo's own task template no longer fails `flow-tooling`**
+  (`project-template/.flow/bin/flow-doctor.test.mjs`, flow-0138). **No caller action.** The fix
+  arrives with the next flow-sync.
+
+  flow-0074's criterion-9 test checked that the task template ships `intent: ""`, reading
+  `.flow/tasks/_TEMPLATE.md` beside the test. In an adopting repo that file is the repo's own and is
+  never synced, so every 3.2.0 sync PR failed `flow-tooling`. The test now runs only in canonical and
+  skips elsewhere with a reason, and a canonical-only test fails if canonical ever skips it.
+
 ## 3.2.0 — 2026-10-08
 
 **MINOR: PR gates stop running on drafts, which was the fleet's largest Actions cost.** Measured
