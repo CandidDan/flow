@@ -12,7 +12,7 @@ pr: ""
 issue: ""
 blocked_reason: ""
 blocked_by: []
-serves: ["G9", "G10"]
+serves: ["maintenance"]
 touches:
   - ".github/workflows/_flow-queue-runner.yml"
   - ".github/workflows/_flow-review.yml"
