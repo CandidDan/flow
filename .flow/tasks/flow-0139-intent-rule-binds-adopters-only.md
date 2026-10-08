@@ -1,13 +1,13 @@
 ---
 id: "flow-0139"
 title: "The intent rule binds only a repo that has adopted intents, so task-writer no longer refuses product work everywhere else"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "orchestrator-cowork-2026-10-08"
 created: "2026-10-08"
-started: ""
-branch: ""
+started: "2026-10-08T05:07:14Z"
+branch: "flow/flow-0139-intent-rule-binds-adopters-only"
 pr: ""
 issue: ""
 blocked_reason: ""
