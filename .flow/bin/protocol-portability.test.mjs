@@ -89,12 +89,14 @@ const PRE_MOVE_SECTION_DIGESTS = [
 // digest equals the pre-move one is noise and fails its own test below.
 const INTENTIONAL_DIVERGENCES = new Map([
   ["Hard rules", {
-    digest: "6386a64fd65d088f38c297b23386f60d129fec7dc23ee0c0e5ebe358e89acd01",
+    digest: "02a26beeb9e40753e7b8981b6d12d577f3f09d7f1e4c9b545fb1471c7a291fea",
     why: "the human's first touchpoint moved from approving each task spec to approving the " +
          "intent it derives from (ADR-0007 slice 2). A new rule says product work names an " +
          "intent already on `main`, that the session writing a task never writes its intent, " +
-         "and that `maintenance` is exempt. No existing rule was reworded.",
-    task: "flow-0074",
+         "and that `maintenance` is exempt (flow-0074). flow-0139 then scoped it " +
+         "to a repo that has ADOPTED intents (`.flow/intents/` + `intents.required_from`): " +
+         "unconditional, it made task-writer refuse all product work in every adopter.",
+    task: "flow-0139",
   }],
   ["Response style — show, don't tell", {
     digest: "853df84a5dc41392daf887fb708ecbe65f664d8f6d25b3d76797d3e24d23e6d6",
