@@ -1,12 +1,12 @@
 ---
 id: "flow-0140"
 title: "Workers and reviewers run the 5.5 models: action pin to v1.0.245, full model IDs, code-review on Opus"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-session-012CTneThg94vo5drhs7QSEY-worker"
 created: "2026-10-08"
-started: ""
+started: "2026-10-08T22:17:39Z"
 branch: ""
 pr: ""
 issue: ""
