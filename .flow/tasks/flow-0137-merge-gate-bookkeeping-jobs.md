@@ -1,7 +1,7 @@
 ---
 id: "flow-0137"
 title: "The PR gate's 1-minute bookkeeping jobs become one job, so each gate run bills ~2 fewer minutes"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Sequenced behind flow-0136: both edit `_flow-gates.yml` and `gate-cost.test.mjs`. Unblocks when flow-0136 merges."
-blocked_by: ["flow-0136"]
+blocked_reason: ""
+blocked_by: []
 serves: ["maintenance"]
 touches:
   - ".github/workflows/_flow-gates.yml"
@@ -22,6 +22,7 @@ touches:
   - "changes/flow-0137.md"
 labels: [ci, cost]
 notes:
+  - "2026-10-08 (orchestrator): unblocked — flow-0136 merged (PR #187) and shipped in 3.2.0 (PR #188). Build against _flow-gates.yml as it is on main now, which carries flow-0136's draft clauses; keep them on every job, merged or not (gate-cost.test.mjs enforces it)."
   - "2026-10-08 (orchestrator): ORIGIN: the Actions cost review (see flow-0136's notes). GitHub bills every job at least one minute. A gate run carries `touches`, `flow-tooling` and `source-roots-plan`, each a few seconds of work billed as 1 minute, so ~3 billed minutes per run for ~20 seconds of work. Measured: those three jobs were ~3 min of every gate run in all five adopters. Approved by Dan 2026-10-08."
   - "2026-10-08 (orchestrator): DECIDE IN THE PR, with the reason: which jobs merge. `source-roots-plan` emits the matrix the `source-root` jobs read, so it must stay a job those can `needs:`. The cheap shape: fold `touches` and `flow-tooling` into `source-roots-plan` as steps (one job, ~1 billed min instead of 3), and leave `gate` alone, so the matrix still starts without waiting on the 5–8 min gate."
   - "2026-10-08 (orchestrator): RISK TO CHECK FIRST: renaming or removing a job renames its check (`flow-gates / touches`). Any adopter whose branch protection REQUIRES one of those check names would then have every PR blocked on a check that never reports. Before merging, list each adopter's required checks (`GET /repos/{o}/{r}/branches/main/protection/required_status_checks`, or ask Dan). If any requires a merged-away name, keep a job by that name or say exactly what the adopter must change in the fragment's caller action."
