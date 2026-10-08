@@ -6,6 +6,25 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 3.2.2 — 2026-10-08
+
+**PATCH: task-writer stops refusing product work in repos that have not adopted intents.**
+flow-0074 (3.2.0) made its intent step unconditional, so on 3.2.x every product task stopped for
+want of an intent no adopter has yet. Now it binds only where `.flow/intents/` exists and
+`intents.required_from` is set (flow-0139). **No caller action.** Re-run flow-sync.
+
+- **The intent rule binds only a repo that has adopted intents, so task-writer no longer refuses
+  product work everywhere else** (`task-writer` skill, `PROTOCOL.md`, `README.md`, flow-0139).
+  **No caller action.** The fix arrives with the next flow-sync.
+
+  flow-0074 (3.2.0) gated flow-doctor's intent checks correctly, but made task-writer's step
+  unconditional: product work had to name an intent already on `main`, or the session stopped. No
+  adopter had intents, so on 3.2.x task-writer refused every product task. It also pointed at an
+  `intent-writer` skill that is not shipped yet. The step, the PROTOCOL hard rule and the
+  touchpoint wording now apply only when `.flow/intents/` exists **and** `intents.required_from` is
+  set. Otherwise `intent` stays empty and tasks are written as before. The `intent-writer`
+  reference is gone until that skill ships.
+
 ## 3.2.1 — 2026-10-08
 
 **PATCH: the 3.2.0 sync PRs go green in adopting repos.** One canonical test (flow-0074's
