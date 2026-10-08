@@ -1,7 +1,7 @@
 ---
 id: "flow-0141"
 title: "A PR that changes what a person sees carries key screenshots and, for motion, a recording"
-status: "blocked"
+status: "ready"
 priority: 3
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits on the intent it derives from: `pr-visual-captures` is proposed in PR #194 and is not on main until Dan merges it. Also: the store holds more ready tasks than queue_cap (8), so this was written blocked rather than ready; flipping it to ready when #194 merges is the orchestrator's move."
-blocked_by: ["https://github.com/CandidDan/flow/pull/194"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G10"]
 intent: "pr-visual-captures"
 touches:
@@ -23,6 +23,7 @@ labels: [review, protocol]
 notes:
   - "2026-10-09 (orchestrator): ORIGIN. Dan, verbatim: 'in Presence pr #2 codex added screenshots and a screen recording to the pr this was a massive help. Can we add this as guidance as well where it would benefit and is possible key screenshots and recordings are added'. Reference PR: https://github.com/CandidDan/presence/pull/2 (section 'Review captures': one .webm scroll recording linked, two PNGs inline, desktop and mobile, all pinned to a commit SHA)."
   - "2026-10-09 (orchestrator): DECIDED, do not re-litigate. (1) Guidance, not a check: no CI job asserts a capture exists (the intent's open question 'should a check flag a missing capture' is answered no for this task; a check would need to know what is visual, which is judgement). (2) The procedure lives in show-me/SKILL.md, not a new skill: a new skill directory must be added to CANONICAL_SKILLS in flow-review.mjs and _flow-sync.yml's header, which overlaps flow-0140's touches; show-me is already the 'show, don't tell' skill and is loaded for every PR description. (3) PROTOCOL.md gets one clause only, in the PR-description order sentence: the protocol counts against claude_md_max and depth belongs in the skill. (4) Captures never travel on the feature branch: they would trip touches-guard and land binaries on main. They go on an orphan branch `captures/<task-id>` (not `flow/…`, which flow-status would parse as a task branch), linked by commit SHA so a later push cannot change what the reviewer saw."
+  - "2026-10-09 (orchestrator): UNBLOCKED. Intent pr-visual-captures merged (PR #194, approved by Dan). blocked_by cleared; status ready. The queue-cap part of the old blocked_reason is moot for a transition: the cap governs new allocations, and Dan asked for this work."
 ---
 
 ## Context
