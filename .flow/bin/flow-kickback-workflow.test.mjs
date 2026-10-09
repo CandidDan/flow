@@ -107,35 +107,6 @@ test("the claude-code-action pin equals _flow-queue-runner.yml's, everywhere it 
   }
 });
 
-// flow-0140's follow-up, which lands here because this task rewrote the file. model-ids.test.mjs
-// still exempts _flow-kickback.yml by name (that file is outside this task's touches), so the same
-// two rules are held here until the exemption is dropped: full model IDs, and a byte-identical
-// "Report the model that answered" step after every Claude step, reading that step's output.
-test("every Claude step passes a full model ID and is followed by the shared model-report step", { skip }, () => {
-  const wf = parse(REUSABLE);
-  const scriptOf = (st) => st.run.slice(st.run.indexOf("node - <<'FLOW_MODEL_REPORT'"));
-  const reviewReport = Object.values(parse(join(WORKFLOWS, "_flow-review.yml")).jobs)
-    .flatMap((j) => j.steps ?? []).find((st) => st.name === "Report the model that answered");
-  assert.ok(reviewReport, "the shared script's source of truth is _flow-review.yml");
-  let seen = 0;
-  for (const [name, job] of Object.entries(wf.jobs)) {
-    const list = job.steps ?? [];
-    list.forEach((st, i) => {
-      if (!/claude-code-action/.test(st.uses ?? "")) return;
-      seen++;
-      const model = st.with.claude_args.match(/--model\s+(\S+)/)?.[1];
-      assert.match(model ?? "", /^claude-[a-z]+-\d+(-\d+)*$/, `${name}: --model ${model} is not a full model id`);
-      const next = list[i + 1];
-      assert.equal(next?.name, "Report the model that answered", `${name}: the step after the Claude step must report its model`);
-      assert.equal(next.if, "${{ always() }}");
-      assert.equal(next.env.EXECUTION_FILE, `\${{ steps.${st.id}.outputs.execution_file }}`);
-      assert.equal(next.env.REQUESTED_MODEL, model, `${name}: the report must state the model the step asked for`);
-      assert.equal(scriptOf(next), scriptOf(reviewReport), `${name}: the report script must be byte-identical to _flow-review.yml's`);
-    });
-  }
-  assert.equal(seen, 3, "the three Claude steps: the fixer, round-card and card");
-});
-
 // ═════════════════════════════════════════════════════════════════════════════════════════
 // The fixer's limits
 // ═════════════════════════════════════════════════════════════════════════════════════════
@@ -350,6 +321,10 @@ test("the push job checks out fresh and takes the round's commits only as a bund
 
   // The bundle leaves `fix` as an artifact, cut from the round's base, and arrives in `push`.
   const fix = steps(wf, "fix");
+  // The round itself is built on the recorded head, so a moved branch fails before the model runs.
+  const fixCheckout = fix.find((s) => /actions\/checkout@/.test(s.uses ?? ""));
+  assert.match(fixCheckout.with.ref, /needs\.plan\.outputs\.head_sha/,
+    "`fix` must check out the head `push` will accept, not whatever head_ref points at now");
   const carry = fix.find((s) => s.id === "carry");
   assert.match(carry.run, /git bundle create "\$dir\/round\.bundle" "\$BASE_SHA\.\.HEAD"/);
   assert.match(carry.if, /always\(\)/, "a disputed round still hands back");
@@ -357,6 +332,7 @@ test("the push job checks out fresh and takes the round's commits only as a bund
   const down = push.find((s) => /actions\/download-artifact@/.test(s.uses ?? ""));
   assert.ok(up && down, "the round crosses the job boundary as an artifact");
   assert.equal(up.with.name, down.with.name);
+  assert.equal(up.with.overwrite, true, "a re-run of a failed `fix` re-uploads the same name in the same run");
   assert.ok(fix.indexOf(up) > fix.findIndex((s) => s.id === "worker"));
   // Nothing but the bundle carries commits into `push`: no fetch from the PR, no second checkout.
   const runs = push.map((s) => s.run ?? "").join("\n");
