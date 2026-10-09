@@ -46,7 +46,8 @@ jobs:
             --description "Filed by the flow-compass vision-drift audit" \
             --force
 
-      - uses: anthropics/claude-code-action@5ccc3a35a6367cdb8e6fbd0728287467540ecfe2 # v1.0.219
+      - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
+        id: claude
         with:
           # Subscription auth (Pro/Max): run `claude setup-token` locally, save the result as
           # the CLAUDE_CODE_OAUTH_TOKEN repo secret. Uses your plan quota, not API credits.
@@ -81,3 +82,44 @@ jobs:
             is GitHub issues. If you cannot tell whether something is material, file it as a
             question rather than silently skipping it.
           claude_args: "--max-turns 150 --permission-mode bypassPermissions"
+
+      # flow-0140: name the model that actually answered, read from the action's own output,
+      # so a pin whose CLI resolves to a different model can never again run unreported.
+      - name: Report the model that answered
+        if: ${{ always() }}
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          REQUESTED_MODEL: ""
+          CLAUDE_STEP: compass
+        run: |
+          # flow-0140. claude-code-action has no output naming the model. Its `execution_file` output is
+          # the SDK message stream as JSON (base-action/src/run-claude-sdk.ts at v1.0.245): the `result`
+          # message's `modelUsage` is keyed by every model that answered, `assistant` messages carry
+          # `message.model`, and `system`/`init` carries the model the CLI resolved. Read in that order.
+          # Every value arrives through env, never an expression. Reporting only: it never fails the job.
+          node - <<'FLOW_MODEL_REPORT'
+          const fs = require("fs");
+          const { EXECUTION_FILE: file = "", REQUESTED_MODEL: want = "", CLAUDE_STEP: step = "claude" } = process.env;
+          let seen = [];
+          try {
+            const msgs = JSON.parse(fs.readFileSync(file, "utf8"));
+            const from = (f) => [...new Set(msgs.flatMap((m) => { try { return f(m) ?? []; } catch { return []; } }))]
+              .filter((v) => typeof v === "string" && /^[A-Za-z0-9][\w.:\[\]-]*$/.test(v));
+            for (const f of [
+              (m) => (m.type === "result" ? Object.keys(m.modelUsage ?? {}) : []),
+              (m) => (m.type === "assistant" ? [m.message.model] : []),
+              (m) => (m.type === "system" && m.subtype === "init" ? [m.model] : []),
+            ]) { seen = from(f); if (seen.length) break; }
+          } catch { seen = []; }
+          const code = (v) => "`" + v + "`";
+          const lines = [`### Model: ${step}`, "",
+            `- requested: ${want ? code(want) : "none passed, so the CLI's default"}`,
+            `- answered: ${seen.length ? seen.map(code).join(", ") : `not reported by the action (requested ${want ? code(want) : "the CLI's default"})`}`];
+          if (want && seen.length && !seen.includes(want)) {
+            lines.push(`- **mismatch:** requested ${code(want)}, answered by ${seen.map(code).join(", ")}`);
+            console.log(`::warning::${step} requested ${want} but was answered by ${seen.join(", ")}`);
+          }
+          const out = lines.join("\n") + "\n\n";
+          process.stdout.write(out);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          FLOW_MODEL_REPORT

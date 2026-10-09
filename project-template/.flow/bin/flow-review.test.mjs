@@ -149,6 +149,36 @@ test("security_model falls back to model, and model to the documented default �
   assert.ok(absent.warnings.some((w) => /no `review:` block/.test(w)));
 });
 
+// flow-0140: code-review may run a different model from qa and the guide.
+test("flow-0140: without code_review_model, code-review runs on review.model", () => {
+  const cfg = parseReviewConfig(`review:\n  model: "claude-sonnet-5-5"\n`);
+  assert.equal(cfg.codeReviewModel, "claude-sonnet-5-5", "one knob unless the repo asks for two");
+  assert.equal(parseReviewConfig("project:\n  name: x\n").codeReviewModel, DEFAULT_MODEL,
+    "no review block at all: every check, code-review included, falls back to the default");
+});
+
+test("flow-0140: with code_review_model, code-review runs on it while qa and the guide stay on review.model", () => {
+  const cfg = parseReviewConfig(
+    `review:\n  model: "claude-sonnet-5-5"\n  code_review_model: "claude-opus-5-5"\n`);
+  assert.equal(cfg.codeReviewModel, "claude-opus-5-5");
+  assert.equal(cfg.model, "claude-sonnet-5-5", "qa and the guide read `model`, which must not move");
+  assert.equal(cfg.securityModel, "claude-sonnet-5-5",
+    "code_review_model is not a second default: security still falls back to `model`");
+});
+
+test("flow-0140: an unusable code_review_model fails naming the key, as security_model does", () => {
+  for (const value of ["opus; rm -rf", "opus --print", "-x"]) {
+    assert.throws(() => parseReviewConfig(`review:\n  code_review_model: "${value}"\n`),
+      (e) => e instanceof ReviewError && /code_review_model/.test(e.message) && /not a usable model name/.test(e.message),
+      `${JSON.stringify(value)} reaches the code-review check as \`--model <value>\` and must not pass`);
+  }
+});
+
+test("flow-0140: DEFAULT_MODEL is a full model id, not an alias", () => {
+  assert.match(DEFAULT_MODEL, /^claude-[a-z]+-\d+(-\d+)*$/,
+    "an alias resolves through whatever CLI the action pin installs — the drift flow-0140 fixed");
+});
+
 // ── the conditional security review (criterion 3) ─────────────────────────────────────────
 
 test("the security review RUNS when the diff touches a configured trigger path", () => {
@@ -1074,6 +1104,21 @@ test("runReviewCli plan takes its defaults from opts — and the environment sti
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("flow-0140: plan emits code_review_model, overriding only the code-review check", () => {
+  const dir = tmp("cli-crm");
+  try {
+    writeFileSync(join(dir, "config.yml"),
+      `review:\n  model: "claude-sonnet-5-5"\n  code_review_model: "claude-opus-5-5"\n`);
+    const gh = join(dir, "gh");
+    assert.equal(runReviewCli(["plan"], {
+      env: { GITHUB_OUTPUT: gh }, configPath: join(dir, "config.yml"), outDir: join(dir, "out"), git: () => "",
+    }), 0);
+    const outputs = readFileSync(gh, "utf8");
+    assert.match(outputs, /^code_review_model=claude-opus-5-5$/m);
+    assert.match(outputs, /^model=claude-sonnet-5-5$/m, "qa and the guide keep review.model");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 // End-to-end `plan` against a real git repo: proves the outputs the workflow reads are actually
 // produced, including the model (criterion 5) and the visible security decision (criterion 3).
 test("CLI `plan` publishes the model and the security decision as workflow outputs", () => {
@@ -1105,6 +1150,10 @@ test("CLI `plan` publishes the model and the security decision as workflow outpu
     const outputs = readFileSync(out, "utf8");
     assert.match(outputs, /^model=haiku$/m, "the workflow reads the model from here — it names none itself");
     assert.match(outputs, /^security_model=opus$/m);
+    assert.match(outputs, /^code_review_model=haiku$/m,
+      "flow-0140: the code-review job reads its model from here; unset, it is review.model");
+    assert.match(readFileSync(summary, "utf8"), /code-review model: `haiku`/,
+      "flow-0140: the plan summary says which model code-review runs on");
     assert.match(outputs, /^security_run=false$/m, "a docs-only diff touches no configured trigger path");
     assert.match(outputs, /^security_reason=SKIPPED — /m);
     assert.match(readFileSync(summary, "utf8"), /security review: \*\*SKIPPED\*\*/,
