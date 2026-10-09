@@ -1,7 +1,7 @@
 ---
 id: "flow-0144"
 title: "Reviewer models come from canonical: unset is the norm, a set key is the warning"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-session-012CTneThg94vo5drhs7QSEY-w0144"
