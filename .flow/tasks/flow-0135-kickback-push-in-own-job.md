@@ -1,12 +1,12 @@
 ---
 id: "flow-0135"
 title: "The kickback round's guards and push run in their own job, so nothing the fixer model writes can reach FLOW_PAT"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-session-012CTneThg94vo5drhs7QSEY-w0135"
 created: "2026-10-06"
-started: ""
+started: "2026-10-09T00:56:04Z"
 branch: ""
 pr: ""
 issue: ""
