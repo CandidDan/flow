@@ -11,10 +11,8 @@
 // LINE-BASED, NOT YAML-BASED, like `action-pins.test.mjs`: it runs without `npm ci` (no `yaml`
 // module) and a violation can name its LINE, which a parsed document cannot.
 //
-// `_flow-kickback.yml` IS EXEMPT from the model-ID and report-step checks BY NAME. flow-0140 moves
-// only its pin lines; flow-0135 rewrites the file and moves its `--model opus|sonnet` values (its
-// model jobs are off: `auto_fix_rounds: 0`). Whichever of the two lands second drops this
-// exemption. Its pin IS checked here — a split pin is what the pin tests exist to forbid.
+// NO WORKFLOW IS EXEMPT. flow-0140 exempted `_flow-kickback.yml` while flow-0135 rewrote it;
+// flow-0143 moved its three Claude steps to full IDs and report steps and deleted the exemption.
 //
 // AN EMPTY SCAN IS A FAILURE: no workflow, no model value or no Claude step found means the check
 // verified nothing.
@@ -35,8 +33,6 @@ export const FULL_ID = /^claude-[a-z]+-\d+(-\d+)*$/;
 export const ALIASES = Object.freeze(["opus", "sonnet", "haiku", "fable", "mythos"]);
 export const PIN_SHA = "6fed3ca145920b639991cb756090506e1bcaf515";
 export const PIN_VERSION = "v1.0.245";
-// See the header: flow-0135 owns this file's `--model` values. Drop when both tasks have landed.
-export const MODEL_EXEMPT = Object.freeze(["_flow-kickback.yml"]);
 export const PINNED_REUSABLES = Object.freeze([
   "_flow-queue-runner.yml", "_flow-review.yml", "_flow-compass.yml", "_flow-triage.yml", "_flow-kickback.yml",
 ]);
@@ -80,10 +76,10 @@ export function judgeModel(value) {
 
 // The whole check over a directory of workflows plus a list of config files. Returns violations
 // as "file:line — why" strings, and how many values it judged (an empty scan is a failure).
-export function checkModelIds({ dir, configs = [], exempt = MODEL_EXEMPT }) {
+export function checkModelIds({ dir, configs = [] }) {
   const violations = [];
   let judged = 0;
-  const files = readdirSync(dir).filter((f) => /^_flow-.*\.ya?ml$/.test(f) && !exempt.includes(f)).sort();
+  const files = readdirSync(dir).filter((f) => /^_flow-.*\.ya?ml$/.test(f)).sort();
   for (const f of files) {
     for (const { line, value } of modelFlags(readFileSync(join(dir, f), "utf8"))) {
       judged++;
@@ -134,16 +130,22 @@ test("AC2: no model value in the reusables or the template/canonical config is a
 });
 
 test("AC2 mutation: reintroducing `--model opus` into a copy of a workflow fails, naming file and line", () => {
+  for (const f of ["_flow-queue-runner.yml", "_flow-kickback.yml"]) {
+    const dir = mkdtempSync(join(tmpdir(), "flow-model-ids-"));
+    try {
+      const src = readFileSync(join(WORKFLOWS, f), "utf8");
+      assert.ok(src.includes("--model claude-opus-5-5"), `${f}: fixture precondition`);
+      writeFileSync(join(dir, f), src.replace("--model claude-opus-5-5", "--model opus"));
+      const line = src.split("\n").findIndex((l) => l.includes("--model claude-opus-5-5")) + 1;
+      const { violations } = checkModelIds({ dir });
+      assert.equal(violations.length, 1, f);
+      assert.match(violations[0], new RegExp(`^${f.replace(/\./g, "\\.")}:${line} — --model is the bare alias "opus"`));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+
   const dir = mkdtempSync(join(tmpdir(), "flow-model-ids-"));
   try {
-    const src = readFileSync(join(WORKFLOWS, "_flow-queue-runner.yml"), "utf8");
-    assert.ok(src.includes("--model claude-opus-5-5"), "fixture precondition");
-    writeFileSync(join(dir, "_flow-queue-runner.yml"), src.replace("--model claude-opus-5-5", "--model opus"));
-    const line = src.split("\n").findIndex((l) => l.includes("--model claude-opus-5-5")) + 1;
-    const { violations } = checkModelIds({ dir });
-    assert.equal(violations.length, 1);
-    assert.match(violations[0], new RegExp(`^_flow-queue-runner\\.yml:${line} — --model is the bare alias "opus"`));
-
+    writeFileSync(join(dir, "_flow-queue-runner.yml"), readFileSync(join(WORKFLOWS, "_flow-queue-runner.yml"), "utf8"));
     const cfg = join(dir, "config.yml");
     writeFileSync(cfg, `project:\n  name: x\nreview:\n  model: "sonnet"\n  security_model: claude-opus-5\nother:\n  model: opus\n`);
     const bad = checkModelIds({ dir, configs: [cfg] }).violations.filter((v) => v.startsWith(cfg));
@@ -202,8 +204,7 @@ export function reportScripts(src) {
   return out;
 }
 
-const reportedFiles = () => readdirSync(WORKFLOWS)
-  .filter((f) => /^_flow-.*\.ya?ml$/.test(f) && !MODEL_EXEMPT.includes(f)).sort();
+const reportedFiles = () => readdirSync(WORKFLOWS).filter((f) => /^_flow-.*\.ya?ml$/.test(f)).sort();
 
 test("AC5: every Claude step is followed by a report step reading that step's execution_file", () => {
   let total = 0;
@@ -219,13 +220,14 @@ test("AC5: every Claude step is followed by a report step reading that step's ex
       assert.ok(r.always, `${f}:${r.line} — the report must run with always(), so a failed run still says what ran`);
     });
   }
-  assert.equal(total, 7, "the seven Claude steps: worker, qa, code-review, security, guide, compass, triage");
+  assert.equal(total, 10, "the ten Claude steps: worker, qa, code-review, security, guide, compass, triage, " +
+    "and kickback's fixer, round-card and card");
 });
 
 test("AC5: the report script is byte-identical in every copy", () => {
   const scripts = reportedFiles().flatMap((f) => reportScripts(readFileSync(join(WORKFLOWS, f), "utf8")));
-  assert.equal(scripts.length, 7);
-  for (const s of scripts) assert.equal(s, scripts[0], "seven copies of one script must not drift apart");
+  assert.equal(scripts.length, 10);
+  for (const s of scripts) assert.equal(s, scripts[0], "ten copies of one script must not drift apart");
 });
 
 // Runs the extracted script exactly as the step does (`node -`, script on stdin).

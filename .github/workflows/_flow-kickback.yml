@@ -379,7 +379,7 @@ jobs:
           #      all fail anyway, and they are listed so that the day someone widens the job's
           #      permissions, the deny-list is already there.
           claude_args: >-
-            --max-turns 60 --model opus --permission-mode bypassPermissions
+            --max-turns 60 --model claude-opus-5-5 --permission-mode bypassPermissions
             --disallowedTools "Bash(git push:*)" "Bash(gh pr ready:*)" "Bash(gh api:*)"
             "Bash(curl:*)" "Bash(wget:*)" "Bash(gh pr merge:*)" "Bash(gh pr edit:*)"
             "Bash(gh pr comment:*)" "Bash(gh pr close:*)" "Bash(gh pr review:*)"
@@ -433,6 +433,45 @@ jobs:
             round, those four fields become the decision card a human reads on their phone, and a
             card with a blank field is a card that gets ignored. `change` is required when the
             action is `kickback`, and must name a specific change rather than a direction.
+
+      - name: Report the model that answered
+        if: ${{ always() }}
+        env:
+          EXECUTION_FILE: ${{ steps.worker.outputs.execution_file }}
+          REQUESTED_MODEL: claude-opus-5-5
+          CLAUDE_STEP: kickback-fix
+        run: |
+          # flow-0140. claude-code-action has no output naming the model. Its `execution_file` output is
+          # the SDK message stream as JSON (base-action/src/run-claude-sdk.ts at v1.0.245): the `result`
+          # message's `modelUsage` is keyed by every model that answered, `assistant` messages carry
+          # `message.model`, and `system`/`init` carries the model the CLI resolved. Read in that order.
+          # Every value arrives through env, never an expression. Reporting only: it never fails the job.
+          node - <<'FLOW_MODEL_REPORT'
+          const fs = require("fs");
+          const { EXECUTION_FILE: file = "", REQUESTED_MODEL: want = "", CLAUDE_STEP: step = "claude" } = process.env;
+          let seen = [];
+          try {
+            const msgs = JSON.parse(fs.readFileSync(file, "utf8"));
+            const from = (f) => [...new Set(msgs.flatMap((m) => { try { return f(m) ?? []; } catch { return []; } }))]
+              .filter((v) => typeof v === "string" && /^[A-Za-z0-9][\w.:\[\]-]*$/.test(v));
+            for (const f of [
+              (m) => (m.type === "result" ? Object.keys(m.modelUsage ?? {}) : []),
+              (m) => (m.type === "assistant" ? [m.message.model] : []),
+              (m) => (m.type === "system" && m.subtype === "init" ? [m.model] : []),
+            ]) { seen = from(f); if (seen.length) break; }
+          } catch { seen = []; }
+          const code = (v) => "`" + v + "`";
+          const lines = [`### Model: ${step}`, "",
+            `- requested: ${want ? code(want) : "none passed, so the CLI's default"}`,
+            `- answered: ${seen.length ? seen.map(code).join(", ") : `not reported by the action (requested ${want ? code(want) : "the CLI's default"})`}`];
+          if (want && seen.length && !seen.includes(want)) {
+            lines.push(`- **mismatch:** requested ${code(want)}, answered by ${seen.map(code).join(", ")}`);
+            console.log(`::warning::${step} requested ${want} but was answered by ${seen.join(", ")}`);
+          }
+          const out = lines.join("\n") + "\n\n";
+          process.stdout.write(out);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          FLOW_MODEL_REPORT
 
       # ── the round leaves this job as DATA ─────────────────────────────────────────────
       # Two files, and nothing else: the round's commits as a `git bundle`, and the hand-back.
@@ -782,7 +821,7 @@ jobs:
           # The same bounds as `card`: it may not commit, push, re-ready, merge, comment or label,
           # and the only thing it produces is a JSON file this job then validates in code.
           claude_args: >-
-            --max-turns 20 --model sonnet --permission-mode bypassPermissions
+            --max-turns 20 --model claude-sonnet-5-5 --permission-mode bypassPermissions
             --disallowedTools "Bash(git push:*)" "Bash(git commit:*)" "Bash(gh pr ready:*)" "Bash(gh pr merge:*)" "Bash(gh pr edit:*)" "Bash(gh pr comment:*)" "Bash(gh pr close:*)"
           prompt: |
             A Flow auto-fix round was dispatched on pull request #${{ needs.plan.outputs.pr }} and
@@ -814,6 +853,45 @@ jobs:
             `merge` (the PR is good enough to ship as it stands) or `kickback` with `change`
             naming the specific change to make. "Investigate further" is not a recommendation.
             Fill in every field; a card with a blank field is a card that gets ignored.
+
+      - name: Report the model that answered
+        if: ${{ always() }}
+        env:
+          EXECUTION_FILE: ${{ steps.write-card.outputs.execution_file }}
+          REQUESTED_MODEL: claude-sonnet-5-5
+          CLAUDE_STEP: round-card
+        run: |
+          # flow-0140. claude-code-action has no output naming the model. Its `execution_file` output is
+          # the SDK message stream as JSON (base-action/src/run-claude-sdk.ts at v1.0.245): the `result`
+          # message's `modelUsage` is keyed by every model that answered, `assistant` messages carry
+          # `message.model`, and `system`/`init` carries the model the CLI resolved. Read in that order.
+          # Every value arrives through env, never an expression. Reporting only: it never fails the job.
+          node - <<'FLOW_MODEL_REPORT'
+          const fs = require("fs");
+          const { EXECUTION_FILE: file = "", REQUESTED_MODEL: want = "", CLAUDE_STEP: step = "claude" } = process.env;
+          let seen = [];
+          try {
+            const msgs = JSON.parse(fs.readFileSync(file, "utf8"));
+            const from = (f) => [...new Set(msgs.flatMap((m) => { try { return f(m) ?? []; } catch { return []; } }))]
+              .filter((v) => typeof v === "string" && /^[A-Za-z0-9][\w.:\[\]-]*$/.test(v));
+            for (const f of [
+              (m) => (m.type === "result" ? Object.keys(m.modelUsage ?? {}) : []),
+              (m) => (m.type === "assistant" ? [m.message.model] : []),
+              (m) => (m.type === "system" && m.subtype === "init" ? [m.model] : []),
+            ]) { seen = from(f); if (seen.length) break; }
+          } catch { seen = []; }
+          const code = (v) => "`" + v + "`";
+          const lines = [`### Model: ${step}`, "",
+            `- requested: ${want ? code(want) : "none passed, so the CLI's default"}`,
+            `- answered: ${seen.length ? seen.map(code).join(", ") : `not reported by the action (requested ${want ? code(want) : "the CLI's default"})`}`];
+          if (want && seen.length && !seen.includes(want)) {
+            lines.push(`- **mismatch:** requested ${code(want)}, answered by ${seen.map(code).join(", ")}`);
+            console.log(`::warning::${step} requested ${want} but was answered by ${seen.join(", ")}`);
+          }
+          const out = lines.join("\n") + "\n\n";
+          process.stdout.write(out);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          FLOW_MODEL_REPORT
 
       # Base64, into a bounded job output — the same shape and the same reason as `push`'s verdict
       # and `card`'s hand-back: every field below is model-written text, and base64 cannot carry a
@@ -948,7 +1026,7 @@ jobs:
           # merge, comment or label. The only thing it produces is a JSON file this job then
           # validates in code.
           claude_args: >-
-            --max-turns 20 --model sonnet --permission-mode bypassPermissions
+            --max-turns 20 --model claude-sonnet-5-5 --permission-mode bypassPermissions
             --disallowedTools "Bash(git push:*)" "Bash(git commit:*)" "Bash(gh pr ready:*)" "Bash(gh pr merge:*)" "Bash(gh pr edit:*)" "Bash(gh pr comment:*)" "Bash(gh pr close:*)"
           prompt: |
             A Flow auto-fix round was NOT run on pull request #${{ needs.plan.outputs.pr }}, and
@@ -979,6 +1057,45 @@ jobs:
             `merge` (the PR is good enough to ship as it stands) or `kickback` with `change`
             naming the specific change to make. "Investigate further" is not a recommendation.
             Fill in every field; a card with a blank field is a card that gets ignored.
+
+      - name: Report the model that answered
+        if: ${{ always() }}
+        env:
+          EXECUTION_FILE: ${{ steps.write-card.outputs.execution_file }}
+          REQUESTED_MODEL: claude-sonnet-5-5
+          CLAUDE_STEP: card
+        run: |
+          # flow-0140. claude-code-action has no output naming the model. Its `execution_file` output is
+          # the SDK message stream as JSON (base-action/src/run-claude-sdk.ts at v1.0.245): the `result`
+          # message's `modelUsage` is keyed by every model that answered, `assistant` messages carry
+          # `message.model`, and `system`/`init` carries the model the CLI resolved. Read in that order.
+          # Every value arrives through env, never an expression. Reporting only: it never fails the job.
+          node - <<'FLOW_MODEL_REPORT'
+          const fs = require("fs");
+          const { EXECUTION_FILE: file = "", REQUESTED_MODEL: want = "", CLAUDE_STEP: step = "claude" } = process.env;
+          let seen = [];
+          try {
+            const msgs = JSON.parse(fs.readFileSync(file, "utf8"));
+            const from = (f) => [...new Set(msgs.flatMap((m) => { try { return f(m) ?? []; } catch { return []; } }))]
+              .filter((v) => typeof v === "string" && /^[A-Za-z0-9][\w.:\[\]-]*$/.test(v));
+            for (const f of [
+              (m) => (m.type === "result" ? Object.keys(m.modelUsage ?? {}) : []),
+              (m) => (m.type === "assistant" ? [m.message.model] : []),
+              (m) => (m.type === "system" && m.subtype === "init" ? [m.model] : []),
+            ]) { seen = from(f); if (seen.length) break; }
+          } catch { seen = []; }
+          const code = (v) => "`" + v + "`";
+          const lines = [`### Model: ${step}`, "",
+            `- requested: ${want ? code(want) : "none passed, so the CLI's default"}`,
+            `- answered: ${seen.length ? seen.map(code).join(", ") : `not reported by the action (requested ${want ? code(want) : "the CLI's default"})`}`];
+          if (want && seen.length && !seen.includes(want)) {
+            lines.push(`- **mismatch:** requested ${code(want)}, answered by ${seen.map(code).join(", ")}`);
+            console.log(`::warning::${step} requested ${want} but was answered by ${seen.join(", ")}`);
+          }
+          const out = lines.join("\n") + "\n\n";
+          process.stdout.write(out);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          FLOW_MODEL_REPORT
 
       # Base64, into a job output, for the same reason the round's verdict travels that way:
       # every field below is model-written text, and base64 cannot carry a quote, a newline, a
