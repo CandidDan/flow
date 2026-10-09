@@ -1,7 +1,7 @@
 ---
 id: "flow-0141"
 title: "A PR that changes what a person sees carries key screenshots and, for motion, a recording"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "flow"
 owner: "claude-session-012CTneThg94vo5drhs7QSEY-w0141"
