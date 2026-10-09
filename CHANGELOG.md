@@ -6,6 +6,66 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 3.3.1 — 2026-10-09
+
+**PATCH: code-review and security default to Opus everywhere, and kickback's push runs away from
+the fixer model.** flow-0142 gives each review check its own default (qa and the guide
+`claude-sonnet-5-5`, code-review and security `claude-opus-5-5`), so 3.3.0's split reaches repos
+whose config sets no models. flow-0135 moves kickback's guards and push into a job that runs no
+model and is the only one holding `FLOW_PAT`. **Caller action:** none for most repos; re-run
+flow-sync. A repo that set only `review.model` now gets Opus on code-review and security (two
+Opus calls per PR); set `code_review_model` and `security_model` to keep them on its model.
+
+- **The auto-fix round's guards and push run in their own job, so nothing the fixer model writes
+  can reach `FLOW_PAT`** (`.github/workflows/_flow-kickback.yml`, `.flow/config.yml`,
+  `docs/flow-reusable-workflows.md`, flow-0135). **No caller action**: both callers' `permissions:`
+  are unchanged (the new job needs only `contents: read`), and a repo that has not set
+  `review.auto_fix_rounds` is still off. A repo that has it armed gets the new layout on its next
+  run of the reusable.
+
+  ROOT CAUSE. flow-0082 stated its credential rule per STEP ("FLOW_PAT reaches exactly one step"),
+  and the code, its comments and its tests all held that invariant — so three later reviews checked
+  the code against it and passed it. The invariant was wrong: on a runner the trust boundary is the
+  JOB. Every step of a job shares the filesystem (`.git/hooks/`) and the `$GITHUB_ENV` /
+  `$GITHUB_PATH` files, so the fixer (`bypassPermissions`, reading PR comments) could plant a hook,
+  an env var (`BASH_ENV`, `NODE_OPTIONS`, `LD_PRELOAD`) or a PATH entry that ran beside the PAT in
+  the later `stamp-and-push` step, and could subvert the guards in that job too. flow-0134 switched
+  canonical's auto-fix off as the stopgap.
+
+  The fix replaces the invariant, not just the code: **no job that runs a model references
+  `secrets.FLOW_PAT`, and the job that does runs no model.** `fix` now only runs the model and hands
+  the round on as data — a `git bundle` plus the hand-back, as a one-day run artifact (a job output
+  would reach the next job through `env:`, which Linux caps at 128 KiB per value). A new `push` job
+  checks out the PR head `plan` recorded before any model ran (fresh, `persist-credentials: false`),
+  refuses any bundle whose single prerequisite is not that head, runs the four guards from
+  default-branch code exactly as before, and commits and pushes with hooks off
+  (`-c core.hooksPath=/dev/null`, `--no-verify`). A refused bundle escalates with its own sentence
+  on the decision card. The hand-back now reaches check 1 through the artifact, cut to its first
+  16 KiB (the same cap the card's job output already had), so an over-long hand-back fails to parse
+  there and routes to the dead-round card. `fix` also checks out the head `plan` recorded, so a
+  branch that moved fails before a model round is spent. Canonical's `review.auto_fix_rounds` is
+  back to `2`.
+
+- **code-review and security default to Opus in every repo, not only where config says so**
+  (`project-template/.flow/bin/flow-review.mjs`, `project-template/.flow/config.yml`, flow-0142).
+  **Caller action:** none for a repo that sets no `review.*model` key — it gains Opus on
+  code-review and security at the next sync. A repo that set **only** `review.model` sees
+  code-review and security move off it onto Opus; to keep them on its model, set
+  `review.code_review_model` and `review.security_model` to the same value. **This costs: two Opus
+  review calls per PR** (code-review on every PR, security on every PR it triggers on) where such a
+  repo previously ran its `model` — the cost flow-0140 already decided.
+
+  flow-0140 shipped the split (Sonnet for qa and the guide, Opus for code-review and security) as
+  template config, but an adopter's `config.yml` is repo-owned and never synced, so the split
+  reached only new repos; everywhere else all three checks ran `DEFAULT_MODEL` (Sonnet). The
+  defaults now live in the synced helper as `DEFAULT_MODELS = { model: "claude-sonnet-5-5",
+  code_review_model: "claude-opus-5-5", security_model: "claude-opus-5-5" }`, and each key resolves
+  its own value or its own default — never another key's. Every unset key now warns in the plan
+  summary, naming the key and the default it fell to (previously only `model` did).
+  `DEFAULT_MODEL` stays exported (canonical's adapter re-exports it) and equals
+  `DEFAULT_MODELS.model`. `_flow-review.yml`'s `code_review_model || model` fallback is now inert
+  and left in place for base branches whose helper predates this change.
+
 ## 3.3.0 — 2026-10-09
 
 **MINOR: every Claude step runs the 5.5 models and says which model answered.** The action pin
