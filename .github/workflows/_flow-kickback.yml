@@ -72,8 +72,8 @@ on:
 #   ───────────────────────────────────────────────────────────────────────────────────────────
 #   plan             none          no      reads the run's jobs, the PR and the task's status
 #   undraft          PRs           no      one `gh pr ready --undo`, nothing else
-#   fix              NONE          YES     the round: commit-only, then the guards, then a
-#                                          push made with FLOW_PAT and no GITHUB_TOKEN scope
+#   fix              NONE          YES     the round: commit-only; its commits leave as a bundle
+#   push             FLOW_PAT      no      fresh checkout, the guards, then the one push
 #   round-card       NONE          YES     writes the card for a round that handed nothing back
 #   escalate-round   PRs, issues   no      posts the card and the label for a round that failed
 #   card             NONE          YES     writes the card's four fields, read-only
@@ -83,12 +83,21 @@ on:
 # and it is job-scoped for the same reason _flow-queue-runner.yml scopes its own: a top-level
 # entry would demand the scope from every caller including the jobs that never touch it.
 #
-# WHERE FLOW_PAT GOES, AND WHERE IT DOES NOT. It appears in exactly one step, `stamp-and-push`,
-# which runs only after all four guards have passed. It is deliberately absent from the fixer
-# step: a push-capable credential in that process's environment is reachable by any command a
-# deny-list does not textually match, and is exfiltratable over a hosted runner's open egress.
-# GITHUB_TOKEN as scoped by the `fix` job cannot push, which is what makes the guard set a
-# boundary rather than a request.
+# WHERE FLOW_PAT GOES — THE INVARIANT IS A JOB ONE (flow-0135). No job that runs a model
+# references `secrets.FLOW_PAT`, and the one job that does (`push`) runs no model. On a runner
+# the trust boundary is the JOB, not the step: every step of a job shares the filesystem
+# (`.git/hooks/`) and the `$GITHUB_ENV` / `$GITHUB_PATH` files, which feed every later step. So
+# a model step running `bypassPermissions` over PR comments can plant a hook, an env var
+# (BASH_ENV, NODE_OPTIONS, LD_PRELOAD) or a PATH entry that runs beside any secret a LATER STEP
+# of its job holds, and the guards in that job cannot be trusted either. flow-0082 stated this
+# invariant per step ("FLOW_PAT reaches exactly one step"); a same-job layout satisfied it and
+# passed three reviews, because the invariant itself was wrong.
+#
+# So the round's commits leave `fix` as DATA: a `git bundle`, carried as a run artifact (no size
+# cliff — a job output reaches the next job through `env:`, which a Linux exec caps at 128 KiB a
+# value, and a round touching a lockfile clears that). `push` starts from a fresh checkout of the
+# head `plan` recorded before any model ran, refuses any bundle whose base is not that head, runs
+# the guards from default-branch code, and commits and pushes with hooks off.
 permissions:
   contents: read
 
@@ -117,6 +126,10 @@ jobs:
       trailer: ${{ steps.decide.outputs.trailer }}
       pr: ${{ steps.pr.outputs.number }}
       head_ref: ${{ steps.pr.outputs.head_ref }}
+      # Both recorded HERE, in a job that runs no model, so nothing a model writes can move them:
+      # the PR head the round must build on, and the default-branch commit the guards run from.
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      guard_sha: ${{ steps.pr.outputs.guard_sha }}
       failed: ${{ steps.failed.outputs.checks }}
       link: ${{ steps.failed.outputs.link }}
     steps:
@@ -159,6 +172,10 @@ jobs:
           {
             echo "number=$number"
             echo "head_ref=$(jq -r .headRefName "$RUNNER_TEMP/pr.json")"
+            echo "head_sha=$(jq -r .headRefOid "$RUNNER_TEMP/pr.json")"
+            # This checkout IS the default branch, so its HEAD is the guard's commit. A SHA is
+            # content-addressed: it cannot be made to name a different tree later.
+            echo "guard_sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
 
       - name: Which review jobs failed
@@ -284,15 +301,15 @@ jobs:
 
 
   # ── fix ────────────────────────────────────────────────────────────────────────────────
-  # ONE bounded round. The worker commits; the WORKFLOW checks and pushes. Everything between
-  # those two sentences is the guard set, and it runs in the order the task states.
+  # ONE bounded round. The worker commits; this job hands the commits on as DATA and stops.
+  # Checking and pushing them is `push`'s work, in a job of its own.
   #
-  # THIS IS THE JOB THAT RUNS A MODEL OVER PR COMMENTS, so it is the job that holds no write
-  # scope of any kind. `contents: read` is the checkout; `pull-requests: read` is the fixer
-  # reading the reviewers' verdicts, which its prompt requires and which cannot label, comment,
-  # approve, close, edit or merge. The draft toggle and every escalation are separate jobs that
-  # hold the write scopes and run no model. The one write this job makes — the push — goes out
-  # as FLOW_PAT from a single step, after all four guards.
+  # THIS IS THE JOB THAT RUNS A MODEL OVER PR COMMENTS, so it holds no write scope of any kind
+  # and no FLOW_PAT, in any step. `contents: read` is the checkout; `pull-requests: read` is the
+  # fixer reading the reviewers' verdicts, which its prompt requires and which cannot label,
+  # comment, approve, close, edit or merge. Every step after the model's is the model's to
+  # tamper with (hooks, $GITHUB_ENV, $GITHUB_PATH), so nothing here after it decides anything:
+  # what leaves this job is a bundle and a hand-back, and `push` trusts neither.
   fix:
     needs: [plan, undraft]
     if: ${{ needs.plan.outputs.action == 'dispatch' }}
@@ -301,43 +318,27 @@ jobs:
       contents: read          # the checkout. NOT write: see the header's table.
       pull-requests: read     # `gh pr view --comments` — the verdicts the round is addressing
       id-token: write         # OIDC minting for claude-code-action
-    outputs:
-      pushed: ${{ steps.stamp-and-push.outputs.pushed }}
-      amend: ${{ steps.verdict.outputs.amend }}
-      handback: ${{ steps.verdict.outputs.handback }}
-      # Whether the hand-back is USABLE, which is what routes the escalation: a round that
-      # handed back `fixed` or `disputed` is described by its own four fields, and anything else
-      # is the dead round `round-card` writes a card for.
-      handback_ok: ${{ steps.verdict.outputs.handback_ok }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ needs.plan.outputs.head_ref }}
-          # Every branch and tag, so the default-branch copy of the guard can be materialised
-          # below without a second authenticated fetch.
+          # Full history, so the round can read it like any worker would.
           fetch-depth: 0
           # NO PERSISTED CREDENTIAL. The fixer runs `--permission-mode bypassPermissions` on this
-          # checkout; a credential left in .git/config is a credential it can push with, and the
-          # whole point of this round is that the guard sits between the commit and the push. The
-          # stamp-and-push step supplies FLOW_PAT explicitly, once, after every check has passed.
+          # checkout; a credential left in .git/config is a credential it can push with. Nothing
+          # in this job can push: the push is a different job, on a different runner.
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ inputs.node_version }}
 
-      - name: Record this round's base, and the guard's commit
+      - name: Record this round's base
         id: base
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -eu
-          {
-            echo "sha=$(git rev-parse HEAD)"
-            # Resolved BEFORE the fixer runs and pinned by SHA, so the guard materialised after
-            # it is the default branch's code whatever the fixer did to the working tree. A SHA
-            # is content-addressed: it cannot be made to name a different tree.
-            echo "guard_sha=$(git rev-parse "origin/$DEFAULT_BRANCH")"
-          } >> "$GITHUB_OUTPUT"
+          # What the bundle below is cut from. `push` does not take this on trust: it checks the
+          # bundle against the head `plan` recorded, in a job no model ran in.
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: The auto-fix round (a fresh worker session, commit-only)
         id: worker
@@ -357,8 +358,8 @@ jobs:
           #      reviewers' verdicts) and read is all it gets: no `pull-requests: write`, so no
           #      `gh pr review --approve`, no `gh pr comment`, no `gh pr close`; no `issues:
           #      write`, so it cannot add or remove a label, including the `flow:needs-human`
-          #      that is this PR's off switch; no `contents: write`, so no push. FLOW_PAT
-          #      reaches only `stamp-and-push`, after every guard.
+          #      that is this PR's off switch; no `contents: write`, so no push. FLOW_PAT is
+          #      not in this JOB at all: it is `push`'s, a job that runs no model.
           #
           #      THIS IS A JOB-LEVEL FACT, NOT A WORKFLOW-LEVEL ONE, and the distinction is the
           #      whole fix: the write scopes this workflow does use live on `undraft`,
@@ -375,7 +376,7 @@ jobs:
           #      all fail anyway, and they are listed so that the day someone widens the job's
           #      permissions, the deny-list is already there.
           claude_args: >-
-            --max-turns 60 --model opus --permission-mode bypassPermissions
+            --max-turns 60 --model claude-opus-5-5 --permission-mode bypassPermissions
             --disallowedTools "Bash(git push:*)" "Bash(gh pr ready:*)" "Bash(gh api:*)"
             "Bash(curl:*)" "Bash(wget:*)" "Bash(gh pr merge:*)" "Bash(gh pr edit:*)"
             "Bash(gh pr comment:*)" "Bash(gh pr close:*)" "Bash(gh pr review:*)"
@@ -430,10 +431,127 @@ jobs:
             card with a blank field is a card that gets ignored. `change` is required when the
             action is `kickback`, and must name a specific change rather than a direction.
 
-      - name: Materialise the guard from the default branch
+      - name: Report the model that answered
         if: ${{ always() }}
         env:
-          GUARD_SHA: ${{ steps.base.outputs.guard_sha }}
+          EXECUTION_FILE: ${{ steps.worker.outputs.execution_file }}
+          REQUESTED_MODEL: claude-opus-5-5
+          CLAUDE_STEP: kickback-fix
+        run: |
+          # flow-0140. claude-code-action has no output naming the model. Its `execution_file` output is
+          # the SDK message stream as JSON (base-action/src/run-claude-sdk.ts at v1.0.245): the `result`
+          # message's `modelUsage` is keyed by every model that answered, `assistant` messages carry
+          # `message.model`, and `system`/`init` carries the model the CLI resolved. Read in that order.
+          # Every value arrives through env, never an expression. Reporting only: it never fails the job.
+          node - <<'FLOW_MODEL_REPORT'
+          const fs = require("fs");
+          const { EXECUTION_FILE: file = "", REQUESTED_MODEL: want = "", CLAUDE_STEP: step = "claude" } = process.env;
+          let seen = [];
+          try {
+            const msgs = JSON.parse(fs.readFileSync(file, "utf8"));
+            const from = (f) => [...new Set(msgs.flatMap((m) => { try { return f(m) ?? []; } catch { return []; } }))]
+              .filter((v) => typeof v === "string" && /^[A-Za-z0-9][\w.:\[\]-]*$/.test(v));
+            for (const f of [
+              (m) => (m.type === "result" ? Object.keys(m.modelUsage ?? {}) : []),
+              (m) => (m.type === "assistant" ? [m.message.model] : []),
+              (m) => (m.type === "system" && m.subtype === "init" ? [m.model] : []),
+            ]) { seen = from(f); if (seen.length) break; }
+          } catch { seen = []; }
+          const code = (v) => "`" + v + "`";
+          const lines = [`### Model: ${step}`, "",
+            `- requested: ${want ? code(want) : "none passed, so the CLI's default"}`,
+            `- answered: ${seen.length ? seen.map(code).join(", ") : `not reported by the action (requested ${want ? code(want) : "the CLI's default"})`}`];
+          if (want && seen.length && !seen.includes(want)) {
+            lines.push(`- **mismatch:** requested ${code(want)}, answered by ${seen.map(code).join(", ")}`);
+            console.log(`::warning::${step} requested ${want} but was answered by ${seen.join(", ")}`);
+          }
+          const out = lines.join("\n") + "\n\n";
+          process.stdout.write(out);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          FLOW_MODEL_REPORT
+
+      # ── the round leaves this job as DATA ─────────────────────────────────────────────
+      # Two files, and nothing else: the round's commits as a `git bundle`, and the hand-back.
+      # This step runs after the model, so the model can tamper with it (a BASH_ENV, a fake
+      # `git` on PATH) — which is why it decides nothing. `push` checks the bundle's base against
+      # the head `plan` recorded, and reads the hand-back as model-written text, which it is.
+      - name: Carry the round out as a bundle and a hand-back
+        id: carry
+        if: ${{ always() }}
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+        run: |
+          set -eu
+          dir="$RUNNER_TEMP/flow-kickback-round"
+          rm -rf "$dir"
+          mkdir -p "$dir"
+          # Always one file, so the upload never comes up empty and `push` can tell "the round
+          # handed nothing back" from "the artifact never arrived".
+          echo "carried" > "$dir/carried.txt"
+          if [ -f .flow-kickback/outcome.json ]; then
+            head -c 16384 .flow-kickback/outcome.json > "$dir/outcome.json"
+          fi
+          # `git bundle create` refuses an empty range, and a round that committed nothing has
+          # nothing to carry; `push`'s check 4 says so in its own words.
+          if [ -n "$BASE_SHA" ] && [ "$(git rev-parse HEAD)" != "$BASE_SHA" ]; then
+            git bundle create "$dir/round.bundle" "$BASE_SHA..HEAD"
+          fi
+
+      - name: Hand the round to the job that may push it
+        if: ${{ always() && steps.carry.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: flow-kickback-round
+          path: ${{ runner.temp }}/flow-kickback-round/
+          retention-days: 1
+          if-no-files-found: error
+
+  # ── push ───────────────────────────────────────────────────────────────────────────────
+  # The guards and the one push, in a job that RUNS NO MODEL — the only job in this file that
+  # references FLOW_PAT. It shares no runner with `fix`: a fresh checkout, a fresh .git, fresh
+  # `$GITHUB_ENV` / `$GITHUB_PATH`. The round reaches it only as the artifact above, and the
+  # bundle in it is used only if its base is the head `plan` recorded before any model ran.
+  #
+  # Runs only when `fix` succeeded (the default `needs` rule): a round that crashed, timed out or
+  # was cancelled pushes nothing, and `round-card` / `escalate-round` handle it as today.
+  push:
+    needs: [plan, fix]
+    if: ${{ needs.plan.outputs.action == 'dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read          # the fresh checkout and the remote-head check. The push is FLOW_PAT's.
+    outputs:
+      pushed: ${{ steps.stamp-and-push.outputs.pushed }}
+      amend: ${{ steps.verdict.outputs.amend }}
+      handback: ${{ steps.verdict.outputs.handback }}
+      # Whether the hand-back is USABLE, which is what routes the escalation: a round that
+      # handed back `fixed` or `disputed` is described by its own four fields, and anything else
+      # is the dead round `round-card` writes a card for.
+      handback_ok: ${{ steps.verdict.outputs.handback_ok }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The head `plan` recorded, by SHA — not whatever the branch says now, and nothing the
+          # `fix` job reported.
+          ref: ${{ needs.plan.outputs.head_sha }}
+          # Every branch, so the default-branch copy of the guard can be materialised below
+          # without a second authenticated fetch.
+          fetch-depth: 0
+          # NO PERSISTED CREDENTIAL: FLOW_PAT is supplied once, to the push, after every check.
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - name: Take the round from the job that ran it
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: flow-kickback-round
+          path: ${{ runner.temp }}/flow-kickback-round
+
+      - name: Materialise the guard from the default branch
+        env:
+          GUARD_SHA: ${{ needs.plan.outputs.guard_sha }}
         run: |
           set -eu
           # flow-0079's rule: everything that DECIDES comes from base, everything DECIDED ABOUT
@@ -441,8 +559,7 @@ jobs:
           # the PR's copy of it would let a round edit the check that is about to judge it.
           dir="$RUNNER_TEMP/flow-kickback-guard"
           rm -rf "$dir"
-          git worktree prune
-          git worktree add -q --detach "$dir" "$GUARD_SHA"
+          git -c core.hooksPath=/dev/null worktree add -q --detach "$dir" "$GUARD_SHA"
           echo "KICKBACK_BIN=$dir/.flow/bin" >> "$GITHUB_ENV"
 
       # ── the guard set. The FIRST check that fails escalates, and NOTHING is pushed. ──
@@ -451,7 +568,7 @@ jobs:
         id: check-outcome
         run: |
           set -eu
-          f=".flow-kickback/outcome.json"
+          f="$RUNNER_TEMP/flow-kickback-round/outcome.json"
           if [ ! -f "$f" ]; then
             echo "amend=The round ended without writing a hand-back, so there is no account of what it did." >> "$GITHUB_OUTPUT"
             echo "::error::the round did not hand back"
@@ -476,7 +593,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          BASE_SHA: ${{ steps.base.outputs.sha }}
+          BASE_SHA: ${{ needs.plan.outputs.head_sha }}
           HEAD_REF: ${{ needs.plan.outputs.head_ref }}
         run: |
           set -eu
@@ -487,10 +604,51 @@ jobs:
             exit 1
           fi
 
+      # The bundle is model-produced data. Its header is text up to the first blank line:
+      # `# v2 git bundle`, then one `-<sha>` line per prerequisite, then `<sha> <ref>` per head.
+      # It is used only if it has exactly one prerequisite, that prerequisite IS the recorded
+      # head, it carries exactly one head, and that head descends from the recorded head — so
+      # what is pushed is the recorded head plus the round's commits, and nothing else.
+      - name: Check 2b — the round's commits arrive as a bundle based on the recorded head
+        id: check-bundle
+        env:
+          BASE_SHA: ${{ needs.plan.outputs.head_sha }}
+        run: |
+          set -eu
+          b="$RUNNER_TEMP/flow-kickback-round/round.bundle"
+          if [ ! -f "$b" ]; then
+            # No commits to carry. Check 4 says so in its own words.
+            echo "tip=$BASE_SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          refuse() {
+            echo "amend=The round's commits did not arrive as a bundle based on this PR's recorded head ($1). Nothing was pushed." >> "$GITHUB_OUTPUT"
+            echo "::error::bundle refused: $1"
+            exit 1
+          }
+          head -c 65536 "$b" | LC_ALL=C sed -n '1,/^$/p' > "$RUNNER_TEMP/bundle-header.txt"
+          case "$(head -n1 "$RUNNER_TEMP/bundle-header.txt")" in
+            "# v2 git bundle"|"# v3 git bundle") ;;
+            *) refuse "not a git bundle" ;;
+          esac
+          prereqs="$(grep -c '^-' "$RUNNER_TEMP/bundle-header.txt" || true)"
+          base="$(LC_ALL=C sed -n 's/^-\([0-9a-f]\{40\}\)\( .*\)\{0,1\}$/\1/p' "$RUNNER_TEMP/bundle-header.txt")"
+          [ "$prereqs" = "1" ] || refuse "it names $prereqs prerequisites, not exactly one"
+          [ "$base" = "$BASE_SHA" ] || refuse "its base is ${base:-unreadable}, not $BASE_SHA"
+          heads="$(LC_ALL=C grep -c '^[0-9a-f]\{40\} ' "$RUNNER_TEMP/bundle-header.txt" || true)"
+          tip="$(LC_ALL=C sed -n 's/^\([0-9a-f]\{40\}\) .*$/\1/p' "$RUNNER_TEMP/bundle-header.txt" | head -n1)"
+          [ "$heads" = "1" ] || refuse "it carries $heads heads, not exactly one"
+          git -c core.hooksPath=/dev/null bundle verify -q "$b" >/dev/null 2>&1 || refuse "git cannot verify it"
+          git -c core.hooksPath=/dev/null bundle unbundle "$b" >/dev/null || refuse "git cannot unpack it"
+          git cat-file -e "$tip^{commit}" 2>/dev/null || refuse "its head is not a commit"
+          git merge-base --is-ancestor "$BASE_SHA" "$tip" || refuse "its head does not descend from $BASE_SHA"
+          git -c core.hooksPath=/dev/null checkout -q --detach "$tip"
+          echo "tip=$tip" >> "$GITHUB_OUTPUT"
+
       - name: Check 3 — the round did not weaken the tests
         id: check-weakens
         env:
-          BASE_SHA: ${{ steps.base.outputs.sha }}
+          BASE_SHA: ${{ needs.plan.outputs.head_sha }}
         run: |
           set -eu
           git diff "$BASE_SHA"..HEAD > "$RUNNER_TEMP/round.diff"
@@ -513,7 +671,7 @@ jobs:
       - name: Check 4 — a round that claims to have fixed something changed something
         id: check-commits
         env:
-          BASE_SHA: ${{ steps.base.outputs.sha }}
+          BASE_SHA: ${{ needs.plan.outputs.head_sha }}
         run: |
           set -eu
           n="$(git rev-list --count "$BASE_SHA"..HEAD)"
@@ -523,6 +681,9 @@ jobs:
             exit 1
           fi
 
+      # HOOKS OFF on both git commands, twice over (`core.hooksPath` and `--no-verify`). This job
+      # never ran a model, so its .git/hooks/ is the fresh checkout's — this is defence in depth,
+      # kept so the day someone moves a model step back in here, the hook route is already shut.
       - name: Stamp the round, push it, and re-request review
         id: stamp-and-push
         env:
@@ -539,12 +700,12 @@ jobs:
           # The ONE amend. It adds the round trailer and changes no content, and it happens here
           # rather than in the fixer so the stamp the cap is counted from cannot be written by the
           # thing the cap is bounding.
-          git commit --amend --no-edit --trailer "$ROUND_TRAILER_LINE"
+          git -c core.hooksPath=/dev/null commit --amend --no-edit --no-verify --trailer "$ROUND_TRAILER_LINE"
           # FLOW_PAT, not GITHUB_TOKEN: a push made with GITHUB_TOKEN triggers no workflows, so a
           # fix pushed with it would never be re-reviewed. `decide` skips the whole round when
           # the secret is absent, so reaching this line means it is set. The URL is built from
           # env, and the credential never reaches a remote stored in .git/config.
-          git push "https://x-access-token:$FLOW_PAT@github.com/$GH_REPO.git" "HEAD:$HEAD_REF"
+          git -c core.hooksPath=/dev/null push --no-verify "https://x-access-token:$FLOW_PAT@github.com/$GH_REPO.git" "HEAD:$HEAD_REF"
           # And this is what starts the three reviewers again. Whatever they say re-enters at
           # `plan`, one round further along.
           gh pr ready "$PR_NUMBER"
@@ -570,6 +731,7 @@ jobs:
           # the one that stopped the round.
           AMEND_1: ${{ steps.check-outcome.outputs.amend }}
           AMEND_2: ${{ steps.check-remote-head.outputs.amend }}
+          AMEND_2B: ${{ steps.check-bundle.outputs.amend }}
           AMEND_3: ${{ steps.check-weakens.outputs.amend }}
           AMEND_4: ${{ steps.check-commits.outputs.amend }}
           # `fixed` or `disputed` means the round parsed and named an outcome the protocol knows;
@@ -577,7 +739,7 @@ jobs:
           OUTCOME: ${{ steps.check-outcome.outputs.outcome }}
         run: |
           set -eu
-          amend="${AMEND_1:-${AMEND_2:-${AMEND_3:-${AMEND_4:-}}}}"
+          amend="${AMEND_1:-${AMEND_2:-${AMEND_2B:-${AMEND_3:-${AMEND_4:-}}}}}"
           # One line, always: a job output with an embedded newline would need a heredoc
           # delimiter, and every amend sentence is authored right here in this file as one line.
           printf 'amend=%s\n' "$(printf '%s' "$amend" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
@@ -615,13 +777,14 @@ jobs:
   #                                              and a model re-reading the PR would not.
   #   anything else                          -> THIS JOB writes the four fields instead: no file,
   #                                              unparseable JSON, an outcome nobody knows, or a
-  #                                              `fix` that never reached its verdict step at all.
+  #                                              round whose `push` job never ran, or never
+  #                                              reached its verdict step.
   #
   # Read-only, and for the same reason as `card`: it is a model reading PR comments, so it holds no
   # write scope at all and `escalate-round` is what posts what it wrote.
   round-card:
-    needs: [plan, fix]
-    if: ${{ always() && needs.plan.outputs.action == 'dispatch' && needs.fix.outputs.pushed != 'true' && needs.fix.outputs.handback_ok != 'true' }}
+    needs: [plan, push]
+    if: ${{ always() && needs.plan.outputs.action == 'dispatch' && needs.push.outputs.pushed != 'true' && needs.push.outputs.handback_ok != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read          # the default-branch checkout
@@ -651,13 +814,13 @@ jobs:
           # The same bounds as `card`: it may not commit, push, re-ready, merge, comment or label,
           # and the only thing it produces is a JSON file this job then validates in code.
           claude_args: >-
-            --max-turns 20 --model sonnet --permission-mode bypassPermissions
+            --max-turns 20 --model claude-sonnet-5-5 --permission-mode bypassPermissions
             --disallowedTools "Bash(git push:*)" "Bash(git commit:*)" "Bash(gh pr ready:*)" "Bash(gh pr merge:*)" "Bash(gh pr edit:*)" "Bash(gh pr comment:*)" "Bash(gh pr close:*)"
           prompt: |
             A Flow auto-fix round was dispatched on pull request #${{ needs.plan.outputs.pr }} and
             handed nothing usable back, so the PR now needs a human decision.
 
-            What stopped the round: ${{ needs.fix.outputs.amend }}
+            What stopped the round: ${{ needs.push.outputs.amend }}
             Failing review checks: ${{ needs.plan.outputs.failed }}
             Auto-fix rounds used: ${{ needs.plan.outputs.rounds_used }} of ${{ needs.plan.outputs.cap }}
 
@@ -684,7 +847,46 @@ jobs:
             naming the specific change to make. "Investigate further" is not a recommendation.
             Fill in every field; a card with a blank field is a card that gets ignored.
 
-      # Base64, into a bounded job output — the same shape and the same reason as `fix`'s verdict
+      - name: Report the model that answered
+        if: ${{ always() }}
+        env:
+          EXECUTION_FILE: ${{ steps.write-card.outputs.execution_file }}
+          REQUESTED_MODEL: claude-sonnet-5-5
+          CLAUDE_STEP: round-card
+        run: |
+          # flow-0140. claude-code-action has no output naming the model. Its `execution_file` output is
+          # the SDK message stream as JSON (base-action/src/run-claude-sdk.ts at v1.0.245): the `result`
+          # message's `modelUsage` is keyed by every model that answered, `assistant` messages carry
+          # `message.model`, and `system`/`init` carries the model the CLI resolved. Read in that order.
+          # Every value arrives through env, never an expression. Reporting only: it never fails the job.
+          node - <<'FLOW_MODEL_REPORT'
+          const fs = require("fs");
+          const { EXECUTION_FILE: file = "", REQUESTED_MODEL: want = "", CLAUDE_STEP: step = "claude" } = process.env;
+          let seen = [];
+          try {
+            const msgs = JSON.parse(fs.readFileSync(file, "utf8"));
+            const from = (f) => [...new Set(msgs.flatMap((m) => { try { return f(m) ?? []; } catch { return []; } }))]
+              .filter((v) => typeof v === "string" && /^[A-Za-z0-9][\w.:\[\]-]*$/.test(v));
+            for (const f of [
+              (m) => (m.type === "result" ? Object.keys(m.modelUsage ?? {}) : []),
+              (m) => (m.type === "assistant" ? [m.message.model] : []),
+              (m) => (m.type === "system" && m.subtype === "init" ? [m.model] : []),
+            ]) { seen = from(f); if (seen.length) break; }
+          } catch { seen = []; }
+          const code = (v) => "`" + v + "`";
+          const lines = [`### Model: ${step}`, "",
+            `- requested: ${want ? code(want) : "none passed, so the CLI's default"}`,
+            `- answered: ${seen.length ? seen.map(code).join(", ") : `not reported by the action (requested ${want ? code(want) : "the CLI's default"})`}`];
+          if (want && seen.length && !seen.includes(want)) {
+            lines.push(`- **mismatch:** requested ${code(want)}, answered by ${seen.map(code).join(", ")}`);
+            console.log(`::warning::${step} requested ${want} but was answered by ${seen.join(", ")}`);
+          }
+          const out = lines.join("\n") + "\n\n";
+          process.stdout.write(out);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          FLOW_MODEL_REPORT
+
+      # Base64, into a bounded job output — the same shape and the same reason as `push`'s verdict
       # and `card`'s hand-back: every field below is model-written text, and base64 cannot carry a
       # quote, a newline, a backtick or a `$`. Absent or over-long decodes to nothing readable, and
       # `escalate-round` posts the fallback card, which is visible rather than silent.
@@ -704,10 +906,10 @@ jobs:
   # THE DEAD-ROUND BACKSTOP. A round that died part-way — a failed guard, a crashed action, a
   # cancelled job, an `undraft` that never succeeded — must never leave a draft PR that nothing
   # is watching. `always()` is what makes that true of every exit, including the ones nobody
-  # predicted: `needs.fix.outputs.pushed` is empty when `fix` was skipped or cancelled, so the
-  # condition holds and the card still gets posted.
+  # predicted: `needs.push.outputs.pushed` is empty when `fix` or `push` was skipped, failed or
+  # was cancelled, so the condition holds and the card still gets posted.
   #
-  # This is a separate job from `fix` because posting a comment and adding a label need
+  # This is a separate job from `fix` and `push` because posting a comment and adding a label need
   # `pull-requests: write` and `issues: write`, and `fix` runs a model on PR comments. No model
   # runs here: it renders a card from values that arrive through `env:` and a file, and posts it.
   #
@@ -715,8 +917,8 @@ jobs:
   # the round's own hand-back when it handed one back, and `round-card`'s read-only model call
   # when it did not. `needs` plus `always()` is what makes this run whichever of them was skipped.
   escalate-round:
-    needs: [plan, fix, round-card]
-    if: ${{ always() && needs.plan.outputs.action == 'dispatch' && needs.fix.outputs.pushed != 'true' }}
+    needs: [plan, push, round-card]
+    if: ${{ always() && needs.plan.outputs.action == 'dispatch' && needs.push.outputs.pushed != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read          # the default-branch checkout, for the card renderer
@@ -742,16 +944,16 @@ jobs:
           KICKBACK_LINK: ${{ needs.plan.outputs.link }}
           KICKBACK_ROUNDS_USED: ${{ needs.plan.outputs.rounds_used }}
           KICKBACK_CAP: ${{ needs.plan.outputs.cap }}
-          # The guard's own sentence, carried out of `fix` as a job output — so the human is
-          # told WHICH check fired. Empty means `fix` never reached its verdict step at all,
+          # The guard's own sentence, carried out of `push` as a job output — so the human is
+          # told WHICH check fired. Empty means `push` never reached its verdict step at all,
           # and the sentence in the shell default below is the honest account of that.
-          ROUND_AMEND: ${{ needs.fix.outputs.amend }}
+          ROUND_AMEND: ${{ needs.push.outputs.amend }}
           # WHOSE four fields the card carries. A round that handed back `fixed` or `disputed`
           # describes itself — it is the only thing that knows what it tried. A round that handed
           # back nothing usable cannot, so the fields come from `round-card`'s read-only model
           # call, which read the verdicts, the diff and the round history instead. `round-card` is
           # skipped on the first branch, so its output is empty exactly when it is not wanted.
-          HANDBACK_B64: ${{ needs.fix.outputs.handback_ok == 'true' && needs.fix.outputs.handback || needs['round-card'].outputs.handback }}
+          HANDBACK_B64: ${{ needs.push.outputs.handback_ok == 'true' && needs.push.outputs.handback || needs['round-card'].outputs.handback }}
         run: |
           set -eu
           export KICKBACK_AMEND="${ROUND_AMEND:-The round never ran to completion: it was skipped, crashed or was cancelled before it could hand anything back. Nothing was pushed.}"
@@ -817,7 +1019,7 @@ jobs:
           # merge, comment or label. The only thing it produces is a JSON file this job then
           # validates in code.
           claude_args: >-
-            --max-turns 20 --model sonnet --permission-mode bypassPermissions
+            --max-turns 20 --model claude-sonnet-5-5 --permission-mode bypassPermissions
             --disallowedTools "Bash(git push:*)" "Bash(git commit:*)" "Bash(gh pr ready:*)" "Bash(gh pr merge:*)" "Bash(gh pr edit:*)" "Bash(gh pr comment:*)" "Bash(gh pr close:*)"
           prompt: |
             A Flow auto-fix round was NOT run on pull request #${{ needs.plan.outputs.pr }}, and
@@ -848,6 +1050,45 @@ jobs:
             `merge` (the PR is good enough to ship as it stands) or `kickback` with `change`
             naming the specific change to make. "Investigate further" is not a recommendation.
             Fill in every field; a card with a blank field is a card that gets ignored.
+
+      - name: Report the model that answered
+        if: ${{ always() }}
+        env:
+          EXECUTION_FILE: ${{ steps.write-card.outputs.execution_file }}
+          REQUESTED_MODEL: claude-sonnet-5-5
+          CLAUDE_STEP: card
+        run: |
+          # flow-0140. claude-code-action has no output naming the model. Its `execution_file` output is
+          # the SDK message stream as JSON (base-action/src/run-claude-sdk.ts at v1.0.245): the `result`
+          # message's `modelUsage` is keyed by every model that answered, `assistant` messages carry
+          # `message.model`, and `system`/`init` carries the model the CLI resolved. Read in that order.
+          # Every value arrives through env, never an expression. Reporting only: it never fails the job.
+          node - <<'FLOW_MODEL_REPORT'
+          const fs = require("fs");
+          const { EXECUTION_FILE: file = "", REQUESTED_MODEL: want = "", CLAUDE_STEP: step = "claude" } = process.env;
+          let seen = [];
+          try {
+            const msgs = JSON.parse(fs.readFileSync(file, "utf8"));
+            const from = (f) => [...new Set(msgs.flatMap((m) => { try { return f(m) ?? []; } catch { return []; } }))]
+              .filter((v) => typeof v === "string" && /^[A-Za-z0-9][\w.:\[\]-]*$/.test(v));
+            for (const f of [
+              (m) => (m.type === "result" ? Object.keys(m.modelUsage ?? {}) : []),
+              (m) => (m.type === "assistant" ? [m.message.model] : []),
+              (m) => (m.type === "system" && m.subtype === "init" ? [m.model] : []),
+            ]) { seen = from(f); if (seen.length) break; }
+          } catch { seen = []; }
+          const code = (v) => "`" + v + "`";
+          const lines = [`### Model: ${step}`, "",
+            `- requested: ${want ? code(want) : "none passed, so the CLI's default"}`,
+            `- answered: ${seen.length ? seen.map(code).join(", ") : `not reported by the action (requested ${want ? code(want) : "the CLI's default"})`}`];
+          if (want && seen.length && !seen.includes(want)) {
+            lines.push(`- **mismatch:** requested ${code(want)}, answered by ${seen.map(code).join(", ")}`);
+            console.log(`::warning::${step} requested ${want} but was answered by ${seen.join(", ")}`);
+          }
+          const out = lines.join("\n") + "\n\n";
+          process.stdout.write(out);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          FLOW_MODEL_REPORT
 
       # Base64, into a job output, for the same reason the round's verdict travels that way:
       # every field below is model-written text, and base64 cannot carry a quote, a newline, a

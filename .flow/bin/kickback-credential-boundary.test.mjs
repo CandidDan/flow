@@ -9,8 +9,9 @@
 // passed three security reviews. This pins the job-level fact instead.
 //
 // While `_flow-kickback.yml` has a job that both runs `anthropics/claude-code-action` and references
-// `secrets.FLOW_PAT`, canonical's `review.auto_fix_rounds` must be 0 or absent. flow-0135 splits the
-// job; from then on the predicate reports nothing and auto-fix can be re-armed with no edit here.
+// `secrets.FLOW_PAT`, canonical's `review.auto_fix_rounds` must be 0 or absent. flow-0135 split the
+// job (`fix` runs the model, `push` holds the PAT), so the predicate reports nothing and canonical
+// is re-armed at 2. Moving a model step back beside the PAT fails here while canonical is armed.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -62,20 +63,29 @@ test("canonical keeps auto-fix off while a model job references FLOW_PAT", { ski
     "auto_fix_rounds to 0, or move the FLOW_PAT steps into a job that runs no model (flow-0135).");
 });
 
-test("flow-0134 criterion 1: canonical's auto_fix_rounds is 0, so the kickback plan skips every round", () => {
+test("flow-0135: canonical is re-armed at 2, and the kickback plan dispatches on that cap", () => {
   const raw = parseAutoFixRounds(readFileSync(CONFIG, "utf8"));
-  assert.equal(raw, "0");
-  const d = decide({ flowAi: "true", configuredCap: raw, rounds: 0 });
-  assert.equal(d.action, SKIP);
-  assert.match(d.reason, /auto-fix off/);
+  assert.equal(raw, "2");
+  assert.equal(effectiveCap(raw).cap, 2);
+  // The facts of a real kickback: a red qa check on an in_review task's PR, with FLOW_PAT set.
+  const d = decide({ flowAi: "true", configuredCap: raw, rounds: 0, flowPat: "true", fork: "false",
+    taskId: "flow-0135", taskStatus: "in_review", draft: "false", labels: "", failedChecks: "qa" });
+  assert.notEqual(d.action, SKIP, d.reason);
+  assert.match(d.reason, /dispatching auto-fix round 1\/2/);
 });
 
-test("flow-0134 criterion 2: today's layout is reported, naming `fix`, when armed — and passes when off", { skip }, () => {
-  assert.deepEqual(boundaryViolations(WORKFLOW, armed(2)), ["fix"],
-    "the predicate must see the same-job layout this task exists for; if this fails because " +
-    "flow-0135 has landed, the predicate is doing its job — update this criterion with it");
-  assert.deepEqual(boundaryViolations(WORKFLOW, armed(0)), []);
-  assert.deepEqual(boundaryViolations(WORKFLOW, "review:\n  model: opus\n"), [], "absent key = off");
+test("flow-0135: the split layout passes armed; the pre-split layout (push steps back in `fix`) is reported", { skip }, () => {
+  assert.deepEqual(modelJobsHoldingPat(WORKFLOW), []);
+  assert.deepEqual(boundaryViolations(WORKFLOW, armed(2)), [],
+    "the job split is what lets canonical arm auto-fix at all");
+  // Mutation: fold `push` back into `fix` — the layout flow-0134 disarmed for.
+  const wf = yamlMod.parse(WORKFLOW);
+  wf.jobs.fix.steps = [...wf.jobs.fix.steps, ...wf.jobs.push.steps];
+  delete wf.jobs.push;
+  const before = yamlMod.stringify(wf);
+  assert.deepEqual(boundaryViolations(before, armed(2)), ["fix"]);
+  assert.deepEqual(boundaryViolations(before, armed(0)), []);
+  assert.deepEqual(boundaryViolations(before, "review:\n  model: opus\n"), [], "absent key = off");
 });
 
 test("flow-0134 criterion 3: a layout whose model jobs never reference FLOW_PAT passes, armed or not", { skip }, () => {

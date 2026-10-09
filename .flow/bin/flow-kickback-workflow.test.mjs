@@ -20,7 +20,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -105,6 +107,35 @@ test("the claude-code-action pin equals _flow-queue-runner.yml's, everywhere it 
   }
 });
 
+// flow-0140's follow-up, which lands here because this task rewrote the file. model-ids.test.mjs
+// still exempts _flow-kickback.yml by name (that file is outside this task's touches), so the same
+// two rules are held here until the exemption is dropped: full model IDs, and a byte-identical
+// "Report the model that answered" step after every Claude step, reading that step's output.
+test("every Claude step passes a full model ID and is followed by the shared model-report step", { skip }, () => {
+  const wf = parse(REUSABLE);
+  const scriptOf = (st) => st.run.slice(st.run.indexOf("node - <<'FLOW_MODEL_REPORT'"));
+  const reviewReport = Object.values(parse(join(WORKFLOWS, "_flow-review.yml")).jobs)
+    .flatMap((j) => j.steps ?? []).find((st) => st.name === "Report the model that answered");
+  assert.ok(reviewReport, "the shared script's source of truth is _flow-review.yml");
+  let seen = 0;
+  for (const [name, job] of Object.entries(wf.jobs)) {
+    const list = job.steps ?? [];
+    list.forEach((st, i) => {
+      if (!/claude-code-action/.test(st.uses ?? "")) return;
+      seen++;
+      const model = st.with.claude_args.match(/--model\s+(\S+)/)?.[1];
+      assert.match(model ?? "", /^claude-[a-z]+-\d+(-\d+)*$/, `${name}: --model ${model} is not a full model id`);
+      const next = list[i + 1];
+      assert.equal(next?.name, "Report the model that answered", `${name}: the step after the Claude step must report its model`);
+      assert.equal(next.if, "${{ always() }}");
+      assert.equal(next.env.EXECUTION_FILE, `\${{ steps.${st.id}.outputs.execution_file }}`);
+      assert.equal(next.env.REQUESTED_MODEL, model, `${name}: the report must state the model the step asked for`);
+      assert.equal(scriptOf(next), scriptOf(reviewReport), `${name}: the report script must be byte-identical to _flow-review.yml's`);
+    });
+  }
+  assert.equal(seen, 3, "the three Claude steps: the fixer, round-card and card");
+});
+
 // ═════════════════════════════════════════════════════════════════════════════════════════
 // The fixer's limits
 // ═════════════════════════════════════════════════════════════════════════════════════════
@@ -160,21 +191,58 @@ test("the fixer step is handed NO FLOW_PAT — not in env:, not in with:", { ski
   }
 });
 
-test("FLOW_PAT reaches exactly one step — stamp-and-push, after every guard", { skip }, () => {
+// flow-0135. The invariant is a JOB one, and it replaces flow-0082's step-level one ("FLOW_PAT
+// reaches exactly one step"), which a same-job layout satisfied while a model step in that job
+// could plant a hook, a $GITHUB_ENV entry (BASH_ENV, NODE_OPTIONS, LD_PRELOAD) or a $GITHUB_PATH
+// entry that ran beside the PAT. On a runner, the boundary is the job.
+const PAT_VALUE = /secrets\.FLOW_PAT(?!\s*!=)/;
+// Every job, split by the two facts that matter: does it run a model, does it reference the PAT
+// value anywhere (job env, step env, with:, run:). `plan`'s presence test is not the value.
+export function patLayout(wf) {
+  const model = [];
+  const pat = [];
+  for (const [name, job] of Object.entries(wf.jobs ?? {})) {
+    if (runsAModel(job)) model.push(name);
+    if (PAT_VALUE.test(JSON.stringify(job))) pat.push(name);
+  }
+  return { model, pat, both: model.filter((j) => pat.includes(j)) };
+}
+
+test("flow-0135: no job that runs a model references FLOW_PAT, and the job that does runs no model", { skip }, () => {
+  const wf = parse(REUSABLE);
+  const { model, pat, both } = patLayout(wf);
+  assert.ok(model.length >= 3 && pat.length >= 1, "an empty scan is a failure, not a pass");
+  assert.deepEqual(both, [],
+    `these jobs run a model AND reference secrets.FLOW_PAT: ${both.join(", ")}. A model step can reach a secret held by any later step of its job.`);
+  assert.deepEqual(pat, ["push"], "FLOW_PAT belongs to exactly one job, `push`");
+  assert.ok(!runsAModel(wf.jobs.push), "the FLOW_PAT job runs no model");
+  assert.ok(!JSON.stringify(wf.jobs.fix).includes("FLOW_PAT"),
+    "the fixer's job must not even name the secret");
+
+  // MUTATION: the pre-change layout — the guards and the push back inside `fix` — fails.
+  const before = structuredClone(wf);
+  before.jobs.fix.steps = [...before.jobs.fix.steps, ...before.jobs.push.steps];
+  delete before.jobs.push;
+  assert.deepEqual(patLayout(before).both, ["fix"], "the same-job layout this task removed must be reported");
+  // And so does the PAT merely reaching the model job's environment, at job level.
+  const leaky = structuredClone(wf);
+  leaky.jobs.fix.env = { GH_TOKEN: "${{ secrets.FLOW_PAT }}" };
+  assert.deepEqual(patLayout(leaky).both, ["fix"]);
+});
+
+test("FLOW_PAT's value reaches one step — stamp-and-push, in `push`, after every guard", { skip }, () => {
   const wf = parse(REUSABLE);
   const holders = [];
   for (const [job, j] of Object.entries(wf.jobs)) {
     for (const step of j.steps ?? []) {
       const refs = [...Object.entries(step.env ?? {}), ...Object.entries(step.with ?? {})]
-        .filter(([, v]) => /secrets\.FLOW_PAT(?!\s*!=)/.test(String(v)));
+        .filter(([, v]) => PAT_VALUE.test(String(v)));
       if (refs.length) holders.push({ job, id: step.id ?? step.name, keys: refs.map(([k]) => k) });
     }
   }
-  assert.deepEqual(holders.map((h) => h.id), ["stamp-and-push"],
+  assert.deepEqual(holders.map((h) => `${h.job}/${h.id}`), ["push/stamp-and-push"],
     `FLOW_PAT must reach one step and one only; found: ${JSON.stringify(holders)}`);
-  // And that step runs after all four guards, which the ordering test above already pins. What
-  // is pinned here is that no guard, no card step and no fixer step is on the list at all.
-  const ids = steps(wf, "fix").map((s) => s.id).filter(Boolean);
+  const ids = steps(wf, "push").map((s) => s.id).filter(Boolean);
   assert.ok(ids.indexOf("stamp-and-push") > ids.indexOf(GUARD_ORDER.at(-1)),
     "the one step holding the push credential is the one that runs last");
   // `plan` reads only WHETHER the secret is set. The value itself never enters that job.
@@ -212,13 +280,16 @@ test("the fixer prompt carries all four of its rules, in its own words", { skip 
 // The guard set, and the single push
 // ═════════════════════════════════════════════════════════════════════════════════════════
 
-const GUARD_ORDER = ["check-outcome", "check-remote-head", "check-weakens", "check-commits"];
+// Guards 1–4 as flow-0082 ordered them, with flow-0135's bundle check between 2 and 3: the
+// commits it admits are what 3 and 4 judge.
+const GUARD_ORDER = ["check-outcome", "check-remote-head", "check-bundle", "check-weakens", "check-commits"];
 
-test("the push happens only after the four checks, in the stated order", { skip }, () => {
-  const ids = steps(parse(REUSABLE), "fix").map((s) => s.id).filter(Boolean);
+test("the push happens only after the guards, in the stated order, in a job after the round", { skip }, () => {
+  const wf = parse(REUSABLE);
+  const ids = steps(wf, "push").map((s) => s.id).filter(Boolean);
   const at = (id) => {
     const i = ids.indexOf(id);
-    assert.notEqual(i, -1, `the fix job must have a step with id \`${id}\``);
+    assert.notEqual(i, -1, `the push job must have a step with id \`${id}\``);
     return i;
   };
   const order = GUARD_ORDER.map(at);
@@ -228,11 +299,19 @@ test("the push happens only after the four checks, in the stated order", { skip 
     assert.ok(at(id) < at("stamp-and-push"),
       `\`${id}\` must run BEFORE anything is pushed — a check after the push is not a check`);
   }
-  assert.ok(at("worker") < at(GUARD_ORDER[0]), "the guards judge the round, so they run after it");
+  // The guards judge the round, so their job runs after the round's — and only when it succeeded:
+  // no `always()`, so a crashed or cancelled round never reaches a push.
+  assert.deepEqual(wf.jobs.push.needs, ["plan", "fix"]);
+  assert.doesNotMatch(wf.jobs.push.if, /always\(\)/, "a round that did not finish must never be pushed");
+  assert.match(wf.jobs.push.if, /action == 'dispatch'/);
+  for (const id of GUARD_ORDER) {
+    assert.ok(!steps(wf, "fix").some((s) => s.id === id),
+      `\`${id}\` runs in the model's job, where the model can tamper with it ($GITHUB_ENV, $GITHUB_PATH, hooks)`);
+  }
 });
 
 test("no guard pipes its verdict into tee — a pipeline reports the LAST command's status", { skip }, () => {
-  for (const step of steps(parse(REUSABLE), "fix")) {
+  for (const step of steps(parse(REUSABLE), "push")) {
     if (!GUARD_ORDER.includes(step.id)) continue;
     assert.doesNotMatch(step.run, /flow-kickback\.mjs[^\n|]*\|\s*tee/,
       `\`${step.id}\` pipes the guard into tee, so the step would see tee's exit code 0 and the guard would never trip`);
@@ -240,22 +319,131 @@ test("no guard pipes its verdict into tee — a pipeline reports the LAST comman
 });
 
 test("the guard runs the DEFAULT branch's copy of the helper, not the PR's", { skip }, () => {
-  const fix = steps(parse(REUSABLE), "fix");
-  const weakens = fix.find((s) => s.id === "check-weakens");
+  const wf = parse(REUSABLE);
+  const push = steps(wf, "push");
+  const weakens = push.find((s) => s.id === "check-weakens");
   assert.match(weakens.run, /KICKBACK_BIN/,
     "running `.flow/bin/flow-kickback.mjs` from the PR checkout would let a round edit the check about to judge it (flow-0079's rule)");
-  const materialise = fix.find((s) => /worktree add/.test(s.run ?? ""));
+  const materialise = push.find((s) => /worktree add/.test(s.run ?? ""));
   assert.ok(materialise, "the default-branch copy has to be materialised from somewhere");
   assert.match(materialise.run, /GUARD_SHA/,
-    "the guard's commit must be pinned by SHA resolved BEFORE the fixer ran — a SHA is content-addressed and cannot be made to name a different tree");
-  assert.ok(fix.indexOf(fix.find((s) => s.id === "base")) < fix.indexOf(fix.find((s) => s.id === "worker")),
-    "the guard SHA is recorded before the fixer gets the runner");
+    "the guard's commit must be pinned by SHA — a SHA is content-addressed and cannot be made to name a different tree");
+  // Recorded by `plan`, on its default-branch checkout, in a job that runs no model.
+  assert.match(String(materialise.env.GUARD_SHA), /needs\.plan\.outputs\.guard_sha/);
+  assert.match(wf.jobs.plan.outputs.guard_sha, /steps\.pr\.outputs\.guard_sha/);
+  assert.match(steps(wf, "plan").find((s) => s.id === "pr").run, /guard_sha=\$\(git rev-parse HEAD\)/);
+  assert.ok(!runsAModel(wf.jobs.plan));
+});
+
+// flow-0135 criterion 2. The push job starts from nothing the model touched: a fresh checkout of
+// the head `plan` recorded, the round's commits only as a bundle, and a refusal (no push, the
+// guard's sentence on the card) when the bundle's base is not that head.
+test("the push job checks out fresh and takes the round's commits only as a bundle", { skip }, () => {
+  const wf = parse(REUSABLE);
+  const push = steps(wf, "push");
+  const checkout = push.find((s) => /actions\/checkout@/.test(s.uses ?? ""));
+  assert.match(checkout.with.ref, /needs\.plan\.outputs\.head_sha/,
+    "the recorded head, by SHA — never a ref the fix job reported");
+  assert.equal(checkout.with["persist-credentials"], false);
+  assert.match(wf.jobs.plan.outputs.head_sha, /steps\.pr\.outputs\.head_sha/);
+  assert.match(steps(wf, "plan").find((s) => s.id === "pr").run, /jq -r \.headRefOid/);
+
+  // The bundle leaves `fix` as an artifact, cut from the round's base, and arrives in `push`.
+  const fix = steps(wf, "fix");
+  const carry = fix.find((s) => s.id === "carry");
+  assert.match(carry.run, /git bundle create "\$dir\/round\.bundle" "\$BASE_SHA\.\.HEAD"/);
+  assert.match(carry.if, /always\(\)/, "a disputed round still hands back");
+  const up = fix.find((s) => /actions\/upload-artifact@/.test(s.uses ?? ""));
+  const down = push.find((s) => /actions\/download-artifact@/.test(s.uses ?? ""));
+  assert.ok(up && down, "the round crosses the job boundary as an artifact");
+  assert.equal(up.with.name, down.with.name);
+  assert.ok(fix.indexOf(up) > fix.findIndex((s) => s.id === "worker"));
+  // Nothing but the bundle carries commits into `push`: no fetch from the PR, no second checkout.
+  const runs = push.map((s) => s.run ?? "").join("\n");
+  assert.doesNotMatch(runs, /git (-c \S+ )*(fetch|pull)\b/, "the round's commits come from the bundle and nowhere else");
+  assert.equal(push.filter((s) => /actions\/checkout@/.test(s.uses ?? "")).length, 1);
+
+  const bundle = push.find((s) => s.id === "check-bundle");
+  assert.match(String(bundle.env.BASE_SHA), /needs\.plan\.outputs\.head_sha/);
+  assert.match(bundle.run, /\[ "\$prereqs" = "1" \] \|\| refuse/, "exactly one prerequisite");
+  assert.match(bundle.run, /\[ "\$base" = "\$BASE_SHA" \] \|\| refuse/, "and it is the recorded head");
+  assert.match(bundle.run, /merge-base --is-ancestor "\$BASE_SHA" "\$tip" \|\| refuse/);
+  assert.match(bundle.run, /refuse\(\) \{[\s\S]*amend=[\s\S]*exit 1/, "a refusal escalates with its own sentence");
+  for (const id of ["check-weakens", "check-commits"]) {
+    assert.match(String(push.find((s) => s.id === id).env.BASE_SHA), /needs\.plan\.outputs\.head_sha/,
+      `${id} judges the round against the recorded head, not the fix job's word for it`);
+  }
+});
+
+// The refusal, run for real: the check-bundle script against bundles built in a scratch repo.
+function runBundleCheck({ build }) {
+  const dir = mkdtempSync(join(tmpdir(), "flow-kickback-bundle-"));
+  try {
+    const g = (...a) => execFileSync("git", ["-C", join(dir, "repo"), ...a], { encoding: "utf8" }).trim();
+    mkdirSync(join(dir, "repo"));
+    g("init", "-q");
+    g("config", "user.email", "t@example.com");
+    g("config", "user.name", "t");
+    g("commit", "-q", "--allow-empty", "-m", "c0");
+    const c0 = g("rev-parse", "HEAD");
+    g("commit", "-q", "--allow-empty", "-m", "c1");
+    const head = g("rev-parse", "HEAD");
+    const round = join(dir, "temp", "flow-kickback-round");
+    mkdirSync(round, { recursive: true });
+    build({ g, c0, head, bundle: join(round, "round.bundle") });
+    // The push job's checkout: the recorded head, detached.
+    g("checkout", "-q", "--detach", head);
+    const out = join(dir, "out.txt");
+    writeFileSync(out, "");
+    const step = steps(parse(REUSABLE), "push").find((s) => s.id === "check-bundle");
+    const r = spawnSync("bash", ["-c", step.run], {
+      cwd: join(dir, "repo"), encoding: "utf8",
+      env: { PATH: process.env.PATH, HOME: dir, RUNNER_TEMP: join(dir, "temp"), GITHUB_OUTPUT: out, BASE_SHA: head },
+    });
+    return { status: r.status, out: readFileSync(out, "utf8"), head, now: g("rev-parse", "HEAD") };
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+test("check-bundle admits a bundle based on the recorded head, and refuses every other base", { skip }, () => {
+  const ok = runBundleCheck({ build: ({ g, head, bundle }) => {
+    g("commit", "-q", "--allow-empty", "-m", "fix");
+    g("bundle", "create", "-q", bundle, `${head}..HEAD`);
+  } });
+  assert.equal(ok.status, 0, ok.out);
+  assert.match(ok.out, /^tip=[0-9a-f]{40}$/m);
+  assert.notEqual(ok.now, ok.head, "the admitted round is what is checked out for the push");
+
+  const none = runBundleCheck({ build: () => {} });
+  assert.equal(none.status, 0, "no bundle is no commits, which check 4 reports in its own words");
+  assert.equal(none.out.trim(), `tip=${none.head}`);
+
+  // Cut from an older commit: the base is not the recorded head.
+  const stale = runBundleCheck({ build: ({ g, c0, bundle }) => {
+    g("checkout", "-q", "--detach", c0);
+    g("commit", "-q", "--allow-empty", "-m", "elsewhere");
+    g("bundle", "create", "-q", bundle, `${c0}..HEAD`);
+  } });
+  assert.equal(stale.status, 1);
+  assert.match(stale.out, /^amend=The round's commits did not arrive as a bundle based on this PR's recorded head \(its base is [0-9a-f]{40}, not /m);
+  assert.equal(stale.now, stale.head, "a refused bundle is never checked out");
+
+  // A whole-history bundle has no prerequisite at all.
+  const full = runBundleCheck({ build: ({ g, bundle }) => {
+    g("commit", "-q", "--allow-empty", "-m", "fix");
+    g("bundle", "create", "-q", bundle, "HEAD");
+  } });
+  assert.equal(full.status, 1);
+  assert.match(full.out, /names 0 prerequisites, not exactly one/);
+
+  const junk = runBundleCheck({ build: ({ bundle }) => writeFileSync(bundle, "not a bundle\n") });
+  assert.equal(junk.status, 1);
+  assert.match(junk.out, /not a git bundle/);
 });
 
 test("the pushed head carries the round trailer, stamped by the workflow and not by the fixer", { skip }, () => {
-  const push = steps(parse(REUSABLE), "fix").find((s) => s.id === "stamp-and-push");
-  const amendAt = push.run.indexOf("git commit --amend");
-  const pushAt = push.run.indexOf("git push");
+  const push = steps(parse(REUSABLE), "push").find((s) => s.id === "stamp-and-push");
+  const amendAt = push.run.search(/git (-c \S+ )*commit --amend/);
+  const pushAt = push.run.search(/git (-c \S+ )*push/);
   assert.ok(amendAt !== -1 && pushAt !== -1);
   assert.ok(amendAt < pushAt, "the trailer is stamped before the push, so the pushed head carries it");
   assert.match(push.run, /--trailer "\$ROUND_TRAILER_LINE"/);
@@ -271,14 +459,29 @@ test("the pushed head carries the round trailer, stamped by the workflow and not
 
 test("there is exactly one push in the file, and it targets the PR's branch, never the default one", { skip }, () => {
   const pushes = allRuns(parse(REUSABLE)).join("\n").split("\n")
-    .filter((l) => /\bgit push\b/.test(l) && !l.trim().startsWith("#"));
+    .filter((l) => /\bgit (-c \S+ )*push\b/.test(l) && !l.trim().startsWith("#"));
   assert.equal(pushes.length, 1, `expected exactly one push; found:\n${pushes.join("\n")}`);
   assert.match(pushes[0], /"HEAD:\$HEAD_REF"/,
     "the only branch this workflow writes to is the PR's own — the round count lives on the PR precisely so the default branch needs no write at all");
   const commits = allRuns(parse(REUSABLE)).join("\n").split("\n")
-    .filter((l) => /\bgit commit\b/.test(l) && !l.trim().startsWith("#"));
+    .filter((l) => /\bgit (-c \S+ )*commit\b/.test(l) && !l.trim().startsWith("#"));
   assert.equal(commits.length, 1, "the ONE amend is the only commit this workflow makes");
   assert.match(commits[0], /--amend --no-edit/);
+});
+
+// flow-0135 criterion 3. Defence in depth: the push job never ran a model, so its .git/hooks/ is
+// the fresh checkout's — but the day a model step moves back in, the hook route is already shut.
+test("the push job's commit and push run with hooks off — core.hooksPath and --no-verify", { skip }, () => {
+  const run = steps(parse(REUSABLE), "push").find((s) => s.id === "stamp-and-push").run;
+  const lines = run.split("\n").filter((l) => /\bgit (-c \S+ )*(commit|push)\b/.test(l) && !l.trim().startsWith("#"));
+  assert.equal(lines.length, 2, "one commit and one push");
+  for (const l of lines) {
+    assert.match(l, /git -c core\.hooksPath=\/dev\/null (commit|push) /, `hooks path not disabled: ${l.trim()}`);
+    assert.match(l, /--no-verify/, `--no-verify missing: ${l.trim()}`);
+  }
+  // Mutation: the pre-change stamp (hooks on) fails the same check.
+  const old = 'git commit --amend --no-edit --trailer "$ROUND_TRAILER_LINE"';
+  assert.doesNotMatch(old, /git -c core\.hooksPath=\/dev\/null commit /);
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════
@@ -296,11 +499,14 @@ test("there is exactly one push in the file, and it targets the PR's branch, nev
 //
 // MODEL_JOBS and WRITER_JOBS are asserted to be disjoint and to cover every job that is one or
 // the other, so adding a model call to a job holding writes fails here rather than in the wild.
+// FLOW_PAT is a write (flow-0135): it can push and re-ready, so the job holding it is a writer.
 const MODEL_JOBS = ["fix", "card", "round-card"];
-const WRITER_JOBS = ["undraft", "escalate-round", "escalate"];
+const WRITER_JOBS = ["undraft", "push", "escalate-round", "escalate"];
+const CARD_POSTERS = ["escalate-round", "escalate"];
 const WRITE_SCOPES = ["write", "admin"];
 const writes = (perms) =>
   Object.entries(perms ?? {}).filter(([, v]) => WRITE_SCOPES.includes(v)).map(([k]) => k);
+const holdsPat = (job) => /secrets\.FLOW_PAT(?!\s*!=)/.test(JSON.stringify(job));
 const runsAModel = (job) =>
   (job.steps ?? []).some((st) => /claude-code-action/.test(st.uses ?? ""));
 
@@ -322,13 +528,15 @@ test("no job that runs a model holds a write scope — not one, not even issues:
 test("the jobs that hold the write scopes run no model at all", { skip }, () => {
   const wf = parse(REUSABLE);
   const found = Object.entries(wf.jobs)
-    .filter(([, j]) => writes(j.permissions).some((sc) => sc !== "id-token")).map(([n]) => n);
+    .filter(([, j]) => writes(j.permissions).some((sc) => sc !== "id-token") || holdsPat(j)).map(([n]) => n);
   assert.deepEqual(found.sort(), [...WRITER_JOBS].sort(),
     "an empty or unexpected scan is a failure, not a pass");
   for (const name of found) {
     assert.ok(!runsAModel(wf.jobs[name]),
-      `${name} holds a write scope, so it may not run a model — the undraft, the card and the label are fixed shell over values that arrive through env: or a file`);
+      `${name} holds a write scope or FLOW_PAT, so it may not run a model — the undraft, the push, the card and the label are fixed shell over values that arrive through env: or a file`);
   }
+  // The model jobs hold neither.
+  for (const name of MODEL_JOBS) assert.ok(!holdsPat(wf.jobs[name]), `${name} runs a model and references FLOW_PAT`);
   // And the split is total: no job is in neither list but holds a write, and none is in both.
   assert.deepEqual(MODEL_JOBS.filter((j) => WRITER_JOBS.includes(j)), []);
 });
@@ -338,19 +546,22 @@ test("the model's hand-back crosses the job boundary as base64, never as raw tex
   // Splitting the model off from the poster means outcome.json has to travel between runners.
   // Every field in it is model-written, so it travels in an alphabet that cannot carry a quote,
   // a newline, a backtick or a `$` — the same reason `facts` base64s commit messages.
-  for (const [producer, out] of [["fix", "handback"], ["card", "handback"], ["round-card", "handback"]]) {
-    assert.ok(wf.jobs[producer].outputs?.[out],
+  // The round's hand-back now reaches `push` inside the artifact (as a file, like the bundle), and
+  // `push` is what carries it on to the card poster — so `push` is its encoder (flow-0135).
+  const PRODUCERS = ["push", "card", "round-card"];
+  for (const producer of PRODUCERS) {
+    assert.ok(wf.jobs[producer].outputs?.handback,
       `${producer} must expose the hand-back as a job output; there is no shared filesystem between jobs`);
   }
-  const encoders = MODEL_JOBS.flatMap((j) => steps(wf, j))
+  const encoders = PRODUCERS.flatMap((j) => steps(wf, j))
     .filter((st) => typeof st.run === "string" && /base64/.test(st.run));
-  assert.equal(encoders.length, MODEL_JOBS.length, "one encoder per model job");
+  assert.equal(encoders.length, PRODUCERS.length, "one encoder per producing job");
   for (const st of encoders) {
     assert.match(st.run, /base64 -w0/, "the hand-back is encoded, not echoed");
     assert.match(st.run, /head -c \d+/, "a job output is bounded; an unbounded one fails the run instead of falling back");
     assert.match(st.if ?? "", /always\(\)/, "a round that failed its guard is exactly when the hand-back is needed");
   }
-  const decoders = WRITER_JOBS.flatMap((j) => steps(wf, j))
+  const decoders = CARD_POSTERS.flatMap((j) => steps(wf, j))
     .filter((st) => typeof st.run === "string" && /base64 -d/.test(st.run));
   assert.equal(decoders.length, 2, "one decoder per card-posting job");
   for (const st of decoders) {
@@ -500,31 +711,31 @@ test("a round that died part-way still escalates — the if: always() backstop",
   // job that ran the model must not have it. `always()` on the job is what makes it fire for
   // every exit, including the ones nobody predicted: a failed guard, a crashed action, a
   // cancelled job, and — new with the split — an `undraft` that never succeeded, which skips
-  // `fix` entirely and leaves `needs.fix.outputs.pushed` empty.
+  // `fix` and `push` entirely and leaves `needs.push.outputs.pushed` empty.
   const job = wf.jobs["escalate-round"];
   assert.ok(job, "the dead-round backstop must be a job of its own");
   assert.match(job.if, /always\(\)/,
     "a crashed or cancelled round must not leave a draft PR that nothing is watching");
-  assert.match(job.if, /needs\.fix\.outputs\.pushed != 'true'/,
+  assert.match(job.if, /needs\.push\.outputs\.pushed != 'true'/,
     "a round that pushed is not an escalation — the reviewers get it next");
   assert.match(job.if, /needs\.plan\.outputs\.action == 'dispatch'/,
     "and a run that never dispatched a round has nothing to escalate here");
-  assert.deepEqual(job.needs, ["plan", "fix", "round-card"],
-    "it needs `fix` for the verdict, `plan` for the PR and `round-card` for a dead round's four fields — and `needs` plus `always()` is what makes it run when any of them was skipped");
+  assert.deepEqual(job.needs, ["plan", "push", "round-card"],
+    "it needs `push` for the verdict, `plan` for the PR and `round-card` for a dead round's four fields — and `needs` plus `always()` is what makes it run when any of them was skipped");
   // Each guard's own sentence is what the card leads with, so the human is told WHICH check
   // fired. The sentences now cross a job boundary: guard -> the `verdict` step's output ->
   // the job output -> this job's env. Every link is asserted, because a broken one is silent.
-  const verdict = steps(wf, "fix").find((st) => st.id === "verdict");
-  assert.ok(verdict, "the fix job must carry the sentence out as a job output");
+  const verdict = steps(wf, "push").find((st) => st.id === "verdict");
+  assert.ok(verdict, "the push job must carry the sentence out as a job output");
   for (const id of GUARD_ORDER) {
-    const step = steps(wf, "fix").find((st) => st.id === id);
+    const step = steps(wf, "push").find((st) => st.id === id);
     assert.match(step.run, /amend=/, `\`${id}\` must write the sentence its own failure puts on the card`);
     assert.ok(Object.values(verdict.env).some((v) => String(v).includes(`${id}.outputs.amend`)),
       `\`${id}\`'s sentence must reach the step that carries it out of the job`);
   }
-  assert.match(wf.jobs.fix.outputs.amend, /steps\.verdict\.outputs\.amend/);
+  assert.match(wf.jobs.push.outputs.amend, /steps\.verdict\.outputs\.amend/);
   const post = (job.steps ?? []).find((st) => typeof st.run === "string" && st.run.includes("--add-label"));
-  assert.ok(Object.values(post.env).some((v) => String(v).includes("needs.fix.outputs.amend")),
+  assert.ok(Object.values(post.env).some((v) => String(v).includes("needs.push.outputs.amend")),
     "and the job output must actually reach the card");
   assert.match(post.run, /\$\{ROUND_AMEND:-[^}]+\}/,
     "a `fix` that never reached its verdict step hands this job an empty sentence, and a card whose lead line is blank tells the human nothing — the shell default is the honest account of that case");
@@ -547,17 +758,17 @@ test("a round that handed nothing back gets the read-only model call, not the fa
   assert.match(job.if, /always\(\)/,
     "a `fix` that crashed, timed out or was cancelled never reports success — `always()` is the only thing that reaches it");
   assert.match(job.if, /needs\.plan\.outputs\.action == 'dispatch'/);
-  assert.match(job.if, /needs\.fix\.outputs\.pushed != 'true'/, "a round that pushed is not an escalation at all");
-  assert.match(job.if, /needs\.fix\.outputs\.handback_ok != 'true'/,
+  assert.match(job.if, /needs\.push\.outputs\.pushed != 'true'/, "a round that pushed is not an escalation at all");
+  assert.match(job.if, /needs\.push\.outputs\.handback_ok != 'true'/,
     "and a round that DID hand back describes itself; the model call is for the round that could not");
-  assert.deepEqual(job.needs, ["plan", "fix"]);
+  assert.deepEqual(job.needs, ["plan", "push"]);
 
   // `handback_ok` is the routing fact, and it is true only for a hand-back that parsed and named
   // an outcome the protocol knows. That keeps a guard-stopped round on its own four fields and
   // sends every other exit here, which is the Scope's split rather than a second one.
-  assert.match(wf.jobs.fix.outputs.handback_ok, /steps\.verdict\.outputs\.handback_ok/,
-    "the fact has to leave the `fix` job as an output, or no `if:` can read it");
-  const verdict = steps(wf, "fix").find((st) => st.id === "verdict");
+  assert.match(wf.jobs.push.outputs.handback_ok, /steps\.verdict\.outputs\.handback_ok/,
+    "the fact has to leave the `push` job as an output, or no `if:` can read it");
+  const verdict = steps(wf, "push").find((st) => st.id === "verdict");
   assert.ok(Object.values(verdict.env).some((v) => String(v).includes("check-outcome.outputs.outcome")),
     "and it must be derived from the guard that actually parsed the hand-back, not re-parsed in YAML");
   assert.match(verdict.run, /fixed\|disputed\)\s*printf 'handback_ok=true/,
@@ -579,7 +790,7 @@ test("a round that handed nothing back gets the read-only model call, not the fa
     assert.match(model.with.prompt, re,
       `the card is built by reading ${what} — reading the PR is the whole difference between a recommendation and a shrug`);
   }
-  assert.ok(Object.values(model.with).some((v) => String(v).includes("needs.fix.outputs.amend")),
+  assert.ok(Object.values(model.with).some((v) => String(v).includes("needs.push.outputs.amend")),
     "and it must be told WHAT stopped the round, or its card re-describes a failure it cannot see");
   const checkout = (job.steps ?? []).find((s) => /actions\/checkout@/.test(s.uses ?? ""));
   assert.match(checkout.with.ref, /default_branch/,
@@ -589,7 +800,7 @@ test("a round that handed nothing back gets the read-only model call, not the fa
   // there is one, and this job's when there is not.
   const post = steps(wf, "escalate-round").find((st) => typeof st.run === "string" && st.run.includes("--add-label"));
   const b64 = String(post.env.HANDBACK_B64);
-  assert.match(b64, /needs\.fix\.outputs\.handback_ok == 'true' && needs\.fix\.outputs\.handback/,
+  assert.match(b64, /needs\.push\.outputs\.handback_ok == 'true' && needs\.push\.outputs\.handback/,
     "a round that handed back keeps its own four fields — it is the only thing that knows what it tried");
   assert.match(b64, /needs\['round-card'\]\.outputs\.handback/,
     "and a dead round gets the four fields the read-only model call wrote");
@@ -633,10 +844,10 @@ const TEMPLATE_CONFIG = join(REPO, "project-template", ".flow", "config.yml");
 const CANON_CONFIG = join(REPO, ".flow", "config.yml");
 const DOCS = join(REPO, "docs", "flow-reusable-workflows.md");
 
-// Canonical is at 0, not 2, until flow-0135 (flow-0134): the `fix` job runs the model and pushes
-// with FLOW_PAT from the same job, and kickback-credential-boundary.test.mjs keeps auto-fix off
-// while that is true. flow-0135 splits the job and restores 2 here.
-test("the template ships auto_fix_rounds COMMENTED OUT; canonical sets it to 0 until flow-0135", () => {
+// Canonical dogfoods the thing it ships. flow-0134 held it at 0 while the fixer and FLOW_PAT shared
+// a job; flow-0135 split them and re-armed it (kickback-credential-boundary.test.mjs keeps the two
+// facts tied together).
+test("the template ships auto_fix_rounds COMMENTED OUT; canonical arms it at 2 (flow-0135)", () => {
   const template = src(TEMPLATE_CONFIG).split("\n")
     .filter((l) => l.includes("auto_fix_rounds:"));
   assert.ok(template.length > 0, "the template must document the key, or an adopting repo never learns it exists");
@@ -646,8 +857,19 @@ test("the template ships auto_fix_rounds COMMENTED OUT; canonical sets it to 0 u
   }
   const live = src(CANON_CONFIG).split("\n")
     .map((l) => l.trim()).filter((l) => /^auto_fix_rounds:/.test(l));
-  assert.deepEqual(live, ["auto_fix_rounds: 0"],
-    "canonical is disarmed until flow-0135 moves FLOW_PAT out of the model's job (flow-0134)");
+  assert.deepEqual(live, ["auto_fix_rounds: 2"],
+    "canonical is re-armed now that FLOW_PAT is out of the model's job (flow-0135)");
+});
+
+// flow-0135's changelog fragment, read through changelogEntry so it survives the release that
+// folds it into CHANGELOG.md.
+test("flow-0135's changelog entry states the caller action and the step-vs-job root cause", () => {
+  const text = changelogEntry(REPO, "flow-0135");
+  assert.ok(text.length > 0, "the entry must exist");
+  assert.match(text, /flow-0135\)/, "the bullet's file list must end `, flow-0135)`");
+  assert.match(text, /caller action/i, "an adopting repo has to be told whether it must do something");
+  assert.match(text, /\bstep\b[\s\S]*\bjob\b/i, "the root cause: the invariant was stated per step; the boundary is the job");
+  assert.match(text, /FLOW_PAT/);
 });
 
 test("the template's commented key explains the hard maximum and the FLOW_PAT requirement", () => {
