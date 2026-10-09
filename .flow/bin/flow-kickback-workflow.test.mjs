@@ -107,6 +107,33 @@ test("the claude-code-action pin equals _flow-queue-runner.yml's, everywhere it 
   }
 });
 
+// flow-0143. model-ids.test.mjs proves every `--model` is a full ID and every Claude step has a
+// report step; it does not prove WHICH ID each kickback step runs. This does: the fixer writes code
+// (Opus), the two card writers summarise (Sonnet), and each report states the model its step asked for.
+test("each kickback Claude step runs its decided model and its report step states that model", { skip }, () => {
+  const wf = parse(REUSABLE);
+  const scriptOf = (st) => st.run.slice(st.run.indexOf("node - <<'FLOW_MODEL_REPORT'"));
+  const reviewReport = Object.values(parse(join(WORKFLOWS, "_flow-review.yml")).jobs)
+    .flatMap((j) => j.steps ?? []).find((st) => st.name === "Report the model that answered");
+  assert.ok(reviewReport, "the shared script's source of truth is _flow-review.yml");
+  const want = { fix: "claude-opus-5-5", "round-card": "claude-sonnet-5-5", card: "claude-sonnet-5-5" };
+  const seen = {};
+  for (const [name, job] of Object.entries(wf.jobs)) {
+    const list = job.steps ?? [];
+    list.forEach((st, i) => {
+      if (!/claude-code-action/.test(st.uses ?? "")) return;
+      const model = st.with.claude_args.match(/--model\s+(\S+)/)?.[1];
+      seen[name] = model;
+      const next = list[i + 1];
+      assert.equal(next?.name, "Report the model that answered", `${name}: the step after the Claude step must report its model`);
+      assert.equal(next.env.EXECUTION_FILE, `\${{ steps.${st.id}.outputs.execution_file }}`);
+      assert.equal(next.env.REQUESTED_MODEL, model, `${name}: the report must state the model the step asked for`);
+      assert.equal(scriptOf(next), scriptOf(reviewReport), `${name}: the report script must be byte-identical to _flow-review.yml's`);
+    });
+  }
+  assert.deepEqual(seen, want, "fixer on Opus, both card writers on Sonnet — one Claude step per job");
+});
+
 // ═════════════════════════════════════════════════════════════════════════════════════════
 // The fixer's limits
 // ═════════════════════════════════════════════════════════════════════════════════════════
