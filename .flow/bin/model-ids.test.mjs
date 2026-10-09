@@ -121,12 +121,20 @@ test("AC2: no model value in the reusables or the template/canonical config is a
   const { files, judged, violations } = checkModelIds({ dir: WORKFLOWS, configs: [TEMPLATE_CONFIG, CANON_CONFIG] });
   assert.ok(files.length > 0 && judged > 0, "an empty scan verified nothing");
   assert.deepEqual(violations, []);
-  const keys = reviewModels(readFileSync(TEMPLATE_CONFIG, "utf8")).map((r) => `${r.key}=${r.value}`);
-  assert.deepEqual(keys.sort(), [
-    "code_review_model=claude-opus-5-5", "model=claude-sonnet-5-5", "security_model=claude-opus-5-5",
-  ], "the template ships the decided split: Sonnet for qa/guide, Opus for code-review and security");
   assert.ok(modelFlags(readFileSync(join(WORKFLOWS, "_flow-queue-runner.yml"), "utf8"))
     .some((m) => m.value === "claude-opus-5-5"), "the queue runner's worker runs claude-opus-5-5");
+});
+
+// flow-0144: reviewer models come from canonical's DEFAULT_MODELS, so neither the config a new repo
+// copies nor canonical's own sets one. A pin in either is the drift this rule exists to stop.
+test("flow-0144: neither the template config nor canonical's sets review.model, code_review_model or security_model", () => {
+  for (const c of [TEMPLATE_CONFIG, CANON_CONFIG]) {
+    const src = readFileSync(c, "utf8");
+    assert.match(src, /^review:/m, `${c}: precondition — the review: block exists, so its absence of keys means something`);
+    const set = reviewModels(src).filter((r) => ["model", "code_review_model", "security_model"].includes(r.key));
+    assert.deepEqual(set.map((r) => `${c}:${r.line} review.${r.key}`), [],
+      "reviewer models come from DEFAULT_MODELS in flow-review.mjs; repos do not set them");
+  }
 });
 
 test("AC2 mutation: reintroducing `--model opus` into a copy of a workflow fails, naming file and line", () => {
