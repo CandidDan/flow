@@ -1,7 +1,7 @@
 ---
 id: "flow-0135"
 title: "The kickback round's guards and push run in their own job, so nothing the fixer model writes can reach FLOW_PAT"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-session-012CTneThg94vo5drhs7QSEY-w0135"
