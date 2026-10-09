@@ -213,11 +213,12 @@ The gate isn't free, and that's deliberate — but spend it where it pays:
   input, data access, or dependencies; on a pure copy/styling change it has little to chew on. List
   those paths in `review.security_paths` and it runs only when they change, saying so on the ones
   where it doesn't. Leave the list empty and it runs on every PR — unscoped is not off.
-- **The model is config.** `review.model` runs qa and the review guide; the optional
-  `review.code_review_model` and `review.security_model` override it for those two checks, and
-  each falls back to `review.model` when unset. Tuning cost is a one-line edit here, never a patch
-  to shared infra. The template ships Sonnet for qa and the guide, Opus for code-review (a Sonnet
-  reviewer grading Sonnet-built work shares its blind spots) and Opus for security.
+- **The model is config.** `review.model` runs qa and the review guide, `review.code_review_model`
+  the code-review check, `review.security_model` the security check. The three are independent:
+  each unset key falls back to its own default (`DEFAULT_MODELS` in `flow-review.mjs` — Sonnet for
+  qa and the guide, Opus for code-review and security), never to another key, so a repo that wants
+  one model everywhere sets all three. Opus reviews because a Sonnet reviewer grading Sonnet-built
+  work shares its blind spots. Tuning cost is a one-line edit here, never a patch to shared infra.
 - **Use full model IDs** (`claude-sonnet-5-5`), not aliases (`sonnet`). An alias resolves through
   whichever Claude Code CLI the action pin installs, so an older pin silently runs an older model.
   An alias still works; it just stops saying what runs. Every Claude step's run summary names the
