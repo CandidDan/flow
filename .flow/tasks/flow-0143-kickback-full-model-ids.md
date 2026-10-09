@@ -25,6 +25,9 @@ notes:
   - "2026-10-09 (orchestrator): DECIDED. Model choice mirrors flow-0140/0142: the fixer writes code, so Opus; the two card writers summarise, so Sonnet. The model stays a literal in the workflow and is not read from `review:` config; per-task model selection is flow-0083's job."
   - "2026-10-09 (orchestrator): UNBLOCKED. flow-0135 merged (PR #198, 402944a); blocked_by cleared, status ready."
   - "2026-10-09 (worker w0143): HANDOFF. PR #201 ready for review on flow/flow-0143-kickback-full-model-ids. Done: 61762df's model hunks re-applied onto main's kickback (its head_sha/overwrite/carried.txt hunks were already merged by flow-0135, so dropped); MODEL_EXEMPT and the `exempt` param deleted; the alias mutation test loops over _flow-queue-runner.yml and _flow-kickback.yml; counts 7 -> 10. No test added to flow-kickback-workflow.test.mjs: model-ids.test.mjs proves the kickback steps. Gate: 37 workflows, 123 .mjs, 1995 pass/0 fail, lines 97.14%. Next: wait for qa/code-review/security on #201; fix any blocking finding in scope."
+  - "2026-10-09 (worker w0143): KICKBACK ROUND 1. qa FAILed on f32152c: nothing proved WHICH model each kickback step runs. Fixed in 2e0aa6c: flow-kickback-workflow.test.mjs :: 'each kickback Claude step runs its decided model and its report step states that model' (fixer opus, cards sonnet, REQUESTED_MODEL == --model; mutation-checked). Re-run: qa, code-review, security, gate all PASS. The auto-fix round on the first qa failure handed nothing back and labelled the PR flow:needs-human; that label is now stale."
+asks:
+  - "fyi: PR #201 still carries flow:needs-human from the auto-fix escalation on the first qa failure; all checks now pass, so the label can be removed before merging."
 ---
 
 ## Context
