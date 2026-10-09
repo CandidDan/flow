@@ -99,11 +99,12 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0139",
   }],
   ["Response style — show, don't tell", {
-    digest: "853df84a5dc41392daf887fb708ecbe65f664d8f6d25b3d76797d3e24d23e6d6",
+    digest: "b260a80a382fbbc16d61f8e9646d36da489fca76966ba422d247888c08ceee59",
     why: "the section told workers they \"auto-load this file\", which stopped being true the " +
          "moment the protocol moved behind a host pointer: the HOST file auto-loads and imports " +
-         "this one. One hop, stated as one hop.",
-    task: "flow-0016",
+         "this one. One hop, stated as one hop (flow-0016). flow-0141 then added captures to the " +
+         "PR-description order, between the visual and the criteria checklist.",
+    task: "flow-0141",
   }],
   ["Concurrency — how parallel sessions don't collide", {
     digest: "b109c9d9a05e59e910603ceae55daf82ed3d9037ec64a06898141310952ecebd",
