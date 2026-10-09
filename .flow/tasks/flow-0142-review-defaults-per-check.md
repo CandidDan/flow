@@ -1,7 +1,7 @@
 ---
 id: "flow-0142"
 title: "code-review and security default to Opus in every repo, not only where config says so"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude-session-012CTneThg94vo5drhs7QSEY-w0142"
