@@ -1,7 +1,7 @@
 ---
 id: "flow-0143"
 title: "Kickback's Claude steps use full model IDs and report the model that answered"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits on flow-0135 (PR #198), which rewrites `_flow-kickback.yml`; this task edits the same file. When #198 merges, flip to ready."
-blocked_by: ["https://github.com/CandidDan/flow/pull/198"]
+blocked_reason: ""
+blocked_by: []
 serves: ["maintenance"]
 intent: ""
 touches:
@@ -23,6 +23,7 @@ labels: [cost, review, kickback]
 notes:
   - "2026-10-09 (orchestrator): ORIGIN. flow-0140's follow-up ask (kickback was exempted, `MODEL_EXEMPT` in model-ids.test.mjs) and #198's blocking code-review finding: the flow-0135 worker did this work inside the security fix, which was out of its scope, and was told to revert it. The reverted work is in commit 61762df on `flow/flow-0135-kickback-push-in-own-job` (fixer `--model claude-opus-5-5`, both card writers `claude-sonnet-5-5`, three byte-identical 'Report the model that answered' steps, and a test in flow-kickback-workflow.test.mjs). Reuse it, rebased onto flow-0135's merged layout."
   - "2026-10-09 (orchestrator): DECIDED. Model choice mirrors flow-0140/0142: the fixer writes code, so Opus; the two card writers summarise, so Sonnet. The model stays a literal in the workflow and is not read from `review:` config; per-task model selection is flow-0083's job."
+  - "2026-10-09 (orchestrator): UNBLOCKED. flow-0135 merged (PR #198, 402944a); blocked_by cleared, status ready."
 ---
 
 ## Context
