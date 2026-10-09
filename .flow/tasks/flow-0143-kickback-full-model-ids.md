@@ -1,12 +1,12 @@
 ---
 id: "flow-0143"
 title: "Kickback's Claude steps use full model IDs and report the model that answered"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-session-012CTneThg94vo5drhs7QSEY-w0143"
 created: "2026-10-09"
-started: ""
+started: "2026-10-09T03:40:08Z"
 branch: ""
 pr: ""
 issue: ""
