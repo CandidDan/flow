@@ -14,7 +14,28 @@ the fixer model.** flow-0142 gives each review check its own default (qa and the
 whose config sets no models. flow-0135 moves kickback's guards and push into a job that runs no
 model and is the only one holding `FLOW_PAT`. **Caller action:** none for most repos; re-run
 flow-sync. A repo that set only `review.model` now gets Opus on code-review and security (two
-Opus calls per PR); set `code_review_model` and `security_model` to keep them on its model.
+Opus calls per PR); set `code_review_model` and `security_model` to keep them on its model. Also: PRs that change
+something a person sees carry screenshots and recordings (flow-0141), and kickback's Claude
+steps use full model IDs and report the model that answered (flow-0143).
+
+- **PR descriptions carry captures for visible changes** (`project-template/.flow/PROTOCOL.md`,
+  `project-template/.claude/skills/show-me/SKILL.md`, flow-0141). The PR-description order gains
+  a captures step between the visual and the criteria checklist: key screenshots, and a short
+  recording for motion, when the change is something a person sees and the session can run it;
+  otherwise one `Not captured: <reason>` line. show-me's new `## Captures` section says what to
+  capture, that captures go on an orphan `captures/<task-id>` branch linked by commit SHA (never
+  the feature branch), the `blob/<sha>/…?raw=true` image form that renders in a private repo,
+  synthetic data only, and never adding the browser to the repo's dependencies. Guidance only; no
+  check enforces it. **Caller action: none; adopters receive the guidance at their next sync.**
+
+- **Kickback's three Claude steps name full model IDs and report the model that answered**
+  (`.github/workflows/_flow-kickback.yml`, flow-0143). **No caller action**: the reusable's inputs
+  and permissions are unchanged. The fixer passes `--model claude-opus-5-5` and both decision-card
+  writers `--model claude-sonnet-5-5`, replacing the bare `opus` / `sonnet` aliases that resolved
+  through whatever CLI the action pin installed. Each is followed by the same "Report the model that
+  answered" step `_flow-review.yml` runs, so a round's job summary says which model did the work.
+  `model-ids.test.mjs` no longer exempts `_flow-kickback.yml` — the exemption flow-0140 added while
+  flow-0135 rewrote the file is gone, and every reusable is held to the rule.
 
 - **The auto-fix round's guards and push run in their own job, so nothing the fixer model writes
   can reach `FLOW_PAT`** (`.github/workflows/_flow-kickback.yml`, `.flow/config.yml`,
