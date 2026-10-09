@@ -55,7 +55,7 @@ CLAUDE.md                     A pointer, not the rules: a short host file that @
   flow-review.yml             The three Definition-of-Done review checks on every PR — qa,
                               code-review, and (conditionally) security. They run HERE, not in
                               the worker's session, so the work and its reviewer are never the
-                              same context. Model + security trigger paths come from the
+                              same context. Security trigger paths come from the
                               `review:` block in config.yml. Same off-by-default gate.
   flow-queue-runner.yml       Scheduled/dispatchable: picks a ready task → dispatches a fresh
                               worker through the loop. The board's "Work this" link targets it.
@@ -213,12 +213,12 @@ The gate isn't free, and that's deliberate — but spend it where it pays:
   input, data access, or dependencies; on a pure copy/styling change it has little to chew on. List
   those paths in `review.security_paths` and it runs only when they change, saying so on the ones
   where it doesn't. Leave the list empty and it runs on every PR — unscoped is not off.
-- **The model is config.** `review.model` runs qa and the review guide, `review.code_review_model`
-  the code-review check, `review.security_model` the security check. The three are independent:
-  each unset key falls back to its own default (`DEFAULT_MODELS` in `flow-review.mjs` — Sonnet for
-  qa and the guide, Opus for code-review and security), never to another key, so a repo that wants
-  one model everywhere sets all three. Opus reviews because a Sonnet reviewer grading Sonnet-built
-  work shares its blind spots. Tuning cost is a one-line edit here, never a patch to shared infra.
+- **Reviewer models come from canonical, not from this repo.** `DEFAULT_MODELS` in
+  `flow-review.mjs` decides them — Sonnet for qa and the guide, Opus for code-review and security,
+  because a Sonnet reviewer grading Sonnet-built work shares its blind spots — and the synced file
+  ships every change to every repo. Leave `review.model`, `review.code_review_model` and
+  `review.security_model` unset; setting one still works, but is an override every plan summary
+  warns about.
 - **Use full model IDs** (`claude-sonnet-5-5`), not aliases (`sonnet`). An alias resolves through
   whichever Claude Code CLI the action pin installs, so an older pin silently runs an older model.
   An alias still works; it just stops saying what runs. Every Claude step's run summary names the
