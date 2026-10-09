@@ -6,6 +6,27 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 3.3.2 — 2026-10-09
+
+**PATCH: reviewer models come from canonical.** Leaving `review.model`, `review.code_review_model`
+and `review.security_model` unset is now the norm and stays silent; setting one warns on every
+plan summary as a visible override (flow-0144). The template and canonical's own config set none.
+**Caller action:** remove the three keys from `.flow/config.yml` if present (every adopter has
+already done so), then re-run flow-sync.
+
+- **Reviewer models come from canonical: an unset model key is silent, a set one warns**
+  (`project-template/.flow/bin/flow-review.mjs`, `project-template/.flow/config.yml`,
+  `.flow/config.yml`, flow-0144). **Caller action:** remove `review.model`,
+  `review.code_review_model` and `review.security_model` from `.flow/config.yml`. Until you do,
+  each plan summary warns once per key.
+
+  `DEFAULT_MODELS` in `flow-review.mjs` is the one decision — qa and the guide on Sonnet,
+  code-review and security on Opus — and it ships to every repo with the synced helper. flow-0142
+  warned on every *unset* key, and the template set all three, so new repos copied pins that then
+  drifted (inflight sat on `claude-sonnet-5` / `claude-opus-5` after the move to 5.5). Now the
+  unset path is silent, and a set key warns naming the key, its value and canonical's default.
+  An override still works and is still validated; it is just visible on every PR.
+
 ## 3.3.1 — 2026-10-09
 
 **PATCH: code-review and security default to Opus everywhere, and kickback's push runs away from
