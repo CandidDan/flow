@@ -145,18 +145,22 @@ review:
   # model, silently (flow-0140). A full ID names exactly one model, so a new one is a reviewed,
   # one-line change here. An alias still works; it just stops saying what runs.
   #
+  # THE THREE MODEL KEYS ARE INDEPENDENT (flow-0142). Each one omitted falls back to ITS OWN
+  # default, never to another key, and the run summary says so naming the key. The values below
+  # are those defaults. A repo that wants one model everywhere must set all three: setting only
+  # `model` leaves code-review and security on Opus.
+  #
   # The model the qa check and the review guide run on. Criterion-to-test mapping is mostly
-  # mechanical, so Sonnet: capable enough to be hard to fool, cheap enough for every PR. Omit it
-  # and the gate falls back to a default AND says so in the run summary — an unconfigured repo
-  # should look unconfigured.
+  # mechanical, so Sonnet: capable enough to be hard to fool, cheap enough for every PR.
+  # Omitted, it is claude-sonnet-5-5.
   model: "claude-sonnet-5-5"
 
-  # Optional: the model for the code-review check only. Opus, because builds run on Sonnet and a
-  # Sonnet reviewer grading Sonnet work shares its blind spots. Omit to use `model`.
+  # The model for the code-review check only. Opus, because builds run on Sonnet and a Sonnet
+  # reviewer grading Sonnet work shares its blind spots. Omitted, it is claude-opus-5-5.
   code_review_model: "claude-opus-5-5"
 
-  # Optional: a deeper model for the security check only, since it runs on a minority of PRs.
-  # Opus — and never Fable for security work. Omit to use `model`.
+  # The model for the security check only. Opus — and never Fable for security work.
+  # Omitted, it is claude-opus-5-5.
   security_model: "claude-opus-5-5"
 
   # Optional: how many BYTES of the PR diff the reviewers are handed. Omitted, it is 300000.
