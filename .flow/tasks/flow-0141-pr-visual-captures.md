@@ -1,16 +1,16 @@
 ---
 id: "flow-0141"
 title: "A PR that changes what a person sees carries key screenshots and, for motion, a recording"
-status: "blocked"
+status: "ready"
 priority: 3
 project: "flow"
-owner: "claude-session-012CTneThg94vo5drhs7QSEY-w0141"
+owner: ""
 created: "2026-10-09"
-started: "2026-10-09T03:40:35Z"
+started: ""
 branch: "flow/flow-0141-pr-visual-captures"
 pr: "https://github.com/CandidDan/flow/pull/200"
 issue: ""
-blocked_reason: "Editing PROTOCOL.md Response style changes that section's pinned digest; .flow/bin/protocol-portability.test.mjs :: every protocol section survives the move byte-for-byte fails until its INTENTIONAL_DIVERGENCES entry is updated, and that file is not in touches. Waiting on the orchestrator to widen touches on main (not machine-checkable)."
+blocked_reason: ""
 blocked_by: []
 serves: ["G10"]
 intent: "pr-visual-captures"
@@ -18,6 +18,7 @@ touches:
   - "project-template/.flow/PROTOCOL.md"
   - "project-template/.claude/skills/show-me/SKILL.md"
   - ".flow/bin/show-me.test.mjs"
+  - ".flow/bin/protocol-portability.test.mjs"
   - "changes/flow-0141.md"
 labels: [review, protocol]
 notes:
@@ -25,8 +26,7 @@ notes:
   - "2026-10-09 (orchestrator): DECIDED, do not re-litigate. (1) Guidance, not a check: no CI job asserts a capture exists (the intent's open question 'should a check flag a missing capture' is answered no for this task; a check would need to know what is visual, which is judgement). (2) The procedure lives in show-me/SKILL.md, not a new skill: a new skill directory must be added to CANONICAL_SKILLS in flow-review.mjs and _flow-sync.yml's header, which overlaps flow-0140's touches; show-me is already the 'show, don't tell' skill and is loaded for every PR description. (3) PROTOCOL.md gets one clause only, in the PR-description order sentence: the protocol counts against claude_md_max and depth belongs in the skill. (4) Captures never travel on the feature branch: they would trip touches-guard and land binaries on main. They go on an orphan branch `captures/<task-id>` (not `flow/…`, which flow-status would parse as a task branch), linked by commit SHA so a later push cannot change what the reviewer saw."
   - "2026-10-09 (orchestrator): UNBLOCKED. Intent pr-visual-captures merged (PR #194, approved by Dan). blocked_by cleared; status ready. The queue-cap part of the old blocked_reason is moot for a transition: the cap governs new allocations, and Dan asked for this work."
   - "2026-10-09 (worker w0141): BLOCKED, work pushed. Branch flow/flow-0141-pr-visual-captures (commit 8141c3b) holds the full change: PROTOCOL.md captures clause (28653 -> 28776 bytes; template import set 33346/50000), show-me step 3 + ## Captures, show-me.test.mjs (3 tests green), changes/flow-0141.md. Only red test: protocol-portability.test.mjs byte-for-byte pin. Verified URL form: https://github.com/<owner>/<repo>/blob/<sha>/<path>?raw=true (GitHub docs, basic-writing-and-formatting-syntax, image table row In issues, pull requests and comments: renders for private repos for viewers with read access; curl confirms it 302s to /raw/<full-sha>/ and serves image/png). POST /markdown is refused in this environment (session bound to repo-scoped endpoints), and no private repo is reachable, so the private render could not be tested live. NEXT: once touches include .flow/bin/protocol-portability.test.mjs, update the Response style entry in INTENTIONAL_DIVERGENCES to digest b260a80a382fbbc16d61f8e9646d36da489fca76966ba422d247888c08ceee59 with why/task flow-0141, rerun the gate, open the PR (body: TL;DR, visual, Captures = Not captured: no visible change, criteria, to-dos)."
-asks:
-  - "decision: widen flow-0141 touches to include .flow/bin/protocol-portability.test.mjs? Recommend: yes, any edit to PROTOCOL.md Response style must re-record that section digest in INTENTIONAL_DIVERGENCES in the same commit, which the task scope requires but its touches omit"
+  - "2026-10-09 (orchestrator): RESOLVED the decision ask: touches widened by `.flow/bin/protocol-portability.test.mjs`, the `INTENTIONAL_DIVERGENCES` entry for Response style only (task flow-0141, digest of the edited section, a reason). My miss: any edit to a protocol section re-pins its hash there. Back to ready; the same worker resumes on draft PR #200, branch `flow/flow-0141-pr-visual-captures`."
 ---
 
 ## Context
