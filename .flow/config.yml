@@ -121,13 +121,12 @@ review:
   # reviewer are both models, and more rounds between them converge on agreement rather than on
   # correctness. Set it to 0, or delete the key, to switch auto-fix off entirely.
   #
-  # OFF (flow-0134) until flow-0135 lands. The `fix` job runs the model (`bypassPermissions`, over
-  # PR comments) and later steps of the SAME job push with FLOW_PAT. Steps share the runner — the
-  # filesystem (`.git/hooks/`) and `$GITHUB_ENV` / `$GITHUB_PATH` — so an injected comment can reach
-  # the PAT. `.flow/bin/kickback-credential-boundary.test.mjs` fails if this is raised above 0
-  # while any model job still references FLOW_PAT. flow-0135 moves the push to its own job and
-  # sets this back to 2.
-  auto_fix_rounds: 0
+  # RE-ARMED by flow-0135, after flow-0134 switched it off. The fixer model and FLOW_PAT now live in
+  # different JOBS (`fix` and `push`), because on a runner the boundary is the job, not the step:
+  # steps share the filesystem (`.git/hooks/`) and `$GITHUB_ENV` / `$GITHUB_PATH`.
+  # `.flow/bin/kickback-credential-boundary.test.mjs` fails if this is above 0 while any model job
+  # references FLOW_PAT.
+  auto_fix_rounds: 2
 
 security:
   secrets_scan: true

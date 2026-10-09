@@ -175,16 +175,38 @@ human asking it to, so every bound on it is stated here rather than left to the 
 (GitHub's recursion guard), so a fix pushed with it would never be re-reviewed — the round would
 look successful and prove nothing. With no `FLOW_PAT` the workflow **skips**, visibly, saying so.
 
-**And it reaches exactly one step — never the fixer.** `FLOW_PAT` is handed only to
-`stamp-and-push`, which runs after all four guards have passed. Every other step runs on
-`GITHUB_TOKEN`. That split is the actual boundary, and it is worth being explicit about why,
-because the intuitive design gets it wrong: the fixer runs a model under `--permission-mode
-bypassPermissions`, on a checkout of the PR branch, and its prompt tells it to read the PR's
-comments as its instructions — so on a non-fork PR, anyone who can comment can address that
-session. `--disallowedTools` does not contain that; it pattern-matches command prefixes, so any
-route it does not textually name reaches the remote, and a hosted runner's open egress reaches
-the network. A session that cannot push because it holds nothing that can push is bounded. A
-session that was merely *asked* not to push is not.
+**And it never shares a JOB with a model (flow-0135).** No job that runs a model references
+`secrets.FLOW_PAT`, and the one job that does — `push` — runs no model. The fixer runs a model
+under `--permission-mode bypassPermissions`, on a checkout of the PR branch, and its prompt tells it
+to read the PR's comments as its instructions — so on a non-fork PR, anyone who can comment can
+address that session. `--disallowedTools` does not contain that; it pattern-matches command
+prefixes, so any route it does not textually name reaches the remote, and a hosted runner's open
+egress reaches the network. A session that cannot push because it holds nothing that can push is
+bounded. A session that was merely *asked* not to push is not.
+
+The boundary is the **job, not the step**, and this file once got that wrong. flow-0082 kept
+`FLOW_PAT` out of the fixer's *step* and handed it to a later step of the *same job*. Steps share a
+runner: the filesystem (so `.git/hooks/`) and the `$GITHUB_ENV` / `$GITHUB_PATH` files, which feed
+every later step. A model step can plant a hook, an env var (`BASH_ENV`, `NODE_OPTIONS`,
+`LD_PRELOAD`) or a `PATH` entry that runs beside whatever a later step holds — and can subvert the
+guards in that job as well. So the round now crosses a job boundary as **data**:
+
+```
+plan   (no model)  records head_sha + guard_sha
+  │
+fix    (model)     commits ─▶ git bundle <head>..HEAD + outcome.json ─▶ artifact (1 day)
+  │                           no FLOW_PAT, no write scope
+push   (no model)  fresh checkout of head_sha (persist-credentials: false)
+                   ─▶ check 1 hand-back ─▶ check 2 remote head unmoved
+                   ─▶ check 2b bundle: exactly one prerequisite, == head_sha; tip descends from it
+                   ─▶ check 3 tests not weakened (default-branch helper) ─▶ check 4 committed something
+                   ─▶ amend + push with FLOW_PAT, hooks off (core.hooksPath=/dev/null, --no-verify)
+```
+
+The bundle travels as a run **artifact**, not a job output: a job output reaches the next job
+through `env:`, and Linux caps one environment value at 128 KiB — a round that touches a lockfile
+clears that. A bundle based on anything but the recorded head is refused, and the refusal is an
+escalation like any other guard's, with its own sentence on the card.
 
 **The same argument applies to every write, not just the push — so the permissions are per job.**
 `GITHUB_TOKEN` is only as narrow as the job holding it, and a workflow-level `pull-requests:
@@ -197,7 +219,8 @@ hold reads only, and the jobs that hold writes run no model:
 |---|---|---|---|
 | `plan` | nothing | no | reads the run's failed jobs, the PR, and the task's status on the default branch |
 | `undraft` | pull requests | no | one `gh pr ready --undo`, and nothing else |
-| `fix` | **nothing** | **yes** | the round: commit-only, then the four guards, then the one push — made with `FLOW_PAT`, not with this token |
+| `fix` | **nothing** | **yes** | the round: commit-only; its commits leave as a bundle, and nothing else here decides anything |
+| `push` | nothing (but holds `FLOW_PAT`) | no | fresh checkout, the guards, then the one push — made with `FLOW_PAT`, not with this token |
 | `round-card` | **nothing** | **yes** | writes the card's four fields for a round that handed nothing back, read-only |
 | `escalate-round` | pull requests, issues | no | posts the card and the label for a round that did not push |
 | `card` | **nothing** | **yes** | writes the card's four fields, read-only |
@@ -259,8 +282,8 @@ card.**
 workflow **file from the default branch**, never from the PR head — so a PR cannot edit the
 workflow, the fixer's prompt or the guards that are about to judge it. For the same reason the
 test-weakening guard is run from the default branch's copy of `.flow/bin/flow-kickback.mjs`,
-pinned by a SHA resolved *before* the fixer gets the runner (flow-0079's rule: everything that
-decides comes from base). Fork PRs are skipped outright, matching the fork fence in
+pinned by a SHA that `plan` resolves on its default-branch checkout, in a job no model runs in
+(flow-0079's rule: everything that decides comes from base). Fork PRs are skipped outright, matching the fork fence in
 `_flow-review.yml`.
 
 ### Which copy of a helper CI runs — and why there are two (flow-0094)
