@@ -11,11 +11,13 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "FILE CLAIMS, checked not assumed. project-template/INIT.md and project-template/RETROFIT.md are claimed by flow-0023 (blocked); project-template/.flow/bin/flow-doctor.mjs and flow-doctor.test.mjs are claimed by flow-0022 (blocked). Flow has no dependency field, so `blocked` expresses the sequence. UNBLOCK: flip to ready once flow-0022 and flow-0023 are done, or once their claims on these four files are split out. NOTE the deadlock recorded in the notes below — this task is inside a four-task ring, and the human breaking it by hand is what releases the chain."
+blocked_reason: "TO CANCEL (Dan, 2026-10-13): premise stale (mission control left canonical per ADR-0006; inflight watchdog never written; 0003's second-person trigger not expected). Set status cancelled once flow-0108 lands. Any part still wanted gets a fresh task. Do not unblock."
+blocked_by: []
 serves: ["maintenance"]   # re-anchored 2026-09-23 from retired G5 (decision D1)
 touches: ["project-template/INIT.md", "project-template/RETROFIT.md", "project-template/.flow/bin/flow-doctor.mjs", "project-template/.flow/bin/flow-doctor.test.mjs"]
 labels: [docs, infra, onboarding, flightdeck]
 notes:
+  - "2026-10-13 (orchestrator): DECIDED: cancel. Kept blocked only because `cancelled` does not exist until flow-0108 merges."
   - "2026-09-23 (orchestrator): serves re-anchored from G5 to `maintenance`, on the human's decision D1 in _private/flow-operating-model-spec.md: every open task on retired G4/G5 moves to `maintenance` in one orchestrator commit on main. This is a deliberate, human-directed exception to task-writer's no-retrofit rule for non-ready tasks, and nothing else about the task changed. G5 was retired on 2026-09-01 and no live goal names this work."
   - "2026-09-01: found while asking why mission control rendered empty. Neither INIT.md nor RETROFIT.md mentions the `flow` topic — zero occurrences in either. The topic is documented only in flightdeck/README.md and project-template/README.md, which is not where someone onboarding a repo looks."
   - "2026-09-01: THE DEADLOCK, recorded because it is not obvious from any one task. flow-0022 is blocked until the human confirms mission control answers 'where is every project up to'. They cannot confirm it, because the page renders EMPTY — discovery is `user:<owner> topic:flow` and no repo carries the topic. Fixing that properly means editing INIT.md/RETROFIT.md, which flow-0023 claims, and flow-0023 is blocked on flow-0022. Four tasks in a ring. The only edge cuttable from outside is the human adding the topic by hand; that is what releases flow-0022, then flow-0023, then this."
