@@ -1,7 +1,7 @@
 ---
 id: "flow-0131"
 title: "Every frontmatter reader keeps a quoted '#', not only flow-doctor's"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Queue cap. Runs after flow-0119 merges (it adds yamlScalar/stripYamlComment to flow-doctor.mjs)."
-blocked_by: ["flow-0119"]
+blocked_reason: ""
+blocked_by: []
 serves: ["maintenance"]
 touches:
   - "project-template/.flow/bin/flow-recover.mjs"
@@ -26,6 +26,7 @@ touches:
   - "changes/flow-0131.md"
 labels: [flow-infra, parsing]
 notes:
+  - "2026-10-13 (orchestrator): UNBLOCKED: flow-0119 is done and the queue was reshaped. Dan's queue rule 2026-10-13: every p1/p2 task plus flow-0108 is ready; p3s park."
   - "2026-10-04 orchestrator: found in the code review on #175 (flow-0119). The frontmatter readers did `value.split('#')[0]`, which truncates any quoted value containing a '#', such as 'see PR #127'. flow-0119 fixes parseListField and scalarReader in flow-doctor.mjs and exports yamlScalar/stripYamlComment. The same pattern remains at flow-recover.mjs:234, pick-task.mjs:64, source-roots.mjs:115, check-claude-md.mjs:235, and flow-doctor.mjs:153/173/574/587."
 ---
 

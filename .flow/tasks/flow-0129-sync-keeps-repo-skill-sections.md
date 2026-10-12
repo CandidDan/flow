@@ -1,7 +1,7 @@
 ---
 id: "flow-0129"
 title: "flow-sync stops erasing a repo's own sections from canonical skills"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
 owner: ""
@@ -10,7 +10,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Queue cap (13 ready, cap 8). Design decided: A (LOCAL.md overlay)."
+blocked_reason: ""
 blocked_by: []
 serves: ["maintenance"]
 touches:
@@ -21,6 +21,7 @@ touches:
   - "changes/flow-0129.md"
 labels: [flow-infra, sync, skills, canary]
 notes:
+  - "2026-10-13 (orchestrator): UNBLOCKED: queue reshaped. Dan's queue rule 2026-10-13: every p1/p2 task plus flow-0108 is ready; p3s park."
   - "2026-10-04 orchestrator: Dan chose design A (the LOCAL.md overlay). The task is unblocked on design and stays blocked only on the queue cap. Its first follow-up is to move progress's R1–R5 section into .claude/skills/task-writer/LOCAL.md."
   - "2026-10-03 orchestrator: found by the v3 canary, progress PR #115. The sync copies each canonical skill with `rsync -a --delete`, which replaced progress's task-writer SKILL.md wholesale. That deleted its repo-owned 'Declaring touches for reference prose (R1–R5)' section, and progress's own gate pins that section, so 3 tests went red. I restored the section by hand on #115. The next sync deletes it again."
 ---

@@ -3,7 +3,7 @@
 id: "flow-0108"
 title: "Add a terminal `cancelled` status so dead work stops squatting in `blocked`"
 status: "ready"
-priority: 3
+priority: 2
 project: "flow"
 owner: ""
 created: "2026-09-30"
@@ -32,6 +32,7 @@ touches:
   - "changes/flow-0108.md"
 labels: [flow-infra, protocol]
 notes:
+  - "2026-10-13 (orchestrator): Raised p3 -> p2 by Dan 2026-10-13: seven blocked tasks (0003, 0022, 0023, 0034, 0046, 0053, 0067) are cancelled the moment this lands."
   - "2026-09-30 (orchestrator): Renumbered from flow-0104: the triage run allocated that id a minute after a local session had already taken it (duplicate id). Changelog fragment path updated to match; content otherwise unchanged."
 ---
 

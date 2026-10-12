@@ -1,7 +1,7 @@
 ---
 id: "flow-0127"
 title: "Stamp an intent's approved_by and approved_at from the merge that approved it (ADR-0007 slice 4)"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,7 +10,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Held out of the ready queue by queue_cap (15 ready vs cap 8 on 2026-10-03). Not machine-checkable: clears when the ready count drops below the cap. Flip to ready then."
+blocked_reason: ""
 blocked_by: []
 serves: ["G11"]
 touches:
@@ -22,6 +22,7 @@ touches:
   - "changes/flow-0127.md"
 labels: [flow-infra, intents]
 notes:
+  - "2026-10-13 (orchestrator): UNBLOCKED: queue reshaped. Dan's queue rule 2026-10-13: every p1/p2 task plus flow-0108 is ready; p3s park."
   - "2026-10-03 (orchestrator): written on the human's request after inflight PR #37, the first intent approval in any repo. The human chose to write it now rather than wait for the cap."
 ---
 

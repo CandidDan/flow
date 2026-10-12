@@ -1,7 +1,7 @@
 ---
 id: "flow-0122"
 title: "A deploy skips a Flow-only commit only when that is proven: one tested check, a protocol rule, wiring left to each adopter"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,7 +10,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Held out of the ready queue by queue_cap (10 ready vs cap 8 on 2026-10-02); the human chose blocked over urgent because the 2026-10-02 dashboard fix already stops the failures. Not machine-checkable: clears when the ready count drops below the cap. Flip to ready then."
+blocked_reason: ""
 blocked_by: []
 serves: ["G9"]    # G9: not materially expensive to run. Every task-state commit to main triggers a full deploy build in every adopting repo; skipping them must never cost a broken deploy.
 touches:
@@ -21,6 +21,7 @@ touches:
   - "changes/flow-0122.md"
 labels: [flow-infra, deploy, cost]
 notes:
+  - "2026-10-13 (orchestrator): UNBLOCKED: queue reshaped. Dan's queue rule 2026-10-13: every p1/p2 task plus flow-0108 is ready; p3s park."
   - "2026-10-02 (orchestrator): the split was decided with the human. The rule goes in the protocol, the check is shared code, and the host wiring belongs to each adopter. Instruction-only was rejected because of the incident in Context."
 ---
 

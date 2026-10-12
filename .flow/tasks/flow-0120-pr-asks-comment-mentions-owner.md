@@ -1,7 +1,7 @@
 ---
 id: "flow-0120"
 title: "A PR whose task has open asks gets a comment that @-mentions the repo owner, and a needs-input label"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Needs the asks field and asks.mjs from flow-0119 first. When flow-0119 is done, clear blocked_by and set status ready."
-blocked_by: ["flow-0119"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G12"]    # G12: one decision, answerable from my phone. A mention on the PR reaches GitHub mobile.
 touches:
   - ".github/workflows/_flow-status.yml"
@@ -20,6 +20,7 @@ touches:
   - "changes/flow-0120.md"
 labels: [flow-infra, human-loop, flow-status]
 notes:
+  - "2026-10-13 (orchestrator): UNBLOCKED: flow-0119 is done. Dan's queue rule 2026-10-13: every p1/p2 task plus flow-0108 is ready; p3s park."
   - "2026-10-02 orchestrator: Dan asked that a PR needing a human's attention gets a comment that tags the repo owner. DECISIONS, do not relitigate: (1) The mention target is `github.repository_owner`, the same source flow-0109 and flow-watchdog use. The label is `needs-input`, the label flow-0109 introduces. (2) A NEW comment is posted for each newly seen ask, because GitHub does not notify on a mention added by editing a comment. An ask already announced on the PR is never re-posted, and the hidden id marker is what tells them apart. (3) Asks added to a task after its PR is ready are only picked up on the PR's next opened/reopened/ready_for_review event. A main-push trigger is deliberately left out of this task. inflight is the surface that catches late asks and PR-less decisions."
 ---
 

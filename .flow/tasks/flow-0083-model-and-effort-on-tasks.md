@@ -1,7 +1,7 @@
 ---
 id: "flow-0083"
 title: "Each task names its model and effort (default Sonnet 5.5), the runner honours it, and a task that fails moves up a model"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Sequenced behind flow-0140: both edit `_flow-queue-runner.yml` (0140 repins the action and replaces `--model opus` with a full ID; this task replaces that with the resolver). Unblocks when flow-0140 merges."
-blocked_by: ["flow-0140"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G9", "G10"]      # G9: stop paying Opus prices for mechanical work. G10: put the hardest work on the model most likely to get it right.
 touches:
   - "project-template/.flow/tasks/_TEMPLATE.md"
@@ -30,6 +30,7 @@ touches:
   - "changes/flow-0083.md"
 labels: [queue-runner, cost, task-writer, urgent]
 notes:
+  - "2026-10-13 (orchestrator): UNBLOCKED: flow-0140 is done. Dan's queue rule 2026-10-13: every p1/p2 task plus flow-0108 is ready; p3s park."
   - "2026-10-02 (orchestrator): unblocked on the human's say-so. Every blocked_by entry had landed (checked against main), and inflight listed it as UNBLOCK."
   - "2026-09-26 (orchestrator): From the operator. Every task runs on Opus today, whatever it needs. Fable is available on his Max plan and should be recommended where a task suits it. Effort matters as much as model: the TanPlan planning work that went in circles probably needed more effort, not just a bigger model."
   - "2026-10-08 (orchestrator): REWRITTEN and made URGENT, approved by Dan 2026-10-08 (Actions/quota cost review). Changes from the 26 Sep spec, decided with Dan, do not re-litigate: (1) the DEFAULT is Sonnet 5.5 / medium, not Opus / high; the orchestrator raises a task to Opus or Fable deliberately, with a reason. (2) Tiers map to FULL model IDs in one table (see flow-0140's notes for why aliases drifted). (3) Escalation is MECHANICAL as well as self-reported: models judge their own limits poorly, so a weaker model asking for help cannot be the only trigger. (4) Planning stays on the higher model; this task changes only the build worker."
