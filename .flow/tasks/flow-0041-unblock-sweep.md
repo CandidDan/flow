@@ -1,7 +1,7 @@
 ---
 id: "flow-0041"
 title: "Sweep blocked tasks whose dependency has landed, so the only status with no way out stops needing a human"
-status: "ready"
+status: "blocked"
 priority: 3
 project: "flow"
 owner: ""
@@ -10,7 +10,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
+blocked_reason: "Parked by queue cap (Dan, 2026-10-13: p1/p2 first, p3s wait). Not machine-checkable: flip to ready when the ready count drops below the cap."
 blocked_by: []
 serves: ["G7", "G8"]
 touches:
@@ -26,6 +26,7 @@ touches:
   - "docs/flow-reusable-workflows.md"
 labels: [infra, protocol]
 notes:
+  - "2026-10-13 (orchestrator): PARKED: p3 held out of the ready queue so p1/p2 work runs first (Dan's decision)."
   - "2026-10-02 (orchestrator): unblocked on the human's say-so. Every blocked_by entry had landed (checked against main), and inflight listed it as UNBLOCK."
 ---
 

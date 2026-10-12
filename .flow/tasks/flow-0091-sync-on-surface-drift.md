@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0091"
 title: "flow-sync opens a PR when the synced surface differs, not only when VERSION differs, so an edge repo can never be stranded without a helper its workflow calls"
-status: "ready"
+status: "blocked"
 priority: 3
 project: "flow"
 owner: ""
@@ -11,7 +11,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
+blocked_reason: "Parked by queue cap (Dan, 2026-10-13: p1/p2 first, p3s wait). Not machine-checkable: flip to ready when the ready count drops below the cap."
 blocked_by: []
 serves: ["G10"]    # G10: the gate tells the truth. The gate said 'run flow-sync'; flow-sync said 'up to date'; both were wrong for three days.
 touches:
@@ -23,6 +23,7 @@ touches:
   - "changes/flow-0091.md"
 labels: [flow-sync, release, flow-infra]
 notes:
+  - "2026-10-13 (orchestrator): PARKED: p3 held out of the ready queue so p1/p2 work runs first (Dan's decision)."
   - "2026-09-29 (orchestrator): EVIDENCE, twice in one week on progress (the canary, pinned @v2-edge). flow-0077 made `_flow-gates.yml` call `.flow/bin/source-roots.mjs`; flow-0050 made it call `check-claude-md.mjs`. `v2-edge` moves on every merge, but flow-sync only copies `.flow/bin/` when canonical's VERSION is ahead. Canonical's VERSION did not move, so flow-sync answered 'up to date, nothing to do' while every progress PR failed with an error telling the human to run flow-sync. Only a release unblocked it."
   - "2026-09-29 (orchestrator): PRIORITY LOWERED to 3. flow-0094 (reusables run canonical's own helpers) removes the breakage this task was written for. This task remains worth doing so repos' local copies do not go stale on the edge, but it is no longer what keeps PRs green."
   - "2026-09-29 (orchestrator): DECIDED: fix it in flow-sync, not with a per-workflow version check. Declaring a minimum helper version in each reusable would be one more number to forget to bump. Comparing the actual surface is exact: if canonical's copy of the synced files differs from the repo's, the repo is not current, whatever the stamps say. On `@v2` (stable) the surface only changes at a release, so the fleet sees no new noise; on `@v2-edge` the canary gets a sync PR per merge that changes the surface, which is what the canary is for."

@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0030"
 title: "Point the template, the helpers and the runbooks at the release repo, and call canonical's own reusables locally"
-status: "ready"
+status: "blocked"
 priority: 3
 project: "flow"
 owner: ""
@@ -11,12 +11,13 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
+blocked_reason: "Parked by queue cap (Dan, 2026-10-13: p1/p2 first, p3s wait). Not machine-checkable: flip to ready when the ready count drops below the cap."
 blocked_by: []
 serves: ["maintenance"]   # re-anchored 2026-09-23 from retired G4 (decision D1)
 touches: ["project-template/.github/workflows/flow-gates.yml", "project-template/.github/workflows/flow-status.yml", "project-template/.github/workflows/flow-done.yml", "project-template/.github/workflows/flow-open-pr.yml", "project-template/.github/workflows/flow-review.yml", "project-template/.github/workflows/flow-triage.yml", "project-template/.github/workflows/flow-compass.yml", "project-template/.github/workflows/flow-queue-runner.yml", "project-template/.github/workflows/flow-recover.yml", "project-template/.github/workflows/flow-sync.yml", "project-template/.flow/bin/flow-init.mjs", "project-template/.flow/bin/flow-sync.mjs", "project-template/.flow/bin/flow-doctor.mjs", "project-template/.flow/bin/flow-init.test.mjs", "project-template/.claude/settings.json", "docs/repinning-a-consuming-repo.md", ".github/workflows/flow-gates.yml", ".github/workflows/flow-status.yml", ".github/workflows/flow-done.yml", ".github/workflows/flow-open-pr.yml", ".github/workflows/flow-review.yml", ".github/workflows/flow-triage.yml", ".github/workflows/flow-compass.yml", ".github/workflows/flow-queue-runner.yml", ".github/workflows/flow-recover.yml", ".flow/bin/adapters.test.mjs", "changes/flow-0030.md"]
 labels: [infra, docs, fleet, cleanup]
 notes:
+  - "2026-10-13 (orchestrator): PARKED: p3 held out of the ready queue so p1/p2 work runs first (Dan's decision)."
   - "2026-10-02 (orchestrator): unblocked on the human's say-so. Every blocked_by entry had landed (checked against main), and inflight listed it as UNBLOCK."
   - "2026-09-28 (orchestrator): CHANGELOG.md -> changes/flow-0030.md, human's decision. Since 2.1.0 canonical keeps one changelog fragment per task in `changes/` (see changes/README.md), and release assembles them into CHANGELOG.md. Declaring CHANGELOG.md was stale: a worker following the fragment convention would write `changes/flow-0030.md`, which was not in `touches`, and fail touches-guard, while one following the old wording would edit the shared file the convention exists to keep out of every task's `touches`. `touches`, the scope line and any criterion naming CHANGELOG.md now name the fragment instead. Write it in the shape changes/README.md gives, with no heading of its own; it lands under `## Unreleased` at release."
   - "2026-09-23 (orchestrator): serves re-anchored from G4 to `maintenance`, on the human's decision D1 in _private/flow-operating-model-spec.md: every open task on retired G4/G5 moves to `maintenance` in one orchestrator commit on main. This is a deliberate, human-directed exception to task-writer's no-retrofit rule for non-ready tasks, and nothing else about the task changed. G4 was retired on 2026-09-01 and no live goal names this work."

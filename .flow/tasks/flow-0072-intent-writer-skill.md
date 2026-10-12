@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0072"
 title: "intent-writer skill: interview a human into an intent, open the PR, stop"
-status: "ready"
+status: "blocked"
 priority: 3
 project: "flow"
 owner: ""
@@ -11,7 +11,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
+blocked_reason: "Parked by queue cap (Dan, 2026-10-13: p1/p2 first, p3s wait). Not machine-checkable: flip to ready when the ready count drops below the cap."
 blocked_by: []
 serves: ["G11"]
 touches:
@@ -22,6 +22,7 @@ touches:
   - "changes/flow-0072.md"
 labels: [skills, intent-layer]
 notes:
+  - "2026-10-13 (orchestrator): PARKED: p3 held out of the ready queue so p1/p2 work runs first (Dan's decision)."
   - "2026-09-27 (orchestrator): unblocked. flow-0073 merged (PR #112, fe13258). `owner` and `started` are cleared so the claim is atomic again. As the earlier worker note says: build against the template as it now ships on `main`, not against the shape these notes predicted."
   - "2026-09-24 (orchestrator): DEPENDS ON flow-0063 (intent store + template). This is slice (3) of the four-slice intent layer that flow-0063's notes lay out. The skill writes files into `.flow/intents/` using the template flow-0063 ships, and must match its frontmatter (`id`, `title`, `status`, `created`, `source`, `approved_by`, `approved_at`, `evidence`). It ALSO DEPENDS ON flow-0073, which adds `serves`, `supersedes`, the Cost of inaction / Constraints / Open questions sections and the `[assumption]` marker to that template. If either is not `done` when you pick this up, set this task `blocked` with `blocked_by` listing whichever are outstanding (for example `[\"flow-0063\", \"flow-0073\"]`) rather than guessing the template's shape. Same pattern as flow-0070's dependency on flow-0069."
   - "2026-09-24 (orchestrator): DECIDED (revised the same day): THE ASSUMPTION MARKER IS THE TEMPLATE'S `[assumption]`. This note first defined an `ASSUMED:` convention local to this skill, because flow-0063 has no marker. flow-0073 now puts `[assumption]` at the start of a line into the intent template, so a hand-written intent and a skill-written one look the same. The skill obeys the template's marker and does not define its own."

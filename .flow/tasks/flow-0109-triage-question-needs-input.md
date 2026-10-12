@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0109"
 title: "Triage's ask-the-human path gets an @mention and a needs-input label, so questions surface once and stop repeating"
-status: "ready"
+status: "blocked"
 priority: 3
 project: "flow"
 owner: ""
@@ -11,7 +11,7 @@ started: ""
 branch: ""
 pr: ""
 issue: "https://github.com/CandidDan/flow/issues/49"
-blocked_reason: ""
+blocked_reason: "Parked by queue cap (Dan, 2026-10-13: p1/p2 first, p3s wait). Not machine-checkable: flip to ready when the ready count drops below the cap."
 blocked_by: []
 serves: ["G12"]    # G12: anything Flow needs from the operator is one decision, answerable in
                   # under a minute from a phone. A triage question is exactly that kind of
@@ -25,6 +25,7 @@ touches:
   - "changes/flow-0109.md"
 labels: [flow-infra, triage]
 notes:
+  - "2026-10-13 (orchestrator): PARKED: p3 held out of the ready queue so p1/p2 work runs first (Dan's decision)."
   - "2026-09-30 (orchestrator): Renumbered from flow-0105: the triage run allocated that id a minute after a local session had already taken it (duplicate id). Changelog fragment path updated to match; content otherwise unchanged."
 ---
 

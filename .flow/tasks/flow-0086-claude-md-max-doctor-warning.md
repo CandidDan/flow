@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0086"
 title: "flow-doctor warns when claude_md_max is not declared"
-status: "ready"
+status: "blocked"
 priority: 3
 project: "flow"
 owner: ""
@@ -11,7 +11,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
+blocked_reason: "Parked by queue cap (Dan, 2026-10-13: p1/p2 first, p3s wait). Not machine-checkable: flip to ready when the ready count drops below the cap."
 blocked_by: []
 serves: ["G9"]
 touches:
@@ -20,6 +20,7 @@ touches:
   - "changes/flow-0086.md"
 labels: [infra, context]
 notes:
+  - "2026-10-13 (orchestrator): PARKED: p3 held out of the ready queue so p1/p2 work runs first (Dan's decision)."
   - "2026-10-02 (orchestrator): unblocked on the human's say-so. Every blocked_by entry had landed (checked against main), and inflight listed it as UNBLOCK."
   - "2026-09-28 (orchestrator): split out of flow-0050, whose acceptance criterion 8 originally carried this as its second half. The flow-0050 worker left it undelivered on purpose because neither flow-doctor file was in that task's `touches`, and QA failed PR #114 on the unproven half. The human chose to split rather than widen flow-0050's scope, so criterion 8 there was amended to the check's own behaviour and this task owns the doctor's."
 ---

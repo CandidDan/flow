@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0092"
 title: "flow-sync delivers the intent template (and only the template) so every adopting repo can write intents"
-status: "ready"
+status: "blocked"
 priority: 3
 project: "flow"
 owner: ""
@@ -11,7 +11,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
+blocked_reason: "Parked by queue cap (Dan, 2026-10-13: p1/p2 first, p3s wait). Not machine-checkable: flip to ready when the ready count drops below the cap."
 blocked_by: []
 serves: ["G11"]
 touches:
@@ -21,6 +21,7 @@ touches:
   - "changes/flow-0092.md"
 labels: [flow-sync, intent-layer]
 notes:
+  - "2026-10-13 (orchestrator): PARKED: p3 held out of the ready queue so p1/p2 work runs first (Dan's decision)."
   - "2026-09-29 (orchestrator): flow-0063/0073 ship `project-template/.flow/intents/_TEMPLATE.md`, but flow-sync never copies `.flow/intents/`, so an adopting repo only has the template if it was onboarded after flow-0063 or copied it by hand (the handoff lists 'copy the intent template in' as a manual step for TanPlan). flow-0072's intent-writer skill writes against that template. 2.1.1 made the template's own tests skip where it is absent; this task makes it present."
   - "2026-09-29 (orchestrator): ONLY THE TEMPLATE. `.flow/intents/` also holds the repo's own intents, which are per-repo data like `.flow/tasks/`. The sync copies exactly one file and never deletes or rewrites anything else in that directory."
 ---
