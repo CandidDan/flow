@@ -1,7 +1,7 @@
 ---
 id: "flow-0149"
 title: "Every Flow job runs on a runner the repo chooses with one variable (FLOW_RUNNER), defaulting to ubuntu-latest"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
 owner: ""
@@ -10,7 +10,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Parked by queue cap at creation (Dan, 2026-10-13). Not machine-checkable: flip to ready when the ready count drops below the cap, or when Dan labels it urgent."
+blocked_reason: ""
 blocked_by: []
 serves: ["G9"]
 intent: ""
@@ -22,8 +22,9 @@ touches:
   - ".flow/bin/caller-pins.test.mjs"
   - "docs/flow-reusable-workflows.md"
   - "changes/flow-0149.md"
-labels: [ci, cost]
+labels: [ci, cost, urgent]
 notes:
+  - "2026-10-13 (orchestrator): URGENT, labelled by Dan 2026-10-13, so it bypasses queue_cap. Unparked to ready."
   - "2026-10-13 (orchestrator): ORIGIN — Dan, 2026-10-13 (Actions cost review). October is on track for ~$285 against a $200 budget at GitHub's $0.006/min. Hosted alternatives (Ubicloud, Namespace, Blacksmith, Depot) list roughly $0.0015–0.004/min and are mostly a `runs-on:` label change, but all 27 jobs in the 11 `_flow-*.yml` reusables hard-code `runs-on: ubuntu-latest`, so no adopter can switch without forking. Provider choice is Dan's and per repo; this task only makes it possible."
   - "2026-10-13 (orchestrator): DESIGN, decided; mirrors flow-0080's 'timing lives in repo variables'. (1) Each reusable declares `workflow_call.inputs.runner` (string, default `ubuntu-latest`) and every job uses `runs-on: ${{ inputs.runner }}`. (2) Each TEMPLATE caller passes `runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}`, so a repo switches with `gh variable set FLOW_RUNNER -b <label>`, no file edit, survives sync. (3) Canonical's OWN callers do NOT pass it: canonical is public, and a third-party or self-hosted runner on a public repo runs fork-PR code on someone else's box. A test pins that."
   - "2026-10-13 (orchestrator): SECURITY, state it in the docs, do not try to solve it here: a non-GitHub runner sees every secret its jobs hold (FLOW_PAT in kickback's push job and the queue runner, CLAUDE_CODE_OAUTH_TOKEN). Choosing FLOW_RUNNER is choosing to trust that provider with them. Private repos only."
