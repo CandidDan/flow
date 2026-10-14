@@ -265,14 +265,20 @@ jobs:
   # GitHub bills every job at least one minute. `touches`, `flow-tooling` and this plan job were
   # three jobs of a few seconds each — ~3 billed minutes per gate run for ~20 seconds of work, in
   # every adopter. They are one job now. This is the job that survives because it is the one
-  # `source-root` must `needs:` for its matrix; folding the others in costs the matrix a few
-  # seconds of start-up and nothing else. It still does not wait on `gate` (5–8 min).
+  # `source-root` must `needs:` for its matrix. It still does not wait on `gate` (5–8 min).
   #
   # Every check here is its own step and fails the job on its own. Each step after the first runs
-  # under `!cancelled()`, so one failing check does not hide the others' verdicts — the property
-  # three separate jobs gave for free. The helper steps also need `FLOW_BIN`: if materialising
-  # canonical failed, that step has already failed the job, and running a helper from an empty
-  # path would only bury its error under a second one.
+  # under `!cancelled()`, so within this job one failing check does not hide the others' verdicts.
+  #
+  # THE TRADE-OFF, stated so nobody has to rediscover it: `source-root` needs this job, so when ANY
+  # step here fails — a touches-guard scope failure, a flow-tooling test, flow-doctor — the matrix
+  # is SKIPPED for that run, even though the plan step produced it. Before flow-0137 a `touches` or
+  # `flow-tooling` failure left the matrix running. The PR is red either way; what is lost is the
+  # source_roots verdicts on that run, which arrive on the push that fixes the failing check.
+  #
+  # The helper steps also need `FLOW_BIN`: if materialising canonical failed, that step has already
+  # failed the job, and running a helper from an empty path would only bury its error under a
+  # second one.
   #
   # The id stays `source-roots-plan`, so its check name does not change and `source-root` needs
   # no edit. `flow-gates / touches` and `flow-gates / flow-tooling` no longer report: a branch
