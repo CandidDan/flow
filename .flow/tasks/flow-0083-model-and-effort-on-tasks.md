@@ -1,7 +1,7 @@
 ---
 id: "flow-0083"
 title: "Each task names its model and effort (default Sonnet 5.5), the runner honours it, and a task that fails moves up a model"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "session_01Gp2QoD5mNiQpKhXNWUJHTC"
