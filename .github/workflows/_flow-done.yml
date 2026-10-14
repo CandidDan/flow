@@ -7,6 +7,9 @@ name: _flow-done (reusable)
 # goes as far as `in_review`. When a flow/<id>-… PR merges into main, this flips the matching
 # task to `done` on main (the store's home) and commits it. Board regeneration is left to the
 # next board-builder run; the canonical state is correct immediately.
+#
+# The same merge is also the approval event for any intent it makes `approved` (ADR-0007), so a
+# second step stamps those intents' `approved_by` / `approved_at` from it (flow-0127).
 
 on:
   workflow_call:
@@ -188,3 +191,73 @@ jobs:
           done
           echo "$id -> $TRANSITION landed on main (attempt $attempt of $MAX_PUSH_ATTEMPTS)."
           # <<< flow-0059 state-push-retry <<<
+
+      # flow-0127 (ADR-0007 slice 4): the merge is the approval event, and an intent's
+      # `approved_by` / `approved_at` are its projection — written HERE, from the event, never by
+      # hand. Its own step so a task transition that no-ops (no task id) or fails cannot drop a stamp;
+      # `!cancelled()` keeps it running after a failed transition, and the reset below makes sure it
+      # never pushes that step's leftover commit.
+      - name: Stamp intents this merge approved
+        if: ${{ !cancelled() && github.event.pull_request.merged == true }}
+        env:
+          PR_NUM: ${{ github.event.pull_request.number }}
+          MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
+          MERGED_AT: ${{ github.event.pull_request.merged_at }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          # Start from origin's `main`, whatever the transition step left behind on the runner.
+          git fetch origin main --quiet
+          git reset --hard --quiet FETCH_HEAD
+
+          # A repo that has not synced this helper yet must not fail its flow-done.
+          if [ ! -f .flow/bin/stamp-intents.mjs ]; then
+            echo "No .flow/bin/stamp-intents.mjs in this repo yet (sync Flow to get it) — skipping intent stamping."
+            exit 0
+          fi
+
+          # The merge commit's FIRST PARENT is `main` before this PR landed: the diff against it is
+          # this PR's change and nothing else, and an intent already `approved` there is not re-stamped.
+          BASE_SHA="$(git rev-parse "$MERGE_SHA^1")"
+          stamp() {
+            node .flow/bin/stamp-intents.mjs --base "$BASE_SHA" --head "$MERGE_SHA" \
+              --merged-by "$MERGED_BY" --merged-at "$MERGED_AT"
+          }
+
+          # A throw exits non-zero, and `bash -e` fails the job with the error above it in the log.
+          stamp
+          if git diff --quiet -- .flow/intents/; then
+            echo "PR #$PR_NUM approved no intent — nothing to stamp."
+            exit 0
+          fi
+
+          COMMIT_MSG="flow: stamp intent approval (PR #$PR_NUM merged by $MERGED_BY)"
+          git config user.name  "flow-bot"
+          git config user.email "flow-bot@users.noreply.github.com"
+          git add .flow/intents/
+          git commit -m "$COMMIT_MSG"
+
+          # The flow-0059 push retry above, in the same shape: on a refused push DISCARD the attempt
+          # and REDO it against the new tip — never pull/rebase/merge/--force a stale edit onto
+          # someone else's. The helper stamps the tip's own copy of each intent, so a re-run composes
+          # with whatever landed in between. Exhausting the attempts exits NON-ZERO: a stamp that
+          # vanishes quietly is the gap this step exists to close.
+          MAX_PUSH_ATTEMPTS=5
+          attempt=1
+          until git push origin HEAD:main; do
+            attempt=$((attempt + 1))
+            if [ "$attempt" -gt "$MAX_PUSH_ATTEMPTS" ]; then
+              echo "::error::flow: LOST INTENT STAMP — the approval stamp for PR #$PR_NUM could not be pushed to main after $MAX_PUSH_ATTEMPTS attempts. Re-run this workflow; nothing else will re-fire it."
+              exit 1
+            fi
+            sleep "$attempt"
+            git fetch origin main --quiet
+            git reset --hard FETCH_HEAD
+            stamp
+            if git diff --quiet -- .flow/intents/; then
+              echo "The stamp for PR #$PR_NUM is already on main — nothing left to push."
+              exit 0
+            fi
+            git add .flow/intents/
+            git commit -m "$COMMIT_MSG"
+          done
+          echo "Intent approval for PR #$PR_NUM landed on main (attempt $attempt of $MAX_PUSH_ATTEMPTS)."

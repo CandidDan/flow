@@ -44,6 +44,7 @@ Adopt an intent layer in **four slices**, and build only the first.
 3. **An `intent-writer` interview skill**, the counterpart to `vision-writer`.
 4. **CI stamping the approval record on merge** — writing `approved_by` and `approved_at` from
    the merge event.
+   **Shipped in flow-0127:** `_flow-done.yml` runs `.flow/bin/stamp-intents.mjs` on every merge.
 
 Slices 2 and 4 are *not written as tasks*, deliberately. Both depend on decisions this ADR
 settles, and queuing them now would be speculation dressed as a plan. Slice 3 exists as
