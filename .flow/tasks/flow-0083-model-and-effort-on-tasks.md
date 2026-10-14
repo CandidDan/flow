@@ -30,6 +30,7 @@ touches:
   - "changes/flow-0083.md"
   - ".github/workflows/_flow-status.yml"
   - ".flow/bin/state-push-retry.test.mjs"
+  - ".flow/bin/model-ids.test.mjs"
 labels: [queue-runner, cost, task-writer, urgent]
 notes:
   - "2026-10-13 (orchestrator): UNBLOCKED: flow-0140 is done. Dan's queue rule 2026-10-13: every p1/p2 task plus flow-0108 is ready; p3s park."
@@ -39,6 +40,7 @@ notes:
   - "2026-10-08 (orchestrator): ESCALATION WRITES TO MAIN. Bumping `model` is a task-state change, so it is a small commit to the task file on `main` (the same plane as a claim), never on a branch. The runner already commits to main for recovery; reuse that path. A task already at `fable` does not escalate further: it gets an `asks` decision instead (`Recommend:` split the task)."
   - "2026-10-08 (orchestrator): touches lists tests that pin the template's key order (serves-template), the PROTOCOL hard-rules digest (protocol-portability, only if a hard rule changes), and the queue runner's dispatch step (queue-runner-*). Edit them only if they actually fail; do not widen further without a note."
   - "2026-10-14 (orchestrator): WIDENED touches to add .github/workflows/_flow-status.yml and .flow/bin/state-push-retry.test.mjs. Escalation trigger 2 was specced on flow-state.mjs, which is read-only; the real closed-unmerged -> ready write is the closed) branch of _flow-status.yml. No in-flight task touches either path (flow-0120, the other _flow-status.yml task, is blocked)."
+  - "2026-10-14 (orchestrator): WIDENED touches to add .flow/bin/model-ids.test.mjs. flow-0140's test pins the literal --model in the queue runner, which this task's criterion removes; the test changes to assert no literal remains. No in-flight task touches it."
 ---
 
 ## Context
