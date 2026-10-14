@@ -436,10 +436,6 @@ jobs:
         if: ${{ !cancelled() }}
         run: node .flow/bin/flow-doctor.mjs
 
-  # Scope enforcement: a task-carrying PR's diff must stay within the task's declared `touches`.
-  # Runs in the per-stack gate job (needs the PR diff + base). Mirrors the store-guard.
-
-
   # `if` on the count, so a repo with nothing extra to gate gets a SKIPPED job rather than a red
   # one — an empty matrix is the correct answer for a single-tree repo, and for canonical itself
   # (all four of its entries are `npm run lint`/`npm run build`, which the gate job above runs).
