@@ -116,12 +116,15 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0118",
   }],
   ["Status lifecycle", {
-    digest: "d9bccf75c9e2d2337011514ac5f3d43c7f9c8944e61d88a403b7a87bab625960",
+    digest: "40997a0358d14378ce82d69d9f1017399f0989ad3cb7f72746f84576c3c76ed8",
     why: "the `blocked` bullet told a worker to record the undecidable thing in " +
          "`blocked_reason` and `blocked_by` only — both of which a person reads only once they " +
          "are already looking at the task file, which is the thing a human never opens. It now " +
-         "also sends the decision to `asks`, which is the field that brings them there.",
-    task: "flow-0119",
+         "also sends the decision to `asks`, which is the field that brings them there " +
+         "(flow-0119). flow-0083 then added the `Which model builds a task` subsection: the " +
+         "four-tier rubric, the sonnet/medium default, mechanical escalation, and the worker's " +
+         "own `blocked` + `Recommend: re-run on <tier>` self-escalation.",
+    task: "flow-0083",
   }],
   ["Session hygiene — context is a budget", {
     digest: "65ee3fa781bad844dccfcb45e43c343c7ced01058dbf6744ecd510f2c5aab5a0",

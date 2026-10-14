@@ -19,11 +19,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalRepoRoot, canonicalTasksDir, readTaskState } from "./queue-runner-verify.mjs";
+import { changelogEntry } from "./changelog-entry.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const FLOW = resolve(BIN, "..");
@@ -210,4 +211,178 @@ test("the explain step no-ops to the generic two-branch text when no facts were 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ── flow-0083: the worker's model is the task's, and a run with no PR escalates it ──
+//
+// Criteria proved here (flow-0083):
+//   · no literal `--model` value remains in the dispatch step; the worker's claude_args and the
+//     report step read the resolver's outputs
+//   · a run's step summary names tier, model ID, effort and reason (the resolve step, executed)
+//   · a run that ends without a PR escalates the task on main by one tier (the escalate step,
+//     executed end to end against a bare origin — the step's logic, not a live run)
+//   · TIERS is the only place that maps a tier to a model ID, across `.github/workflows/` and
+//     `project-template/.flow/bin/`
+// The pure resolver and escalation are proved in `project-template/.flow/bin/task-model.test.mjs`.
+
+const dispatchSteps = () => yamlMod.parse(wfSrc()).jobs.dispatch.steps;
+const stepNamed = (re) => dispatchSteps().find((s) => re.test(s.name || ""));
+const TEMPLATE_BIN = join(REPO, "project-template", ".flow", "bin");
+
+test("no literal --model value remains in the dispatch step", { skip }, () => {
+  const steps = dispatchSteps();
+  const work = steps.find((s) => s.id === "work");
+  const args = String(work.with.claude_args);
+  assert.match(args, /\$\{\{ steps\.model\.outputs\.args \}\}/, "the worker must take the resolver's args");
+  assert.doesNotMatch(args.replace(/\$\{\{[^}]*\}\}/g, ""), /--model/, "a literal --model is back in claude_args");
+  const report = steps.find((s) => /Report the model/.test(s.name || ""));
+  assert.equal(report.env.REQUESTED_MODEL, "${{ steps.model.outputs.model }}");
+  const literals = JSON.stringify(steps).replace(/\$\{\{[^}]*\}\}/g, "");
+  assert.doesNotMatch(literals, /claude-(haiku|sonnet|opus|fable)-\d/, "a model id is spelled out in the dispatch job");
+  const resolveIdx = steps.findIndex((s) => s.id === "model");
+  assert.ok(resolveIdx > steps.findIndex((s) => s.id === "pick") && resolveIdx < steps.indexOf(work),
+    "the model is resolved after the pick and before the worker");
+});
+
+// A consuming repo's checkout: the template's helpers in `.flow/bin/`, one task in the store,
+// committed and pushed to a bare `origin` so the escalate step has a real `main` to write.
+function adopterRepo(taskText) {
+  const dir = mkdtempSync(join(tmpdir(), "qr-model-"));
+  const repo = join(dir, "repo"), origin = join(dir, "origin.git");
+  const git = (...a) => {
+    const r = spawnSync("git", a, { cwd: repo, encoding: "utf8" });
+    assert.equal(r.status, 0, `git ${a.join(" ")}: ${r.stderr}`);
+    return r.stdout;
+  };
+  spawnSync("git", ["init", "-q", "--bare", "-b", "main", origin]);
+  spawnSync("git", ["init", "-q", "-b", "main", repo]);
+  for (const d of [".flow/bin", ".flow/tasks"]) spawnSync("mkdir", ["-p", join(repo, d)]);
+  for (const f of ["task-model.mjs", "asks.mjs"]) {
+    writeFileSync(join(repo, ".flow/bin", f), readFileSync(join(TEMPLATE_BIN, f)));
+  }
+  writeFileSync(join(repo, ".flow/tasks/proj-0001-x.md"), taskText);
+  git("-c", "user.name=t", "-c", "user.email=t@t", "add", ".");
+  git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init");
+  git("remote", "add", "origin", origin);
+  git("push", "-q", "origin", "main");
+  const onMain = () => spawnSync("git", ["--git-dir", origin, "show", "main:.flow/tasks/proj-0001-x.md"], { encoding: "utf8" }).stdout;
+  return { dir, repo, onMain };
+}
+
+const TASK = (fm = "") => `---\nid: "PROJ-0001"\ntitle: "t"\nstatus: "in_progress"\n${fm}touches: []\n---\n\nbody\n`;
+
+function runStep(step, cwd, env) {
+  const script = join(cwd, "..", `${step.id || "step"}.sh`);
+  writeFileSync(script, step.run);
+  return spawnSync("bash", ["-eo", "pipefail", script], { cwd, encoding: "utf8", env: { ...process.env, ...env } });
+}
+
+test("the resolve step writes args and a summary naming tier, model ID, effort and reason", { skip }, () => {
+  const step = stepNamed(/Resolve the worker's model/);
+  assert.ok(step && step.id === "model", "a `model` step must resolve the worker's model");
+  const { dir, repo } = adopterRepo(TASK('model: "opus"\neffort: "high"\nmodel_reason: "edits CI"\n'));
+  try {
+    const out = join(dir, "out"), sum = join(dir, "sum");
+    writeFileSync(out, ""); writeFileSync(sum, "");
+    const r = runStep(step, repo, { TASK_ID: "PROJ-0001", GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: sum });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(readFileSync(out, "utf8"), /^args=--model claude-opus-5-5 --effort high$/m);
+    assert.match(readFileSync(out, "utf8"), /^model=claude-opus-5-5$/m);
+    const summary = readFileSync(sum, "utf8");
+    for (const s of ["tier: `opus`", "model: `claude-opus-5-5`", "effort: `high`", "reason: edits CI"]) {
+      assert.ok(summary.includes(s), `summary is missing "${s}":\n${summary}`);
+    }
+    // An invalid value fails the step — the worker never runs on a silent fallback.
+    writeFileSync(join(repo, ".flow/tasks/proj-0001-x.md"), TASK('model: "gpt-5"\nmodel_reason: "x"\n'));
+    const bad = runStep(step, repo, { TASK_ID: "PROJ-0001", GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: sum });
+    assert.notEqual(bad.status, 0);
+    assert.match(bad.stdout + bad.stderr, /model: "gpt-5"/);
+    // Bootstrap: no helper synced yet -> no --model, said so, exit 0.
+    rmSync(join(repo, ".flow/bin/task-model.mjs"));
+    const boot = runStep(step, repo, { TASK_ID: "PROJ-0001", GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: sum });
+    assert.equal(boot.status, 0, boot.stderr);
+    assert.match(readFileSync(sum, "utf8"), /no `\.flow\/bin\/task-model\.mjs` in this repo yet/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a run that ends without a PR escalates the task on main by one tier", { skip }, () => {
+  const step = stepNamed(/Escalate the task's model/);
+  assert.ok(step, "the dispatch job must carry the escalate step");
+  assert.match(String(step.if), /!cancelled\(\)/, "it must run after a failed verify step");
+  assert.match(String(step.if), /steps\.work\.outcome == 'failure'/);
+  const names = dispatchSteps().map((s) => s.name || s.id);
+  assert.ok(names.indexOf(step.name) > dispatchSteps().findIndex((s) => s.id === "verify"), "it reads the verify step's facts");
+  const { dir, repo, onMain } = adopterRepo(TASK());
+  try {
+    const sum = join(dir, "sum");
+    writeFileSync(sum, "");
+    const env = {
+      TASK_ID: "PROJ-0001", WORKER_OUTCOME: "failure", FACTS_KNOWN: "1", BRANCH_EXISTS: "0", AHEAD: "0",
+      HAS_OPEN_PR: "0", GITHUB_RUN_ID: "4242", RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: sum,
+    };
+    const r = runStep(step, repo, env);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const main = onMain();
+    assert.match(main, /^model: "opus"$/m, `the task on main was not escalated:\n${main}`);
+    assert.match(main, /^model_reason: "escalated after run 4242 ended without a PR \(was sonnet\)"$/m);
+    assert.match(readFileSync(sum, "utf8"), /sonnet -> opus/);
+    // A run that left an open PR does not escalate.
+    const again = runStep(step, repo, { ...env, HAS_OPEN_PR: "1" });
+    assert.equal(again.status, 0, again.stderr);
+    assert.match(again.stdout, /no escalation — a PR is open/);
+    assert.match(onMain(), /^model: "opus"$/m, "an open PR must leave the model where it was");
+    // No facts published -> no escalation on a guess.
+    const blind = runStep(step, repo, { ...env, FACTS_KNOWN: "" });
+    assert.match(blind.stdout, /not escalating on a guess/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a blocked task is not escalated: the worker's own stop is a legitimate outcome", { skip }, () => {
+  const step = stepNamed(/Escalate the task's model/);
+  const { dir, repo, onMain } = adopterRepo(TASK().replace('status: "in_progress"', 'status: "blocked"'));
+  try {
+    const r = runStep(step, repo, {
+      TASK_ID: "PROJ-0001", WORKER_OUTCOME: "success", FACTS_KNOWN: "1", BRANCH_EXISTS: "0", AHEAD: "0",
+      HAS_OPEN_PR: "0", GITHUB_RUN_ID: "1", RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: join(dir, "sum"),
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /no escalation — the task is blocked on main/);
+    assert.doesNotMatch(onMain(), /^model:/m);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// A tier name used as a key or arrow source, pointing at a full model id: `opus: "claude-…"`,
+// `sonnet → claude-…`, `fable = 'claude-…'`. `model: "claude-sonnet-5-5"` in flow-review.mjs maps a
+// ROLE to an id, not a tier, and is deliberately not matched.
+export const TIER_MAPPING = /\b(haiku|sonnet|opus|fable)\b["']?\s*(:|=>|->|→|=)\s*["'`]?claude-[a-z]+-\d/;
+
+test("TIERS is the only place that maps a tier to a model ID", () => {
+  const files = [
+    ...readdirSync(join(REPO, ".github", "workflows")).filter((n) => /\.ya?ml$/.test(n))
+      .map((n) => join(REPO, ".github", "workflows", n)),
+    ...readdirSync(TEMPLATE_BIN).filter((n) => n.endsWith(".mjs") && !n.endsWith(".test.mjs"))
+      .map((n) => join(TEMPLATE_BIN, n)),
+  ];
+  assert.ok(files.length > 10, "the scan found nothing to check");
+  const hits = [];
+  for (const f of files) {
+    readFileSync(f, "utf8").split("\n").forEach((line, i) => {
+      if (TIER_MAPPING.test(line)) hits.push(`${f.slice(REPO.length + 1)}:${i + 1}`);
+    });
+  }
+  const tierFile = "project-template/.flow/bin/task-model.mjs";
+  assert.deepEqual(hits.filter((h) => !h.startsWith(`${tierFile}:`)), [], "a second tier -> model-ID table exists");
+  assert.equal(hits.length, 4, `task-model.mjs's TIERS must hold the four mappings, found: ${hits.join(", ")}`);
+  // The pattern is not vacuous: it catches the shapes a second table would take.
+  for (const s of ['  opus: "claude-opus-5-5",', "sonnet → claude-sonnet-5-5", "FABLE=claude-fable-5-1".toLowerCase()]) {
+    assert.match(s, TIER_MAPPING);
+  }
+  assert.doesNotMatch('  model: "claude-sonnet-5-5",', TIER_MAPPING);
+});
+
+test("changes/flow-0083.md exists and states the caller action", () => {
+  const entry = changelogEntry(REPO, "flow-0083");
+  assert.ok(entry.trim(), "changes/flow-0083.md must exist (or be assembled into CHANGELOG.md)");
+  assert.match(entry, /\*\*No caller action\*\*/, "the caller action must be stated");
+  assert.match(entry, /now build on Sonnet 5\.5/, "adopters must be told unmodelled tasks now build on Sonnet");
 });

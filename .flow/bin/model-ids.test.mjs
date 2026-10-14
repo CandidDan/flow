@@ -121,8 +121,13 @@ test("AC2: no model value in the reusables or the template/canonical config is a
   const { files, judged, violations } = checkModelIds({ dir: WORKFLOWS, configs: [TEMPLATE_CONFIG, CANON_CONFIG] });
   assert.ok(files.length > 0 && judged > 0, "an empty scan verified nothing");
   assert.deepEqual(violations, []);
-  assert.ok(modelFlags(readFileSync(join(WORKFLOWS, "_flow-queue-runner.yml"), "utf8"))
-    .some((m) => m.value === "claude-opus-5-5"), "the queue runner's worker runs claude-opus-5-5");
+  // flow-0083: the worker's model is the TASK's, resolved through task-model.mjs's TIERS table, so
+  // the queue runner carries no literal `--model` at all — a literal there is the per-task choice
+  // silently overridden. Kickback still names its own (flow-0083 does not touch it).
+  assert.deepEqual(modelFlags(readFileSync(join(WORKFLOWS, "_flow-queue-runner.yml"), "utf8")), [],
+    "the queue runner must take its worker's --model from task-model.mjs, never a literal");
+  assert.ok(modelFlags(readFileSync(join(WORKFLOWS, "_flow-kickback.yml"), "utf8"))
+    .some((m) => m.value === "claude-opus-5-5"), "precondition: kickback's worker still names its full id");
 });
 
 // flow-0144: reviewer models come from canonical's DEFAULT_MODELS, so neither the config a new repo
@@ -138,13 +143,19 @@ test("flow-0144: neither the template config nor canonical's sets review.model, 
 });
 
 test("AC2 mutation: reintroducing `--model opus` into a copy of a workflow fails, naming file and line", () => {
-  for (const f of ["_flow-queue-runner.yml", "_flow-kickback.yml"]) {
+  // The queue runner no longer carries a literal to replace (flow-0083), so its mutation puts the
+  // bare alias back in front of the resolver's args — the regression this guards against.
+  const MUTATIONS = {
+    "_flow-queue-runner.yml": ["--max-turns 120 ${{ steps.model.outputs.args }}", "--max-turns 120 --model opus ${{ steps.model.outputs.args }}"],
+    "_flow-kickback.yml": ["--model claude-opus-5-5", "--model opus"],
+  };
+  for (const [f, [from, to]] of Object.entries(MUTATIONS)) {
     const dir = mkdtempSync(join(tmpdir(), "flow-model-ids-"));
     try {
       const src = readFileSync(join(WORKFLOWS, f), "utf8");
-      assert.ok(src.includes("--model claude-opus-5-5"), `${f}: fixture precondition`);
-      writeFileSync(join(dir, f), src.replace("--model claude-opus-5-5", "--model opus"));
-      const line = src.split("\n").findIndex((l) => l.includes("--model claude-opus-5-5")) + 1;
+      assert.ok(src.includes(from), `${f}: fixture precondition`);
+      writeFileSync(join(dir, f), src.replace(from, to));
+      const line = src.split("\n").findIndex((l) => l.includes(from)) + 1;
       const { violations } = checkModelIds({ dir });
       assert.equal(violations.length, 1, f);
       assert.match(violations[0], new RegExp(`^${f.replace(/\./g, "\\.")}:${line} — --model is the bare alias "opus"`));

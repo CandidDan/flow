@@ -8,7 +8,8 @@ name: _flow-status (reusable)
 #   opened / reopened, DRAFT   -> stays in_progress (+ branch & pr recorded) — flow-0039
 #   opened / reopened, ready   -> in_review (+ branch & pr recorded)
 #   ready_for_review           -> in_review (the hand-off; a worker's `gh pr ready`)
-#   closed without merge       -> back to ready (owner/branch/pr cleared for re-claim)
+#   closed without merge       -> back to ready (owner/branch/pr cleared for re-claim), one
+#                                 model tier up (flow-0083: a closed PR is a failed attempt)
 #   closed by merge            -> handled by flow-done.yml (this job no-ops)
 #   anything else              -> logged no-op (a caller pinned ahead of this reusable)
 # Workers write only two transitions by hand: the claim (ready -> in_progress, which must
@@ -105,6 +106,18 @@ jobs:
           COMMIT_MSG="flow: $id status sync ($ACTION, PR #$PR_NUM)"
 
           node .flow/bin/apply-board-edits.mjs
+
+          # flow-0083, ESCALATION TRIGGER 2: a PR closed unmerged is a failed attempt, so the task
+          # goes back to `ready` ONE MODEL TIER UP, in the same commit as the transition. `--once`
+          # keys on this PR's event, so a second application is a no-op. A task the resolver
+          # rejects keeps its transition: the reset to `ready` matters more than the model, and the
+          # queue runner's resolve step fails that task loudly on its next dispatch anyway.
+          # The retry block below re-derives only `$EDITS`; if a contended push drops this edit,
+          # the `Escalate the model` step after this one puts it back.
+          if [ "$TRANSITION" = "ready" ] && [ -f .flow/bin/task-model.mjs ]; then
+            node .flow/bin/task-model.mjs escalate --once --task-id "$id" --event "PR #$PR_NUM closed unmerged" \
+              || echo "::warning::flow: $id went back to ready but its model was NOT escalated (see above)."
+          fi
 
           if git diff --quiet -- .flow/tasks/; then
             echo "No state change for $id (no matching task file?) — nothing to commit."
@@ -235,3 +248,50 @@ jobs:
           done
           echo "$id -> $TRANSITION landed on main (attempt $attempt of $MAX_PUSH_ATTEMPTS)."
           # <<< flow-0059 state-push-retry <<<
+
+      # flow-0083: the guarantee behind trigger 2. The step above escalates inside the transition's
+      # own commit, but its retry block (byte-identical with _flow-done.yml) re-derives only the
+      # board edits, so a push that lost a race lands `ready` WITHOUT the escalation. This step
+      # re-reads `main` and applies it `--once`: on the normal path the event is already recorded
+      # and this is a no-op; after a contended push it is the one commit that puts it back.
+      - name: Escalate the model of a task whose PR closed unmerged
+        if: ${{ github.event.action == 'closed' && github.event.pull_request.merged != true }}
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUM:   ${{ github.event.pull_request.number }}
+        run: |
+          if [ ! -f .flow/bin/task-model.mjs ] || [ ! -f .flow/bin/parse-task-id.mjs ]; then
+            echo "No .flow/bin/task-model.mjs in this repo yet — no model escalation."
+            exit 0
+          fi
+          id="$(node .flow/bin/parse-task-id.mjs "$HEAD_REF" "$PR_TITLE" || true)"
+          if [ -z "$id" ]; then echo "No task id — nothing to escalate."; exit 0; fi
+          event="PR #$PR_NUM closed unmerged"
+          git config user.name  "flow-bot"
+          git config user.email "flow-bot@users.noreply.github.com"
+          attempt=1
+          while :; do
+            git fetch -q origin main
+            git reset -q --hard FETCH_HEAD
+            if ! node .flow/bin/task-model.mjs escalate --once --task-id "$id" --event "$event"; then
+              echo "::warning::flow: $id's model could not be escalated after $event (see above)."
+              exit 0
+            fi
+            if git diff --quiet -- .flow/tasks/; then
+              echo "$id: escalation after $event is on main."
+              exit 0
+            fi
+            git add .flow/tasks/
+            git commit -q -m "flow: $id escalate model ($event)"
+            if git push -q origin HEAD:main; then
+              echo "$id: escalation after $event landed on main (attempt $attempt)."
+              exit 0
+            fi
+            attempt=$((attempt + 1))
+            if [ "$attempt" -gt 5 ]; then
+              echo "::error::flow: $id went back to ready but its model escalation after $event could not be pushed to main after 5 attempts."
+              exit 1
+            fi
+            sleep "$attempt"
+          done

@@ -51,6 +51,16 @@ intent: ""                # the id of the intent this task derives from — a fi
 touches: []               # path globs this task expects to modify, e.g. ["src/signup/**", "api/subscribe.*"]
                           # concurrency: a ready task is skipped while its touches overlap an in_progress one
 labels: []                # optional, e.g. [frontend, infra, spike]
+model: ""                 # optional: haiku | sonnet | opus | fable — the model that BUILDS this
+                          # task. Unset means sonnet (Sonnet 5.5). Raise it deliberately, per the
+                          # task-writer rubric; the queue runner resolves it through
+                          # .flow/bin/task-model.mjs, the one tier -> model-ID table.
+                          # A run that ends without a PR, or a PR closed unmerged, moves it up a
+                          # tier on its own (haiku -> sonnet -> opus -> fable); at fable the task
+                          # gets a `decision` ask recommending a split instead.
+effort: ""                # optional: low | medium | high | max. Unset means medium.
+model_reason: ""          # one line, REQUIRED whenever `model` or `effort` is set — the run fails
+                          # rather than build on a value nobody explained. Escalation rewrites it.
 notes: []                 # append-only log; kickbacks land here. For the next SESSION, not the
                           # human: what is done, what only looks done, the exact next action.
 asks: []                  # the open items for the HUMAN — the other half of the `notes` split.
