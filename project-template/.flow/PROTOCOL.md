@@ -132,6 +132,29 @@ You hand-write exactly **two** transitions: the claim (it must stay an atomic fi
 commit — see Concurrency) and `blocked` (a judgment call). Every PR-event transition is owned
 by workflows committing to `main`.
 
+### Which model builds a task
+
+A task names the model that builds it, in its own frontmatter: `model` (`haiku` | `sonnet` |
+`opus` | `fable`), `effort` (`low` | `medium` | `high` | `max`) and `model_reason`, one line,
+required whenever either is set. **Unset is the default: `sonnet` / `medium`.** The orchestrator
+departs from it deliberately, by this rubric:
+
+| Tier / effort | For |
+|---|---|
+| `fable` / `high`–`max` | the hardest judgement: planning a large rebuild, a messy brief, debugging that went in circles. **Never Fable for security-review-style work.** |
+| `opus` / `high` | risky or ambiguous: money, auth, concurrency, CI workflows and Flow infra, cross-cutting changes, open design decisions |
+| `sonnet` / `medium` (default) | well-specified: precise criteria, small `touches`, no design decisions, an existing pattern to follow |
+| `haiku` / `low` | trivial, fully mechanical |
+
+`.flow/bin/task-model.mjs` is the one table from tier to model ID; a value outside the lists, or
+either field without `model_reason`, fails the run rather than building on a guess.
+
+**A failed attempt moves the task up a tier** (`haiku → sonnet → opus → fable`), as a commit to
+the task file on `main`: a queue-runner run that ends without a PR, and a PR closed unmerged, both
+escalate it mechanically. At `fable` the task gets a `decision` ask recommending a split instead.
+**And you escalate yourself:** if you judge the task beyond you on the model you are running, do
+not guess — set it `blocked` with a `decision` ask carrying `Recommend: re-run on <tier>`.
+
 ## Concurrency — how parallel sessions don't collide
 
 Several Code sessions may run at once (the queue runner can dispatch more than one). The

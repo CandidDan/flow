@@ -38,6 +38,7 @@ const skip = yamlMod ? false : "needs `npm ci` (yaml) — runs in the per-stack 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const WF = resolve(BIN, "..", "..", ".github", "workflows");
 const STATUS_YML = join(WF, "_flow-status.yml");
+const TEMPLATE_BIN = resolve(BIN, "..", "..", "project-template", ".flow", "bin");
 const DONE_YML = join(WF, "_flow-done.yml");
 const RECOVER_YML = join(WF, "_flow-recover.yml");
 
@@ -127,7 +128,7 @@ unlinkSync(".flow/board-edits.json");
 console.log("apply-board-edits(stub): applied " + edits.length + " update(s)");
 `;
 
-function makeSandbox({ startStatus = "in_progress", rejectEveryPush = false } = {}) {
+function makeSandbox({ startStatus = "in_progress", rejectEveryPush = false, taskModel = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "flow-0059-"));
   const remote = join(dir, "remote.git");
   const work = join(dir, "work");
@@ -148,6 +149,14 @@ function makeSandbox({ startStatus = "in_progress", rejectEveryPush = false } = 
   writeFileSync(join(seed, ".flow", "tasks", TASK_FILE), taskFile(TASK_ID, startStatus));
   writeFileSync(join(seed, ".flow", "tasks", OTHER_TASK_FILE), taskFile("flow-0058", "ready"));
   writeFileSync(join(seed, ".flow", "bin", "apply-board-edits.mjs"), APPLY_STUB);
+  // flow-0083: the REAL model resolver (an adopter's copy, so it resolves the sandbox's store),
+  // and a parse-task-id stub that answers this sandbox's one task id.
+  if (taskModel) {
+    for (const f of ["task-model.mjs", "asks.mjs"]) {
+      writeFileSync(join(seed, ".flow", "bin", f), readFileSync(join(TEMPLATE_BIN, f)));
+    }
+    writeFileSync(join(seed, ".flow", "bin", "parse-task-id.mjs"), `console.log(${JSON.stringify(TASK_ID)});\n`);
+  }
   git(seed, ["init", "-b", "main"]);
   git(seed, ["config", "user.name", "seed"]);
   git(seed, ["config", "user.email", "seed@example.com"]);
@@ -464,6 +473,76 @@ test("a contender moving `pr` IS a conflict for the closed-unmerged edit, which 
         "and the refused transition must not have been half-applied");
     });
   });
+
+// ── flow-0083: a PR closed unmerged sends the task back to ready ONE MODEL TIER UP ──────────
+// Escalation trigger 2. The transition's own step escalates in the same commit; the follow-up
+// step re-applies it `--once` when a contended push re-derived only the board edits.
+
+const ESCALATE_STEP = () =>
+  runOf(STATUS_YML, "sync-status", "Escalate the model of a task whose PR closed unmerged");
+
+const CLOSED = {
+  edits: { id: TASK_ID, status: "ready", owner: "", branch: "", pr: "" },
+  env: { ...STATUS_ENV, ACTION: "closed", TRANSITION: "ready" },
+};
+
+function runEscalateStep(sb) {
+  const r = spawnSync("bash", ["-e", "-c", ESCALATE_STEP()], {
+    cwd: sb.work,
+    encoding: "utf8",
+    env: { PATH: `${sb.shims}:${process.env.PATH}`, HOME: sb.dir, HEAD_REF: `flow/${TASK_ID}-x`, PR_TITLE: "t", PR_NUM: "78" },
+  });
+  return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
+}
+
+test("a PR closed unmerged returns the task to ready one model tier up, in the transition's own commit",
+  { skip }, () => {
+    withSandbox({ taskModel: true }, (sb) => {
+      const r = runTail(sb, tail(STATUS_STEP()), CLOSED);
+      assert.equal(r.status, 0, r.out);
+      const main = onMain(sb, TASK_FILE);
+      assert.match(main, /^status: "ready"$/m);
+      assert.match(main, /^model: "opus"$/m, `not escalated:\n${main}`);
+      assert.match(main, /^model_reason: "escalated after PR #78 closed unmerged \(was sonnet\)"$/m);
+      const files = git(sb.remote, ["show", "--name-only", "--format=%s", "main"]).stdout;
+      assert.match(files, /status sync|flow:/, "one commit carries the transition");
+      assert.equal(git(sb.remote, ["rev-list", "--count", "main"]).stdout.trim(), "2",
+        "seed + ONE commit: the escalation rides in the transition's commit");
+
+      // The follow-up step finds the event recorded and changes nothing — one tier per failure.
+      const f = runEscalateStep(sb);
+      assert.equal(f.status, 0, f.out);
+      assert.match(f.out, /already escalated after PR #78 closed unmerged/);
+      assert.match(onMain(sb, TASK_FILE), /^model: "opus"$/m, "a second application must not reach fable");
+      assert.equal(git(sb.remote, ["rev-list", "--count", "main"]).stdout.trim(), "2");
+    });
+  });
+
+test("a contended closed-unmerged push that dropped the escalation gets it back from the follow-up step",
+  { skip }, () => {
+    withSandbox({ taskModel: true }, (sb) => {
+      contenderAppendsNote(sb, TASK_FILE);
+      const r = runTail(sb, tail(STATUS_STEP()), CLOSED);
+      assert.equal(r.status, 0, r.out);
+      assert.match(onMain(sb, TASK_FILE), /^status: "ready"$/m, "the transition landed");
+      assert.doesNotMatch(onMain(sb, TASK_FILE), /^model:/m,
+        "the retry re-derives only the board edits — this is the gap the follow-up step closes");
+
+      const f = runEscalateStep(sb);
+      assert.equal(f.status, 0, f.out);
+      const main = onMain(sb, TASK_FILE);
+      assert.match(main, /^model: "opus"$/m, `the follow-up step did not restore the escalation:\n${main}`);
+      assert.match(main, /^status: "ready"$/m);
+      assert.ok(main.includes(NOTE_BLOCK), "the contender's note survives");
+    });
+  });
+
+test("the escalate step only runs on a closed, unmerged PR", { skip }, () => {
+  const step = parse(STATUS_YML).jobs["sync-status"].steps
+    .find((s) => s.name === "Escalate the model of a task whose PR closed unmerged");
+  assert.match(String(step.if), /github\.event\.action == 'closed'/);
+  assert.match(String(step.if), /github\.event\.pull_request\.merged != true/);
+});
 
 // ── the unchanged path must not have moved ──────────────────────────────────────────────────
 
