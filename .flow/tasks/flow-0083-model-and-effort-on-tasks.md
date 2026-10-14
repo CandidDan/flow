@@ -28,6 +28,8 @@ touches:
   - ".flow/bin/queue-runner-verify.test.mjs"
   - ".flow/bin/queue-runner-switch.test.mjs"
   - "changes/flow-0083.md"
+  - ".github/workflows/_flow-status.yml"
+  - ".flow/bin/state-push-retry.test.mjs"
 labels: [queue-runner, cost, task-writer, urgent]
 notes:
   - "2026-10-13 (orchestrator): UNBLOCKED: flow-0140 is done. Dan's queue rule 2026-10-13: every p1/p2 task plus flow-0108 is ready; p3s park."
@@ -36,6 +38,7 @@ notes:
   - "2026-10-08 (orchestrator): REWRITTEN and made URGENT, approved by Dan 2026-10-08 (Actions/quota cost review). Changes from the 26 Sep spec, decided with Dan, do not re-litigate: (1) the DEFAULT is Sonnet 5.5 / medium, not Opus / high; the orchestrator raises a task to Opus or Fable deliberately, with a reason. (2) Tiers map to FULL model IDs in one table (see flow-0140's notes for why aliases drifted). (3) Escalation is MECHANICAL as well as self-reported: models judge their own limits poorly, so a weaker model asking for help cannot be the only trigger. (4) Planning stays on the higher model; this task changes only the build worker."
   - "2026-10-08 (orchestrator): ESCALATION WRITES TO MAIN. Bumping `model` is a task-state change, so it is a small commit to the task file on `main` (the same plane as a claim), never on a branch. The runner already commits to main for recovery; reuse that path. A task already at `fable` does not escalate further: it gets an `asks` decision instead (`Recommend:` split the task)."
   - "2026-10-08 (orchestrator): touches lists tests that pin the template's key order (serves-template), the PROTOCOL hard-rules digest (protocol-portability, only if a hard rule changes), and the queue runner's dispatch step (queue-runner-*). Edit them only if they actually fail; do not widen further without a note."
+  - "2026-10-14 (orchestrator): WIDENED touches to add .github/workflows/_flow-status.yml and .flow/bin/state-push-retry.test.mjs. Escalation trigger 2 was specced on flow-state.mjs, which is read-only; the real closed-unmerged -> ready write is the closed) branch of _flow-status.yml. No in-flight task touches either path (flow-0120, the other _flow-status.yml task, is blocked)."
 ---
 
 ## Context
