@@ -248,37 +248,55 @@ jobs:
       # - name: Dependency audit
       #   run: npm audit --audit-level=high   # or pip-audit, etc.
 
-  # The flow tooling is JS regardless of the project's stack, so it's tested on its own —
-  # the foundation's own Definition of Done ("every behaviour has a proving test") applies
-  # to the tooling too. Stays independent of the per-stack gate above.
-  flow-tooling:
+  # ── The declared source_roots that the primary gate does NOT already cover (flow-0077) ──
+  #
+  # `source_roots:` in the caller's .flow/config.yml has always named every tree that holds source
+  # and the command that parses it, but until flow-0077 nothing RAN those checks — flow-doctor only
+  # proved each entry existed. A repo with a second runtime therefore dropped out of the thin-caller
+  # model and hand-wrote a job per tree, which (a) duplicated this file, (b) could not be pushed by
+  # a worker credential, since `.github/workflows/` needs Workflows: Write, and (c) was overwritten
+  # by the next flow-sync. Now it is a .flow/config.yml edit, which any worker can push.
+  #
+  # TWO JOBS, not one: a matrix cannot be computed by the job that uses it. `plan` reads the config
+  # and emits the entries that need their own job; `source-root` fans out over them.
+  #
+  # ── And the gate's other bookkeeping rides in the plan job (flow-0137) ──
+  #
+  # GitHub bills every job at least one minute. `touches`, `flow-tooling` and this plan job were
+  # three jobs of a few seconds each — ~3 billed minutes per gate run for ~20 seconds of work, in
+  # every adopter. They are one job now. This is the job that survives because it is the one
+  # `source-root` must `needs:` for its matrix. It still does not wait on `gate` (5–8 min).
+  #
+  # Every check here is its own step and fails the job on its own. Each step after the first runs
+  # under `!cancelled()`, so within this job one failing check does not hide the others' verdicts.
+  #
+  # THE TRADE-OFF, stated so nobody has to rediscover it: `source-root` needs this job, so when ANY
+  # step here fails — a touches-guard scope failure, a flow-tooling test, flow-doctor — the matrix
+  # is SKIPPED for that run, even though the plan step produced it. Before flow-0137 a `touches` or
+  # `flow-tooling` failure left the matrix running. The PR is red either way; what is lost is the
+  # source_roots verdicts on that run, which arrive on the push that fixes the failing check.
+  #
+  # The helper steps also need `FLOW_BIN`: if materialising canonical failed, that step has already
+  # failed the job, and running a helper from an empty path would only bury its error under a
+  # second one.
+  #
+  # The id stays `source-roots-plan`, so its check name does not change and `source-root` needs
+  # no edit. `flow-gates / touches` and `flow-gates / flow-tooling` no longer report: a branch
+  # protection rule that required either must require `flow-gates / source-roots-plan` instead.
+  source-roots-plan:
     if: (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 22
-      - name: Test flow tooling
-        run: node --test .flow/bin/*.test.mjs
-
-      # Drift detection (back-ported from the canary repo's state:check): a validated store beats a
-      # trusted one. Problems fail; warnings (e.g. stale board snapshot) just report.
-      - name: flow-doctor — store consistency
-        run: node .flow/bin/flow-doctor.mjs
-
-  # Scope enforcement: a task-carrying PR's diff must stay within the task's declared `touches`.
-  # Runs in the per-stack gate job (needs the PR diff + base). Mirrors the store-guard.
-  touches:
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          fetch-depth: 0
+          fetch-depth: 0          # the touches-guard diffs against the base
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
+
       # ── Canonical's own helpers, at THIS workflow's own commit (flow-0094, ADR-0008) ──
       #
       # Until now the gate ran the CALLER's `.flow/bin/` copy, which only changes when that repo's
@@ -352,7 +370,10 @@ jobs:
           echo "flow-helpers: decision=materialised repo=$repo ref=$ref source=$src bin=$bin"
           echo "FLOW_BIN=$bin" >> "$GITHUB_ENV"
 
+      # Scope enforcement: a task-carrying PR's diff must stay within the task's declared `touches`.
+      # Pull requests only — a manual run has no diff to scope. Mirrors the store-guard in `gate`.
       - name: touches-guard — diff stays within declared scope
+        if: ${{ !cancelled() && env.FLOW_BIN != '' && github.event_name == 'pull_request' }}
         env:
           # The repo-root contract (ADR-0008). This guard is where the module-relative default is
           # most dangerous: run from canonical's checkout it would read canonical's own fixture
@@ -379,6 +400,7 @@ jobs:
       # both guards. `.flow/bin/gate-assertion.test.mjs` pins that they stay byte-identical and
       # that this script fails against a guard that produced nothing.
       - name: Assert — the touches-guard proved it ran
+        if: ${{ !cancelled() && env.FLOW_BIN != '' && github.event_name == 'pull_request' }}
         env:
           DECISION_LOG: ${{ runner.temp }}/touches-guard.log
           DECISION_PREFIX: 'touches-guard: decision='
@@ -393,107 +415,12 @@ jobs:
           fi
           grep -E "^${DECISION_PREFIX}" "$DECISION_LOG"
 
-  # ── The declared source_roots that the primary gate does NOT already cover (flow-0077) ──
-  #
-  # `source_roots:` in the caller's .flow/config.yml has always named every tree that holds source
-  # and the command that parses it, but until flow-0077 nothing RAN those checks — flow-doctor only
-  # proved each entry existed. A repo with a second runtime therefore dropped out of the thin-caller
-  # model and hand-wrote a job per tree, which (a) duplicated this file, (b) could not be pushed by
-  # a worker credential, since `.github/workflows/` needs Workflows: Write, and (c) was overwritten
-  # by the next flow-sync. Now it is a .flow/config.yml edit, which any worker can push.
-  #
-  # TWO JOBS, not one: a matrix cannot be computed by the job that uses it. `plan` reads the config
-  # and emits the entries that need their own job; `source-root` fans out over them.
-  source-roots-plan:
-    if: (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
-      count: ${{ steps.plan.outputs.count }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 22
-
-      # ── Canonical's own helpers, at THIS workflow's own commit (flow-0094, ADR-0008) ──
-      #
-      # Until now the gate ran the CALLER's `.flow/bin/` copy, which only changes when that repo's
-      # flow-sync PR merges — while this file changes for every pinned repo the instant an alias
-      # moves. Any release that made a reusable need a new helper therefore broke the whole fleet
-      # until each repo synced. 2.1.0 (`source-roots.mjs`) and 2.1.1 (`check-claude-md.mjs`) did
-      # exactly that on 28–29 Sep 2026. Fetching the helpers from canonical at the same commit as
-      # this file makes the workflow and the helper it calls ship as one unit.
-      #
-      # This step is duplicated verbatim in every job that needs a helper; a reusable workflow
-      # cannot share a step between jobs without a composite action, and a composite action would
-      # itself have to be fetched before it could fetch anything. The copies must stay
-      # byte-identical — `.flow/bin/canonical-helpers-workflow.test.mjs` pins that, exactly as
-      # `gate-assertion.test.mjs` pins the two decision-line assertions below.
-      - name: Materialise canonical's helpers at this workflow's commit
-        env:
-          # `job.workflow_sha` / `job.workflow_repository` describe THE FILE THAT DEFINES THIS JOB
-          # — this reusable — where `github.workflow_sha` describes the caller's 3-line caller and
-          # `github.job_workflow_sha` is not exposed as an expression at all. Both job properties
-          # are absent on GitHub Enterprise Server; `flow_ref` is the fallback for that case only,
-          # and its race is recorded in docs/adr/0008-helpers-from-canonical.md.
-          FLOW_WORKFLOW_REPO: ${{ job.workflow_repository }}
-          FLOW_WORKFLOW_SHA: ${{ job.workflow_sha }}
-          FLOW_REF_INPUT: ${{ inputs.flow_ref }}
-        run: |
-          set -euo pipefail
-          repo="${FLOW_WORKFLOW_REPO:-}"
-          ref="${FLOW_WORKFLOW_SHA:-}"
-          src="job.workflow_sha"
-          if [ -z "$ref" ]; then
-            src="flow_ref input"
-            ref="${FLOW_REF_INPUT:-}"
-          fi
-          [ -n "$repo" ] || repo="CandidDan/flow"
-          if [ -z "$ref" ]; then
-            echo "::error::Cannot resolve the commit of this reusable workflow: job.workflow_sha is"
-            echo "::error::empty (expected only on GitHub Enterprise Server) and no flow_ref input"
-            echo "::error::was passed. Set flow_ref in your flow-gates.yml caller to the same ref"
-            echo "::error::its uses: pins. See docs/adr/0008-helpers-from-canonical.md."
-            exit 1
-          fi
-          case "$repo" in
-            */*) ;;
-            *) echo "::error::Refusing canonical repo '$repo' — expected owner/repo."; exit 1 ;;
-          esac
-          case "$ref" in
-            main|master|HEAD|refs/heads/*)
-              echo "::error::Refusing to fetch the gate's helpers from the moving ref '$ref'. A"
-              echo "::error::gate that follows a branch cannot be reproduced from a run log. Pass"
-              echo "::error::flow_ref as a tag or a commit sha."
-              exit 1 ;;
-            -*) echo "::error::Invalid ref '$ref' — a ref cannot begin with '-'."; exit 1 ;;
-          esac
-          dir="$RUNNER_TEMP/flow-canonical"
-          rm -rf "$dir"
-          mkdir -p "$dir"
-          git -C "$dir" init -q
-          git -C "$dir" remote add origin "https://github.com/$repo.git"
-          git -C "$dir" config core.sparseCheckout true
-          printf 'project-template/.flow/bin/\n' > "$dir/.git/info/sparse-checkout"
-          git -C "$dir" fetch -q --depth 1 origin "$ref"
-          git -C "$dir" checkout -q FETCH_HEAD
-          bin="$dir/project-template/.flow/bin"
-          for helper in source-roots.mjs check-claude-md.mjs touches-guard.mjs; do
-            if [ -f "$bin/$helper" ]; then continue; fi
-            echo "::error::$repo@$ref carries no project-template/.flow/bin/$helper. That is"
-            echo "::error::canonical's own tree at the commit this workflow was resolved from, so"
-            echo "::error::it is a bug in canonical, not in this repository."
-            exit 1
-          done
-          echo "flow-helpers: decision=materialised repo=$repo ref=$ref source=$src bin=$bin"
-          echo "FLOW_BIN=$bin" >> "$GITHUB_ENV"
-
       # "A caller that bumped its workflow refs without syncing `.flow/bin/`" used to be the
       # failure this step guarded against by name. It can no longer happen: the helper arrives
       # with the workflow (flow-0094), so there is nothing left to be missing and nothing to tell
       # the caller to run.
       - name: Plan — which declared source_roots need a job of their own
+        if: ${{ !cancelled() && env.FLOW_BIN != '' }}
         id: plan
         env:
           FLOW_REPO_DIR: ${{ github.workspace }}
@@ -501,6 +428,19 @@ jobs:
         run: |
           set -euo pipefail
           node "$FLOW_BIN"/source-roots.mjs plan
+
+      # The flow tooling is JS regardless of the project's stack, so it's tested on its own —
+      # the foundation's own Definition of Done ("every behaviour has a proving test") applies
+      # to the tooling too. It runs the REPO's own `.flow/bin/` copy, never canonical's.
+      - name: Test flow tooling
+        if: ${{ !cancelled() }}
+        run: node --test .flow/bin/*.test.mjs
+
+      # Drift detection (back-ported from the canary repo's state:check): a validated store beats a
+      # trusted one. Problems fail; warnings (e.g. stale board snapshot) just report.
+      - name: flow-doctor — store consistency
+        if: ${{ !cancelled() }}
+        run: node .flow/bin/flow-doctor.mjs
 
   # `if` on the count, so a repo with nothing extra to gate gets a SKIPPED job rather than a red
   # one — an empty matrix is the correct answer for a single-tree repo, and for canonical itself

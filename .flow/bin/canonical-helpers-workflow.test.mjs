@@ -16,7 +16,7 @@
 // Canonical-only by location: it lives in `.flow/bin/`, not `project-template/.flow/bin/`, so
 // flow-sync never copies it into a repo that has no `project-template/` to test.
 //
-// TEXT SCANNING, not YAML parsing, on purpose: the `flow-tooling` job runs
+// TEXT SCANNING, not YAML parsing, on purpose: the flow-tooling step runs
 // `node --test .flow/bin/*.test.mjs` with no install step before it, so `yaml` is not importable.
 
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -159,14 +159,15 @@ test("the `flow_ref` input defaults to empty, never to a branch", () => {
     "GHES repo back on a moving ref");
 });
 
-test("the four copies of the fetch step are byte-identical", () => {
+test("the three copies of the fetch step are byte-identical", () => {
   // The same rule `gate-assertion.test.mjs` applies to the two decision-line assertions. A
   // reusable workflow cannot share a step between jobs without a composite action, and a composite
   // action would itself have to be fetched before it could fetch anything — so the copies stay,
   // and stay pinned. A divergence here means one job is gating against a different commit.
   const steps = fetchSteps();
-  assert.equal(steps.length, 4,
-    "expected one fetch per job that runs a helper: gate, touches, source-roots-plan, source-root");
+  // Three since flow-0137 folded the `touches` job, and its copy, into source-roots-plan.
+  assert.equal(steps.length, 3,
+    "expected one fetch per job that runs a helper: gate, source-roots-plan, source-root");
   for (const s of steps.slice(1)) {
     assert.equal(s, steps[0],
       "the copies have drifted. One job is now materialising canonical differently from another, " +
@@ -179,9 +180,10 @@ test("the four copies of the fetch step are byte-identical", () => {
 // ─────────────────────────────────────────────────────────────────────────────────────────
 
 test("flow-doctor and the flow-tooling test step still run the repo's own copy", () => {
-  const job = source.slice(source.indexOf("\n  flow-tooling:"));
-  const end = job.slice(1).search(/\n {2}[a-z][\w-]*:\n/);
-  const tooling = end === -1 ? job : job.slice(0, end + 1);
+  // Since flow-0137 these are steps in the source-roots-plan job, beside steps that DO run
+  // canonical's copy — so the check is per step, not per job.
+  const steps = source.split(/\n      - (?:name|uses):/);
+  const tooling = steps.filter((s) => /node --test \.flow\/bin\/\*\.test\.mjs|node \.flow\/bin\/flow-doctor\.mjs/.test(s)).join("\n");
 
   assert.match(tooling, /node --test \.flow\/bin\/\*\.test\.mjs/,
     "the point of this step is to prove the SYNCED copy works in the repo that synced it. Running " +
