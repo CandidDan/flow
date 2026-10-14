@@ -1,12 +1,12 @@
 ---
 id: "flow-0127"
 title: "Stamp an intent's approved_by and approved_at from the merge that approved it (ADR-0007 slice 4)"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_01CLPKoFoz73iktHy8eXcUXS"
 created: "2026-10-03"
-started: ""
+started: "2026-10-14T01:36:20Z"
 branch: ""
 pr: ""
 issue: ""
