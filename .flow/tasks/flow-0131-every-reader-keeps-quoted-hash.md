@@ -1,12 +1,12 @@
 ---
 id: "flow-0131"
 title: "Every frontmatter reader keeps a quoted '#', not only flow-doctor's"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_016vyqvRsTmXPKfLj5LoYbVt"
 created: "2026-10-04"
-started: ""
+started: "2026-10-14T01:36:20Z"
 branch: ""
 pr: ""
 issue: ""
