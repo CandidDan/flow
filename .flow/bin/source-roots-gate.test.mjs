@@ -39,7 +39,7 @@ const REPO = resolve(BIN, "..", "..");
 const GATES = join(REPO, ".github", "workflows", "_flow-gates.yml");
 const source = readFileSync(GATES, "utf8");
 
-// `yaml` is a devDependency, and the `flow-tooling` job runs `node --test .flow/bin/*.test.mjs`
+// `yaml` is a devDependency, and the flow-tooling step runs `node --test .flow/bin/*.test.mjs`
 // with no install step — so when it is missing these skip VISIBLY instead of crashing the job.
 // They run for real in the per-stack gate job, which installs first. Same guard as
 // sync-permissions.test.mjs.
@@ -331,14 +331,19 @@ test("the plan job materialises canonical's helpers BEFORE invoking one, and pin
 // The jobs this task must NOT have touched
 // ─────────────────────────────────────────────────────────────────────────────────────────
 
-test("gate, flow-tooling and touches are still present and still do their own work", { skip }, () => {
+// flow-0137 folded the `flow-tooling` and `touches` jobs into the plan job as steps, to stop each
+// billing a minute for seconds of work. Their work must survive the move; gate-cost.test.mjs pins
+// the job count and that each check still fails on its own.
+test("gate, flow-tooling and touches-guard are still present and still do their own work", { skip }, () => {
   const j = jobs(source);
-  for (const name of ["gate", "flow-tooling", "touches"]) {
-    assert.ok(j[name], `${name} must survive — flow-0077 adds jobs, it does not restructure the gate`);
-  }
+  assert.ok(j.gate, "gate must survive — neither flow-0077 nor flow-0137 restructures the per-stack gate");
   assert.match(runScripts(j.gate), /store-guard: decision=/, "the store-guard's decision line is a CI contract");
   assert.ok(!j.gate.needs, "the primary gate must not have been made to wait on the plan job");
-  assert.ok(!j["flow-tooling"].needs);
+  const plan = runScripts(j[PLAN_JOB]);
+  assert.match(plan, /node --test \.flow\/bin\/\*\.test\.mjs/, "the flow-tooling tests must still run");
+  assert.match(plan, /node \.flow\/bin\/flow-doctor\.mjs/, "flow-doctor must still run");
+  assert.match(plan, /touches-guard\.mjs/, "the touches-guard must still run");
+  assert.ok(!j[PLAN_JOB].needs, "the plan job must not wait on anything — the matrix would wait with it");
 });
 
 test("the workflow still declares `on: workflow_call` with the setup_node_version input intact", { skip }, () => {

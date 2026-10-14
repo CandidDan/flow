@@ -24,8 +24,8 @@ import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // DEPENDENCY NOTE — same shape as check-workflows.test.mjs, for the same reason. The
-// `flow-tooling` job in `_flow-gates.yml` runs `node --test .flow/bin/*.test.mjs` with NO
-// install step, so `yaml` is not there. These tests skip *visibly* ("# SKIP") in that job and
+// flow-tooling step in `_flow-gates.yml` runs `node --test .flow/bin/*.test.mjs` with NO
+// install step, so `yaml` is not there. These tests skip *visibly* ("# SKIP") in that step and
 // run for real in the per-stack gate job, which does `npm ci` and then `npm test`.
 //
 // A printed skip is not a silent no-op; a module-not-found crash is not a gate result at all —
@@ -52,8 +52,8 @@ function stepScript(job, name) {
 
 const STORE_GUARD = stepScript("gate", "Guard — store is main-only");
 const STORE_ASSERT = stepScript("gate", "Assert — the store-guard proved it ran");
-const TOUCHES_STEP = stepScript("touches", "touches-guard — diff stays within declared scope");
-const TOUCHES_ASSERT = stepScript("touches", "Assert — the touches-guard proved it ran");
+const TOUCHES_STEP = stepScript("source-roots-plan", "touches-guard — diff stays within declared scope");
+const TOUCHES_ASSERT = stepScript("source-roots-plan", "Assert — the touches-guard proved it ran");
 
 // Run a `run:` script the way Actions does: `bash -e <file>` with the step's env. Note the
 // shell: Actions' default is `bash -e {0}`, so `-e` is on and pipefail is NOT — running these

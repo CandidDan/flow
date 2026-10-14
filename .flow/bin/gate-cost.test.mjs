@@ -8,7 +8,11 @@
 // that stop that, each with a mutation check, so the saving cannot quietly regress.
 //
 // Canonical-only by placement (it reads canonical's own callers and the reusable), and it needs
-// `yaml`, so it skips in flow-tooling (no `npm ci`) and runs in full in the per-stack gate job.
+// `yaml`, so it skips in the flow-tooling step (no `npm ci`) and runs in full in the per-stack gate
+// job.
+//
+// flow-0137 adds the other half of the same bill: GitHub bills every job at least one minute, and
+// the gate ran three bookkeeping jobs of a few seconds each. The last section pins them as one.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -68,13 +72,11 @@ function jobsThatRunOnADraft(text) {
 test("flow-0136 criterion 2: every gate job skips on a draft, and runs on a ready PR and on workflow_dispatch", { skip }, () => {
   const text = WF(REUSABLE_GATES);
   const jobs = jobsOf(text);
-  assert.ok(Object.keys(jobs).length >= 5, "the reusable gate's jobs were not found");
+  assert.ok(Object.keys(jobs).length >= 3, "the reusable gate's jobs were not found");
   assert.deepEqual(jobsThatRunOnADraft(text), [], "these jobs still run on a draft PR");
   for (const [name, job] of Object.entries(jobs)) {
     assert.equal(evaluate(job.if, { event: "pull_request", draft: false }), true, `${name} must run on a ready PR`);
-    if (name !== "touches") {   // touches is pull_request-only by design: no diff to scope otherwise
-      assert.equal(evaluate(job.if, { event: "workflow_dispatch" }), true, `${name} must run on workflow_dispatch`);
-    }
+    assert.equal(evaluate(job.if, { event: "workflow_dispatch" }), true, `${name} must run on workflow_dispatch`);
   }
 });
 
@@ -117,4 +119,103 @@ test("flow-0136 criterion 4: a cancelled review run never dispatches a kickback 
   assert.match(String(plan.if), /github\.event\.workflow_run\.conclusion == 'failure'/,
     "the kickback must act only on a FAILED review; a cancelled one (this task's concurrency) is not a failure");
   assert.doesNotMatch(String(plan.if), /cancelled/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// flow-0137: the bookkeeping is one job, so a gate run bills ~1 minute for it instead of ~3
+// ─────────────────────────────────────────────────────────────────────────────────────────
+
+const PLAN_JOB = "source-roots-plan";
+// The jobs that do real work and are deliberately separate: `gate` is the 5–8 minute per-stack
+// run, and `source-root` is the matrix that cannot be computed by the job that uses it.
+const WORK_JOBS = ["gate", "source-root"];
+
+const bookkeepingJobs = (text) =>
+  Object.entries(jobsOf(text))
+    .filter(([name, job]) => !WORK_JOBS.includes(name) && evaluate(job.if, { event: "pull_request", draft: false }))
+    .map(([name]) => name);
+
+const stepsOf = (job) => job.steps ?? [];
+const findStep = (job, pred, what) => {
+  const found = stepsOf(job).filter(pred);
+  assert.equal(found.length, 1, `expected exactly one ${what} step, found ${found.length}`);
+  return found[0];
+};
+const runs = (needle) => (s) => String(s.run ?? "").includes(needle);
+
+// Each check the three jobs used to run, and how to recognise its step. The failure messages are
+// the steps' own `run:` text, so finding the step by its command and comparing it with the text on
+// main is what proves the message survived the move.
+const PRESERVED = [
+  { what: "touches-guard", pred: runs('node "$FLOW_BIN"/touches-guard.mjs'), helper: true, prOnly: true },
+  { what: "touches-guard assertion", pred: (s) => s.name === "Assert — the touches-guard proved it ran", helper: true, prOnly: true },
+  { what: "source-roots plan", pred: runs('node "$FLOW_BIN"/source-roots.mjs plan'), helper: true },
+  { what: "flow-tooling tests", pred: runs("node --test .flow/bin/*.test.mjs") },
+  { what: "flow-doctor", pred: runs("node .flow/bin/flow-doctor.mjs") },
+];
+
+test("flow-0137 criterion 2: at most one job besides gate and source-root runs on a non-draft PR", { skip }, () => {
+  assert.deepEqual(bookkeepingJobs(WF(REUSABLE_GATES)), [PLAN_JOB],
+    "each extra job bills at least one minute for a few seconds of work — fold it into the plan job as a step");
+});
+
+test("flow-0137 criterion 2 (mutation): splitting a check back out into its own job is caught", { skip }, () => {
+  const doc = parse(WF(REUSABLE_GATES));
+  doc.jobs.touches = { if: NOT_DRAFT, "runs-on": "ubuntu-latest", steps: [{ run: "echo touches" }] };
+  assert.deepEqual(bookkeepingJobs(yamlMod.stringify(doc)), [PLAN_JOB, "touches"]);
+});
+
+test("flow-0137 criterion 1: store-guard, touches-guard, flow-tooling tests and plan each still run as a step", { skip }, () => {
+  const jobs = jobsOf(WF(REUSABLE_GATES));
+  findStep(jobs.gate, (s) => s.name === "Guard — store is main-only", "store-guard");
+  findStep(jobs.gate, (s) => s.name === "Assert — the store-guard proved it ran", "store-guard assertion");
+  for (const { what, pred } of PRESERVED) findStep(jobs[PLAN_JOB], pred, what);
+});
+
+// "Fails the run on its own failure": no step may swallow its exit code, and no check may be
+// skipped just because a DIFFERENT check before it failed — that was free with three jobs.
+function independenceProblems(text) {
+  const job = jobsOf(text)[PLAN_JOB];
+  const out = [];
+  for (const { what, pred, helper, prOnly } of PRESERVED) {
+    const step = stepsOf(job).find(pred);
+    if (!step) { out.push(`${what}: missing`); continue; }
+    if (step["continue-on-error"]) out.push(`${what}: continue-on-error swallows its failure`);
+    const cond = String(step.if ?? "");
+    if (!cond.includes("!cancelled()")) out.push(`${what}: an earlier check's failure would skip it`);
+    if (helper && !cond.includes("env.FLOW_BIN != ''")) out.push(`${what}: runs even when canonical's helpers were not materialised`);
+    if (prOnly && !cond.includes("github.event_name == 'pull_request'")) out.push(`${what}: runs without a PR diff to check`);
+    if (!prOnly && cond.includes("pull_request")) out.push(`${what}: must also run on workflow_dispatch`);
+  }
+  return out;
+}
+
+test("flow-0137 criterion 1: each check fails the job on its own and does not hide the others", { skip }, () => {
+  assert.deepEqual(independenceProblems(WF(REUSABLE_GATES)), []);
+  const job = jobsOf(WF(REUSABLE_GATES))[PLAN_JOB];
+  assert.equal(job.steps[0].with?.["fetch-depth"], 0, "the touches-guard diffs against the base: a shallow clone has none");
+  assert.match(String(job.if), /draft == false/, "and the merged job keeps flow-0136's draft clause");
+});
+
+test("flow-0137 criterion 1 (mutation): a check that would be skipped or swallowed is caught, naming it", { skip }, () => {
+  const text = WF(REUSABLE_GATES);
+  for (const { what, pred } of PRESERVED) {
+    const doc = parse(text);
+    const step = doc.jobs[PLAN_JOB].steps.find(pred);
+    delete step.if;
+    assert.ok(independenceProblems(yamlMod.stringify(doc)).some((p) => p.startsWith(`${what}:`)), `dropping ${what}'s if`);
+    const doc2 = parse(text);
+    doc2.jobs[PLAN_JOB].steps.find(pred)["continue-on-error"] = true;
+    assert.ok(independenceProblems(yamlMod.stringify(doc2)).includes(`${what}: continue-on-error swallows its failure`));
+  }
+});
+
+test("flow-0137 criterion 3: source-root still reads its matrix from a job output, and never waits on gate", { skip }, () => {
+  const jobs = jobsOf(WF(REUSABLE_GATES));
+  const needs = [].concat(jobs["source-root"].needs ?? []);
+  assert.deepEqual(needs, [PLAN_JOB], "source-root must need the plan job and nothing else — above all not `gate`");
+  assert.match(String(jobs["source-root"].strategy.matrix), new RegExp(`needs\\.${PLAN_JOB}\\.outputs\\.matrix`));
+  assert.equal(jobs[PLAN_JOB].outputs.matrix, "${{ steps.plan.outputs.matrix }}");
+  assert.equal(jobs[PLAN_JOB].needs, undefined, "the plan job must not wait on anything, gate included");
+  findStep(jobs[PLAN_JOB], (s) => s.id === "plan", "id: plan");
 });

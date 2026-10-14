@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
 
-// DEPENDENCY NOTE. `_flow-gates.yml` has a `flow-tooling` job that runs
+// DEPENDENCY NOTE. `_flow-gates.yml` has a flow-tooling step that runs
 // `node --test .flow/bin/*.test.mjs` with NO install step — it exists so a consuming repo's
 // Flow tooling is tested independently of its stack. canonical's build helper needs `yaml`,
 // so these tests skip *visibly* there ("# skipped") rather than crashing the job on a missing
