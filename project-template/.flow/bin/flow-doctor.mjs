@@ -152,9 +152,10 @@ const ROOT_IGNORE = new Set([
 // unreadable escape hatch must not be able to fail a gate all by itself.
 const IGNORE_GLOB_CHARS = /[*?[\]{}!]/;
 
-// Strip a trailing `# comment`, whitespace and one layer of quotes from one scalar entry.
+// Strip a trailing `# comment`, whitespace and one layer of quotes from one scalar entry — the
+// quote-aware reader, so a quoted `#` survives (flow-0131).
 function unquoteEntry(v) {
-  return v.split("#")[0].trim().replace(/^["'](.*)["']$/, "$1");
+  return yamlScalar(v);
 }
 
 /**
@@ -174,7 +175,7 @@ export function parseSourceRootsIgnore(configPath) {
   const lines = readFileSync(configPath, "utf8").split("\n");
   const i = lines.findIndex((l) => /^source_roots_ignore:/.test(l));
   if (i === -1) return [];
-  const inline = lines[i].replace(/^source_roots_ignore:\s*/, "").split("#")[0].trim();
+  const inline = stripYamlComment(lines[i].replace(/^source_roots_ignore:\s*/, "")).trim();
   if (inline.startsWith("[")) {
     const body = inline.replace(/^\[/, "").replace(/\]\s*$/, "").trim();
     return body === "" ? [] : body.split(",").map(unquoteEntry);   // `[]` is an empty list, not one empty entry
@@ -617,7 +618,7 @@ export function evidenceShape(head) {
   const lines = String(head).split("\n");
   const i = lines.findIndex((l) => /^\s*evidence:/.test(l));
   if (i === -1) return "absent";
-  const inline = lines[i].replace(/^\s*evidence:\s*/, "").split("#")[0].trim();
+  const inline = stripYamlComment(lines[i].replace(/^\s*evidence:\s*/, "")).trim();
   if (inline.startsWith("[")) {
     if (!inline.endsWith("]")) return "not-a-list";
     const inner = inline.slice(1, -1).trim();
@@ -630,7 +631,7 @@ export function evidenceShape(head) {
     if (t === "" || t.startsWith("#")) continue;
     const m = t.match(/^-\s*(.*)$/);
     if (!m) break;                                     // dedent to the next key → list done
-    entries.push(m[1].split("#")[0]);
+    entries.push(stripYamlComment(m[1]));
   }
   // `evidence:` with nothing beneath it is YAML null, which is the empty case, not a broken one.
   return entries.length === 0 || entries.every(isScalarStringEntry) ? "list" : "not-a-list";
