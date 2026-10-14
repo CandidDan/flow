@@ -1,7 +1,7 @@
 ---
 id: "flow-0137"
 title: "The PR gate's 1-minute bookkeeping jobs become one job, so each gate run bills ~2 fewer minutes"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "session_01ANQhXq3EhUmXDuzdUbRRsF"
