@@ -1,7 +1,7 @@
 ---
 id: "flow-0041"
 title: "Release blocked tasks whose dependency has landed and start the next worker, with no model in the loop"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "queue-runner-38854909716"
