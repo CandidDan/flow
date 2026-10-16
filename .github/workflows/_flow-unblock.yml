@@ -1,0 +1,174 @@
+name: _flow-unblock (reusable)
+
+# Reusable form of the blocked-task release sweep (flow-0041). Repos call it from a thin caller
+# that owns the triggers — `workflow_run` on flow-done completing, an hourly `schedule`, and
+# `workflow_dispatch`; this file is trigger-agnostic. See docs/flow-reusable-workflows.md.
+#
+# `blocked` was the one status with no automated exit: flow-status owns `in_review` and the return
+# to `ready`, flow-done owns `done`, flow-recover heals a stranded `in_progress`, and a blocked task
+# waited for someone to notice its dependency had landed. flow-0040 made the dependency
+# machine-readable (`blocked_by`); this sweep acts on it, with no model in the loop.
+#
+#   1. Release: every `blocked` task whose EVERY `blocked_by` entry has resolved — a task id that is
+#      `done` on main, a PR url that MERGED — goes back to `ready`, with `blocked_reason` and
+#      `blocked_by` cleared, through apply-board-edits.mjs as a commit to main. Never straight to
+#      `in_progress`: the sweep restores eligibility, it does not claim.
+#   2. Start the next worker: if a task is `ready`, no queue-runner run is active, and
+#      FLOW_QUEUE_RUNNER is not `paused`, dispatch the runner with NO task_id so pick-task chooses.
+#
+# A SWEEP, not a hook: each run re-reads the whole store, so a block written after its dependency
+# landed is still released, and a missed run loses nothing — the next one does the same work.
+#
+# Conservative by construction. A block the machine cannot FULLY read stays blocked: an empty
+# `blocked_by`, a malformed entry, an id the store does not hold, a PR closed without merging, a PR
+# the token could not read. The sweep never SETS `blocked` and never touches any other task.
+#
+# NOT gated on FLOW_AI, unlike flow-recover. flow-recover is dormant without autonomous workers
+# because there is nothing to strand; a repo driven entirely by humans still has blocked tasks
+# whose dependencies land, so gating this the same way would switch it off where it helps most.
+#
+# Credentials: GITHUB_TOKEN only, never FLOW_PAT. The release push uses the checkout credential;
+# the dispatch is `workflow_dispatch`, the documented exception to GITHUB_TOKEN-initiated events
+# not starting workflows. The caller grants `contents: write` (the release commit) and
+# `actions: write` (list the runner's runs, dispatch it) and nothing else. A PR-url entry is read
+# with `gh api repos/<owner>/<repo>/pulls/<n>`; where the token cannot read it, the lookup fails,
+# the entry resolves unknown, the task stays blocked and the run says so in a ::warning::.
+
+on:
+  workflow_call:
+    inputs:
+      queue_runner_workflow:
+        description: "The queue runner's workflow file name, dispatched after a release (default flow-queue-runner.yml)."
+        required: false
+        type: string
+        default: "flow-queue-runner.yml"
+
+permissions:
+  contents: write          # the release commit to main
+  actions: write           # list the queue runner's runs, and dispatch it
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Release blocked tasks whose every blocked_by entry has resolved
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Bootstrap guard: the helper lives in the consuming repo once it adopts the template.
+          if [ ! -f .flow/bin/flow-unblock.mjs ]; then
+            echo "No .flow/bin/flow-unblock.mjs in this repo yet — nothing to do."
+            exit 0
+          fi
+          git config user.name  "flow-bot"
+          git config user.email "flow-bot@users.noreply.github.com"
+          tmp="${RUNNER_TEMP:-/tmp}"
+
+          # Look up every PR a blocked task waits on, once. The helper prints only refs whose shape
+          # it validated (`<owner>/<repo>` and a number), so nothing else reaches `gh api`. A lookup
+          # that fails is recorded as `unknown`, never as "not merged" and never skipped: unknown
+          # keeps the task blocked, and the warning says why.
+          node .flow/bin/flow-unblock.mjs pr-refs > "$tmp/flow-unblock-refs"
+          : > "$tmp/flow-unblock-facts"
+          while IFS="$(printf '\t')" read -r url repo number; do
+            [ -z "$url" ] && continue
+            if fact="$(gh api "repos/$repo/pulls/$number" --jq '[.state, (.merged | tostring)] | @tsv' </dev/null 2>/dev/null)"; then
+              printf '%s\t%s\n' "$url" "$fact" >> "$tmp/flow-unblock-facts"
+            else
+              echo "::warning::Could not read $url — it resolves unknown and its task stays blocked. A PR in another private repo, or a token without pull-requests read, both land here."
+              printf '%s\tunknown\t\n' "$url" >> "$tmp/flow-unblock-facts"
+            fi
+          done < "$tmp/flow-unblock-refs"
+
+          # Discard-and-redo, the shape flow-0059 gave every state write to `main`: on a rejected
+          # push, reset to the new tip and re-derive the release from the store as it now is —
+          # never pull, rebase or merge a stale edit into someone else's. Re-deriving is exact here
+          # because the plan is a pure function of the store and the PR facts.
+          MAX_PUSH_ATTEMPTS=5
+          attempt=1
+          while :; do
+            node .flow/bin/flow-unblock.mjs plan --pr-facts "$tmp/flow-unblock-facts" > "$tmp/flow-unblock-plan"
+            released=""
+            while IFS="$(printf '\t')" read -r id decision detail; do
+              [ -z "$id" ] && continue
+              case "$decision" in
+                release) echo "$id: every blocked_by entry resolved -> ready"; released="$released $id" ;;
+                closed-unmerged) echo "::warning::$id stays blocked: $detail — a PR it waits on closed without merging, so waiting will never release it. A person needs to look." ;;
+                *) echo "$id stays blocked: $detail" ;;
+              esac
+            done < "$tmp/flow-unblock-plan"
+
+            if [ -z "$released" ]; then
+              echo "Nothing to release."
+              break
+            fi
+            node .flow/bin/flow-unblock.mjs edits --pr-facts "$tmp/flow-unblock-facts" > .flow/board-edits.json
+            node .flow/bin/apply-board-edits.mjs
+            if git diff --quiet -- .flow/tasks/; then
+              echo "No change (already released / not found)."
+              break
+            fi
+            git add .flow/tasks/
+            git commit -q -m "flow: unblock$released -> ready (every blocked_by entry resolved)"
+            if git push origin HEAD:main; then
+              echo "Released:$released"
+              break
+            fi
+            if [ "$attempt" -ge "$MAX_PUSH_ATTEMPTS" ]; then
+              echo "::error::flow-unblock could not push the release of$released to main after $MAX_PUSH_ATTEMPTS attempts — the next sweep will retry."
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            echo "Push rejected; re-deriving against the new tip of main (attempt $attempt/$MAX_PUSH_ATTEMPTS)."
+            git fetch origin main --quiet
+            git reset --hard --quiet FETCH_HEAD
+          done
+
+      # Its own step, and `!cancelled()`: a ready task left waiting by an earlier merge is reason
+      # enough to start a worker, whether or not this run released anything — or managed to push.
+      - name: Start the next worker
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLOW_QUEUE_RUNNER: ${{ vars.FLOW_QUEUE_RUNNER }}
+          RUNNER_WF: ${{ inputs.queue_runner_workflow }}
+        run: |
+          if [ ! -f .flow/bin/flow-unblock.mjs ]; then
+            echo "No .flow/bin/flow-unblock.mjs in this repo yet — nothing to do."
+            exit 0
+          fi
+          RUNNER_WF="${RUNNER_WF:-flow-queue-runner.yml}"
+          case "$RUNNER_WF" in
+            *[!A-Za-z0-9._-]*|"") echo "::warning::queue_runner_workflow '$RUNNER_WF' is not a workflow file name — not dispatching."; exit 0 ;;
+          esac
+
+          ready="$(node .flow/bin/flow-unblock.mjs count-ready)"
+          # Whether the list could be READ is a separate fact from what it held: a failure is
+          # `unknown`, and unknown never dispatches — a second worker on the same pick is waste.
+          if runs="$(gh run list --workflow "$RUNNER_WF" --limit 50 --json status </dev/null 2>&1)"; then
+            active="$(printf '%s' "$runs" | node .flow/bin/flow-unblock.mjs count-active-runs)"
+          else
+            echo "::warning::Could not list $RUNNER_WF runs — not dispatching. The caller must grant \`actions: write\` (run flow-sync for the current flow-unblock.yml caller). gh said: $runs"
+            active="unknown"
+          fi
+          decision="$(node .flow/bin/flow-unblock.mjs should-dispatch --ready "$ready" --active "$active" --queue-runner "$FLOW_QUEUE_RUNNER")"
+          echo "ready=$ready active=$active FLOW_QUEUE_RUNNER=${FLOW_QUEUE_RUNNER:-<unset>} -> $decision"
+          [ "$decision" = "dispatch" ] || exit 0
+
+          # No `task_id`: pick-task chooses, so priority and `touches` overlap stay its rules. The
+          # outcome — including a 403 from a caller not yet synced to grant `actions: write` — is a
+          # line the helper prints, never a failed step: the release above already happened.
+          if out="$(gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/$RUNNER_WF/dispatches" -f ref=main </dev/null 2>&1)"; then
+            rc=0
+          else
+            rc=$?
+          fi
+          printf '%s' "$out" | node .flow/bin/flow-unblock.mjs dispatch-outcome "$rc" "$RUNNER_WF"
