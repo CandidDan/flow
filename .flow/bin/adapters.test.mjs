@@ -21,7 +21,7 @@
 // without the adoption quietly pointing at the wrong tree.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +35,7 @@ import { canonicalFlowDir as guardFlowDir, findTaskFile } from "./touches-guard.
 import { canonicalFlowDir as pickFlowDir } from "./pick-task.mjs";
 import { canonicalFlowDir as recoverFlowDir, readTasks as recoverReadTasks } from "./flow-recover.mjs";
 import { canonicalFlowDir as openPrFlowDir } from "./flow-open-pr.mjs";
+import { canonicalFlowDir as unblockFlowDir } from "./flow-unblock.mjs";
 import { parseTaskId } from "./parse-task-id.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
@@ -53,7 +54,8 @@ test("every adapter resolves CANONICAL's store, not the template's fixture store
                              ["touches-guard", guardFlowDir()],
                              ["pick-task", pickFlowDir()],
                              ["flow-recover", recoverFlowDir()],
-                             ["flow-open-pr", openPrFlowDir()]]) {
+                             ["flow-open-pr", openPrFlowDir()],
+                             ["flow-unblock", unblockFlowDir()]]) {
     assert.equal(dir, FLOW, `${name} must resolve canonical's .flow/`);
     assert.notEqual(dir, TEMPLATE_FLOW,
       `${name} must NOT resolve project-template/.flow — that is the fixture store, and ` +
@@ -504,7 +506,7 @@ test("checkWorkflows parses every workflow in canonical, including the five new 
 const WORKFLOW_INVOKED_ADAPTERS = [
   "flow-doctor.mjs", "apply-board-edits.mjs", "touches-guard.mjs", "parse-task-id.mjs",
   "flow-review.mjs", "pick-task.mjs", "flow-recover.mjs", "flow-open-pr.mjs",
-  "source-roots.mjs",
+  "source-roots.mjs", "flow-unblock.mjs",
 ];
 
 test("every .flow/bin/<helper>.mjs a workflow canonical CALLS invokes by path exists here", () => {
@@ -969,4 +971,176 @@ test("_flow-gates.yml runs source-roots from CANONICAL, not from the caller's .f
     "the adapter still has to exist — it is the local and flow-doctor entry point");
   assert.ok(WORKFLOW_INVOKED_ADAPTERS.includes("source-roots.mjs"),
     "the hand-kept list must name it too, so its absence would be caught twice");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// flow-unblock (flow-0041): the adapter, the two callers, and the reusable's two steps run for real
+// ─────────────────────────────────────────────────────────────────────────────────────────
+
+import * as unblockAdapter from "./flow-unblock.mjs";
+import * as unblockTemplate from "../../project-template/.flow/bin/flow-unblock.mjs";
+
+test("flow-unblock.mjs is an ADAPTER — one call into runUnblockCli, re-exporting the template", () => {
+  const file = join(BIN, "flow-unblock.mjs");
+  assert.ok(!lstatSync(file).isSymbolicLink(),
+    "a symlink resolves into project-template/ and would sweep the fixture store, exiting 0");
+  const code = readFileSync(file, "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+  assert.ok(!/cmd ===/.test(code), "a `cmd === …` branch here is a second CLI growing back");
+  assert.match(code, /runUnblockCli\(process\.argv\.slice\(2\), \{ tasksDir: join\(canonicalFlowDir\(\), "tasks"\) \}\)/);
+  assert.match(code, /from "\.\.\/\.\.\/project-template\/\.flow\/bin\/flow-unblock\.mjs"/);
+  // Every export of the template is re-exported — and is the SAME function, not a copy.
+  for (const name of Object.keys(unblockTemplate)) {
+    assert.equal(unblockAdapter[name], unblockTemplate[name], `${name} must be re-exported from the template`);
+  }
+});
+
+// A consuming-repo layout in a tmp dir: the template's bin, canonical's adapters, a seeded store,
+// and a bare `origin` so the release step's push lands somewhere the test can read back.
+const UNBLOCK_PR = "https://github.com/o/r/pull/7";
+function unblockRepo({ readyToo = false } = {}) {
+  const root = tmp("unblock");
+  const work = join(root, "work");
+  cpSync(join(TEMPLATE_FLOW, "bin"), join(work, "project-template", ".flow", "bin"), { recursive: true });
+  mkdirSync(join(work, ".flow", "bin"), { recursive: true });
+  mkdirSync(join(work, ".flow", "tasks"), { recursive: true });
+  for (const f of ["flow-unblock.mjs", "apply-board-edits.mjs"]) cpSync(join(BIN, f), join(work, ".flow", "bin", f));
+  const t = (name, body) => writeFileSync(join(work, ".flow", "tasks", name), body);
+  t("9001-dep.md", '---\nid: "flow-9001"\nstatus: "done"\n---\n');
+  t("9002-rel.md", '---\nid: "flow-9002"\nstatus: "blocked"\nowner: "w"\nblocked_reason: "waits on 9001 and #7"\n' +
+    `blocked_by:\n  - "flow-9001"\n  - "${UNBLOCK_PR}"\ntouches: ["a/**"]\n---\nbody\n`);
+  t("9003-human.md", '---\nid: "flow-9003"\nstatus: "blocked"\nblocked_reason: "a phone call"\nblocked_by: []\n---\n');
+  if (readyToo) t("9004-ready.md", '---\nid: "flow-9004"\nstatus: "ready"\n---\n');
+  const git = (...a) => execFileSync("git", a, { cwd: work, encoding: "utf8" });
+  execFileSync("git", ["init", "-q", "--bare", "-b", "main", join(root, "origin.git")]);
+  git("init", "-q", "-b", "main");
+  git("config", "user.name", "t"); git("config", "user.email", "t@t");
+  git("add", "-A"); git("commit", "-qm", "seed");
+  git("remote", "add", "origin", join(root, "origin.git"));
+  git("push", "-q", "origin", "main");
+  // A fake `gh` that logs every call: the PR reads merged, the run list is GH_RUNS, and the
+  // dispatch is refused with a 403 when GH_DISPATCH_403 is set.
+  mkdirSync(join(root, "bin"));
+  writeFileSync(join(root, "bin", "gh"), [
+    "#!/bin/sh",
+    'echo "$*" >> "$GH_LOG"',
+    'case "$1 $2" in',
+    '  "api repos/o/r/pulls/7") printf "closed\\ttrue\\n" ;;',
+    '  "run list") printf "%s" "${GH_RUNS:-[]}" ;;',
+    '  "api -X") if [ -n "$GH_DISPATCH_403" ]; then echo "gh: Resource not accessible by integration (HTTP 403)" >&2; exit 1; fi ;;',
+    "  *) exit 1 ;;",
+    "esac", ""].join("\n"));
+  chmodSync(join(root, "bin", "gh"), 0o755);
+  return { root, work, git };
+}
+
+function runStep(repo, stepName, env = {}) {
+  const step = wfParse("_flow-unblock.yml").jobs.sweep.steps.find((s) => s.name === stepName);
+  assert.ok(step, `no step named ${stepName}`);
+  return spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run], {
+    cwd: repo.work, encoding: "utf8",
+    env: { ...process.env, PATH: `${join(repo.root, "bin")}:${process.env.PATH}`,
+           RUNNER_TEMP: repo.root, GH_LOG: join(repo.root, "gh.log"), GITHUB_REPOSITORY: "o/r", ...env },
+  });
+}
+const RELEASE_STEP = "Release blocked tasks whose every blocked_by entry has resolved";
+const DISPATCH_STEP = "Start the next worker";
+const ghLog = (repo) => (existsSync(join(repo.root, "gh.log")) ? readFileSync(join(repo.root, "gh.log"), "utf8") : "");
+
+test("the release step commits the released task to main: ready, cleared, nothing else changed", { skip }, () => {
+  const repo = unblockRepo();
+  try {
+    const before = readFileSync(join(repo.work, ".flow", "tasks", "9002-rel.md"), "utf8");
+    const r = runStep(repo, RELEASE_STEP);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /flow-9002: every blocked_by entry resolved -> ready/);
+    assert.match(r.stdout, /flow-9003 stays blocked: no blocked_by entry/);
+    const onMain = execFileSync("git", ["--git-dir", join(repo.root, "origin.git"), "show",
+      "main:.flow/tasks/9002-rel.md"], { encoding: "utf8" });
+    assert.equal(onMain, before.replace('status: "blocked"', 'status: "ready"')
+      .replace('blocked_reason: "waits on 9001 and #7"', 'blocked_reason: ""')
+      .replace(`blocked_by:\n  - "flow-9001"\n  - "${UNBLOCK_PR}"`, "blocked_by: []"));
+    const human = execFileSync("git", ["--git-dir", join(repo.root, "origin.git"), "show",
+      "main:.flow/tasks/9003-human.md"], { encoding: "utf8" });
+    assert.match(human, /status: "blocked"/, "a block with no blocked_by is never released");
+    assert.match(execFileSync("git", ["--git-dir", join(repo.root, "origin.git"), "log", "-1", "--format=%s", "main"],
+      { encoding: "utf8" }), /^flow: unblock flow-9002 -> ready/);
+    // A second run has nothing left to release and pushes nothing.
+    const again = runStep(repo, RELEASE_STEP);
+    assert.equal(again.status, 0);
+    assert.match(again.stdout, /Nothing to release\./);
+  } finally { rmSync(repo.root, { recursive: true, force: true }); }
+});
+
+test("the release step keeps a task blocked when its PR cannot be read", { skip }, () => {
+  const repo = unblockRepo();
+  try {
+    // A `gh` that fails every call: the PR resolves unknown.
+    writeFileSync(join(repo.root, "bin", "gh"), "#!/bin/sh\nexit 1\n");
+    const r = runStep(repo, RELEASE_STEP);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /::warning::Could not read https:\/\/github\.com\/o\/r\/pull\/7/);
+    assert.match(r.stdout, /Nothing to release\./);
+  } finally { rmSync(repo.root, { recursive: true, force: true }); }
+});
+
+test("the dispatch step dispatches the runner with no task_id when work is ready and no run is active", { skip }, () => {
+  const repo = unblockRepo({ readyToo: true });
+  try {
+    const r = runStep(repo, DISPATCH_STEP, { RUNNER_WF: "flow-queue-runner.yml", FLOW_QUEUE_RUNNER: "" });
+    assert.equal(r.status, 0, r.stderr);
+    const post = ghLog(repo).split("\n").find((l) => l.startsWith("api -X POST"));
+    assert.equal(post, "api -X POST repos/o/r/actions/workflows/flow-queue-runner.yml/dispatches -f ref=main",
+      "exactly the ref and nothing else — no task_id input, so pick-task chooses");
+    assert.match(r.stdout, /Dispatched flow-queue-runner\.yml with no task_id/);
+  } finally { rmSync(repo.root, { recursive: true, force: true }); }
+});
+
+test("the dispatch step does not dispatch when any one condition is false", { skip }, () => {
+  for (const [name, opts, env] of [
+    ["no ready task", {}, {}],
+    ["a runner already active", { readyToo: true }, { GH_RUNS: '[{"status":"in_progress"}]' }],
+    ["FLOW_QUEUE_RUNNER paused", { readyToo: true }, { FLOW_QUEUE_RUNNER: "paused" }],
+  ]) {
+    const repo = unblockRepo(opts);
+    try {
+      const r = runStep(repo, DISPATCH_STEP, env);
+      assert.equal(r.status, 0, `${name}: ${r.stderr}`);
+      assert.match(r.stdout, /-> skip: /, name);
+      assert.doesNotMatch(ghLog(repo), /api -X POST/, `${name}: must not dispatch`);
+    } finally { rmSync(repo.root, { recursive: true, force: true }); }
+  }
+});
+
+test("a 403 on dispatch is a ::warning:: naming actions: write, and the step still succeeds", { skip }, () => {
+  const repo = unblockRepo({ readyToo: true });
+  try {
+    const r = runStep(repo, DISPATCH_STEP, { GH_DISPATCH_403: "1" });
+    assert.equal(r.status, 0, "a caller not yet synced must get a green run, never a red one");
+    assert.match(r.stdout, /^::warning::Could not dispatch flow-queue-runner\.yml: HTTP 403\. .*`actions: write`/m);
+  } finally { rmSync(repo.root, { recursive: true, force: true }); }
+});
+
+test("both flow-unblock callers: three triggers, exactly contents+actions write, no secrets", { skip }, () => {
+  for (const [file, ref] of [[join(WORKFLOWS, "flow-unblock.yml"), "main"],
+                             [join(REPO, "project-template", ".github", "workflows", "flow-unblock.yml"), "v3"]]) {
+    const wf = yamlMod.parse(readFileSync(file, "utf8"));
+    assert.deepEqual(wf.on.workflow_run, { workflows: ["flow-done"], types: ["completed"] }, file);
+    assert.ok(Array.isArray(wf.on.schedule) && wf.on.schedule.length === 1 && wf.on.schedule[0].cron, file);
+    assert.ok("workflow_dispatch" in wf.on, `${file} must be dispatchable`);
+    const jobs = Object.values(wf.jobs);
+    assert.equal(jobs.length, 1, `${file} is a thin caller`);
+    assert.deepEqual(jobs[0].permissions, { contents: "write", actions: "write" }, file);
+    assert.equal(jobs[0].uses, `CandidDan/flow/.github/workflows/_flow-unblock.yml@${ref}`, file);
+    assert.equal(jobs[0].secrets, undefined, `${file} forwards nothing — the reusable uses GITHUB_TOKEN only`);
+  }
+  // `workflows: [flow-done]` matches by workflow NAME; both flow-done callers must carry it.
+  for (const dir of [WORKFLOWS, join(REPO, "project-template", ".github", "workflows")]) {
+    assert.equal(yamlMod.parse(readFileSync(join(dir, "flow-done.yml"), "utf8")).name, "flow-done");
+  }
+  // The reusable is trigger-agnostic, declares no secrets, never reads FLOW_PAT, and is not FLOW_AI-gated.
+  const reusable = wfParse("_flow-unblock.yml");
+  assert.deepEqual(Object.keys(reusable.on), ["workflow_call"]);
+  assert.equal(reusable.on.workflow_call.secrets, undefined);
+  assert.equal(reusable.on.workflow_call.inputs.queue_runner_workflow.default, "flow-queue-runner.yml");
+  assert.doesNotMatch(wfSrc("_flow-unblock.yml").replace(/^\s*#.*$/gm, ""), /FLOW_PAT|FLOW_AI/);
 });

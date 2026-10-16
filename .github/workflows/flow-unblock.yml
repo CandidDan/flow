@@ -1,0 +1,39 @@
+name: flow-unblock
+
+# Canonical's own caller of the blocked-task release sweep (flow-0041). Referenced from `main`
+# rather than a tag — see flow-gates.yml in this directory for why canonical is the one repo where
+# that is the safer pin.
+#
+# Releases every `blocked` task whose `blocked_by` entries have ALL resolved, then starts the next
+# worker if there is ready work and no runner active. No model in the loop: it costs seconds.
+#
+# Three triggers, one job — the reusable is trigger-agnostic:
+#   · workflow_run on flow-done completing, so a dependent is released about a minute after its
+#     dependency merges;
+#   · hourly, the self-correcting backstop: it catches a block written after the dependency landed
+#     and any flow-done run that was missed;
+#   · workflow_dispatch, on demand.
+#
+# NOT gated on FLOW_AI (see the reusable's header). `actions: write` is for dispatching the queue
+# runner and listing its runs; a permissions block is exhaustive, so `contents: write` for the
+# release commit is listed too, and nothing else is granted. No secrets: the reusable uses
+# GITHUB_TOKEN only.
+
+on:
+  workflow_run:
+    workflows: [flow-done]
+    types: [completed]
+  schedule:
+    - cron: "17 * * * *"       # hourly; off the top of the hour, where scheduled runs queue
+  workflow_dispatch:
+
+concurrency:
+  group: flow-unblock
+  cancel-in-progress: false
+
+jobs:
+  flow-unblock:
+    permissions:
+      contents: write          # the release commit to main
+      actions: write           # dispatch the queue runner, list its runs
+    uses: CandidDan/flow/.github/workflows/_flow-unblock.yml@main
