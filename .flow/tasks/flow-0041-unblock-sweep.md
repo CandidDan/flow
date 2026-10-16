@@ -1,12 +1,12 @@
 ---
 id: "flow-0041"
 title: "Release blocked tasks whose dependency has landed and start the next worker, with no model in the loop"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "queue-runner-38854909716"
 created: "2026-09-03"
-started: ""
+started: "2026-10-16T05:17:15Z"
 branch: ""
 pr: ""
 issue: ""
