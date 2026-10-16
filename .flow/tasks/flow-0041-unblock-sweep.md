@@ -1,8 +1,8 @@
 ---
 id: "flow-0041"
-title: "Sweep blocked tasks whose dependency has landed, so the only status with no way out stops needing a human"
-status: "blocked"
-priority: 3
+title: "Release blocked tasks whose dependency has landed and start the next worker, with no model in the loop"
+status: "ready"
+priority: 1
 project: "flow"
 owner: ""
 created: "2026-09-03"
@@ -10,9 +10,9 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Parked by queue cap (Dan, 2026-10-13: p1/p2 first, p3s wait). Not machine-checkable: flip to ready when the ready count drops below the cap."
+blocked_reason: ""
 blocked_by: []
-serves: ["G7", "G8"]
+serves: ["G7", "G8", "G9"]
 touches:
   - "project-template/.flow/bin/flow-unblock.mjs"
   - "project-template/.flow/bin/flow-unblock.test.mjs"
@@ -24,8 +24,14 @@ touches:
   - ".github/workflows/flow-unblock.yml"
   - "project-template/.github/workflows/flow-unblock.yml"
   - "docs/flow-reusable-workflows.md"
-labels: [infra, protocol]
+  - "project-template/.flow/PROTOCOL.md"
+  - "changes/flow-0041.md"
+labels: [infra, protocol, cost, urgent]
+model: "opus"
+effort: "high"
+model_reason: "Reusable CI workflow plus a shared writer (apply-board-edits) that flow-recover depends on; a fleet-wide blast radius per the task-writer rubric."
 notes:
+  - "2026-10-16 (orchestrator): URGENT, Dan 2026-10-16, so it bypasses queue_cap; unparked p3 -> p1. ORIGIN: Write ran an hourly Opus scheduled task ('Write queue auto-advance', 17 connectors attached) whose only job was 'when X merges, unblock Y and dispatch the queue runner'. Dan killed it for cost and asked for this in canonical with no model. Scope WIDENED by two pieces, see the new Scope bullets: (a) the sweep also fires on flow-done completion, not only on a schedule; (b) after releasing, it dispatches the queue runner. Prior art with tests: CandidDan/write branch wip/queue-chain, scripts/queue-chain.mjs (chain-file version; the decision logic and the unblock text edit carry over, the chain file does not: order is expressed through blocked_by)."
   - "2026-10-13 (orchestrator): PARKED: p3 held out of the ready queue so p1/p2 work runs first (Dan's decision)."
   - "2026-10-02 (orchestrator): unblocked on the human's say-so. Every blocked_by entry had landed (checked against main), and inflight listed it as UNBLOCK."
 ---
@@ -71,6 +77,25 @@ unblocking is manual — a workaround written into the store because the protoco
   the kind `flow-0040`'s own criteria reject.
 - **A reusable `_flow-unblock.yml`** plus canonical's thin caller and the template caller
   downstream repos get, documented in `docs/flow-reusable-workflows.md` alongside the others.
+- **When it runs — three triggers, one job.** `workflow_run` on `flow-done` completing (so a
+  dependent is released within about a minute of its dependency merging), a schedule (the
+  self-correcting backstop the notes below argue for; hourly is fine, it costs seconds and no
+  model), and `workflow_dispatch`. All three live in the callers; the reusable is trigger-agnostic.
+- **Then start the next worker.** After the release step, if the repo has at least one `ready`
+  task, no `flow-queue-runner` run is `queued`, `waiting` or `in_progress`, and
+  `vars.FLOW_QUEUE_RUNNER` is not `paused`, dispatch `flow-queue-runner.yml` with **no**
+  `task_id` so `pick-task` chooses (priority and `touches` overlap stay its rules, not this
+  workflow's). This also covers a merge that released nothing but left a `ready` task waiting for
+  tomorrow's scheduled tick. The dispatch needs `actions: write`; grant it in the callers only. A
+  repo whose caller lacks it (not yet synced) must get a `::warning::` and a green run, never a
+  red one. The runner's workflow file name is a reusable input defaulting to
+  `flow-queue-runner.yml`. Dispatching uses `GITHUB_TOKEN` (workflow_dispatch is the documented
+  exception to GITHUB_TOKEN not triggering workflows) — never `FLOW_PAT`.
+- **Protocol text.** `project-template/.flow/PROTOCOL.md` says `blocked` is "the only status with
+  no automatic way out". Update that paragraph to say `flow-unblock` releases a task once every
+  `blocked_by` entry resolves, and that a block with no machine-readable entry still needs a human.
+- **Changelog fragment** `changes/flow-0041.md`. Caller action: run `flow-sync` to get the new
+  `flow-unblock.yml` caller; nothing else.
 - **Not gated on `FLOW_AI`.** `flow-recover` is dormant without autonomous workers because
   there is nothing to strand. That reasoning does not carry over: a repo driven entirely by
   humans still has blocked tasks with dependencies that land, so gating this the same way would
@@ -104,6 +129,19 @@ flightdeck or mission-control rendering. No `flow-watchdog` change. The sweep ne
       `blocked_reason` is empty and its `blocked_by` is empty, and no other field changed.
 - [ ] Given the reusable workflow and both callers, when `npm run build` runs, then every
       workflow file parses.
+- [ ] Given both callers, then each triggers on `workflow_run` of `flow-done` (types
+      `[completed]`), on a `schedule`, and on `workflow_dispatch`, and grants exactly
+      `contents: write` and `actions: write`. (a test reading the caller YAML)
+- [ ] Given at least one `ready` task, no queue-runner run queued/waiting/in progress, and
+      `FLOW_QUEUE_RUNNER` unset, when the dispatch decision runs, then it dispatches with no
+      `task_id`; given any one of those three conditions false, then it does not. (pure decision
+      function, tested per condition)
+- [ ] Given the dispatch is refused with HTTP 403, when the step runs, then it emits a
+      `::warning::` naming the missing `actions: write` and the job still succeeds. (test on the
+      step's shell, or the decision helper's handling of the status)
+- [ ] Given the changelog fragment, then
+      `.flow/bin/changelog-fragments.test.mjs :: every claimed task that declares a changelog fragment has an entry stating its caller action`
+      passes.
 
 ## Definition of done (inherited — do not edit)
 
@@ -116,6 +154,10 @@ test named.
 
 No open decisions. Four were settled when this task was written:
 
+- **Superseded in part (2026-10-16):** the sweep now ALSO fires on `flow-done` completion via
+  `workflow_run`, in its own workflow. That keeps every reason below (self-correcting, catches
+  blocks written after the dependency landed, `flow-done` unchanged) and adds the speed of the
+  event. It is still a sweep: each run re-reads the whole store, so a missed run loses nothing.
 - **A sweep, not a hook in `flow-done`.** Releasing dependents at merge time, inside the
   workflow that already fires on merge, is tempting and cheaper. It was set aside because it
   only catches tasks blocked *before* the dependency merged: a task written blocked on something
