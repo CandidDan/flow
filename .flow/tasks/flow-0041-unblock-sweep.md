@@ -26,11 +26,16 @@ touches:
   - "docs/flow-reusable-workflows.md"
   - "project-template/.flow/PROTOCOL.md"
   - "changes/flow-0041.md"
+  - ".flow/bin/caller-pins.test.mjs"
+  - "docs/adr/0005-split-authoring-from-release.md"
 labels: [infra, protocol, cost, urgent]
 model: "opus"
 effort: "high"
 model_reason: "Reusable CI workflow plus a shared writer (apply-board-edits) that flow-recover depends on; a fleet-wide blast radius per the task-writer rubric."
+asks:
+  - "fyi: the worker widened `touches` by two files under this task's own flag-rather-than-guess clause (a count check a new caller trips): `.flow/bin/caller-pins.test.mjs` pins the literal 'eleven published callers', and ADR-0005's Amendment 1 states counts of files naming CandidDan/flow that adr-split-authoring.test.mjs pins to the tree. Both move by exactly the new caller files; no logic changes."
 notes:
+  - "2026-10-16T05:50Z (worker queue-runner-38854909716): branch flow/flow-0041-unblock-sweep pushed. DONE: apply-board-edits clear-only blocked_reason/blocked_by + tests; project-template/.flow/bin/flow-unblock.mjs classifier + dispatch decision + tests (19 pass); .flow/bin/flow-unblock.mjs adapter; _flow-unblock.yml + both callers (build green); changes/flow-0041.md. WIDENED touches (+caller-pins.test.mjs, +ADR-0005) because adding any caller breaks those two count pins (see asks). NOT DONE: adapters.test.mjs additions (adapter + caller-YAML + step-shell tests), PROTOCOL.md paragraph, docs/flow-reusable-workflows.md row, the two count bumps, coverage, PR. NEXT: finish those, run the gate, open the PR."
   - "2026-10-16 (orchestrator): URGENT, Dan 2026-10-16, so it bypasses queue_cap; unparked p3 -> p1. ORIGIN: Write ran an hourly Opus scheduled task ('Write queue auto-advance', 17 connectors attached) whose only job was 'when X merges, unblock Y and dispatch the queue runner'. Dan killed it for cost and asked for this in canonical with no model. Scope WIDENED by two pieces, see the new Scope bullets: (a) the sweep also fires on flow-done completion, not only on a schedule; (b) after releasing, it dispatches the queue runner. Prior art with tests: CandidDan/write branch wip/queue-chain, scripts/queue-chain.mjs (chain-file version; the decision logic and the unblock text edit carry over, the chain file does not: order is expressed through blocked_by)."
   - "2026-10-13 (orchestrator): PARKED: p3 held out of the ready queue so p1/p2 work runs first (Dan's decision)."
   - "2026-10-02 (orchestrator): unblocked on the human's say-so. Every blocked_by entry had landed (checked against main), and inflight listed it as UNBLOCK."
