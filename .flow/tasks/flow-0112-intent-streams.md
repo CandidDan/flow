@@ -30,6 +30,8 @@ notes:
   - "2026-10-01 (orchestrator): ORIGIN. Dan built a workstreams view by hand for TanPlan (stream C, 'TanPlan Link', rows C-1..C-n). Reading it against the intent template: each row is an intent (an observable outcome in his words, with its why, approvable alone, 'not sliced' = approved with no tasks yet). The stream above the rows is a level Flow does not have. Dan confirmed 2026-10-01: a `stream:` field on intents plus a stream file."
 model: "fable"
 model_reason: "escalated after run 38969216667 ended without a PR (was opus)"
+asks:
+  - "decision: this task failed on the top tier (fable) and cannot escalate further; split it or re-scope it? Recommend: split the task into smaller tasks (latest failure: run 38975767583 ended without a PR)"
 ---
 
 ## Context
