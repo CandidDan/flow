@@ -29,6 +29,7 @@ notes:
   - "2026-10-01 (orchestrator): ORIGIN. Dan built a workstreams view by hand for TanPlan (stream C, 'TanPlan Link', rows C-1..C-n). Reading it against the intent template: each row is an intent (an observable outcome in his words, with its why, approvable alone, 'not sliced' = approved with no tasks yet). The stream above the rows is a level Flow does not have. Dan confirmed 2026-10-01: a `stream:` field on intents plus a stream file."
 model: "fable"
   - "2026-10-20 (orchestrator, Dan approved): RESCOPED AND SPLIT, answering the ask below. The unsplit task failed twice on the top tier. Decisions since 2026-10-01 are in ADR-0009 (PR #212), which is now its own PR, so this task no longer writes it. The term is `workstream` everywhere (was `stream`). flow-doctor's checks moved to two follow-up tasks, so this task touches no code: templates, one protocol paragraph, one skill paragraph, and a docs test."
+  - "2026-10-20 (orchestrator): UNBLOCKED. ADR-0009 merged (PR #212); it is on main at docs/adr/0009-workstreams.md."
 model: "opus"
 model_reason: "reset after the 2026-10-20 split; both failures were on the unsplit task"
 asks: []
