@@ -89,6 +89,15 @@ issues (from anywhere, with whatever context exists at the time); the orchestrat
 into `ready` tasks, linking the origin in the task's `issue` field. You never pick up work
 directly from an issue — if it isn't a `ready` task in `.flow/tasks/`, it isn't yours to do.
 
+**Workstreams, where a repo has them (ADR-0009).** A workstream is a grouping of intents that
+serves VISION.md goals, carries a purpose, and has an end. It is one file in `.flow/workstreams/`,
+on the code plane like an intent, and **merging its PR is its approval**. Membership lives on the
+intent — its `workstream:` field names the workstream — never as a list on the workstream, so
+there is one source of truth. **Tasks never name a workstream**; they name the intent they derive
+from. Its `status` (`active | done | retired`) is set by hand, because finished or abandoned is a
+human call; **progress is derived** by `flow-state` and never stored. A repo with no
+`.flow/workstreams/` is valid, and an intent with an empty `workstream:` is never a finding.
+
 ## Status lifecycle
 
 A task's `status` field moves in one direction only:
