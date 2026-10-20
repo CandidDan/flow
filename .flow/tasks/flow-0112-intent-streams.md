@@ -29,8 +29,8 @@ notes:
   - "2026-10-20 (orchestrator, Dan approved): RESCOPED AND SPLIT, answering the ask below. The unsplit task failed twice on the top tier. Decisions since 2026-10-01 are in ADR-0009 (PR #212), which is now its own PR, so this task no longer writes it. The term is `workstream` everywhere (was `stream`). flow-doctor's checks moved to two follow-up tasks, so this task touches no code: templates, one protocol paragraph, one skill paragraph, and a docs test."
   - "2026-10-20 (orchestrator): UNBLOCKED. ADR-0009 merged (PR #212); it is on main at docs/adr/0009-workstreams.md."
   - "2026-10-20 (orchestrator): run 39359842080 failed in 15s on infrastructure, not the task: my rescope commit left a duplicate `notes:` and a stray `model: \"fable\"` (so the resolver picked fable), and claude-code-action refused a bot-dispatched run (allowed_bots). Frontmatter fixed; the escalation ask is cleared."
-model: "opus"
-model_reason: "reset after the 2026-10-20 split; both failures were on the unsplit task"
+model: "fable"
+model_reason: "escalated after run 39364933162 ended without a PR (was opus)"
 asks: []
 ---
 
