@@ -1,7 +1,7 @@
 ---
 id: "flow-0112"
 title: "Workstreams, part 1: the store, its template and the `workstream:` field on intents (ADR-0009 §4)"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits on ADR-0009 (PR #212) merging. The ADR fixes every shape this task builds; set ready once it is on main."
-blocked_by: ["https://github.com/CandidDan/flow/pull/212"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G11"]
 touches:
   - "project-template/.flow/workstreams/_TEMPLATE.md"
