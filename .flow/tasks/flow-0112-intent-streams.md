@@ -8,7 +8,7 @@ owner: "claude[bot]"
 created: "2026-10-01"
 started: "2026-10-20T23:43:26Z"
 branch: "flow/flow-0112-workstreams-store-template"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/214"
 issue: ""
 blocked_reason: ""
 blocked_by: []
