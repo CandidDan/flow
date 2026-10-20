@@ -93,7 +93,8 @@ wait on each other). It is written as a Dependencies bullet starting `workstream
 
 ### 5. `status` is stored, by hand. Progress is derived.
 
-This reverses the 2026-10-01 decision ("no `status` field, not even paused"). Reason: whether a
+This reverses the 2026-10-01 decision ("no `status` field, not even paused", recorded in
+flow-0112's "Decided" section before its 2026-10-20 rescope). Reason: whether a
 workstream is *finished* or *abandoned* is a human call that cannot be derived. "Every intent is
 done" is not the same as "this workstream is finished" (more intents may be coming), and retiring
 one is a decision, not an observation. Progress (how many intents done, in progress, blocked) is
@@ -110,7 +111,8 @@ used `stream`; that is superseded.
 
 Workstreams are optional. A repo with no `.flow/workstreams/` gets no finding at all. Readers
 (flow-state, inflight) show such a project as one implicit workstream named after the project, so
-a small project never needs a workstream file.
+a small project never needs a workstream file. In a repo that has workstreams, an intent with no
+`workstream:` is never a finding; readers show it under "Not in a workstream".
 
 ### 8. Where the stakeholder boundary sits
 
@@ -128,10 +130,11 @@ deliberate: the layer is optional, so a half-written workstream should not stop 
 |---|---|
 | No `.flow/workstreams/` | None |
 | Malformed frontmatter, or missing `id` / `title` / `created` | WARNING naming file and field |
+| `id` differs from the filename | WARNING (unlike intents, where ADR-0007 left it unchecked) |
 | Two workstreams with one id | PROBLEM, as for duplicate intent ids |
 | Intent's `workstream:` names an unknown id | WARNING naming both |
 | `serves: []` | WARNING: "not tied to a goal" |
-| `serves` lists 3 or more goals | WARNING: probably two workstreams |
+| `serves` lists 3 or more goals (1 or 2 pass silently) | WARNING: probably two workstreams |
 | `status` outside `active / done / retired` | WARNING |
 | Dependency names an unknown workstream id | WARNING |
 
