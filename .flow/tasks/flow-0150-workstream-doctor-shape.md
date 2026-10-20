@@ -16,7 +16,7 @@ serves: ["G11"]
 touches:
   - "project-template/.flow/bin/flow-doctor.mjs"
   - "project-template/.flow/bin/flow-doctor.test.mjs"
-  - "changes/<id>.md"
+  - "changes/flow-0150.md"
 labels: [intent-layer, workstreams, flow-doctor]
 notes:
   - "2026-10-20 (orchestrator, Dan approved): split from flow-0112, which failed twice unsplit. This is the mechanical half of ADR-0009 §9: facts, not judgement."
@@ -61,7 +61,7 @@ change to templates or prose (flow-0112); reporting (flow-0113).
 - [ ] Given an intent with `workstream: ""`, when flow-doctor runs, then no workstream finding
       is reported for it.
 - [ ] Given only `.flow/workstreams/_TEMPLATE.md`, when flow-doctor runs, then it reports nothing.
-- [ ] `changes/<id>.md` exists and states caller action: none.
+- [ ] `changes/flow-0150.md` exists and states caller action: none.
 
 ## Definition of done (inherited — do not edit)
 
