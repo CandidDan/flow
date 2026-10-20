@@ -306,8 +306,10 @@ jobs:
           # bot-initiated run unless the bot is listed here. Without it every auto-unblocked task
           # failed in under a second and the escalate step then raised its model for nothing.
           # Exactly ONE bot, unlike _flow-review.yml's "*": the reviewers only read and comment,
-          # while this worker runs bypassPermissions and pushes with FLOW_PAT. Only Flow's own
-          # dispatcher may start it; any other installed app that can dispatch a workflow may not.
+          # while this worker runs bypassPermissions and pushes with FLOW_PAT. Precisely: any
+          # workflow in THIS repo that dispatches with GITHUB_TOKEN runs as github-actions[bot], so
+          # granting `actions: write` to another workflow extends who can start the worker. Third-
+          # party apps and other bots still cannot.
           allowed_bots: "github-actions[bot]"
           # anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}   # pay-per-use alternative
           # The model and effort are the TASK's (flow-0083), resolved by the step above from the
