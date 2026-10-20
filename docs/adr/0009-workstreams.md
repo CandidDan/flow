@@ -117,7 +117,12 @@ a small project never needs a workstream file.
 Vision, goals, workstreams and intents are readable by non-technical stakeholders (inflight
 `client-reads-the-plan`). Tasks are not shown to them.
 
-### 9. Checks, warn-only (ADR-0007's teeth budget)
+### 9. Checks: warnings, plus one fact-check (ADR-0007's teeth budget)
+
+Every check is a WARNING except duplicate ids, which is a PROBLEM exactly as a duplicate intent id
+is under ADR-0007: it is a fact, and it cannot fail a repo that was passing, because no repo has
+workstreams yet. Unlike intents, malformed frontmatter and missing fields only warn here. That is
+deliberate: the layer is optional, so a half-written workstream should not stop a repo's gate.
 
 | Condition | Finding |
 |---|---|
@@ -154,7 +159,7 @@ Vision, goals, workstreams and intents are readable by non-technical stakeholder
 
 - TanPlan's hand-built workstreams view has a home, and inflight can render it from files.
 - Adding a direction the vision did not foresee costs one PR, and leaves a dated record of why.
-- Adopting repos stay green: every new check is a warning, and the layer is optional.
+- Adopting repos stay green: no check can fail a repo that was passing, and the layer is optional.
 - flow-0112 ("streams") is rescoped to this ADR and split in three: the store and templates
   (flow-0112), flow-doctor's shape checks, and flow-doctor's goal/status/dependency warnings. The
   unsplit task failed twice on the top model tier; its own ask recommended splitting.
@@ -169,4 +174,4 @@ Vision, goals, workstreams and intents are readable by non-technical stakeholder
 - **Most workstreams hold one intent.** Fall back to a tag on intents.
 - **Workstream files start being worked from directly.** The one-queue invariant (ADR-0001) is
   being lost.
-- **A second person joins.** ADR-0004's single-operator caveat applies unchanged (NG4).
+- **A second person joins.** ADR-0004's void condition for a second operator applies unchanged.
