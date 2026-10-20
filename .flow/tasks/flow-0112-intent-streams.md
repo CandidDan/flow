@@ -32,7 +32,8 @@ model: "fable"
   - "2026-10-20 (orchestrator): UNBLOCKED. ADR-0009 merged (PR #212); it is on main at docs/adr/0009-workstreams.md."
 model: "opus"
 model_reason: "reset after the 2026-10-20 split; both failures were on the unsplit task"
-asks: []
+asks:
+  - "decision: this task failed on the top tier (fable) and cannot escalate further; split it or re-scope it? Recommend: split the task into smaller tasks (latest failure: run 39359842080 ended without a PR)"
 ---
 
 ## Context
