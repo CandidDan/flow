@@ -24,16 +24,14 @@ touches:
   - "changes/flow-0112.md"
 labels: [intent-layer, workstreams]
 notes:
-notes:
   - "2026-10-01 (orchestrator): SEQUENCING, checked not asserted. touches overlaps flow-0074 and flow-0108 (project-template/.flow/bin/flow-doctor.mjs), flow-0072, flow-0074, flow-0090 and flow-0108 (project-template/.flow/PROTOCOL.md) and flow-0016 (project-template/README.md), per flow-doctor 2026-10-01. flow-doctor keeps this unclaimable while either is in_progress. No logical dependency on either: build against flow-doctor as it is on main when claimed. `.flow/bin/streams-docs.test.mjs` is canonical-only on purpose — it reads canonical's own ADR and its copy of the intent template, which an adopting repo does not have (the 2.1.1 lesson, adopter-layout.test.mjs)."
   - "2026-10-01 (orchestrator): ORIGIN. Dan built a workstreams view by hand for TanPlan (stream C, 'TanPlan Link', rows C-1..C-n). Reading it against the intent template: each row is an intent (an observable outcome in his words, with its why, approvable alone, 'not sliced' = approved with no tasks yet). The stream above the rows is a level Flow does not have. Dan confirmed 2026-10-01: a `stream:` field on intents plus a stream file."
-model: "fable"
   - "2026-10-20 (orchestrator, Dan approved): RESCOPED AND SPLIT, answering the ask below. The unsplit task failed twice on the top tier. Decisions since 2026-10-01 are in ADR-0009 (PR #212), which is now its own PR, so this task no longer writes it. The term is `workstream` everywhere (was `stream`). flow-doctor's checks moved to two follow-up tasks, so this task touches no code: templates, one protocol paragraph, one skill paragraph, and a docs test."
   - "2026-10-20 (orchestrator): UNBLOCKED. ADR-0009 merged (PR #212); it is on main at docs/adr/0009-workstreams.md."
+  - "2026-10-20 (orchestrator): run 39359842080 failed in 15s on infrastructure, not the task: my rescope commit left a duplicate `notes:` and a stray `model: \"fable\"` (so the resolver picked fable), and claude-code-action refused a bot-dispatched run (allowed_bots). Frontmatter fixed; the escalation ask is cleared."
 model: "opus"
 model_reason: "reset after the 2026-10-20 split; both failures were on the unsplit task"
-asks:
-  - "decision: this task failed on the top tier (fable) and cannot escalate further; split it or re-scope it? Recommend: split the task into smaller tasks (latest failure: run 39359842080 ended without a PR)"
+asks: []
 ---
 
 ## Context
