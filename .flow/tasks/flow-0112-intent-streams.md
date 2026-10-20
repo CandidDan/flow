@@ -1,13 +1,13 @@
 ---
 id: "flow-0112"
 title: "Workstreams, part 1: the store, its template and the `workstream:` field on intents (ADR-0009 §4)"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude[bot]"
 created: "2026-10-01"
-started: ""
-branch: ""
+started: "2026-10-20T23:43:26Z"
+branch: "flow/flow-0112-workstreams-store-template"
 pr: ""
 issue: ""
 blocked_reason: ""
