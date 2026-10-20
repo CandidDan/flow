@@ -1,7 +1,7 @@
 ---
 id: "flow-0152"
 title: "The queue runner accepts a run dispatched by flow-unblock, so an auto-unblocked task does not fail in 15 seconds"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude-session_015SJbzZrb7RuJ87bd7n3mC2"
