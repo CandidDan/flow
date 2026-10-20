@@ -1,12 +1,12 @@
 ---
 id: "flow-0152"
 title: "The queue runner accepts a run dispatched by flow-unblock, so an auto-unblocked task does not fail in 15 seconds"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-session_015SJbzZrb7RuJ87bd7n3mC2"
 created: "2026-10-20"
-started: ""
+started: "2026-10-20T02:56:28Z"
 branch: ""
 pr: ""
 issue: ""
@@ -16,7 +16,7 @@ serves: ["maintenance"]
 touches:
   - ".github/workflows/_flow-queue-runner.yml"
   - ".flow/bin/queue-runner-bot-dispatch.test.mjs"
-  - "changes/<id>.md"
+  - "changes/flow-0152.md"
 labels: [queue-runner, bug]
 notes:
   - "2026-10-20 (orchestrator, Dan approved the fix shape): FOUND on runs 39359842080 (flow-0112) and 39359768889 (flow-0129). flow-unblock dispatches the runner with GITHUB_TOKEN (_flow-unblock.yml:169), so the run's actor is github-actions[bot], and claude-code-action refuses it: 'Workflow initiated by non-human actor: github-actions (type: Bot). Add bot to allowed_bots list'. The worker step failed in under a second, the verify step saw no PR, and the escalate step bumped each task's model as if the task had been too hard."
@@ -56,7 +56,7 @@ decision.
 - [ ] Given every step in `_flow-queue-runner.yml`, when parsed, then no step sets
       `allowed_bots: "*"`.
 - [ ] Given `_flow-review.yml`, when parsed, then its `allowed_bots` values are unchanged (`*`).
-- [ ] `changes/<id>.md` exists and states caller action: none (callers reference the reusable
+- [ ] `changes/flow-0152.md` exists and states caller action: none (callers reference the reusable
       workflow; the fix arrives with the next pinned release).
 
 ## Definition of done (inherited — do not edit)
