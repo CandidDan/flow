@@ -1,14 +1,14 @@
 ---
 id: "flow-0152"
 title: "The queue runner accepts a run dispatched by flow-unblock, so an auto-unblocked task does not fail in 15 seconds"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-session_015SJbzZrb7RuJ87bd7n3mC2"
 created: "2026-10-20"
 started: "2026-10-20T02:56:28Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0152-queue-runner-allows-unblock-dispatch"
+pr: "https://github.com/CandidDan/flow/pull/213"
 issue: ""
 blocked_reason: ""
 blocked_by: []
