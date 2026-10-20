@@ -32,7 +32,7 @@ notes:
 model: "fable"
 model_reason: "escalated after run 39364933162 ended without a PR (was opus)"
 asks:
-  - "decision: this task failed on the top tier (fable) and cannot escalate further; split it or re-scope it? Recommend: split the task into smaller tasks (latest failure: run 39466316109 ended without a PR)"
+  - "decision: this task failed on the top tier (fable) and cannot escalate further; split it or re-scope it? Recommend: split the task into smaller tasks (latest failure: run 39475863060 ended without a PR)"
 ---
 
 ## Context
