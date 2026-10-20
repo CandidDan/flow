@@ -15,7 +15,6 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parse as parseYaml } from "yaml";
 import { changelogEntry } from "./changelog-entry.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -29,11 +28,21 @@ const PROTOCOL = read(TEMPLATE, ".flow", "PROTOCOL.md");
 const README = read(TEMPLATE, "README.md");
 const SKILL = read(TEMPLATE, ".claude", "skills", "vision-writer", "SKILL.md");
 
-// Split a Markdown file into its YAML frontmatter (parsed) and its body.
+// Split a Markdown file into its frontmatter and its body. The frontmatter is read with a
+// deliberately small parser — top-level `key: value  # comment` lines, scalars and `[]` only —
+// rather than the `yaml` package: the release-assemble check re-runs this file in a scratch copy
+// of the tracked tree, where no node_modules exists. Every template this reads is that simple.
 function frontmatter(text) {
   const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text);
   assert.ok(m, "file has no frontmatter block");
-  return { data: parseYaml(m[1]), raw: m[1], body: m[2] };
+  const data = {};
+  for (const line of m[1].split("\n")) {
+    const f = /^([a-z_]+):\s*(.*?)\s*(?:#.*)?$/.exec(line);
+    if (!f) continue;
+    const v = f[2];
+    data[f[1]] = v === "[]" ? [] : v.replace(/^"(.*)"$/, "$1");
+  }
+  return { data, raw: m[1], body: m[2] };
 }
 // Collapse line wrapping so a phrase can be matched however the paragraph is filled — including
 // the `#` of a continued frontmatter comment and the `>` of a continued blockquote line.
@@ -127,8 +136,11 @@ test("criterion 3: each intent template declares a documented `workstream` field
 });
 
 // ── criterion 4: PROTOCOL.md ──
-test("criterion 4: PROTOCOL.md's store section carries the workstreams paragraph", () => {
-  const store = flat(section(PROTOCOL, "The store"));
+// The paragraph sits in the protocol's intro, beside the intents paragraph, not in a `## ` section:
+// protocol-portability.test.mjs pins every section's digest, and the intro is where the layer
+// above it (intents) is already introduced.
+test("criterion 4: PROTOCOL.md's intro carries the workstreams paragraph", () => {
+  const store = flat(PROTOCOL.slice(0, PROTOCOL.indexOf("\n## ")));
   assert.match(store, /\*\*Workstreams, where a repo has them \(ADR-0009\)\.\*\*/);
   assert.match(store, /\*\*merging its PR is its approval\*\*/);
   assert.match(store, /\*\*Tasks never name a workstream\*\*/);
