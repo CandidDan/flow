@@ -31,7 +31,8 @@ notes:
   - "2026-10-20 (orchestrator): run 39359842080 failed in 15s on infrastructure, not the task: my rescope commit left a duplicate `notes:` and a stray `model: \"fable\"` (so the resolver picked fable), and claude-code-action refused a bot-dispatched run (allowed_bots). Frontmatter fixed; the escalation ask is cleared."
 model: "fable"
 model_reason: "escalated after run 39364933162 ended without a PR (was opus)"
-asks: []
+asks:
+  - "decision: this task failed on the top tier (fable) and cannot escalate further; split it or re-scope it? Recommend: split the task into smaller tasks (latest failure: run 39370072890 ended without a PR)"
 ---
 
 ## Context
