@@ -1,14 +1,14 @@
 ---
 id: "flow-0154"
 title: "A run that dies before the worker does any work does not raise the task's model tier"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude[bot]"
 created: "2026-10-21"
 started: "2026-10-21T11:29:53Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0154-infra-failure-no-escalate"
+pr: "https://github.com/CandidDan/flow/pull/220"
 issue: ""
 blocked_reason: ""
 blocked_by: []
