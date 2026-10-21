@@ -140,6 +140,13 @@ merge in between: merge it anyway — its callers *are* `@v3`, which is what ste
 done — then run the sync a second time to pick up the skills. Repinning first is cheaper, because
 nothing goes red.
 
+**Edited a canonical skill? Move the edits to `LOCAL.md` first** (flow-0129). The sync replaces each
+canonical `SKILL.md` byte for byte, so text a repo added to one — progress's R1–R5 section in
+`task-writer` — is gone after the sync. Put it in `.claude/skills/<name>/LOCAL.md` instead: the sync
+never touches that file, and every canonical skill ends by telling the agent to read it. A skill
+that differs from canonical and has no `LOCAL.md` is listed in the sync PR body under "Replaced:
+skills edited in place"; recover its text from `main` into `LOCAL.md` before merging.
+
 By hand there is no such trap: the `sed` below moves `flow-sync.yml` with the other callers, so the
 next sync already runs the v3 reusable. It is the ordinary `sed` plus that one grant:
 

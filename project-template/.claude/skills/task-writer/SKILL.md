@@ -183,3 +183,7 @@ writing the problem in the first place.
 
 After writing or changing tasks, regenerate the board with the **board-builder** skill so the
 human's view reflects the new state.
+
+## This repo's additions
+
+If `LOCAL.md` exists beside this file, read it; it extends and overrides this skill for this repo.
