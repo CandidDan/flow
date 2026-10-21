@@ -1,12 +1,12 @@
 ---
 id: "flow-0154"
 title: "A run that dies before the worker does any work does not raise the task's model tier"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude[bot]"
 created: "2026-10-21"
-started: ""
+started: "2026-10-21T11:29:53Z"
 branch: ""
 pr: ""
 issue: ""
