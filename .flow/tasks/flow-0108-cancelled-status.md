@@ -2,14 +2,14 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0108"
 title: "Add a terminal `cancelled` status so dead work stops squatting in `blocked`"
-status: "blocked"
+status: "in_progress"
 priority: 2
 project: "flow"
 owner: "claude-worker"
 created: "2026-09-30"
 started: "2026-10-21T10:30:50Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0108-cancelled-status"
+pr: "https://github.com/CandidDan/flow/pull/219"
 issue: "https://github.com/CandidDan/flow/issues/73"
 blocked_reason: "Implementation done and pushed (branch flow/flow-0108-cancelled-status) but the gate cannot go green inside touches: three existing tests outside touches pin files this task must change: .flow/bin/workstreams-docs.test.mjs (flow-doctor.mjs identical to main), .flow/bin/protocol-portability.test.mjs (PROTOCOL.md section digests; needs INTENTIONAL_DIVERGENCES entry), project-template/.flow/bin/serves-template.test.mjs (_TEMPLATE.md key order). Not machine-checkable."
 blocked_by: []
