@@ -8,7 +8,7 @@ owner: "claude[bot]"
 created: "2026-10-20"
 started: "2026-10-21T09:29:54Z"
 branch: "flow/flow-0150-workstream-doctor-checks"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/218"
 issue: ""
 blocked_reason: ""
 blocked_by: []
