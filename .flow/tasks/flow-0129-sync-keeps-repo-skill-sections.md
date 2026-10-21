@@ -1,7 +1,7 @@
 ---
 id: "flow-0129"
 title: "flow-sync stops erasing a repo's own sections from canonical skills"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude[bot]"
