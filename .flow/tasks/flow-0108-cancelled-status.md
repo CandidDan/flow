@@ -2,12 +2,12 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0108"
 title: "Add a terminal `cancelled` status so dead work stops squatting in `blocked`"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker"
 created: "2026-09-30"
-started: ""
+started: "2026-10-21T10:30:50Z"
 branch: ""
 pr: ""
 issue: "https://github.com/CandidDan/flow/issues/73"
