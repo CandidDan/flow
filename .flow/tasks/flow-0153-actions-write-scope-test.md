@@ -1,12 +1,12 @@
 ---
 id: "flow-0153"
 title: "A test pins which reusable workflows may grant `actions: write`, so widening who can start the worker is a reviewed change"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "claude"
 created: "2026-10-21"
-started: ""
+started: "2026-10-21T01:38:38Z"
 branch: ""
 pr: ""
 issue: ""
