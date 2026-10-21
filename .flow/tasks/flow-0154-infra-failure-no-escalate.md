@@ -22,9 +22,11 @@ labels: [queue-runner, bug]
 notes:
   - "2026-10-21 (orchestrator): ORIGIN. On 2026-10-20 runs 39359842080 (flow-0112) and 39359768889 (flow-0129) failed in under a second on an infrastructure error (bot actor refused, fixed by flow-0152). The escalate step still read 'ended without a PR' as 'too hard for this model' and raised both tasks a tier, and flow-0112 got a 'split it' ask it did not deserve."
   - "2026-10-21 (Dan): DECIDED, taking the recommendation. The worker counts as having tried if it claimed the task OR took at least 3 turns (read from the action's execution file). Anything less is an infrastructure failure: leave `model` unchanged and add a `follow-up` ask naming the error."
+  - "2026-10-21 (worker): PR #220 opened on flow/flow-0154-infra-failure-no-escalate. Classifier is inline in the escalate step (touches excludes the template helper). Gate green except 2 failures that also fail on main (adapters pick-task: no ready task). Next: review/merge."
 model: "sonnet"
 model_reason: "a classification rule plus tests"
-asks: []
+asks:
+  - "follow-up: move the infrastructure-failure classifier from the inline escalate step into project-template/.flow/bin/queue-runner-verify.mjs (outside flow-0154 touches)"
 ---
 
 ## Context
