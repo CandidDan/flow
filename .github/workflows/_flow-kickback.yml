@@ -40,6 +40,11 @@ name: _flow-kickback (reusable)
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "runs-on label for every job. Callers pass vars.FLOW_RUNNER; see docs/flow-reusable-workflows.md before choosing a non-GitHub runner."
+        required: false
+        type: string
+        default: "ubuntu-latest"
       node_version:
         description: "Node used to run .flow/bin/flow-kickback.mjs (the helper is dependency-free)."
         required: false
@@ -108,7 +113,7 @@ jobs:
   # and the task status all come from there, so a PR cannot change the rules it is judged by.
   plan:
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     # Reads, and only reads. `actions: read` is the jobs API (`.../actions/runs/<id>/jobs`),
     # which is the only way to learn WHICH review job failed — the event payload carries the
     # run's conclusion and not its jobs. It is job-scoped, as _flow-queue-runner.yml scopes its
@@ -283,7 +288,7 @@ jobs:
   undraft:
     needs: plan
     if: ${{ needs.plan.outputs.action == 'dispatch' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     permissions:
       pull-requests: write    # `gh pr ready --undo`, and nothing else in this job
     steps:
@@ -313,7 +318,7 @@ jobs:
   fix:
     needs: [plan, undraft]
     if: ${{ needs.plan.outputs.action == 'dispatch' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     permissions:
       contents: read          # the checkout. NOT write: see the header's table.
       pull-requests: read     # `gh pr view --comments` — the verdicts the round is addressing
@@ -524,7 +529,7 @@ jobs:
   push:
     needs: [plan, fix]
     if: ${{ needs.plan.outputs.action == 'dispatch' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     permissions:
       contents: read          # the fresh checkout and the remote-head check. The push is FLOW_PAT's.
     outputs:
@@ -792,7 +797,7 @@ jobs:
   round-card:
     needs: [plan, push]
     if: ${{ always() && needs.plan.outputs.action == 'dispatch' && needs.push.outputs.pushed != 'true' && needs.push.outputs.handback_ok != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     permissions:
       contents: read          # the default-branch checkout
       pull-requests: read     # the verdicts, the diff and the commit list it is summarising
@@ -926,7 +931,7 @@ jobs:
   escalate-round:
     needs: [plan, push, round-card]
     if: ${{ always() && needs.plan.outputs.action == 'dispatch' && needs.push.outputs.pushed != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     permissions:
       contents: read          # the default-branch checkout, for the card renderer
       pull-requests: write    # `gh pr comment` — the card
@@ -998,7 +1003,7 @@ jobs:
   card:
     needs: plan
     if: ${{ needs.plan.outputs.action == 'escalate' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     permissions:
       contents: read          # the default-branch checkout
       pull-requests: read     # the verdicts, the diff and the commit list it is summarising
@@ -1121,7 +1126,7 @@ jobs:
   escalate:
     needs: [plan, card]
     if: ${{ always() && needs.plan.outputs.action == 'escalate' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     permissions:
       contents: read          # the default-branch checkout, for the card renderer
       pull-requests: write    # `gh pr comment` — the card

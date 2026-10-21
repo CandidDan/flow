@@ -498,3 +498,22 @@ All helpers ship with their proving tests (`node --test .flow/bin/*.test.mjs`).
 5. **Further drift found but not in the plan's Phase 0 list:** `pick-task.mjs` and the
    `touches-guard.mjs` multi-line `touches` fix (CAN-57) have also diverged between the canary repo and
    canonical. Left for a follow-up reconciliation to keep this change scoped to the plan.
+
+## Choosing the runner (`FLOW_RUNNER`, flow-0149)
+
+Every job in every `_flow-*.yml` runs on `${{ inputs.runner }}`, which defaults to
+`ubuntu-latest`. Each template caller passes `runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}`,
+so a repo switches runner without editing a file, and the choice survives a sync:
+
+```
+gh variable set FLOW_RUNNER -b <runner-label>
+```
+
+Unset the variable to return to `ubuntu-latest`. Canonical's own callers never pass `runner`.
+
+**Private repos only.** A non-GitHub or self-hosted runner on a public repo runs fork-PR code on
+someone else's machine. Do not set `FLOW_RUNNER` on a public repo.
+
+**Secrets.** A non-GitHub runner sees every secret its jobs hold — `FLOW_PAT` in the kickback push
+job and the queue runner, `CLAUDE_CODE_OAUTH_TOKEN` in the AI jobs. Choosing `FLOW_RUNNER` is
+choosing to trust that provider with them.

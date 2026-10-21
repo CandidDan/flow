@@ -17,6 +17,12 @@ name: _flow-status (reusable)
 
 on:
   workflow_call:
+    inputs:
+      runner:
+        description: "runs-on label for every job. Callers pass vars.FLOW_RUNNER; see docs/flow-reusable-workflows.md before choosing a non-GitHub runner."
+        required: false
+        type: string
+        default: "ubuntu-latest"
 
 permissions:
   contents: write
@@ -26,7 +32,7 @@ jobs:
     # No branch-name gate: a cloud session forced onto a non-flow/ branch (e.g. claude/…) must
     # still transition. The id is resolved from the branch OR the PR title (CAN-52); the step
     # no-ops cleanly when neither carries one.
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
