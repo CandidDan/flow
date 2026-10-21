@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "PROJ-0000"            # <project slug>-<zero-padded number>
 title: ""                 # one line, imperative: "Persist discount code across PLP navigation"
-status: "ready"           # ready | in_progress | in_review | done | blocked
+status: "ready"           # ready | in_progress | in_review | done | blocked | cancelled
 priority: 3               # 1 = drop everything … 5 = whenever
 project: ""               # project slug, lets the flightdeck aggregate across repos
 owner: ""                 # session id once claimed; empty while ready
@@ -14,6 +14,7 @@ branch: ""                # flow/<id>-<slug>, recorded by flow-status when the P
 pr: ""                    # PR url, recorded by flow-status when the PR opens
 issue: ""                 # origin GitHub issue url, if this task was triaged from the inbox
 blocked_reason: ""        # required iff status is blocked
+cancelled_reason: ""      # required iff status is cancelled — why the work will never ship
 blocked_by: []            # the machine-readable half of `blocked_reason`, never a replacement
                           # for it — a person still needs the sentence. Each entry is either a
                           # task id in this repo ("PROJ-0007") or a PR url, so something other

@@ -119,7 +119,7 @@ started: "${f.started ?? ""}"
 branch: "${f.branch ?? ""}"
 pr: "${f.pr ?? ""}"
 blocked_reason: "${f.blocked_reason ?? ""}"
-${f.created === undefined ? "" : `created: "${f.created}"\n`}${f.intent === undefined ? "" : `intent: "${f.intent}"\n`}${f.blocked_by === undefined ? "" : `blocked_by: ${f.blocked_by}\n`}${f.asks === undefined ? "" : `asks:\n${f.asks.map((a) => `  - ${JSON.stringify(a)}`).join("\n")}\n`}serves: ${f.serves ?? '["G1"]'}
+${f.cancelled_reason === undefined ? "" : `cancelled_reason: "${f.cancelled_reason}"\n`}${f.created === undefined ? "" : `created: "${f.created}"\n`}${f.intent === undefined ? "" : `intent: "${f.intent}"\n`}${f.blocked_by === undefined ? "" : `blocked_by: ${f.blocked_by}\n`}${f.asks === undefined ? "" : `asks:\n${f.asks.map((a) => `  - ${JSON.stringify(a)}`).join("\n")}\n`}serves: ${f.serves ?? '["G1"]'}
 touches: ${f.touches ?? '["src/**"]'}
 ---
 ${f.body ?? READY_BODY}`;
@@ -834,6 +834,28 @@ test("a DONE task serving a retired goal is silent — the warning has no remedy
   assert.deepEqual(r.problems, []);
   assert.ok(!r.warnings.some((w) => w.includes("P-0001") && w.includes("Retired")),
     "a done task serving a retired goal should not warn");
+  cleanup(d);
+});
+
+test("flow-0108: cancelled with a cancelled_reason is accepted", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { status: "cancelled", cancelled_reason: "superseded by P-0002" }) });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  cleanup(d);
+});
+
+test("flow-0108: cancelled with an empty cancelled_reason is a PROBLEM naming the reason", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { status: "cancelled" }) });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(r.problems.some((p) => p.includes("P-0001") && p.includes("cancelled_reason")));
+  cleanup(d);
+});
+
+test("flow-0108: a cancelled task with an unresolvable serves id does not warn", () => {
+  const d = fixture({ "0001-a.md": task("P-0001", { status: "cancelled", cancelled_reason: "moot", serves: '["G404"]' }) });
+  const r = runDoctor({ flowDir: d });
+  assert.deepEqual(r.problems, []);
+  assert.ok(!r.warnings.some((w) => w.includes("P-0001")), "no warning for a cancelled task");
   cleanup(d);
 });
 
