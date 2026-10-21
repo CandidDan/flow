@@ -1,13 +1,13 @@
 ---
 id: "flow-0129"
 title: "flow-sync stops erasing a repo's own sections from canonical skills"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude[bot]"
 created: "2026-10-03"
-started: ""
-branch: ""
+started: "2026-10-21T09:01:53Z"
+branch: "flow/flow-0129-skill-local-overlay"
 pr: ""
 issue: ""
 blocked_reason: ""
