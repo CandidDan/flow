@@ -20,6 +20,15 @@ genuinely done. Two paths deliberately add a touchpoint when reality demands it:
 decision that isn't yours to make). Those aren't failures of the model; they're the model
 refusing to guess. Everything else runs unattended.
 
+**Workstreams, where a repo has them (ADR-0009).** A workstream is a grouping of intents that
+serves VISION.md goals, carries a purpose, and has an end. It is one file in `.flow/workstreams/`,
+on the code plane like an intent, and **merging its PR is its approval**. Membership lives on the
+intent — its `workstream:` field names the workstream — never as a list on the workstream, so
+there is one source of truth. **Tasks never name a workstream**; they name the intent they derive
+from. Its `status` (`active | done | retired`) is set by hand, because finished or abandoned is a
+human call; **progress is derived** by `flow-state` and never stored. A repo with no
+`.flow/workstreams/` is valid, and an intent with an empty `workstream:` is never a finding.
+
 **Creating a task (orchestrator).** A Cowork/orchestrator session does **not** auto-discover
 this repo's local skills, so asking it to "create a task" will not trigger `task-writer` on its
 own. To write a new task, **read `.claude/skills/task-writer/SKILL.md` and follow it** — that is

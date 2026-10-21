@@ -28,6 +28,8 @@ CLAUDE.md                     A pointer, not the rules: a short host file that @
   tasks/                      The source of truth. One Markdown file per task: machine fields in
     _TEMPLATE.md              frontmatter (clean data, incl. `touches` for concurrency), spec in
     0001-*.md                 the body. This IS the handoff. 0001 is a worked example task.
+  workstreams/                Optional, beside .flow/intents/: one file per workstream, a grouping
+    _TEMPLATE.md              of intents that serves goals and has an end (ADR-0009).
   board.html                  Your glance + control surface. Drag to reprioritise/move, then
                               "Apply edits" writes .flow/board-edits.json (no clipboard).
   bin/
