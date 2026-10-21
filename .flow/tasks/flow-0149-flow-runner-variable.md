@@ -1,14 +1,14 @@
 ---
 id: "flow-0149"
 title: "Every Flow job runs on a runner the repo chooses with one variable (FLOW_RUNNER), defaulting to ubuntu-latest"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude"
 created: "2026-10-13"
 started: "2026-10-21T00:59:41Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0149-runner-variable"
+pr: "https://github.com/CandidDan/flow/pull/215"
 issue: ""
 blocked_reason: ""
 blocked_by: []
