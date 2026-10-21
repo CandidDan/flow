@@ -1,7 +1,7 @@
 ---
 id: "flow-0154"
 title: "A run that dies before the worker does any work does not raise the task's model tier"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,7 +10,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Needs Dan's decision on the rule (see asks). Not machine-checkable."
+blocked_reason: ""
 blocked_by: []
 serves: ["maintenance"]
 touches:
@@ -21,10 +21,10 @@ touches:
 labels: [queue-runner, bug]
 notes:
   - "2026-10-21 (orchestrator): ORIGIN. On 2026-10-20 runs 39359842080 (flow-0112) and 39359768889 (flow-0129) failed in under a second on an infrastructure error (bot actor refused, fixed by flow-0152). The escalate step still read 'ended without a PR' as 'too hard for this model' and raised both tasks a tier, and flow-0112 got a 'split it' ask it did not deserve."
+  - "2026-10-21 (Dan): DECIDED, taking the recommendation. The worker counts as having tried if it claimed the task OR took at least 3 turns (read from the action's execution file). Anything less is an infrastructure failure: leave `model` unchanged and add a `follow-up` ask naming the error."
 model: "sonnet"
 model_reason: "a classification rule plus tests"
-asks:
-  - "decision: what counts as the worker having tried? Recommend: escalate only when the worker step ran at least N turns (e.g. 3, read from the action's execution file) or claimed the task; anything shorter is an infrastructure failure: leave the model alone and post a follow-up ask naming the error instead."
+asks: []
 ---
 
 ## Context
@@ -36,7 +36,7 @@ and at the top tier it asks a human to split a task that never ran.
 
 ## Scope
 
-**Does:** after Dan decides the rule, apply it in the escalate step (classification logic in
+**Does:** apply the rule (decided 2026-10-21: tried = claimed the task, or at least 3 turns in the execution file) in the escalate step (classification logic in
 `queue-runner-verify.mjs`, with tests). An infrastructure failure leaves `model` unchanged and
 records a `follow-up` ask naming the error.
 
@@ -44,9 +44,9 @@ records a `follow-up` ask naming the error.
 
 ## Acceptance criteria
 
-- [ ] Given a run whose worker step failed with zero turns, when the escalate step runs, then the
+- [ ] Given a run whose worker step failed with fewer than 3 turns and no claim, when the escalate step runs, then the
       task's `model` is unchanged and a `follow-up` ask names the failure.
-- [ ] Given a run where the worker took at least the agreed number of turns and opened no PR, when
+- [ ] Given a run where the worker took at least 3 turns, or claimed the task, and opened no PR, when
       the escalate step runs, then the task moves up one tier, exactly as today.
 - [ ] Given a task already at the top tier and an infrastructure failure, when the step runs, then
       no "split it" decision ask is added.
