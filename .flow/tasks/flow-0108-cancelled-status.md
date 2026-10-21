@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0108"
 title: "Add a terminal `cancelled` status so dead work stops squatting in `blocked`"
-status: "in_progress"
+status: "blocked"
 priority: 2
 project: "flow"
 owner: "claude-worker"
@@ -11,7 +11,7 @@ started: "2026-10-21T10:30:50Z"
 branch: ""
 pr: ""
 issue: "https://github.com/CandidDan/flow/issues/73"
-blocked_reason: ""
+blocked_reason: "Implementation done and pushed (branch flow/flow-0108-cancelled-status) but the gate cannot go green inside touches: three existing tests outside touches pin files this task must change: .flow/bin/workstreams-docs.test.mjs (flow-doctor.mjs identical to main), .flow/bin/protocol-portability.test.mjs (PROTOCOL.md section digests; needs INTENTIONAL_DIVERGENCES entry), project-template/.flow/bin/serves-template.test.mjs (_TEMPLATE.md key order). Not machine-checkable."
 blocked_by: []
 serves: ["G7"]    # G7: a Flow repo reports its own state, completely enough to render without
                   # asking the owner. Superseded/obsoleted/deferred work sitting in `blocked`
@@ -31,7 +31,10 @@ touches:
   - "project-template/.flow/PROTOCOL.md"
   - "changes/flow-0108.md"
 labels: [flow-infra, protocol]
+asks:
+  - "decision: widen touches to add .flow/bin/workstreams-docs.test.mjs, .flow/bin/protocol-portability.test.mjs and project-template/.flow/bin/serves-template.test.mjs? Recommend: yes, then re-run on sonnet; the branch is complete and only those test pins need updating (delete the flow-0112 criterion-6 test, record the Status lifecycle/Hard rules digests as divergences, allow cancelled_reason in the template key order)"
 notes:
+  - "2026-10-21 (worker): All criteria implemented and tested on branch flow/flow-0108-cancelled-status (pushed, no PR yet). build/lint/coverage green; npm test has 4 failures, all pins outside touches (see asks). Next: after touches widens, rebase branch, fix those three tests, rerun gate, open PR. Also release-assemble.test.mjs fails only as a consequence of the serves-template failure."
   - "2026-10-13 (orchestrator): Raised p3 -> p2 by Dan 2026-10-13: seven blocked tasks (0003, 0022, 0023, 0034, 0046, 0053, 0067) are cancelled the moment this lands."
   - "2026-09-30 (orchestrator): Renumbered from flow-0104: the triage run allocated that id a minute after a local session had already taken it (duplicate id). Changelog fragment path updated to match; content otherwise unchanged."
 ---
