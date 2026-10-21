@@ -1,7 +1,7 @@
 ---
 id: "flow-0150"
 title: "Workstreams, part 2: flow-doctor checks a workstream's shape and that intents name real ones (ADR-0009 §9)"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits on flow-0112 (the template and field these checks read)."
-blocked_by: ["flow-0112"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G11"]
 touches:
   - "project-template/.flow/bin/flow-doctor.mjs"
