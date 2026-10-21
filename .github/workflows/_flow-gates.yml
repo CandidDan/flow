@@ -13,6 +13,11 @@ name: _flow-gates (reusable)
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "runs-on label for every job. Callers pass vars.FLOW_RUNNER; see docs/flow-reusable-workflows.md before choosing a non-GitHub runner."
+        required: false
+        type: string
+        default: "ubuntu-latest"
       setup_node_version:
         description: >
           If set, runs actions/setup-node with this version before the per-stack gate
@@ -46,7 +51,7 @@ on:
 jobs:
   gate:
     if: (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -285,7 +290,7 @@ jobs:
   # protection rule that required either must require `flow-gates / source-roots-plan` instead.
   source-roots-plan:
     if: (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       count: ${{ steps.plan.outputs.count }}
@@ -455,7 +460,7 @@ jobs:
     needs: source-roots-plan
     if: needs.source-roots-plan.outputs.count != '0' && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     name: source-root
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.source-roots-plan.outputs.matrix) }}

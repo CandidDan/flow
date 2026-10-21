@@ -83,6 +83,11 @@ name: _flow-review (reusable)
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "runs-on label for every job. Callers pass vars.FLOW_RUNNER; see docs/flow-reusable-workflows.md before choosing a non-GitHub runner."
+        required: false
+        type: string
+        default: "ubuntu-latest"
       node_version:
         description: "Node used to run .flow/bin/flow-review.mjs (the helper is dependency-free)."
         required: false
@@ -117,7 +122,7 @@ jobs:
     # and `security` keeps no job-level `if` of its own — one that vanished from the PR on a skip
     # is indistinguishable from a gate that broke.
     if: ${{ vars.FLOW_AI == 'true' && github.event.pull_request.draft != true && github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     outputs:
       model: ${{ steps.plan.outputs.model }}
       security_model: ${{ steps.plan.outputs.security_model }}
@@ -226,7 +231,7 @@ jobs:
   # criterion is still a FAIL.
   qa:
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
@@ -437,7 +442,7 @@ jobs:
   # ── code-review ────────────────────────────────────────────────────────────────────────
   code-review:
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
@@ -644,7 +649,7 @@ jobs:
   # indistinguishable from a gate that broke.
   security:
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - name: Security review applicability
         # `security_reason` names the changed files that did (or did not) match the trigger
@@ -905,7 +910,7 @@ jobs:
     if: ${{ always() && needs.plan.result == 'success' }}
     # The guide is advisory. Nothing it does may turn this PR red.
     continue-on-error: true
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }

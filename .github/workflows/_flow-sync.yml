@@ -52,6 +52,11 @@ name: _flow-sync (reusable)
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "runs-on label for every job. Callers pass vars.FLOW_RUNNER; see docs/flow-reusable-workflows.md before choosing a non-GitHub runner."
+        required: false
+        type: string
+        default: "ubuntu-latest"
       canonical_ref:
         description: "Canonical ref to adopt from (tag/branch). Match your callers' pin. Default v3."
         required: false
@@ -86,7 +91,7 @@ permissions:
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       # Fail HERE, naming the fix, rather than forty lines later at `git push` with GitHub's
       # opaque "refusing to allow a GitHub App to create or update workflow ... without

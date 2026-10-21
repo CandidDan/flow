@@ -32,3 +32,5 @@ jobs:
       contents: write          # the release commit to main
       actions: write           # dispatch the queue runner, list its runs
     uses: CandidDan/flow/.github/workflows/_flow-unblock.yml@v3
+    with:
+      runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}

@@ -399,12 +399,15 @@ test("AC2: triggers, permissions, the if: gate, the action version and the non-p
   const wf = yamlMod.parse(readFileSync(join(REPO, DEFAULT_WORKFLOW_DIR, "_flow-triage.yml"), "utf8"));
   const before = TRIAGE_STRUCTURE_BEFORE;
 
-  assert.deepEqual(wf.on ?? wf[true], before.on, "the workflow_call trigger must be byte-identical");
+  // flow-0149 added `inputs.runner` to every reusable; it is the one sanctioned addition.
+  const trigger = structuredClone(wf.on ?? wf[true]);
+  delete trigger.workflow_call.inputs.runner;
+  assert.deepEqual(trigger, before.on, "the workflow_call trigger must be byte-identical");
   assert.deepEqual(wf.permissions, before.permissions, "the permissions block must be byte-identical");
 
   const job = wf.jobs.triage;
   assert.equal(job.if, before.jobIf, "the FLOW_AI gate must be byte-identical");
-  assert.equal(job["runs-on"], before.runsOn);
+  assert.equal(job["runs-on"], "${{ inputs.runner }}"); // was before.runsOn until flow-0149
 
   const steps = job.steps;
   assert.equal(steps[0].uses, before.checkout, "the checkout action version must be byte-identical");
