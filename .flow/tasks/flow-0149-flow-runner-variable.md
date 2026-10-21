@@ -1,12 +1,12 @@
 ---
 id: "flow-0149"
 title: "Every Flow job runs on a runner the repo chooses with one variable (FLOW_RUNNER), defaulting to ubuntu-latest"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude"
 created: "2026-10-13"
-started: ""
+started: "2026-10-21T00:59:41Z"
 branch: ""
 pr: ""
 issue: ""
