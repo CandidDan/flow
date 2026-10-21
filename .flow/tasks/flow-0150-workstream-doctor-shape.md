@@ -1,13 +1,13 @@
 ---
 id: "flow-0150"
 title: "Workstreams, part 2: flow-doctor checks a workstream's shape and that intents name real ones (ADR-0009 §9)"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude[bot]"
 created: "2026-10-20"
-started: ""
-branch: ""
+started: "2026-10-21T09:29:54Z"
+branch: "flow/flow-0150-workstream-doctor-checks"
 pr: ""
 issue: ""
 blocked_reason: ""
