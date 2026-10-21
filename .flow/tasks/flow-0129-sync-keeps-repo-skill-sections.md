@@ -8,7 +8,7 @@ owner: "claude[bot]"
 created: "2026-10-03"
 started: "2026-10-21T09:01:53Z"
 branch: "flow/flow-0129-skill-local-overlay"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/217"
 issue: ""
 blocked_reason: ""
 blocked_by: []
