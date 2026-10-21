@@ -114,3 +114,7 @@ destroys that distinction for every future audit, not just this one.
 
 After `VISION.md` lands, run `node .flow/bin/flow-doctor.mjs`: it reports any `ready` task whose
 `serves` no longer resolves, and any goal heading it could not read.
+
+## This repo's additions
+
+If `LOCAL.md` exists beside this file, read it; it extends and overrides this skill for this repo.
