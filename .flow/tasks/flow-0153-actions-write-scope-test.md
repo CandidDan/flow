@@ -1,14 +1,14 @@
 ---
 id: "flow-0153"
 title: "A test pins which reusable workflows may grant `actions: write`, so widening who can start the worker is a reviewed change"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "flow"
 owner: "claude"
 created: "2026-10-21"
 started: "2026-10-21T01:38:38Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0153-actions-write-scope"
+pr: "https://github.com/CandidDan/flow/pull/216"
 issue: ""
 blocked_reason: ""
 blocked_by: []
