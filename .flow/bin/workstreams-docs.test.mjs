@@ -3,8 +3,7 @@
 // flow-0112 lays down the workstream layer's files and prose and changes no behaviour: the store's
 // template, the `workstream:` field on both intent templates, one protocol paragraph, one README
 // line, one vision-writer paragraph and a changelog fragment. Prose has no natural failure mode,
-// so these give it one, and the last test pins the one thing the task must NOT do: touch
-// flow-doctor.
+// so these give it one.
 //
 // Canonical-only by placement: it reads project-template/ and canonical's own copy of the intent
 // template, which an adopting repo does not have (the 2.1.1 lesson; see adopter-layout.test.mjs).
@@ -12,7 +11,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { changelogEntry } from "./changelog-entry.mjs";
@@ -173,18 +171,6 @@ test("criterion 5: vision-writer says a workstream no goal covers adds the goal 
   assert.match(amend, /ADR-0009 §3/);
 });
 
-// ── criterion 6: flow-doctor is untouched ──
-test("criterion 6: flow-doctor.mjs on this branch is identical to main's", () => {
-  const path = "project-template/.flow/bin/flow-doctor.mjs";
-  const git = (...args) => execFileSync("git", args, { cwd: REPO, encoding: "utf8" });
-  // On a PR checkout the base is origin/main; locally, whichever of the two resolves first.
-  const base = ["origin/main", "main"].find((ref) => {
-    try { git("rev-parse", "--verify", "--quiet", `${ref}^{commit}`); return true; } catch { return false; }
-  });
-  if (!base) return; // a shallow or detached checkout with no main at all: nothing to diff against
-  assert.equal(git("diff", "--stat", base, "--", path).trim(), "", `${path} differs from ${base}`);
-});
-
 // ── criterion 7: the changelog fragment ──
 test("criterion 7: the flow-0112 changelog entry exists and states caller action: none", () => {
   const f = flat(changelogEntry(REPO, "flow-0112"));
@@ -192,4 +178,13 @@ test("criterion 7: the flow-0112 changelog entry exists and states caller action
   assert.match(f, /\*\*Caller action: none\.\*\*/);
   assert.match(f, /`workstream:`/);
   assert.match(f, /\.flow\/workstreams\/_TEMPLATE\.md/);
+});
+
+// ── flow-0150 criterion 8: its changelog fragment (canonical-only, so it lives here, not in
+// flow-doctor.test.mjs, which ships to adopting repos that have no changes/ for this task) ──
+test("flow-0150 criterion 8: the flow-0150 changelog entry exists and states caller action: none", () => {
+  const f = flat(changelogEntry(REPO, "flow-0150"));
+  assert.ok(f.trim(), "changes/flow-0150.md must exist (or be assembled into CHANGELOG.md)");
+  assert.match(f, /\*\*Caller action: none\*\*/);
+  assert.match(f, /flow-doctor/);
 });
