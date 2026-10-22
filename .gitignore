@@ -30,3 +30,6 @@ flow-publish.sh
 # --- kept local, never published ---
 _private/
 flow-catchup.sh
+
+# Local GitHub token file (git-creds.sh). Never commit.
+/.git-credentials
