@@ -1156,3 +1156,21 @@ test("both flow-unblock callers: three triggers, exactly contents+actions write,
   assert.equal(reusable.on.workflow_call.inputs.queue_runner_workflow.default, "flow-queue-runner.yml");
   assert.doesNotMatch(wfSrc("_flow-unblock.yml").replace(/^\s*#.*$/gm, ""), /FLOW_PAT|FLOW_AI/);
 });
+
+// ── flow-0157: the task-model adapter re-exports the template's WHOLE surface ──
+// The queue runner's escalate step imports named exports from `<repo>/.flow/bin/task-model.mjs`,
+// which on canonical is the adapter. A name the adapter omits imports as `undefined` here and
+// nowhere else, so the list is derived from the template at run time, never written by hand.
+
+test("flow-0157: every named export of the template's task-model.mjs is re-exported by the adapter", async () => {
+  const template = await import(join(TEMPLATE_FLOW, "bin", "task-model.mjs"));
+  const adapter = await import(join(BIN, "task-model.mjs"));
+  const names = Object.keys(template);
+  assert.ok(names.includes("readAsks") && names.includes("writeAsks"),
+    "the template must still export the two names the escalate step imports, or this test is vacuous");
+  const missing = names.filter((n) => !(n in adapter));
+  assert.deepEqual(missing, [], `the adapter does not re-export: ${missing.join(", ")}`);
+  for (const n of names) {
+    assert.equal(adapter[n], template[n], `${n} must BE the template's export, not a reimplementation`);
+  }
+});
