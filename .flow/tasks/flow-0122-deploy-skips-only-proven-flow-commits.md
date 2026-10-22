@@ -1,14 +1,14 @@
 ---
 id: "flow-0122"
 title: "A deploy skips a Flow-only commit only when that is proven: one tested check, a protocol rule, wiring left to each adopter"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude"
 created: "2026-10-02"
 started: "2026-10-22T06:45:06Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0122-only-flow-changed"
+pr: "https://github.com/CandidDan/flow/pull/224"
 issue: ""
 blocked_reason: ""
 blocked_by: []
