@@ -599,14 +599,23 @@ jobs:
             verdict="$(WT="$wt" node "$RUNNER_TEMP/flow-classify.mjs")"
             echo "$verdict"
             if printf '%s\n' "$verdict" | grep -qx 'tried=false'; then
+              tried=false
               infra_error="$(printf '%s\n' "$verdict" | sed -n 's/^error=//p')"
               echo "$TASK_ID: the run never reached the worker ($infra_error) — model left unchanged, follow-up ask recorded." | tee -a "$GITHUB_STEP_SUMMARY"
               commit_msg="flow: $TASK_ID infrastructure failure, model unchanged ($event)"
             else
+              tried=true
               node "$wt/.flow/bin/task-model.mjs" escalate --task-id "$TASK_ID" --event "$event" | tee -a "$GITHUB_STEP_SUMMARY"
               commit_msg="flow: $TASK_ID escalate model ($event)"
             fi
             git -C "$wt" add .flow/tasks/
+            # flow-0157: the infrastructure-failure ask is de-duplicated by its exact text, so a
+            # repeat of the same failure stages nothing, and `git commit` would exit 1 under `-e`.
+            # Nothing to commit is nothing to push, so this never reaches the retry loop's sleep.
+            if [ "$tried" = "false" ] && git -C "$wt" diff --cached --quiet; then
+              echo "$TASK_ID: the follow-up ask for this failure is already recorded on main — nothing to commit."
+              exit 0
+            fi
             git -C "$wt" commit -q -m "$commit_msg"
             if git -C "$wt" push -q origin HEAD:main; then
               echo "$TASK_ID: escalation landed on main (attempt $attempt)."
