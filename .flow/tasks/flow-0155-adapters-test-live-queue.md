@@ -1,14 +1,14 @@
 ---
 id: "flow-0155"
 title: "The adapters test stops depending on canonical's live queue, so every PR's gate is not red whenever nothing is pickable"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-session_015SJbzZrb7RuJ87bd7n3mC2"
 created: "2026-10-22"
 started: "2026-10-22T03:19:55Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0155-adapters-test-live-queue"
+pr: "https://github.com/CandidDan/flow/pull/221"
 issue: ""
 blocked_reason: ""
 blocked_by: []
