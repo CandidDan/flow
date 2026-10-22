@@ -136,12 +136,13 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0041",
   }],
   ["Session hygiene — context is a budget", {
-    digest: "65ee3fa781bad844dccfcb45e43c343c7ced01058dbf6744ecd510f2c5aab5a0",
+    digest: "b6a0eebb93032a65950114f77279de5bbac095278b2dc44583ca959852f7a5a9",
     why: "the handoff rule specified `notes` and nothing else, so an item only a PERSON could " +
          "act on had one correct place to go and reached nobody from there. The section now " +
          "states the split — `notes` for the next session, `asks` for the human — with the " +
-         "three kinds and what each one is for. Nothing about the trip conditions changed.",
-    task: "flow-0119",
+         "three kinds and what each one is for. Nothing about the trip conditions changed. flow-0156 then added two rules to the " +
+         "`decision` kind: check the spec before asking, and no open `decision` at hand-off.",
+    task: "flow-0156",
   }],
   ["The loop you run", {
     digest: "7782a30da99d62d4b00abe99fac986c27df6781fd989daa87ac399af72e5a797",
