@@ -1,13 +1,13 @@
 ---
 id: "flow-0151"
 title: "Workstreams, part 3: flow-doctor flags a workstream with no goal, too many goals, an unknown status or a dangling dependency (ADR-0009 §9)"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude[bot]"
 created: "2026-10-20"
-started: ""
-branch: ""
+started: "2026-10-22T07:36:32Z"
+branch: "flow/flow-0151-workstream-goal-checks"
 pr: ""
 issue: ""
 blocked_reason: ""
