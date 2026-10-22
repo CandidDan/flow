@@ -32,19 +32,33 @@ const __isMain = (() => {
 })();
 // ---------------------------------------------------------------------------------------
 
-// The public surface, re-exported rather than reimplemented.
+// The public surface, re-exported rather than reimplemented — ALL of it (flow-0157). The queue
+// runner's escalate step imports `readAsks` / `writeAsks` from whichever `task-model.mjs` the repo
+// holds, and here that is this file; a name missing from this list imports as `undefined` on
+// canonical alone. adapters.test.mjs fails if this list ever lags the template's exports.
+// `resolve` is a re-export, not a binding, so it does not collide with node:path's `resolve`.
 export {
   TIERS,
   TIER_ORDER,
   EFFORTS,
+  DEFAULT_TIER,
+  DEFAULT_EFFORT,
+  DEFAULT_REASON,
   cliArgs,
   decideRunEscalation,
   escalate,
   findTaskFile,
+  readAsks,
+  readField,
   recordsEvent,
+  resolve,
   resolve as resolveModel,
   runCli,
+  scalar,
   summaryLine,
+  topTierAsk,
+  writeAsks,
+  writeField,
 } from "../../project-template/.flow/bin/task-model.mjs";
 
 // Canonical's repo root — two levels up from this `bin/` directory (`.flow/bin` -> `.flow` -> repo).
