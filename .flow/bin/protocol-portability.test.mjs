@@ -98,6 +98,12 @@ const INTENTIONAL_DIVERGENCES = new Map([
          "unconditional, it made task-writer refuse all product work in every adopter.",
     task: "flow-0139",
   }],
+  ["The store", {
+    digest: "c30a497d2fc3cdd7cc828fef501b0b921c04c6bd5d07198d809cc2b2bdd3b50c",
+    why: "a paragraph was added stating that a repo may skip deploys for task-state commits only " +
+         "through `.flow/bin/only-flow-changed.mjs`, and that any doubt builds (flow-0122).",
+    task: "flow-0122",
+  }],
   ["Response style — show, don't tell", {
     digest: "b260a80a382fbbc16d61f8e9646d36da489fca76966ba422d247888c08ceee59",
     why: "the section told workers they \"auto-load this file\", which stopped being true the " +

@@ -98,6 +98,12 @@ issues (from anywhere, with whatever context exists at the time); the orchestrat
 into `ready` tasks, linking the origin in the task's `issue` field. You never pick up work
 directly from an issue — if it isn't a `ready` task in `.flow/tasks/`, it isn't yours to do.
 
+**Task-state commits change nothing deployable.** A repo may skip deploys for them **only** through
+`.flow/bin/only-flow-changed.mjs` (or an equivalent that keeps its contract: exit 0 skips, exit 1
+builds, diff from the last deployed commit, never exit 0 on an error). Any doubt builds. Hand-written
+skip commands in a host dashboard are discouraged: they live outside git and drift. Wiring the hook
+is the adopting repo's, not Flow's; the recipe is in the helper's header.
+
 ## Status lifecycle
 
 A task's `status` field moves in one direction only:
