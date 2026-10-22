@@ -8,7 +8,7 @@ owner: "claude[bot]"
 created: "2026-10-20"
 started: "2026-10-22T07:36:32Z"
 branch: "flow/flow-0151-workstream-goal-checks"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/225"
 issue: ""
 blocked_reason: ""
 blocked_by: []
