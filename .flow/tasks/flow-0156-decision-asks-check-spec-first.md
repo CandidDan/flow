@@ -1,14 +1,14 @@
 ---
 id: "flow-0156"
 title: "A worker checks the task and its notes before asking a decision, and a done task carries no open decision"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude"
 created: "2026-10-22"
 started: "2026-10-22T10:13:10Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0156-decision-check"
+pr: "https://github.com/CandidDan/flow/pull/228"
 issue: ""
 blocked_reason: ""
 blocked_by: []
