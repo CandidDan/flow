@@ -6,6 +6,179 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 3.4.0 — 2026-10-22
+
+**MINOR: the queue looks after itself.** A `blocked` task with machine-checkable `blocked_by`
+entries is released by `flow-unblock` once they land, and the next worker starts (flow-0041). Each
+task names the model and effort that build it and moves up a tier when a run fails, but not when
+the run died before the worker started (flow-0083, flow-0154, flow-0157). Workstreams arrive in the
+store and in flow-doctor (flow-0112, flow-0150); every job can run on a runner the repo chooses
+(flow-0149); the gate's bookkeeping jobs merge into one (flow-0137).
+**Caller action:** re-run flow-sync to get the new `flow-unblock.yml` caller (flow-0041). If branch
+protection or a ruleset names `flow-gates / touches` or `flow-gates / flow-tooling`, replace both
+with `flow-gates / source-roots-plan` before syncing, or every PR waits on a check that never
+arrives (flow-0137).
+
+- **`blocked` has an automatic way out: `flow-unblock` releases a task once everything it waits on
+  has landed, and starts the next worker** (`.github/workflows/_flow-unblock.yml`,
+  `.flow/bin/flow-unblock.mjs`, `.flow/bin/apply-board-edits.mjs`, flow-0041). A `blocked` task
+  whose every `blocked_by` entry has resolved goes back to `ready`, with `blocked_reason` and
+  `blocked_by` cleared, as a commit to `main`. A task id resolves when that task is `done`; a PR url
+  resolves when the PR merged. A PR closed without merging does not count, and the run warns about
+  it. An empty `blocked_by`, or any entry the sweep cannot read, keeps the task blocked: only a
+  person lifts that block. After the release, if a task is `ready`, no `flow-queue-runner` run is
+  active and `FLOW_QUEUE_RUNNER` is not `paused`, it dispatches the queue runner with no `task_id`,
+  so `pick-task` chooses. It runs when `flow-done` completes, hourly, and on demand. It uses no
+  model and only `GITHUB_TOKEN`. It is not gated on `FLOW_AI`. `apply-board-edits.mjs` can now
+  clear `blocked_reason` and `blocked_by`, and nothing else is accepted for them. Edits that do not
+  name those fields behave exactly as before. **Caller action:** run `flow-sync` to get the new
+  `flow-unblock.yml` caller; nothing else.
+
+- **Each task names the model and effort that build it, and a task that fails moves up a model**
+  (`.flow/bin/task-model.mjs`, `_flow-queue-runner.yml`, `_flow-status.yml`, flow-0083).
+  **No caller action** — `flow-sync` delivers `task-model.mjs` with the rest of `.flow/bin/`.
+  Until it lands, the queue runner passes no `--model` and says so in the step summary.
+
+  Tasks carry optional `model` (`haiku` | `sonnet` | `opus` | `fable`), `effort` (`low` |
+  `medium` | `high` | `max`) and `model_reason` (required whenever either is set). The queue runner
+  resolves them through `task-model.mjs`'s `TIERS` table — the one place a tier maps to a full
+  model ID — and passes `--model <id> --effort <level>`; the step summary names tier, model ID,
+  effort and reason. An unknown value, or either field without a reason, fails the run naming the
+  field and the allowed values. A run that ends without a PR, and a PR closed unmerged, each move
+  the task up one tier with a commit on `main` (`haiku → sonnet → opus → fable`); at `fable` the
+  task gets a `decision` ask recommending a split. PROTOCOL and task-writer carry the rubric and
+  the worker's own `Recommend: re-run on <tier>` self-escalation.
+
+  **Heads-up for adopters: existing tasks with no `model` now build on Sonnet 5.5 / medium, not
+  Opus.** If you have risky tasks queued (money, auth, concurrency, CI and Flow infra), tag them
+  `model: "opus"` with a `model_reason` before the next run.
+
+- **Workstreams, part 1: the store template and the `workstream:` field on intents**
+  (`project-template/.flow/workstreams/_TEMPLATE.md`, `project-template/.flow/intents/_TEMPLATE.md`,
+  `project-template/.flow/PROTOCOL.md`, flow-0112). **Caller action: none.** The store and the
+  field are optional: a repo with no `.flow/workstreams/` is valid, and an intent whose
+  `workstream:` is empty is never a finding.
+
+  ADR-0009 settles the layer: a workstream is a grouping of intents that serves VISION.md goals,
+  carries a purpose, and has an end. This task lays down only the files and the prose — the
+  template (frontmatter `id`, `title`, `created`, `serves`, `status`, `owner`; sections Purpose,
+  Constraints, Dependencies, Open questions), the field on both intent templates, one protocol
+  paragraph, one README line and one vision-writer paragraph. No flow-doctor check changes; the
+  shape checks and the goal/status/dependency warnings are the next two tasks.
+
+- **A deploy skips a Flow-only commit only when that is proven** (`project-template/.flow/bin/only-flow-changed.mjs`, `project-template/.flow/PROTOCOL.md`, flow-0122). One tested check, exit 0 = skip and exit 1 = build, for Vercel's `ignoreCommand` and Netlify's `ignore`. It diffs from the last deployed commit, and any doubt (missing base, shallow clone, git error) builds. **No caller action** — wiring the hook is each adopter's choice after a sync.
+
+- **An intent's `approved_by` / `approved_at` are stamped from the merge that approved it**
+  (`project-template/.flow/bin/stamp-intents.mjs`, `.github/workflows/_flow-done.yml`, flow-0127).
+  **No caller action** — `flow-done` picks it up with the next sync of `.flow/bin/`; until then the
+  new step logs one line and skips.
+
+  ADR-0007 slice 4. On every merge into `main`, `flow-done` stamps each `.flow/intents/*.md` that
+  the merge made `approved` with `merged_by.login` and the full UTC `merged_at`, overwriting any
+  hand-typed value, and commits it to `main` as `flow: stamp intent approval (PR #<n> merged by
+  <login>)` with the same discard-and-redo push retry as the task transition. An intent already
+  approved before the merge, a `proposed` or `superseded` one, and `_TEMPLATE.md` are never
+  touched; only the two values change, with quoting and line endings kept. A bad merge value
+  fails the job rather than dropping the stamp.
+
+- **A repo's additions to a canonical skill now survive flow-sync** (`.github/workflows/_flow-sync.yml`,
+  `project-template/.claude/skills/*/SKILL.md`, flow-0129). **Caller action**: none — but a repo that
+  edited a canonical `SKILL.md` in place should move those edits to `.claude/skills/<name>/LOCAL.md`
+  before its next sync.
+
+  The sync still owns `SKILL.md` and replaces it byte for byte; `LOCAL.md` beside it is never
+  touched, and every canonical skill now ends by telling the agent to read it. A skill that differs
+  from canonical and has no `LOCAL.md` is named in the sync PR body under "Replaced: skills edited
+  in place".
+
+- **Every frontmatter and config reader keeps a quoted `#`** (`pick-task.mjs`, `flow-recover.mjs`,
+  `source-roots.mjs`, `check-claude-md.mjs`, `flow-doctor.mjs`, flow-0131). **No caller action.**
+
+  The readers cut every value at its first `#`, so `blocked_reason: "waits for PR #172"` was read
+  as `waits for PR`. They now treat `#` as a comment only outside quotes and after whitespace, the
+  way YAML does — flow-0119's `yamlScalar` / `stripYamlComment`. An unquoted trailing `# comment`
+  is still dropped. `source-roots.mjs` carries its own copy, because flow-doctor imports it
+  optionally and it must stay a leaf; a test runs both copies over one table so they cannot drift.
+
+- **The PR gate's three bookkeeping jobs are one job, so each gate run bills ~2 fewer minutes**
+  (`.github/workflows/_flow-gates.yml`, flow-0137). GitHub bills every job at least one minute,
+  and `touches`, `flow-tooling` and `source-roots-plan` each did a few seconds of work. The
+  touches-guard and its assertion, the flow-tooling tests, flow-doctor and the source-roots plan
+  are now steps in `source-roots-plan`. Each still fails the run by itself, and each runs after
+  an earlier one fails. `source-root` still reads its matrix from that job and still does not wait
+  on `gate`. One trade-off: when any of those steps fails, the `source-root` matrix is skipped for
+  that run, where before a `touches` or `flow-tooling` failure left it running. The PR is red
+  either way, and the source_roots verdicts arrive on the push that fixes the failing check.
+  **Caller action — only if branch protection requires these checks:** the checks
+  `flow-gates / touches` and `flow-gates / flow-tooling` stop reporting. A ruleset or
+  branch-protection rule that names either one would block every PR on a check that never
+  arrives. In Settings → Rules (or Branches), replace both with `flow-gates / source-roots-plan`.
+  The caller files do not change. A repo that requires only `flow-gates / gate`, or nothing, has
+  nothing to do.
+
+- **Every Flow job can run on a runner your repo chooses** (`.github/workflows/_flow-*.yml`,
+  flow-0149). **No caller action**: the default is unchanged (`ubuntu-latest`). To opt in, on a
+  private repo only: `gh variable set FLOW_RUNNER -b <runner-label>`.
+
+  Each reusable gains a `runner` input, and the template callers pass
+  `vars.FLOW_RUNNER || 'ubuntu-latest'`. A non-GitHub runner sees every secret its jobs hold; see
+  `docs/flow-reusable-workflows.md`.
+
+- **flow-doctor checks the workstream store's shape, and that intents name real workstreams**
+  (`project-template/.flow/bin/flow-doctor.mjs`, flow-0150). ADR-0009 §9. **Caller action: none** —
+  the checks arrive with the next `flow-sync`, and a repo with no `.flow/workstreams/` gets no
+  finding at all.
+
+  A workstream file with malformed frontmatter, a missing `id`, `title` or `created`, or an `id`
+  that differs from its filename is a WARNING naming the file. Two files declaring one `id` is a
+  PROBLEM naming both, as a duplicate intent id is. An intent whose `workstream:` names an id no
+  workstream declares is a WARNING naming the intent and the id; an empty or absent `workstream:`
+  is never a finding. `_TEMPLATE.md` is skipped. The goal, status and dependency warnings of §9
+  are a later task.
+
+- **An auto-unblocked task no longer fails the moment it starts** (`.github/workflows/_flow-queue-runner.yml`,
+  flow-0152). **No caller action**: callers reference the reusable workflow, so the fix arrives
+  with the next pinned release.
+
+  `_flow-unblock.yml` dispatches the queue runner with `GITHUB_TOKEN`, so the run's actor is
+  `github-actions[bot]`, and `claude-code-action` refused it ("Workflow initiated by non-human
+  actor"). The worker failed in under a second, and the escalate step then raised the task's model
+  as if the task had been too hard. The worker step now sets `allowed_bots: "github-actions[bot]"`:
+  exactly one bot, not `_flow-review.yml`'s `"*"`, because the worker writes and pushes code.
+
+- **A test pins which reusable workflows may grant `actions: write`** (`.flow/bin/actions-write-scope.test.mjs`, flow-0153). **No caller action** — test only, no workflow permissions changed.
+
+  Since flow-0152 any workflow holding `actions: write` can start the queue-runner worker. The test
+  fails if a `_flow-*.yml` grants it (workflow- or job-level, or via `write-all`) outside an
+  allowlist naming `_flow-unblock.yml`, so widening that set is a reviewed edit.
+
+- **A run that dies before the worker starts no longer raises the task's model tier** (`.github/workflows/_flow-queue-runner.yml`,
+  flow-0154). **Caller action: none.** Callers reference the reusable workflow, so the fix arrives
+  with the next pinned release.
+
+  The escalate step now counts the worker as having tried only if it claimed the task or took at
+  least 3 turns. A run that never got that far leaves `model` unchanged and adds a `follow-up` ask
+  naming the error; at the top tier it adds no "split it" decision ask.
+
+- **A PR's gate no longer goes red whenever canonical's queue has nothing pickable** (`.flow/bin/adapters.test.mjs`,
+  flow-0155). **No caller action.** The adapters test ran pick-task on canonical's live store and
+  required a task id, so whenever every ready task overlapped an in-flight one, every open PR
+  failed. It now checks the CLI agrees with `pickTask` on canonical's store (empty is a valid
+  answer) and does not print the fixture store's pick, which is still what catches a symlinked
+  or copied adapter.
+
+- **The queue runner's escalate step records an infrastructure failure on canonical too, and a
+  repeat of the same failure no longer fails the step** (`.github/workflows/_flow-queue-runner.yml`,
+  `.flow/bin/task-model.mjs`, flow-0157). **Caller action: none.** Callers reference the reusable
+  workflow, so the fix arrives with the next pinned release.
+
+  Two flow-0154 bugs. Canonical's `.flow/bin/task-model.mjs` adapter did not re-export `readAsks`
+  or `writeAsks`, so every infrastructure failure on canonical's own queue threw in the escalate
+  step and recorded nothing; the adapter now re-exports the template's whole surface, and a test
+  fails if it ever lags. And because the follow-up ask is de-duplicated, a second identical
+  failure staged nothing and `git commit` failed the step; it now says the ask is already
+  recorded and exits 0 without committing.
+
 ## 3.3.2 — 2026-10-09
 
 **PATCH: reviewer models come from canonical.** Leaving `review.model`, `review.code_review_model`
