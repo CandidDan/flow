@@ -1,7 +1,7 @@
 ---
 id: "flow-0154"
 title: "A run that dies before the worker does any work does not raise the task's model tier"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude[bot]"
