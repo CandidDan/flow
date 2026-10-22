@@ -179,3 +179,12 @@ test("criterion 7: the flow-0112 changelog entry exists and states caller action
   assert.match(f, /`workstream:`/);
   assert.match(f, /\.flow\/workstreams\/_TEMPLATE\.md/);
 });
+
+// ── flow-0150 criterion 8: its changelog fragment (canonical-only, so it lives here, not in
+// flow-doctor.test.mjs, which ships to adopting repos that have no changes/ for this task) ──
+test("flow-0150 criterion 8: the flow-0150 changelog entry exists and states caller action: none", () => {
+  const f = flat(changelogEntry(REPO, "flow-0150"));
+  assert.ok(f.trim(), "changes/flow-0150.md must exist (or be assembled into CHANGELOG.md)");
+  assert.match(f, /\*\*Caller action: none\*\*/);
+  assert.match(f, /flow-doctor/);
+});
