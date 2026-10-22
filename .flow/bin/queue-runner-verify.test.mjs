@@ -386,3 +386,67 @@ test("changes/flow-0083.md exists and states the caller action", () => {
   assert.match(entry, /\*\*No caller action\*\*/, "the caller action must be stated");
   assert.match(entry, /now build on Sonnet 5\.5/, "adopters must be told unmodelled tasks now build on Sonnet");
 });
+
+
+// ── flow-0154: a run that never reached the worker does not raise the task's tier ──
+// Executed for real: the escalate step, against a bare adopter repo whose origin is inspected.
+const readyTask = (model) => TASK(`model: "${model}"\nmodel_reason: "x"\nasks: []\n`).replace('status: "in_progress"', 'status: "ready"');
+const turnsFile = (dir, messages) => { const f = join(dir, "exec.json"); writeFileSync(f, JSON.stringify(messages)); return f; };
+const infraEnv = (dir, exec) => ({
+  TASK_ID: "PROJ-0001", WORKER_OUTCOME: "failure", FACTS_KNOWN: "1", BRANCH_EXISTS: "0", AHEAD: "0",
+  HAS_OPEN_PR: "0", GITHUB_RUN_ID: "77", RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: join(dir, "sum"), EXECUTION_FILE: exec,
+});
+
+test("flow-0154: <3 turns and no claim leaves model unchanged and records a follow-up ask naming the error", { skip }, () => {
+  const step = stepNamed(/Escalate the task's model/);
+  const { dir, repo, onMain } = adopterRepo(readyTask("sonnet"));
+  try {
+    writeFileSync(join(dir, "sum"), "");
+    const exec = turnsFile(dir, [{ type: "result", subtype: "error_during_execution", is_error: true, result: "Workflow initiated by non-human actor", num_turns: 0 }]);
+    const r = runStep(step, repo, infraEnv(dir, exec));
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const main = onMain();
+    assert.match(main, /^model: "sonnet"$/m, main);
+    assert.match(main, /follow-up: the run never reached the worker \(infrastructure failure: error_during_execution: Workflow initiated by non-human actor\)/);
+    assert.doesNotMatch(main, /escalated after/);
+    // A repeat does not stack a second identical ask.
+    runStep(step, repo, infraEnv(dir, exec));
+    assert.equal((onMain().match(/follow-up:/g) || []).length, 1);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0154: 3 turns with no claim, or a claim with no turns, escalates exactly as before", { skip }, () => {
+  const step = stepNamed(/Escalate the task's model/);
+  for (const [task, messages] of [
+    [readyTask("sonnet"), [{ type: "result", subtype: "error_max_turns", num_turns: 3 }]],
+    [readyTask("sonnet"), [{ type: "assistant" }, { type: "assistant" }, { type: "assistant" }]],
+    [TASK('model: "sonnet"\nmodel_reason: "x"\n'), []],
+  ]) {
+    const { dir, repo, onMain } = adopterRepo(task);
+    try {
+      writeFileSync(join(dir, "sum"), "");
+      const r = runStep(step, repo, infraEnv(dir, turnsFile(dir, messages)));
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.match(onMain(), /^model: "opus"$/m);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
+test("flow-0154: an infrastructure failure at the top tier adds no split-it decision ask", { skip }, () => {
+  const step = stepNamed(/Escalate the task's model/);
+  const { dir, repo, onMain } = adopterRepo(readyTask("fable"));
+  try {
+    writeFileSync(join(dir, "sum"), "");
+    // A missing execution file is itself the signature of a run that died early.
+    const r = runStep(step, repo, infraEnv(dir, join(dir, "absent.json")));
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const main = onMain();
+    assert.doesNotMatch(main, /decision:/);
+    assert.match(main, /^model: "fable"$/m);
+    assert.match(main, /follow-up: .*before reporting an error/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("changes/flow-0154.md exists and states caller action: none", () => {
+  assert.match(changelogEntry(REPO, "flow-0154"), /\*\*Caller action: none\.\*\*/);
+});

@@ -528,6 +528,7 @@ jobs:
           BRANCH_EXISTS: ${{ steps.verify.outputs.branch_exists }}
           AHEAD: ${{ steps.verify.outputs.ahead }}
           HAS_OPEN_PR: ${{ steps.verify.outputs.has_open_pr }}
+          EXECUTION_FILE: ${{ steps.work.outputs.execution_file }}
         run: |
           if [ ! -f .flow/bin/task-model.mjs ]; then
             echo "No .flow/bin/task-model.mjs in this repo yet — no model escalation."
@@ -558,9 +559,55 @@ jobs:
               echo "$TASK_ID: no escalation — $(printf '%s\n' "$decision" | sed -n 's/^why=//p')."
               exit 0
             fi
-            node "$wt/.flow/bin/task-model.mjs" escalate --task-id "$TASK_ID" --event "$event" | tee -a "$GITHUB_STEP_SUMMARY"
+            # flow-0154: "ended without a PR" only means "too hard for this model" if the model got
+            # to work. The worker tried when it claimed the task (no longer `ready` on main) or took
+            # at least 3 turns; anything less is an infrastructure failure, which leaves `model`
+            # alone and records a `follow-up` ask naming the error instead.
+          cat > "$RUNNER_TEMP/flow-classify.mjs" <<'FLOW_CLASSIFY'
+          // flow-0154. Inline, not a `.flow/bin` helper: a consuming repo holds the template's copy
+          // of those, and this step must work before it syncs a newer one. Prints `tried=...`; for
+          // an infrastructure failure it also writes the follow-up ask into the task file.
+          import fs from "node:fs";
+          import path from "node:path";
+          import { pathToFileURL } from "node:url";
+          const { WT, TASK_ID, EXECUTION_FILE = "" } = process.env;
+          const dir = path.join(WT, ".flow", "tasks");
+          const idRe = new RegExp(`^id:\\s*"?${TASK_ID.replace(/[^\w-]/g, "")}"?\\s*$`, "m");
+          const file = fs.readdirSync(dir).filter((n) => n.endsWith(".md")).map((n) => path.join(dir, n))
+            .find((f) => idRe.test(fs.readFileSync(f, "utf8")));
+          const text = file ? fs.readFileSync(file, "utf8") : "";
+          const status = (text.match(/^status:\s*"?([^"\n]*?)"?\s*$/m) || ["", ""])[1].trim();
+          let msgs = [];
+          try { msgs = JSON.parse(fs.readFileSync(EXECUTION_FILE, "utf8")); } catch { msgs = []; }
+          if (!Array.isArray(msgs)) msgs = [];
+          const result = msgs.find((m) => m && m.type === "result");
+          const turns = result && Number.isInteger(result.num_turns) ? result.num_turns
+            : msgs.filter((m) => m && m.type === "assistant").length;
+          // Tried = claimed the task (it left `ready` on main) or took at least 3 turns.
+          if (!file || (status !== "" && status !== "ready") || turns >= 3) {
+            console.log(`tried=true\nturns=${turns}`);
+          } else {
+            const raw = result ? String(result.subtype ?? "") + (result.is_error && typeof result.result === "string" ? `: ${result.result}` : "") : "";
+            const error = raw.replace(/\s+/g, " ").replace(/["\\]/g, "'").trim().slice(0, 120)
+              || "the worker step failed before reporting an error";
+            const { readAsks, writeAsks } = await import(pathToFileURL(path.join(WT, ".flow", "bin", "task-model.mjs")).href);
+            const ask = `follow-up: the run never reached the worker (infrastructure failure: ${error}); the task's model was left unchanged, so fix the cause and re-run it`;
+            fs.writeFileSync(file, writeAsks(text, [...readAsks(text).filter((a) => a !== ask), ask]));
+            console.log(`tried=false\nturns=${turns}\nerror=${error}`);
+          }
+          FLOW_CLASSIFY
+            verdict="$(WT="$wt" node "$RUNNER_TEMP/flow-classify.mjs")"
+            echo "$verdict"
+            if printf '%s\n' "$verdict" | grep -qx 'tried=false'; then
+              infra_error="$(printf '%s\n' "$verdict" | sed -n 's/^error=//p')"
+              echo "$TASK_ID: the run never reached the worker ($infra_error) — model left unchanged, follow-up ask recorded." | tee -a "$GITHUB_STEP_SUMMARY"
+              commit_msg="flow: $TASK_ID infrastructure failure, model unchanged ($event)"
+            else
+              node "$wt/.flow/bin/task-model.mjs" escalate --task-id "$TASK_ID" --event "$event" | tee -a "$GITHUB_STEP_SUMMARY"
+              commit_msg="flow: $TASK_ID escalate model ($event)"
+            fi
             git -C "$wt" add .flow/tasks/
-            git -C "$wt" commit -q -m "flow: $TASK_ID escalate model ($event)"
+            git -C "$wt" commit -q -m "$commit_msg"
             if git -C "$wt" push -q origin HEAD:main; then
               echo "$TASK_ID: escalation landed on main (attempt $attempt)."
               exit 0
