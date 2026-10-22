@@ -1,7 +1,7 @@
 ---
 id: "flow-0150"
 title: "Workstreams, part 2: flow-doctor checks a workstream's shape and that intents name real ones (ADR-0009 §9)"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude[bot]"
