@@ -32,6 +32,11 @@ name: _flow-recover (reusable)
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "runs-on label for every job. Callers pass vars.FLOW_RUNNER; see docs/flow-reusable-workflows.md before choosing a non-GitHub runner."
+        required: false
+        type: string
+        default: "ubuntu-latest"
       threshold_minutes:
         description: "Minutes of no movement before a task is considered stranded (default 75)."
         required: false
@@ -47,7 +52,7 @@ permissions:
 jobs:
   sweep:
     if: ${{ vars.FLOW_AI == 'true' || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:

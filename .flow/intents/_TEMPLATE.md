@@ -31,6 +31,12 @@ serves: []                # the VISION.md goal ids this intent advances, e.g. ["
                           # An id VISION.md does not declare is a WARNING, never a failure. With
                           # no VISION.md the vision layer is inactive and nothing is reported
                           # per intent — one repo-level warning covers it.
+workstream: ""            # the id of the workstream this intent belongs to, empty if none.
+                          # One workstream per intent at most; the field is the ONLY record of
+                          # membership (a workstream never lists its intents; ADR-0009 §1). The
+                          # id names a file in `.flow/workstreams/`, and an id no file declares
+                          # is a WARNING. Empty means ungrouped and is never a finding, in a repo
+                          # with workstreams or without: the layer is optional (ADR-0009 §7).
 supersedes: ""            # the id of the intent this one replaces, empty if none.
                           # An approved intent's body is never revised (ADR-0007), so a changed
                           # mind is a NEW intent naming the old one here. The old one's `status`

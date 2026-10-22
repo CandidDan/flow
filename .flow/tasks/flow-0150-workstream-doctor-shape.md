@@ -1,25 +1,28 @@
 ---
 id: "flow-0150"
 title: "Workstreams, part 2: flow-doctor checks a workstream's shape and that intents name real ones (ADR-0009 §9)"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude[bot]"
 created: "2026-10-20"
-started: ""
-branch: ""
-pr: ""
+started: "2026-10-21T09:29:54Z"
+branch: "flow/flow-0150-workstream-doctor-checks"
+pr: "https://github.com/CandidDan/flow/pull/218"
 issue: ""
-blocked_reason: "Waits on flow-0112 (the template and field these checks read)."
-blocked_by: ["flow-0112"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G11"]
 touches:
   - "project-template/.flow/bin/flow-doctor.mjs"
   - "project-template/.flow/bin/flow-doctor.test.mjs"
+  - ".flow/bin/workstreams-docs.test.mjs"
   - "changes/flow-0150.md"
 labels: [intent-layer, workstreams, flow-doctor]
 notes:
   - "2026-10-20 (orchestrator, Dan approved): split from flow-0112, which failed twice unsplit. This is the mechanical half of ADR-0009 §9: facts, not judgement."
+  - "2026-10-21 (worker, claude[bot]): BLOCKED on scope. Branch flow/flow-0150-workstream-doctor-checks is pushed (2 commits, no PR) and is functionally complete: workstreamFindings() + WORKSTREAM_REQUIRED exported from flow-doctor.mjs, wired into runDoctor via intentFindings().workstreamRefs; 9 new tests in flow-doctor.test.mjs cover all 8 criteria; changes/flow-0150.md written. build, lint, coverage (lines 96.88%) pass. npm test has exactly ONE failure: .flow/bin/workstreams-docs.test.mjs 'criterion 6: flow-doctor.mjs on this branch is identical to main's' (flow-0112), which fails for any edit to flow-doctor.mjs and is outside touches. Next action once touches includes that test file: on the branch, delete that one test (and its execFileSync import if unused), rerun npm test, rebase on main, open the PR titled [flow-0150] <title>, gh pr ready."
+  - "2026-10-22 (orchestrator): ANSWERED the ask: yes. Criterion 6 of flow-0112 was a one-off scope check for that PR and should never have become a permanent test; that was an orchestrator spec error. touches now includes .flow/bin/workstreams-docs.test.mjs: delete the criterion-6 test (and only that test). Resume from the pushed branch flow/flow-0150-workstream-doctor-checks."
 model: "opus"
 model_reason: "one file plus its tests, after the split"
 asks: []

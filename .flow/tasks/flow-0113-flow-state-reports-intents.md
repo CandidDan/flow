@@ -1,7 +1,7 @@
 ---
 id: "flow-0113"
 title: "flow-state reports intents and workstreams, each intent with a status derived from the tasks that name it"
-status: "blocked"
+status: "ready"
 priority: 3
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits on flow-0112 (the workstream store this reports on) and flow-0074 (the `intent:` field on tasks that statuses are derived from). Both are ready, neither is merged."
-blocked_by: ["flow-0112", "flow-0074"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G7", "G11"]
 touches:
   - "project-template/.flow/bin/flow-state.mjs"

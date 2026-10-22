@@ -1,14 +1,14 @@
 ---
 id: "flow-0129"
 title: "flow-sync stops erasing a repo's own sections from canonical skills"
-status: "ready"
+status: "done"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude[bot]"
 created: "2026-10-03"
-started: ""
-branch: ""
-pr: ""
+started: "2026-10-21T09:01:53Z"
+branch: "flow/flow-0129-skill-local-overlay"
+pr: "https://github.com/CandidDan/flow/pull/217"
 issue: ""
 blocked_reason: ""
 blocked_by: []
@@ -21,6 +21,7 @@ touches:
   - "changes/flow-0129.md"
 labels: [flow-infra, sync, skills, canary]
 notes:
+  - "2026-10-21 (worker): DONE: PR #217 open and marked ready, branch flow/flow-0129-skill-local-overlay. LOCAL.md protected by rsync filter, diverged skills listed in PR body, LOCAL line in all 5 skills, doc + fragment. Gate green locally (one flaky release-assemble rerun). Next: review checks on #217, then human merge; follow-up is moving progress R1–R5 into task-writer/LOCAL.md."
   - "2026-10-13 (orchestrator): UNBLOCKED: queue reshaped. Dan's queue rule 2026-10-13: every p1/p2 task plus flow-0108 is ready; p3s park."
   - "2026-10-04 orchestrator: Dan chose design A (the LOCAL.md overlay). The task is unblocked on design and stays blocked only on the queue cap. Its first follow-up is to move progress's R1–R5 section into .claude/skills/task-writer/LOCAL.md."
   - "2026-10-03 orchestrator: found by the v3 canary, progress PR #115. The sync copies each canonical skill with `rsync -a --delete`, which replaced progress's task-writer SKILL.md wholesale. That deleted its repo-owned 'Declaring touches for reference prose (R1–R5)' section, and progress's own gate pins that section, so 3 tests went red. I restored the section by hand on #115. The next sync deletes it again."

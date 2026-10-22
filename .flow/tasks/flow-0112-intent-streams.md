@@ -1,7 +1,7 @@
 ---
 id: "flow-0112"
 title: "Workstreams, part 1: the store, its template and the `workstream:` field on intents (ADR-0009 §4)"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude[bot]"

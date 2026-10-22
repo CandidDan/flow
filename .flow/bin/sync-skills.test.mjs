@@ -200,6 +200,17 @@ export function checkSkillSurface(text, yaml) {
     );
   }
 
+  // 6. The mirror PROTECTS `LOCAL.md` (flow-0129). It is the repo's overlay on a canonical skill
+  //    — the one place its additions survive a sync — and canonical never ships one, so without the
+  //    protect rule `--delete` removes it as "a file canonical does not have".
+  if (copies.some((line) => /--delete\b/.test(line) && !/--filter=P LOCAL\.md\b/.test(
+    line.replace(/'([^']*)'/g, "$1")))) {
+    problems.push(
+      "the skills mirror deletes LOCAL.md: it runs --delete without --filter='P LOCAL.md', so a " +
+      "repo's own additions to a canonical skill are erased by every sync (flow-0129).",
+    );
+  }
+
   return problems;
 }
 
@@ -220,7 +231,8 @@ const extractCopyRegion = (text) => {
 };
 
 /** The shipped line that mirrors one skill directory. Used to mutate it away. */
-const SKILL_RSYNC = /^\s*rsync -a --delete "\$d" "\.claude\/skills\/\$SKILL\/"$/m;
+const SKILL_RSYNC =
+  /^\s*rsync -a --delete --filter='P LOCAL\.md' "\$d" "\.claude\/skills\/\$SKILL\/"$/m;
 
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
 
@@ -569,4 +581,108 @@ test("changes/flow-0081.md exists and states that no caller action is needed", (
   assert.match(text, /caller action:\*\*\s*none/i,
     "the surface is in the reusable, so a caller needs no edit — the fragment must say so");
   assert.match(text, /flow-0081/, "the fragment must name its task id");
+});
+
+// =============================================================================================
+// flow-0129 — the LOCAL.md overlay. flow-0081 made every canonical-named skill canonical's, byte
+// for byte, and repos do extend them: progress added R1–R5 to task-writer, and the first `@v3` sync
+// erased it without a word in the PR. Design A (chosen 2026-10-04): the sync owns SKILL.md, the
+// repo owns `LOCAL.md` beside it, and every canonical SKILL.md tells the agent to read it.
+// =============================================================================================
+
+const LOCAL_LINE =
+  "If `LOCAL.md` exists beside this file, read it; it extends and overrides this skill for this repo.";
+
+/**
+ * Run the shipped copy region, then the shipped PR-body append (the `if [ -n "$REPLACED" ]` block),
+ * over a stand-in for `pr-body`'s output, and print the resulting body. Both halves are lifted from
+ * the workflow, so the body asserted here is the body the real run hands `gh pr create`.
+ */
+const REPLACED_APPEND = /^[ \t]*if \[ -n "\$REPLACED" \]; then$[\s\S]*?^[ \t]*fi$/m;
+const runCopyAndBody = (repo) => {
+  const script = runScripts(yamlMod.parse(readReusable()));
+  const append = script.match(REPLACED_APPEND);
+  assert.ok(append, "could not find the REPLACED body append in _flow-sync.yml — it was reshaped");
+  const body = [extractCopyRegion(readReusable()), 'BODY="PR-BODY"', append[0], 'printf "%s" "$BODY"']
+    .join("\n");
+  return execFileSync("bash", ["-euo", "pipefail", "-c", body], {
+    cwd: repo,
+    encoding: "utf8",
+    env: { ...process.env, CANON_TPL, CANON_VER: "3.1.0", CANONICAL_REF: "v3" },
+  });
+};
+
+test("a sync leaves .claude/skills/task-writer/LOCAL.md byte-identical", { skip }, (t) => {
+  const local = "# progress additions\n\n## Declaring touches for reference prose (R1–R5)\n\nR1. …\n";
+  const repo = fixtureRepo(t, { skills: {
+    "task-writer/SKILL.md": "an older canonical task-writer\n",
+    "task-writer/LOCAL.md": local,
+  } });
+
+  const body = runCopyAndBody(repo);
+
+  assert.equal(readFileSync(join(repo, ".claude/skills/task-writer/LOCAL.md"), "utf8"), local,
+    "LOCAL.md is the repo's overlay — the --delete mirror must never remove or rewrite it");
+  assert.equal(
+    readFileSync(join(repo, ".claude/skills/task-writer/SKILL.md"), "utf8"),
+    readFileSync(join(CANON_SKILLS, "task-writer/SKILL.md"), "utf8"),
+    "…while SKILL.md is still canonical's, byte for byte",
+  );
+  assert.doesNotMatch(body, /task-writer/,
+    "a skill whose additions are already in LOCAL.md has nothing to warn about");
+  const changed = git(repo, "status", "--porcelain").split("\n").filter(Boolean);
+  assert.ok(!changed.some((l) => l.endsWith("LOCAL.md")), `LOCAL.md must produce no diff: ${changed}`);
+});
+
+test("a skill whose SKILL.md diverges, with no LOCAL.md, is named in the sync PR body", { skip }, (t) => {
+  const canonical = readFileSync(join(CANON_SKILLS, "task-writer/SKILL.md"), "utf8");
+  const repo = fixtureRepo(t, { skills: {
+    "task-writer/SKILL.md": canonical + "\n## Declaring touches for reference prose (R1–R5)\n",
+    // Identical to canonical: replacing it loses nothing, so it must NOT be named.
+    "show-me/SKILL.md": readFileSync(join(CANON_SKILLS, "show-me/SKILL.md"), "utf8"),
+  } });
+
+  const body = runCopyAndBody(repo);
+
+  assert.ok(body.startsWith("PR-BODY\n\n### Replaced: skills edited in place"),
+    `the section is appended to pr-body's output: ${body}`);
+  assert.match(body,
+    /- `\.claude\/skills\/task-writer\/` — local edits will be replaced; move them to LOCAL\.md/);
+  assert.doesNotMatch(body, /show-me/, "a byte-identical skill has no local edits to lose");
+  assert.doesNotMatch(body, /vision-writer/, "a skill new to this repo has no local edits to lose");
+});
+
+test("a sync with no diverged skill leaves the PR body exactly as pr-body rendered it", { skip }, (t) => {
+  const repo = fixtureRepo(t, {});
+  assert.equal(runCopyAndBody(repo), "PR-BODY",
+    "a section reading 'Replaced: none' on every PR is noise; it appears only when it says something");
+});
+
+test("removing the LOCAL.md protect rule fails the check, by name", { skip }, () => {
+  const mutated = readReusable().replace(SKILL_RSYNC, (line) => line.replace(" --filter='P LOCAL.md'", ""));
+  assert.notEqual(mutated, readReusable(), "the mutation must actually drop the filter");
+  const problems = checkSkillSurface(mutated, yamlMod);
+  assert.equal(problems.length, 1, `only the protect rule is gone: ${problems.join(" | ")}`);
+  assert.match(problems[0], /deletes LOCAL\.md/);
+});
+
+test("every canonical skill ends with the LOCAL.md line", () => {
+  const skills = readdirSync(CANON_SKILLS, { withFileTypes: true }).filter((e) => e.isDirectory());
+  assert.ok(skills.length > 0, "canonical must ship at least one skill, or this proves nothing");
+  for (const { name } of skills) {
+    const text = readFileSync(join(CANON_SKILLS, name, "SKILL.md"), "utf8");
+    assert.ok(text.trimEnd().endsWith(LOCAL_LINE),
+      `${name}/SKILL.md must END with the LOCAL.md line, so an agent that reads the skill is told ` +
+      `to read the repo's overlay too`);
+    assert.ok(!existsSync(join(CANON_SKILLS, name, "LOCAL.md")),
+      `${name}/LOCAL.md must not exist in canonical — it is the repo's file, and shipping one ` +
+      `would overwrite every repo's overlay at the next sync`);
+  }
+});
+
+test("changes/flow-0129.md exists and states that no caller action is needed", () => {
+  const text = changelogEntry(REPO, "flow-0129");
+  assert.ok(text, "flow-0129's changelog entry must exist, as a fragment or in CHANGELOG.md");
+  assert.match(text, /caller action\*\*:?\s*none/i);
+  assert.match(text, /LOCAL\.md/, "…and must tell a repo with edited skills where to move them");
 });

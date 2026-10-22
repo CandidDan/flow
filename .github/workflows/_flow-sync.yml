@@ -19,6 +19,8 @@ name: _flow-sync (reusable)
 #                            AGENTS.md and PROTOCOL.md tell agents to read by path. Each is
 #                            mirrored wholesale; a skill directory the adopter invented is left
 #                            alone, because only canonical's names are canonical's to replace
+#                            — except `LOCAL.md` inside one, the repo's own overlay, which is
+#                            never touched (flow-0129)
 #   - .flow/VERSION          bumped to canonical's stamp
 # It never touches .flow/config.yml, .flow/tasks/, .claude/settings.json, .claude/settings.local.json,
 # or the project's CLAUDE.md and AGENTS.md — those
@@ -52,6 +54,11 @@ name: _flow-sync (reusable)
 on:
   workflow_call:
     inputs:
+      runner:
+        description: "runs-on label for every job. Callers pass vars.FLOW_RUNNER; see docs/flow-reusable-workflows.md before choosing a non-GitHub runner."
+        required: false
+        type: string
+        default: "ubuntu-latest"
       canonical_ref:
         description: "Canonical ref to adopt from (tag/branch). Match your callers' pin. Default v3."
         required: false
@@ -86,7 +93,7 @@ permissions:
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner }}
     steps:
       # Fail HERE, naming the fix, rather than forty lines later at `git push` with GitHub's
       # opaque "refusing to allow a GitHub App to create or update workflow ... without
@@ -531,12 +538,27 @@ jobs:
           # pinned at a release whose template has no `.claude/skills/`, and the glob would then
           # expand to a literal unmatched path. Reported rather than silently skipped — a silent
           # skip is the defect this step exists to fix.
+          #
+          # THE OVERLAY (flow-0129). Repos DO extend canonical skills — progress added R1–R5 to
+          # task-writer — and the mirror above erased those additions on every sync, with nothing in
+          # the PR saying so. A repo's additions now live in `.claude/skills/<name>/LOCAL.md`, which
+          # canonical never ships and this mirror never deletes (`--filter='P LOCAL.md'` protects it
+          # from `--delete`). Every canonical SKILL.md ends by telling the agent to read it, so
+          # SKILL.md itself stays byte-identical to canonical. A skill that has NO LOCAL.md and
+          # differs from canonical's is a repo that edited SKILL.md in place: the sync still
+          # replaces it, but names it in the PR body so the edit is moved, not silently lost. The
+          # list is rendered here, inside the region, so it is built from the tree BEFORE the copy.
+          REPLACED=""
           if [ -d "$CANON_TPL/.claude/skills" ]; then
             for d in "$CANON_TPL"/.claude/skills/*/; do
               [ -d "$d" ] || continue
               SKILL="$(basename "$d")"
+              if [ -d ".claude/skills/$SKILL" ] && [ ! -e ".claude/skills/$SKILL/LOCAL.md" ] \
+                 && ! diff -rq "$d" ".claude/skills/$SKILL/" > /dev/null 2>&1; then
+                REPLACED="${REPLACED}- \`.claude/skills/${SKILL}/\` — local edits will be replaced; move them to LOCAL.md"$'\n'
+              fi
               mkdir -p ".claude/skills/$SKILL"
-              rsync -a --delete "$d" ".claude/skills/$SKILL/"
+              rsync -a --delete --filter='P LOCAL.md' "$d" ".claude/skills/$SKILL/"
             done
           else
             echo "::warning title=No skills to adopt::canonical@${CANONICAL_REF} has no project-template/.claude/skills/, so this sync cannot refresh the skill procedures AGENTS.md and PROTOCOL.md point at by path. Pin canonical_ref at a release that ships them."
@@ -637,6 +659,10 @@ jobs:
             create|rebuild)
               TITLE="$($SYNC pr-title --local "$LOCAL_VER" --canonical "$CANON_VER")"
               BODY="$($SYNC pr-body --local "$LOCAL_VER" --canonical "$CANON_VER" --files "$CHANGED" --kept "$KEPT")"
+              # flow-0129: name every canonical skill this sync overwrote in place, built above.
+              if [ -n "$REPLACED" ]; then
+                BODY="${BODY}"$'\n\n'"### Replaced: skills edited in place"$'\n\n'"These differed from canonical and had no \`LOCAL.md\`. Canonical's copy replaced them; recover any repo-specific text from \`main\` into \`.claude/skills/<name>/LOCAL.md\`, which the sync never touches."$'\n\n'"${REPLACED}"
+              fi
               gh pr create --base main --head "$BRANCH" --title "$TITLE" --body "$BODY" \
                 || echo "gh pr create failed — branch is pushed; will retry next run."
               ;;
