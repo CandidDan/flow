@@ -1,7 +1,7 @@
 ---
 id: "flow-0122"
 title: "A deploy skips a Flow-only commit only when that is proven: one tested check, a protocol rule, wiring left to each adopter"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude"
