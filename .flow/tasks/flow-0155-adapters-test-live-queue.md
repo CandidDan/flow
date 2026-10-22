@@ -1,7 +1,7 @@
 ---
 id: "flow-0155"
 title: "The adapters test stops depending on canonical's live queue, so every PR's gate is not red whenever nothing is pickable"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude-session_015SJbzZrb7RuJ87bd7n3mC2"
