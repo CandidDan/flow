@@ -1,12 +1,12 @@
 ---
 id: "flow-0157"
 title: "The escalate step records an infrastructure failure on canonical too, and survives a repeat of the same failure"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0157"
 created: "2026-10-22"
-started: ""
+started: "2026-10-22T05:30:13Z"
 branch: ""
 pr: ""
 issue: ""
