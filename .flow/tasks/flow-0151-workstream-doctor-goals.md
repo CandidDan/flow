@@ -1,7 +1,7 @@
 ---
 id: "flow-0151"
 title: "Workstreams, part 3: flow-doctor flags a workstream with no goal, too many goals, an unknown status or a dangling dependency (ADR-0009 §9)"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude[bot]"
