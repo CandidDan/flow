@@ -1,7 +1,7 @@
 ---
 id: "flow-0151"
 title: "Workstreams, part 3: flow-doctor flags a workstream with no goal, too many goals, an unknown status or a dangling dependency (ADR-0009 §9)"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits on flow-0150 (same file; these checks extend its workstream parsing)."
-blocked_by: ["flow-0150"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G11"]
 touches:
   - "project-template/.flow/bin/flow-doctor.mjs"
