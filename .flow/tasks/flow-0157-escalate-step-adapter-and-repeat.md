@@ -19,7 +19,7 @@ touches:
   - ".github/workflows/_flow-queue-runner.yml"
   - ".flow/bin/queue-runner-verify.test.mjs"
   - ".flow/bin/adapters.test.mjs"
-  - "changes/flow-XXXX.md"
+  - "changes/flow-0157.md"
 labels: [queue-runner, bug, adapters]
 notes:
   - "2026-10-22 (orchestrator, Dan approved): FOUND on PR #220 (flow-0154). Its code-review check FAILED with two blockers; the auto-fix round never ran, and the PR was merged with neither fixed. Both are on main now and sit in changes/flow-0154.md, so they reach the fleet at the next tag. (1) The inline classifier does `const { readAsks, writeAsks } = await import(\"<repo>/.flow/bin/task-model.mjs\")`. On canonical that file is the ADAPTER, and its export list stops short of those two (checked 2026-10-22: both import as undefined), so every infrastructure failure on canonical's own queue throws TypeError in the escalate step and records no ask. The flow-0154 tests did not catch it because adopterRepo() copies the TEMPLATE's task-model.mjs, which exports both. (2) A second infra failure with the same error leaves the task file byte-identical (the ask is de-duplicated and carries no run id), so `git commit -q` exits 1 under bash -e and the step fails. The existing repeat-run test never asserts the second run's exit status. Reviewer's full comment: https://github.com/CandidDan/flow/pull/220."
@@ -68,7 +68,7 @@ the error. Two bugs in that path shipped to `main` unfixed:
   - in the existing repeat-run test, assert the second run exits 0 and the task file is unchanged;
   - pin the boundary at 2 turns: 2 turns with no claim is an infrastructure failure (today only 3
     is tested, from the other side).
-- `changes/flow-XXXX.md`.
+- `changes/flow-0157.md`.
 
 **Does not touch:** `project-template/.flow/bin/task-model.mjs` (the template is correct);
 `project-template/.flow/bin/queue-runner-verify.mjs` (moving the classifier there is flow-0154's
@@ -79,7 +79,7 @@ open follow-up ask, a separate task); `_flow-review.yml`, `_flow-kickback.yml`; 
 - [ ] Given canonical's adapter layout (`.flow/bin/task-model.mjs` adapting a
       `project-template/.flow/bin/task-model.mjs` copy), when the escalate step runs for a
       `<3 turns, no claim` run, then it exits 0, `model` is unchanged, and the task on `main`
-      carries the `follow-up` ask naming the error. Proved by a new `flow-XXXX:` test in
+      carries the `follow-up` ask naming the error. Proved by a new `flow-0157:` test in
       `.flow/bin/queue-runner-verify.test.mjs` that runs the real step against that layout.
 - [ ] Given `.flow/bin/task-model.mjs` and `project-template/.flow/bin/task-model.mjs`, when both
       are imported, then every named export of the template is a named export of the adapter.
@@ -91,9 +91,9 @@ open follow-up ask, a separate task); `_flow-review.yml`, `_flow-kickback.yml`; 
       repeat-run test in `.flow/bin/queue-runner-verify.test.mjs`, extended to assert the second
       run's exit status and the file's content.
 - [ ] Given a run with exactly 2 turns and no claim, when the escalate step runs, then it is
-      classified `tried=false`. Proved by a new `flow-XXXX:` test in
+      classified `tried=false`. Proved by a new `flow-0157:` test in
       `.flow/bin/queue-runner-verify.test.mjs`.
-- [ ] Given `changes/flow-XXXX.md`, then it exists and states caller action: none. Proved by
+- [ ] Given `changes/flow-0157.md`, then it exists and states caller action: none. Proved by
       `.flow/bin/changelog-fragments.test.mjs :: every claimed task that declares a changelog fragment has an entry stating its caller action`.
 - [ ] build + lint + test + coverage pass.
 
