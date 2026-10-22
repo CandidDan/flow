@@ -1,12 +1,12 @@
 ---
 id: "flow-0156"
 title: "A worker checks the task and its notes before asking a decision, and a done task carries no open decision"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude"
 created: "2026-10-22"
-started: ""
+started: "2026-10-22T10:13:10Z"
 branch: ""
 pr: ""
 issue: ""
