@@ -32,7 +32,7 @@ import { canonicalRepoRoot, canonicalTasksDir } from "./flow-state.mjs";
 import { canonicalFlowDir as doctorFlowDir } from "./flow-doctor.mjs";
 import { canonicalFlowDir as editsFlowDir, applyEdits } from "./apply-board-edits.mjs";
 import { canonicalFlowDir as guardFlowDir, findTaskFile } from "./touches-guard.mjs";
-import { canonicalFlowDir as pickFlowDir } from "./pick-task.mjs";
+import { canonicalFlowDir as pickFlowDir, pickTask, readTasks } from "./pick-task.mjs";
 import { canonicalFlowDir as recoverFlowDir, readTasks as recoverReadTasks } from "./flow-recover.mjs";
 import { canonicalFlowDir as openPrFlowDir } from "./flow-open-pr.mjs";
 import { canonicalFlowDir as unblockFlowDir } from "./flow-unblock.mjs";
@@ -562,13 +562,25 @@ test("the three autonomous-loop adapters are present and their CLI blocks run", 
     assert.ok(WORKFLOW_INVOKED_ADAPTERS.includes(f));
   }
 
-  // pick-task against canonical's real store: it must name a task that exists HERE. A copy or a
-  // symlink would read project-template/.flow/tasks (the fixture store) and pick a fixture id.
+  // pick-task against canonical's real store. A copy or a symlink would read
+  // project-template/.flow/tasks (the fixture store) and pick a fixture id. flow-0155: this used to
+  // require a canonical id, which tied the gate to the live queue — whenever every ready task
+  // overlapped an in-flight one, pick-task correctly printed nothing and every PR went red. Now the
+  // CLI must agree with the module run on canonical's store (empty when nothing is eligible), and
+  // must not print the fixture store's pick, which is asserted non-empty so that check is real.
   const picked = run("pick-task.mjs").stdout.trim();
-  assert.match(picked, /^flow-\d{4}$/,
-    "pick-task must print a canonical task id — silence here is the symlink failure mode");
-  assert.ok(findTaskFile(join(pickFlowDir(), "tasks"), picked),
-    `pick-task chose ${picked}, which is not in canonical's store`);
+  const expected = pickTask(readTasks(join(pickFlowDir(), "tasks"))) ?? "";
+  assert.equal(picked, expected,
+    "pick-task's CLI must print exactly what pickTask chooses from canonical's own store");
+  const fixturePick = pickTask(readTasks(join(TEMPLATE_FLOW, "tasks")));
+  assert.ok(fixturePick, "the fixture store must have an eligible task, or the next check is vacuous");
+  assert.notEqual(picked, fixturePick,
+    "pick-task printed the fixture store's pick — the adapter is reading project-template/.flow");
+  if (picked) {
+    assert.match(picked, /^flow-\d{4}$/);
+    assert.ok(findTaskFile(join(pickFlowDir(), "tasks"), picked),
+      `pick-task chose ${picked}, which is not in canonical's store`);
+  }
 
   // flow-recover's new subcommands, through the CLI rather than the module.
   const cands = run("flow-recover.mjs", ["branch-candidates", "flow-0040", "claude/foo-x"]);
