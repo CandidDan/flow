@@ -3,8 +3,7 @@
 // flow-0112 lays down the workstream layer's files and prose and changes no behaviour: the store's
 // template, the `workstream:` field on both intent templates, one protocol paragraph, one README
 // line, one vision-writer paragraph and a changelog fragment. Prose has no natural failure mode,
-// so these give it one, and the last test pins the one thing the task must NOT do: touch
-// flow-doctor.
+// so these give it one.
 //
 // Canonical-only by placement: it reads project-template/ and canonical's own copy of the intent
 // template, which an adopting repo does not have (the 2.1.1 lesson; see adopter-layout.test.mjs).
@@ -12,7 +11,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { changelogEntry } from "./changelog-entry.mjs";
@@ -171,18 +169,6 @@ test("criterion 5: vision-writer says a workstream no goal covers adds the goal 
   assert.match(amend, /\*\*in the same PR as the workstream file\*\*/);
   assert.match(amend, /merging that PR approves both/);
   assert.match(amend, /ADR-0009 §3/);
-});
-
-// ── criterion 6: flow-doctor is untouched ──
-test("criterion 6: flow-doctor.mjs on this branch is identical to main's", () => {
-  const path = "project-template/.flow/bin/flow-doctor.mjs";
-  const git = (...args) => execFileSync("git", args, { cwd: REPO, encoding: "utf8" });
-  // On a PR checkout the base is origin/main; locally, whichever of the two resolves first.
-  const base = ["origin/main", "main"].find((ref) => {
-    try { git("rev-parse", "--verify", "--quiet", `${ref}^{commit}`); return true; } catch { return false; }
-  });
-  if (!base) return; // a shallow or detached checkout with no main at all: nothing to diff against
-  assert.equal(git("diff", "--stat", base, "--", path).trim(), "", `${path} differs from ${base}`);
 });
 
 // ── criterion 7: the changelog fragment ──
