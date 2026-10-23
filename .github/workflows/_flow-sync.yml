@@ -503,8 +503,18 @@ jobs:
             # the clone step, which cannot succeed on an empty ref. The `:-` default is for the test
             # files that execute this loop with only $CANON_TPL supplied, where the copy must stay
             # byte-identical; in a real run the value is always set.
+            #
+            # The helper is canonical's at CANONICAL_REF, and an explicit `canonical_ref` input can
+            # name a release older than this subcommand. Calling it there would exit 2 and abort
+            # the whole sync, so its presence is probed first; when absent the copy keeps the
+            # template's pins, which is what that release shipped, and the run says so once.
             if [ -n "${CANONICAL_REF:-}" ]; then
-              node "$CANON_TPL/.flow/bin/flow-sync.mjs" pin-callers --file "$DEST" --ref "$CANONICAL_REF"
+              if grep -q 'case "pin-callers"' "$CANON_TPL/.flow/bin/flow-sync.mjs" 2>/dev/null; then
+                node "$CANON_TPL/.flow/bin/flow-sync.mjs" pin-callers --file "$DEST" --ref "$CANONICAL_REF"
+              elif [ -z "${PIN_UNSUPPORTED:-}" ]; then
+                PIN_UNSUPPORTED=1
+                echo "::warning title=Callers not pinned::canonical@${CANONICAL_REF} predates flow-0158 and its flow-sync.mjs has no pin-callers, so the copied callers keep the pins its template ships rather than @${CANONICAL_REF}. Check that they call reusables compatible with this release."
+              fi
             fi
           done
           KEPT="$(cat "$KEPT_FILE")"

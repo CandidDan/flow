@@ -178,7 +178,7 @@ test("flow-0158: the loop pins the copied file from $CANONICAL_REF in the enviro
   const region = extractLoopRegion();
   const lines = region.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
   const cp = lines.indexOf('cp "$f" .github/workflows/');
-  const pin = lines.findIndex((l) => /\bpin-callers\b/.test(l));
+  const pin = lines.findIndex((l) => /^node [^\n]*\bpin-callers\b/.test(l));
   assert.ok(cp >= 0 && pin > cp, "pin-callers runs after the copy, on the copied file");
   assert.match(lines[pin], /node "\$CANON_TPL\/\.flow\/bin\/flow-sync\.mjs" pin-callers --file "\$DEST" --ref "\$CANONICAL_REF"/,
     "canonical's own helper, on $DEST, with the resolved ref — self-contained on $CANON_TPL like the extra-jobs call");
@@ -188,4 +188,21 @@ test("flow-0158: the loop pins the copied file from $CANONICAL_REF in the enviro
   // `Resolve canonical ref` output — one definition of the adopted ref, not a second resolution.
   assert.match(readReusable(), /echo "CANONICAL_REF=\$\{CANONICAL_REF\}" >> "\$GITHUB_ENV"/);
   assert.match(readReusable(), /CANONICAL_REF: \$\{\{ steps\.canonical-ref\.outputs\.ref \}\}/);
+});
+
+test("flow-0158: a canonical whose helper predates pin-callers still completes the sync, warning once", { skip }, (t) => {
+  // An explicit `canonical_ref` can name a release older than the subcommand. The loop runs THAT
+  // release's helper, so calling a subcommand it lacks would exit 2 and abort the sync.
+  const fx = fixture(t);
+  const helper = join(fx.canonTpl, ".flow/bin/flow-sync.mjs");
+  writeFileSync(helper, readFileSync(helper, "utf8").replace(/case "pin-callers"/g, 'case "pin-callers-not-yet"'));
+
+  const out = runLoop(fx, "v3.3.2");
+
+  for (const name of Object.keys(TPL)) {
+    assert.equal(read(fx.repo, name), TPL[name], `${name}: copied with the pins that release shipped`);
+  }
+  assert.equal(out.match(/::warning title=Callers not pinned::/g)?.length, 1,
+    "the unpinned copy is reported, once per run rather than once per caller");
+  assert.match(out, /canonical@v3\.3\.2 predates flow-0158/);
 });
