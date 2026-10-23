@@ -327,6 +327,13 @@ asks:
 - **`decision`** — a ruling that is not yours to make. It **must** carry `Recommend: <the option
   and why>`: a decision reaches the human with the recommendation you are already holding, or it
   hands back thinking that was already done. `flow-doctor` fails a `decision` without one.
+  **Check the spec before you ask.** Before writing a `decision`, read this task's body and
+  `notes`, the intent it names, and the tasks in its `blocked_by` and any task whose `blocked_by`
+  points at it. If one of them already answers the question, follow that answer and append a
+  `notes` line citing where it came from. Then it is not a decision.
+  **No open `decision` at hand-off.** A worker does not open its PR for review with an open
+  `decision` ask. Either the work does not depend on the answer, so it is a `fyi` (or a
+  `follow-up` for the task that does), or it does, so the task is `blocked`.
 - **`follow-up`** — a task that should exist and doesn't. You never create it (the orchestrator
   writes tasks); you name it in one sentence.
 - **`fyi`** — what the reviewer should know before merging.
