@@ -246,7 +246,10 @@ test("no literal --model value remains in the dispatch step", { skip }, () => {
 
 // A consuming repo's checkout: the template's helpers in `.flow/bin/`, one task in the store,
 // committed and pushed to a bare `origin` so the escalate step has a real `main` to write.
-function adopterRepo(taskText) {
+// `layout: "canonical"` (flow-0157) instead lays it out the way canonical is: `.flow/bin/` holds
+// canonical's ADAPTER, importing a `project-template/.flow/bin/` copy of the template — the shape
+// an adopter fixture never exercises, and the one where a missing re-export throws.
+function adopterRepo(taskText, { layout = "adopter" } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "qr-model-"));
   const repo = join(dir, "repo"), origin = join(dir, "origin.git");
   const git = (...a) => {
@@ -257,8 +260,13 @@ function adopterRepo(taskText) {
   spawnSync("git", ["init", "-q", "--bare", "-b", "main", origin]);
   spawnSync("git", ["init", "-q", "-b", "main", repo]);
   for (const d of [".flow/bin", ".flow/tasks"]) spawnSync("mkdir", ["-p", join(repo, d)]);
+  const lib = layout === "canonical" ? "project-template/.flow/bin" : ".flow/bin";
+  spawnSync("mkdir", ["-p", join(repo, lib)]);
   for (const f of ["task-model.mjs", "asks.mjs"]) {
-    writeFileSync(join(repo, ".flow/bin", f), readFileSync(join(TEMPLATE_BIN, f)));
+    writeFileSync(join(repo, lib, f), readFileSync(join(TEMPLATE_BIN, f)));
+  }
+  if (layout === "canonical") {
+    writeFileSync(join(repo, ".flow/bin/task-model.mjs"), readFileSync(join(BIN, "task-model.mjs")));
   }
   writeFileSync(join(repo, ".flow/tasks/proj-0001-x.md"), taskText);
   git("-c", "user.name=t", "-c", "user.email=t@t", "add", ".");
@@ -409,8 +417,15 @@ test("flow-0154: <3 turns and no claim leaves model unchanged and records a foll
     assert.match(main, /^model: "sonnet"$/m, main);
     assert.match(main, /follow-up: the run never reached the worker \(infrastructure failure: error_during_execution: Workflow initiated by non-human actor\)/);
     assert.doesNotMatch(main, /escalated after/);
-    // A repeat does not stack a second identical ask.
-    runStep(step, repo, infraEnv(dir, exec));
+    // A repeat does not stack a second identical ask — and, flow-0157, does not fail the step:
+    // it stages nothing, so it must exit 0 without committing rather than let `git commit` fail.
+    const head = () => spawnSync("git", ["--git-dir", join(dir, "origin.git"), "rev-parse", "main"], { encoding: "utf8" }).stdout;
+    const [before, headBefore] = [onMain(), head()];
+    const repeat = runStep(step, repo, infraEnv(dir, exec));
+    assert.equal(repeat.status, 0, repeat.stdout + repeat.stderr);
+    assert.match(repeat.stdout, /already recorded on main — nothing to commit/);
+    assert.equal(onMain(), before, "the task file on main must be byte-identical after a repeat");
+    assert.equal(head(), headBefore, "a repeat must commit and push nothing");
     assert.equal((onMain().match(/follow-up:/g) || []).length, 1);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -449,4 +464,47 @@ test("flow-0154: an infrastructure failure at the top tier adds no split-it deci
 
 test("changes/flow-0154.md exists and states caller action: none", () => {
   assert.match(changelogEntry(REPO, "flow-0154"), /\*\*Caller action: none\.\*\*/);
+});
+
+// ── flow-0157: the step works on canonical's own layout, and the 2-turn boundary ──
+
+test("flow-0157: on canonical's adapter layout, an infrastructure failure records the ask and exits 0", { skip }, () => {
+  const step = stepNamed(/Escalate the task's model/);
+  const { dir, repo, onMain } = adopterRepo(readyTask("sonnet"), { layout: "canonical" });
+  try {
+    writeFileSync(join(dir, "sum"), "");
+    assert.match(readFileSync(join(repo, ".flow/bin/task-model.mjs"), "utf8"), /from "\.\.\/\.\.\/project-template\/\.flow\/bin\/task-model\.mjs"/,
+      "the fixture must hold canonical's adapter, not a template copy — otherwise this proves nothing new");
+    const exec = turnsFile(dir, [{ type: "result", subtype: "error_during_execution", is_error: true, result: "boom", num_turns: 1 }]);
+    const r = runStep(step, repo, infraEnv(dir, exec));
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.doesNotMatch(r.stderr, /is not a function/);
+    const main = onMain();
+    assert.match(main, /^model: "sonnet"$/m, main);
+    assert.match(main, /follow-up: the run never reached the worker \(infrastructure failure: error_during_execution: boom\)/, main);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0157: exactly 2 turns with no claim is an infrastructure failure (tried=false)", { skip }, () => {
+  const step = stepNamed(/Escalate the task's model/);
+  for (const messages of [
+    [{ type: "result", subtype: "error_max_turns", num_turns: 2 }],
+    [{ type: "assistant" }, { type: "assistant" }],
+  ]) {
+    const { dir, repo, onMain } = adopterRepo(readyTask("sonnet"));
+    try {
+      writeFileSync(join(dir, "sum"), "");
+      const r = runStep(step, repo, infraEnv(dir, turnsFile(dir, messages)));
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.match(r.stdout, /^tried=false$/m);
+      assert.match(r.stdout, /^turns=2$/m);
+      const main = onMain();
+      assert.match(main, /^model: "sonnet"$/m, "2 turns is below the boundary — the model must not be raised");
+      assert.match(main, /follow-up: the run never reached the worker/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
+test("changes/flow-0157.md exists and states caller action: none", () => {
+  assert.match(changelogEntry(REPO, "flow-0157"), /\*\*Caller action: none\.\*\*/);
 });

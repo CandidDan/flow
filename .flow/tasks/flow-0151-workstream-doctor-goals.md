@@ -1,14 +1,14 @@
 ---
 id: "flow-0151"
 title: "Workstreams, part 3: flow-doctor flags a workstream with no goal, too many goals, an unknown status or a dangling dependency (ADR-0009 §9)"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude[bot]"
 created: "2026-10-20"
 started: "2026-10-22T07:36:32Z"
 branch: "flow/flow-0151-workstream-goal-checks"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/225"
 issue: ""
 blocked_reason: ""
 blocked_by: []
@@ -20,6 +20,7 @@ touches:
 labels: [intent-layer, workstreams, flow-doctor]
 notes:
   - "2026-10-20 (orchestrator, Dan approved): split from flow-0112. These are the warnings that keep workstreams honest against VISION.md (ADR-0009 §2, §3, §5). All warn-only."
+  - "2026-10-22 (worker, claude[bot]): DONE on branch flow/flow-0151-workstream-goal-checks, PR #225 marked ready. Five warn-only checks in workstreamFindings (serves empty/absent, >=3, undeclared id w/ maintenance reserved, status vocab, Dependencies `workstream: <id>` dangling) + 9 tests + changes/flow-0151.md. Gate green locally (coverage 96.89%). Next: PR review checks; nothing pending from the worker."
 model: "opus"
 model_reason: "one file plus its tests, after the split"
 asks: []
