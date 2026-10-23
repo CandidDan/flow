@@ -1,7 +1,7 @@
 ---
 id: "flow-0158"
 title: "flow-sync pins the callers it copies to the ref it adopted from, so a canary synced at a release tag runs that release"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude[bot]"
