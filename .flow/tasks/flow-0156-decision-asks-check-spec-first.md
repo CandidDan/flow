@@ -1,7 +1,7 @@
 ---
 id: "flow-0156"
 title: "A worker checks the task and its notes before asking a decision, and a done task carries no open decision"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude"
