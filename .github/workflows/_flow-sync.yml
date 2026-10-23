@@ -12,7 +12,9 @@ name: _flow-sync (reusable)
 #   - .flow/bin/*            the tooling (flow-doctor, touches-guard, pick-task, … and this logic)
 #   - .github/workflows/flow-*.yml   the thin callers (in case canonical added/changed one), EXCEPT
 #                            one that declares a job canonical's template does not: that caller is
-#                            kept whole and reported, never overwritten (flow-0076)
+#                            kept whole and reported, never overwritten (flow-0076). Each copied
+#                            caller's reusable `uses:` is pinned to the ref the sync adopted from
+#                            (flow-0158), so its workflows run the release its tooling came from
 #   - .flow/PROTOCOL.md      the protocol itself (flow-0048) — identical in every Flow repo, so a
 #                            protocol fix reaches the fleet by sync instead of by hand-patch
 #   - .claude/skills/<name>/ every CANONICAL-NAMED skill directory (flow-0081) — the procedures
@@ -490,6 +492,20 @@ jobs:
               fi
             fi
             cp "$f" .github/workflows/
+            # PIN THE COPY TO THE ADOPTED REF (flow-0158). The template pins its callers `@v3`, so a
+            # sync at `v3.4.0` delivered 3.4.0's callers calling whatever `v3` pointed at — the
+            # previous release, until the canary passes. On the 3.4.0 rollout those callers passed
+            # `runner`, which 3.3.2's reusables do not declare, and every Flow workflow on the canary
+            # failed at startup. A copied caller now runs the release its `.flow/bin/` came from. A
+            # KEPT caller above never reaches this line: it stays exactly as the guard leaves it.
+            #
+            # CANONICAL_REF is the `Resolve canonical ref` step's output, exported via $GITHUB_ENV by
+            # the clone step, which cannot succeed on an empty ref. The `:-` default is for the test
+            # files that execute this loop with only $CANON_TPL supplied, where the copy must stay
+            # byte-identical; in a real run the value is always set.
+            if [ -n "${CANONICAL_REF:-}" ]; then
+              node "$CANON_TPL/.flow/bin/flow-sync.mjs" pin-callers --file "$DEST" --ref "$CANONICAL_REF"
+            fi
           done
           KEPT="$(cat "$KEPT_FILE")"
           # THE PROTOCOL (flow-0048). For four releases this surface was bin + callers + the stamp,
