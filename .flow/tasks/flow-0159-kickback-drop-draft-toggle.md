@@ -1,7 +1,7 @@
 ---
 id: "flow-0159"
 title: "Make the auto-fix round actually run: drop the draft toggle that GITHUB_TOKEN cannot perform"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-worker-flow-0159"
