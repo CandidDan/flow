@@ -1,14 +1,14 @@
 ---
 id: "flow-0113"
 title: "flow-state reports intents and workstreams, each intent with a status derived from the tasks that name it"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "flow"
 owner: "claude"
 created: "2026-10-01"
 started: "2026-10-24T05:38:48Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0113-intent-report"
+pr: "https://github.com/CandidDan/flow/pull/231"
 issue: ""
 blocked_reason: ""
 blocked_by: []
