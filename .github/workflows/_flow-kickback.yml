@@ -965,7 +965,7 @@ jobs:
           HANDBACK_B64: ${{ needs.push.outputs.handback_ok == 'true' && needs.push.outputs.handback || needs['round-card'].outputs.handback }}
         run: |
           set -eu
-          export KICKBACK_AMEND="${ROUND_AMEND:-The \`fix\` job completed, but the \`push\` job ended without a guard's verdict: it crashed, was cancelled, or its push failed. Nothing was pushed.}"
+          export KICKBACK_AMEND="${ROUND_AMEND:-The \`fix\` job completed, but the \`push\` job ended without a verdict from its guards: it crashed, was cancelled, or its push failed. Nothing was pushed.}"
           # Decoded from base64 into a FILE. Every field in it is model-written text, and it has
           # reached here through an alphabet that cannot carry a quote, a backtick or a `$`. A
           # hand-back lost in transit — truncated past the cap, or a `round-card` that crashed —
