@@ -1,7 +1,7 @@
 ---
 id: "flow-0113"
 title: "flow-state reports intents and workstreams, each intent with a status derived from the tasks that name it"
-status: "in_review"
+status: "done"
 priority: 3
 project: "flow"
 owner: "claude"
