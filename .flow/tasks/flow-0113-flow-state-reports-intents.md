@@ -1,12 +1,12 @@
 ---
 id: "flow-0113"
 title: "flow-state reports intents and workstreams, each intent with a status derived from the tasks that name it"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "claude"
 created: "2026-10-01"
-started: ""
+started: "2026-10-24T05:38:48Z"
 branch: ""
 pr: ""
 issue: ""
