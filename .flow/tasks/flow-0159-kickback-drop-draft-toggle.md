@@ -22,6 +22,7 @@ touches: [".github/workflows/_flow-kickback.yml", ".flow/bin/flow-kickback-workf
 labels: [kickback, bug, workflows]
 notes:
   - "2026-10-24 (orchestrator): from Dan, after write PRs #180 and #182 escalated with 'the round never ran'. Investigated in CandidDan/write; evidence below. maintenance: restores flow-0082's shipped behaviour (G12/G10 were its goals), the same precedent as flow-0157."
+  - "2026-10-24 (worker): DONE on branch flow/flow-0159-kickback-drop-draft-toggle (pushed): undraft job removed, fix needs plan, gh pr ready gone from push, header/comments updated; escalate-round + round-card now need fix, escalate-round blanks the model tried and writes KICKBACK_AMEND from needs.fix.result in shell. ONLY LOOKS DONE: 5 tests in .flow/bin/flow-kickback-workflow.test.mjs still assert the old layout (undraft, gh pr ready, needs lists). NEXT: update those tests, add a test that runs the escalate-round script with FIX_RESULT=skipped, write docs + changes/flow-0159.md, run the gate, open the PR."
 ---
 
 ## Context
