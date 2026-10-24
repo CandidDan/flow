@@ -37,6 +37,8 @@ CLAUDE.md                     A pointer, not the rules: a short host file that @
     apply-board-edits.test.mjs  board-edits.json, patches status/priority, leaves a git diff.
     flow-doctor.mjs           Drift detection for the store (back-ported from the canary repo's
     flow-doctor.test.mjs      state:check): consistency problems fail CI; drift warns.
+    flow-state.mjs            Read-only resolver: task state from origin/main, plus each intent's
+    flow-state.test.mjs       derived status and workstream counts (`--json`, `schema: 1`).
     touches-guard.mjs         Fails a PR whose diff strays outside the task's declared
     touches-guard.test.mjs    `touches` globs — scope enforced, not just agent-reviewed.
     pick-task.mjs             Queue-runner brain: next ready task, no in-flight touches overlap.

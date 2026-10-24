@@ -29,6 +29,13 @@ from. Its `status` (`active | done | retired`) is set by hand, because finished 
 human call; **progress is derived** by `flow-state` and never stored. A repo with no
 `.flow/workstreams/` is valid, and an intent with an empty `workstream:` is never a finding.
 
+**Intent status is derived and never stored.** An intent has no `tasks` list and no progress field;
+a task names its intent, so `flow-state` computes the intent's status by scanning the tasks that
+name it (`not_started`, `in_progress`, `blocked`, `done`, or `superseded` by the intent's own
+hand-set `status`). A workstream's progress is derived the same way. `flow-state --json` is the
+supported way for anything outside the repo to read it: `schema`, `workstreams[]` and `intents[]`,
+or import `buildIntentReport` from the pinned Flow release and run it on files you fetched.
+
 **Creating a task (orchestrator).** A Cowork/orchestrator session does **not** auto-discover
 this repo's local skills, so asking it to "create a task" will not trigger `task-writer` on its
 own. To write a new task, **read `.claude/skills/task-writer/SKILL.md` and follow it** — that is
