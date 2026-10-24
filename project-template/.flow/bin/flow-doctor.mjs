@@ -397,7 +397,7 @@ export function blockedByFindings(task) {
   // cannot redden an existing repo, and a dependency that outlived its block is data that lies:
   // it says "waiting on X" about a task nobody is waiting on. `done` is exempt — there the field
   // is the historical record of what the task waited on, and clearing it would destroy that.
-  if (entries.length && task.status !== "blocked" && task.status !== "done")
+  if (entries.length && task.status !== "blocked" && task.status !== "done" && task.status !== "cancelled")
     problems.push(`${id}: ${task.status} but blocked_by is populated (${entries.join(", ")}) — ` +
       "a dependency that outlived its block is stale data; clear blocked_by when the block clears");
 
@@ -1114,7 +1114,7 @@ function parseTask(text) {
   const get = scalarReader(head);
   return { id: get("id"), title: get("title"), status: get("status"), priority: get("priority"),
            owner: get("owner"), started: get("started"), branch: get("branch"), pr: get("pr"),
-           blocked_reason: get("blocked_reason"), touches: get("touches"),
+           blocked_reason: get("blocked_reason"), cancelled_reason: get("cancelled_reason"), touches: get("touches"),
            touchesList: parseListField(head, "touches"),
            blockedByList: parseListField(head, "blocked_by"),
            servesList: parseListField(head, "serves"),
@@ -1157,6 +1157,8 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
       problems.push(`${t.id}: in_review but ${!t.pr ? "pr" : "branch"} is empty — hand-off incomplete or flow-status didn't fire`);
     if (t.status === "blocked" && !t.blocked_reason)
       problems.push(`${t.id}: blocked with no blocked_reason — undecidable AND unexplained`);
+    if (t.status === "cancelled" && !t.cancelled_reason)
+      problems.push(`${t.id}: cancelled with no cancelled_reason — a terminal state must say why the work will never ship`);
     {
       const b = blockedByFindings(t);
       problems.push(...b.problems);
@@ -1294,6 +1296,8 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
     } else {
       visionGoals = goals;
       for (const t of tasks) {
+        // `cancelled` is history like `done`: never-shipped work is not re-anchored or re-warned.
+        if (t.status === "cancelled") continue;
         const ready = t.status === "ready";
         const entries = (t.servesList ?? []).map((e) => e.trim()).filter(Boolean);
         if (entries.length === 0) {

@@ -111,6 +111,8 @@ A task's `status` field moves in one direction only:
 ```
 ready  →  in_progress  →  in_review  →  done
                 ↘  blocked  ↗
+   ready ─┬─→ cancelled   (terminal; hand-written by the orchestrator only)
+  blocked ┘
 ```
 
 - `ready` — fully specified, you may start it. Set by the orchestrator, not by you. (A PR
@@ -145,8 +147,17 @@ ready  →  in_progress  →  in_review  →  done
   populated `blocked_by` on a live non-blocked task as stale data. On a `done` task it stays, as
   the record of what the task waited on.
 
-You hand-write exactly **two** transitions: the claim (it must stay an atomic first-push-wins
-commit — see Concurrency) and `blocked` (a judgment call). Every PR-event transition is owned
+- `cancelled` — terminal: the work will never ship (superseded, obsoleted, or deliberately
+  deferred with no intent to return). **Hand-written by the orchestrator only, never the worker**
+  — a worker that concludes its task should not proceed sets `blocked` and surfaces it. Set it
+  directly from `ready` or `blocked`; a task that is `in_progress` or `in_review` must reach
+  `blocked` or `done` first. Requires **`cancelled_reason`** (a sentence; not `blocked_reason`,
+  whose `blocked_by` checks are specific to `blocked`). Nothing transitions out of it
+  automatically — `pick-task` and `flow-recover` ignore it — and only a human reverses it, by
+  editing `status` back to `ready`.
+
+You hand-write exactly **three** transitions: the claim (it must stay an atomic first-push-wins
+commit — see Concurrency), `blocked` (a judgment call), and — orchestrator only — `cancelled`. Every PR-event transition is owned
 by workflows committing to `main`.
 
 ### Which model builds a task
