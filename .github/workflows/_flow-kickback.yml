@@ -5,7 +5,7 @@ name: _flow-kickback (reusable)
 # canonical. See docs/flow-reusable-workflows.md.
 #
 # WHAT IT DOES. When the flow-review run on a PR concludes `failure`, this dispatches ONE bounded
-# auto-fix worker onto that same PR, then re-requests review. The protocol already calls a red
+# auto-fix worker onto that same PR, and the round's one push re-triggers review. The protocol already calls a red
 # review check a kickback; nothing started that work, so an `in_review` task with a precise,
 # mechanical finding sat until a human noticed and opened a session. The human was a relay.
 #
@@ -66,7 +66,7 @@ on:
 # three are told to read PR comments as input — so on a non-fork PR, anyone who can comment can
 # address those sessions. Not one of them holds a single write scope: `fix`, `card` and
 # `round-card` get `contents: read` + `pull-requests: read`, which cannot label, comment, approve,
-# close, edit or merge anything. The jobs that DO hold write scopes — `undraft`, `escalate-round`,
+# close, edit or merge anything. The jobs that DO hold write scopes — `escalate-round` and
 # `escalate` — run no model at all; they run fixed shell over values that arrive through `env:` or
 # a file.
 # A single workflow-level `pull-requests: write` would have handed that scope to the fixer's
@@ -76,7 +76,6 @@ on:
 #   job              writes        model   why
 #   ───────────────────────────────────────────────────────────────────────────────────────────
 #   plan             none          no      reads the run's jobs, the PR and the task's status
-#   undraft          PRs           no      one `gh pr ready --undo`, nothing else
 #   fix              NONE          YES     the round: commit-only; its commits leave as a bundle
 #   push             FLOW_PAT      no      fresh checkout, the guards, then the one push
 #   round-card       NONE          YES     writes the card for a round that handed nothing back
@@ -103,6 +102,15 @@ on:
 # value, and a round touching a lockfile clears that). `push` starts from a fresh checkout of the
 # head `plan` recorded before any model ran, refuses any bundle whose base is not that head, runs
 # the guards from default-branch code, and commits and pushes with hooks off.
+#
+# NO DRAFT TOGGLE (flow-0159). flow-0082 converted the PR to a draft for the round, "so the round's
+# own work does not start three reviewers part-way through", and `push` marked it ready again.
+# Since flow-0135 the fixer cannot push: its commits leave as a bundle and `push` makes ONE push,
+# so a non-draft PR gets exactly one `synchronize`, and one review, at the end of the round — the
+# draft protects nothing. It was also the thing breaking every round: the `undraft` job ran
+# `convertPullRequestToDraft` on GITHUB_TOKEN, which GitHub refuses to an integration token, so
+# `fix` and `push` were skipped and the card blamed a round that never ran. Moving FLOW_PAT onto
+# it would have made it work, at the cost of FLOW_PAT reaching a second job for nothing.
 permissions:
   contents: read
 
@@ -280,31 +288,6 @@ jobs:
             if [ -n "${WARNING:-}" ]; then printf -- '- :warning: %s\n' "$WARNING"; fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # ── undraft ────────────────────────────────────────────────────────────────────────────
-  # Its own job for one reason: it needs `pull-requests: write`, and `fix` must not have it.
-  # One command, no model, no checkout — so the scope it holds is never in the same GITHUB_TOKEN
-  # as a session a PR comment can address. If this fails, `fix` is skipped and `escalate-round`
-  # still runs, which is the draft-skip case the task asks for: do not force it.
-  undraft:
-    needs: plan
-    if: ${{ needs.plan.outputs.action == 'dispatch' }}
-    runs-on: ${{ inputs.runner }}
-    permissions:
-      pull-requests: write    # `gh pr ready --undo`, and nothing else in this job
-    steps:
-      - name: Convert the PR to a draft for the duration of the round
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ needs.plan.outputs.pr }}
-        run: |
-          set -eu
-          # So the round's own work does not start three reviewers part-way through. `decide`
-          # skips an already-draft PR, so reaching here means this is a real transition — if it
-          # fails anyway, the round ends and the `always()` step escalates. Do not force it.
-          gh pr ready "$PR_NUMBER" --undo
-
-
   # ── fix ────────────────────────────────────────────────────────────────────────────────
   # ONE bounded round. The worker commits; this job hands the commits on as DATA and stops.
   # Checking and pushing them is `push`'s work, in a job of its own.
@@ -316,7 +299,7 @@ jobs:
   # tamper with (hooks, $GITHUB_ENV, $GITHUB_PATH), so nothing here after it decides anything:
   # what leaves this job is a bundle and a hand-back, and `push` trusts neither.
   fix:
-    needs: [plan, undraft]
+    needs: plan
     if: ${{ needs.plan.outputs.action == 'dispatch' }}
     runs-on: ${{ inputs.runner }}
     permissions:
@@ -370,8 +353,8 @@ jobs:
           #      not in this JOB at all: it is `push`'s, a job that runs no model.
           #
           #      THIS IS A JOB-LEVEL FACT, NOT A WORKFLOW-LEVEL ONE, and the distinction is the
-          #      whole fix: the write scopes this workflow does use live on `undraft`,
-          #      `escalate-round` and `escalate`, which run no model. Granting them at the top
+          #      whole fix: the write scopes this workflow does use live on `escalate-round`
+          #      and `escalate`, which run no model. Granting them at the top
           #      level — as this file once did — would have put them in THIS token, and then an
           #      injected PR comment could have had the session undo its own escalation.
           #   2. NO PERSISTED CREDENTIAL in .git/config, from the checkout above.
@@ -412,8 +395,9 @@ jobs:
             4. RUN THE GATE. Every command in `.flow/config.yml` — install, build, lint, test,
                coverage — and fix what they find. Never lower the coverage floor to go green.
             5. COMMIT, DO NOT PUSH. Commit your work to this branch with a clear message. Do NOT
-               run `git push`. Do NOT run `gh pr ready`. The workflow stamps the round, pushes it
-               and re-requests review; that ordering is what lets the guard run at all.
+               run `git push`. Do NOT run `gh pr ready`. The workflow stamps the round and pushes
+               it, and that push re-runs the reviewers; that ordering is what lets the guard run
+               at all.
             6. NEVER EDIT THE TASK STORE. Nothing under the `.flow/tasks` directory, for any
                reason. Rewriting the acceptance criteria is the cheapest way to turn qa green,
                and it is the one thing this system refuses outright.
@@ -696,12 +680,10 @@ jobs:
       # HOOKS OFF on both git commands, twice over (`core.hooksPath` and `--no-verify`). This job
       # never ran a model, so its .git/hooks/ is the fresh checkout's — this is defence in depth,
       # kept so the day someone moves a model step back in here, the hook route is already shut.
-      - name: Stamp the round, push it, and re-request review
+      - name: Stamp the round and push it — the push is what re-runs review
         id: stamp-and-push
         env:
-          GH_TOKEN: ${{ secrets.FLOW_PAT }}
           GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ needs.plan.outputs.pr }}
           HEAD_REF: ${{ needs.plan.outputs.head_ref }}
           ROUND_TRAILER_LINE: ${{ needs.plan.outputs.trailer }}
           FLOW_PAT: ${{ secrets.FLOW_PAT }}
@@ -717,10 +699,11 @@ jobs:
           # fix pushed with it would never be re-reviewed. `decide` skips the whole round when
           # the secret is absent, so reaching this line means it is set. The URL is built from
           # env, and the credential never reaches a remote stored in .git/config.
+          # This push is also what starts the three reviewers again: a FLOW_PAT push fires
+          # `synchronize` on the PR, once, because it is the round's only push. Whatever they say
+          # re-enters at `plan`, one round further along. There is no `gh pr ready` here: the PR
+          # was never made a draft (flow-0159, header).
           git -c core.hooksPath=/dev/null push --no-verify "https://x-access-token:$FLOW_PAT@github.com/$GH_REPO.git" "HEAD:$HEAD_REF"
-          # And this is what starts the three reviewers again. Whatever they say re-enters at
-          # `plan`, one round further along.
-          gh pr ready "$PR_NUMBER"
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
       # ── carrying the round's verdict out of this job ──────────────────────────────────
@@ -794,8 +777,13 @@ jobs:
   #
   # Read-only, and for the same reason as `card`: it is a model reading PR comments, so it holds no
   # write scope at all and `escalate-round` is what posts what it wrote.
+  #
+  # It is told `fix`'s result, but it is NOT trusted to narrate it (flow-0159). When `fix` did not
+  # succeed, `escalate-round` throws this job's `tried` away and writes that field in shell: a model
+  # asked what a round "appears to have attempted" will describe one, and on write PR #182 it told
+  # the human a fix had been attempted by a round that never started.
   round-card:
-    needs: [plan, push]
+    needs: [plan, fix, push]
     if: ${{ always() && needs.plan.outputs.action == 'dispatch' && needs.push.outputs.pushed != 'true' && needs.push.outputs.handback_ok != 'true' }}
     runs-on: ${{ inputs.runner }}
     permissions:
@@ -833,13 +821,15 @@ jobs:
             handed nothing usable back, so the PR now needs a human decision.
 
             What stopped the round: ${{ needs.push.outputs.amend }}
+            The `fix` job's result: ${{ needs.fix.result }}
             Failing review checks: ${{ needs.plan.outputs.failed }}
             Auto-fix rounds used: ${{ needs.plan.outputs.rounds_used }} of ${{ needs.plan.outputs.cap }}
 
             You are writing the decision card a human will read on their phone, and nothing else.
             DO NOT fix anything, do not change any file other than the hand-back below, and do
             not push. Whatever that round did was NEVER PUSHED and is not on the PR, so do not
-            describe the PR as if it had been fixed. Read only:
+            describe the PR as if it had been fixed. If the `fix` job's result is anything but
+            `success`, no fix was attempted at all: do not describe one. Read only:
 
             - `gh pr view ${{ needs.plan.outputs.pr }} --comments` for the reviewers' verdicts;
             - `gh pr diff ${{ needs.plan.outputs.pr }}` for what the PR changes;
@@ -916,10 +906,10 @@ jobs:
 
   # ── escalate-round ─────────────────────────────────────────────────────────────────────
   # THE DEAD-ROUND BACKSTOP. A round that died part-way — a failed guard, a crashed action, a
-  # cancelled job, an `undraft` that never succeeded — must never leave a draft PR that nothing
-  # is watching. `always()` is what makes that true of every exit, including the ones nobody
-  # predicted: `needs.push.outputs.pushed` is empty when `fix` or `push` was skipped, failed or
-  # was cancelled, so the condition holds and the card still gets posted.
+  # cancelled job — must never leave a PR that nothing is watching. `always()` is what makes that
+  # true of every exit, including the ones nobody predicted: `needs.push.outputs.pushed` is empty
+  # when `fix` or `push` was skipped, failed or was cancelled, so the condition holds and the card
+  # still gets posted.
   #
   # This is a separate job from `fix` and `push` because posting a comment and adding a label need
   # `pull-requests: write` and `issues: write`, and `fix` runs a model on PR comments. No model
@@ -928,8 +918,12 @@ jobs:
   # The four fields it renders come from one of two places, and `round-card` above says which:
   # the round's own hand-back when it handed one back, and `round-card`'s read-only model call
   # when it did not. `needs` plus `always()` is what makes this run whichever of them was skipped.
+  #
+  # ONE FIELD IS NEVER A MODEL'S when `fix` did not succeed: "Tried / disputed". There was no
+  # round to describe, and the job that stopped it is known, so this step writes that field itself
+  # from `needs.fix.result` (flow-0159).
   escalate-round:
-    needs: [plan, push, round-card]
+    needs: [plan, fix, push, round-card]
     if: ${{ always() && needs.plan.outputs.action == 'dispatch' && needs.push.outputs.pushed != 'true' }}
     runs-on: ${{ inputs.runner }}
     permissions:
@@ -960,6 +954,9 @@ jobs:
           # told WHICH check fired. Empty means `push` never reached its verdict step at all,
           # and the sentence in the shell default below is the honest account of that.
           ROUND_AMEND: ${{ needs.push.outputs.amend }}
+          # `success`, `failure`, `cancelled` or `skipped` — GitHub's word for how `fix` ended,
+          # which no model can write. Anything but `success` means no fix was attempted.
+          FIX_RESULT: ${{ needs.fix.result }}
           # WHOSE four fields the card carries. A round that handed back `fixed` or `disputed`
           # describes itself — it is the only thing that knows what it tried. A round that handed
           # back nothing usable cannot, so the fields come from `round-card`'s read-only model
@@ -968,7 +965,7 @@ jobs:
           HANDBACK_B64: ${{ needs.push.outputs.handback_ok == 'true' && needs.push.outputs.handback || needs['round-card'].outputs.handback }}
         run: |
           set -eu
-          export KICKBACK_AMEND="${ROUND_AMEND:-The round never ran to completion: it was skipped, crashed or was cancelled before it could hand anything back. Nothing was pushed.}"
+          export KICKBACK_AMEND="${ROUND_AMEND:-The \`fix\` job completed, but the \`push\` job ended without a guard's verdict: it crashed, was cancelled, or its push failed. Nothing was pushed.}"
           # Decoded from base64 into a FILE. Every field in it is model-written text, and it has
           # reached here through an alphabet that cannot carry a quote, a backtick or a `$`. A
           # hand-back lost in transit — truncated past the cap, or a `round-card` that crashed —
@@ -976,6 +973,21 @@ jobs:
           # KICKBACK_LINK alone, which is visible rather than silent.
           handback="$RUNNER_TEMP/outcome.json"
           printf '%s' "$HANDBACK_B64" | base64 -d > "$handback" 2>/dev/null || : > "$handback"
+          # A round whose `fix` never succeeded attempted nothing, so "Tried / disputed" is this
+          # shell's sentence and nothing else. The model's `tried` is blanked rather than amended:
+          # `card` prefixes KICKBACK_AMEND to it, and a true sentence followed by a model's account
+          # of a fix that never happened still tells the human a fix happened.
+          if [ "${FIX_RESULT:-}" != "success" ]; then
+            case "${FIX_RESULT:-}" in
+              skipped)   how="was skipped" ;;
+              cancelled) how="was cancelled" ;;
+              failure)   how="failed" ;;
+              *)         how="did not complete" ;;
+            esac
+            export KICKBACK_AMEND="The \`fix\` job $how, so no fix was attempted and nothing was pushed."
+            jq 'if type == "object" then .tried = "" else . end' "$handback" > "$handback.tmp" 2>/dev/null \
+              && mv "$handback.tmp" "$handback" || : > "$handback"
+          fi
           card="$RUNNER_TEMP/card.md"
           # ONE invocation, and no `||` fallback after it. `card` renders a card whatever it is
           # given: a missing, unreadable or unparseable hand-back becomes the fallback card, and
