@@ -37,7 +37,7 @@ them. They are:
 | `_flow-triage.yml` | Scheduled issue triage (off unless `FLOW_AI=true`) | secret `CLAUDE_CODE_OAUTH_TOKEN` |
 | `_flow-review.yml` | The three Definition-of-Done review checks on a PR — qa, code-review and a conditional security review (flow-0007). **Skipped entirely while the PR is a draft** (flow-0039) — the `plan` job carries the condition and the other three `needs: plan` — so the reviewers run once, when the worker marks the PR ready, not on every work-in-progress push. Runs for **any** PR author, not just `flow/` branches; model and security-trigger paths come from the caller's `.flow/config.yml` `review:` block, and `.flow/bin/flow-review.mjs` turns each written verdict into an exit code (fail-closed). Off unless `FLOW_AI=true` | input `node_version`; secret `CLAUDE_CODE_OAUTH_TOKEN` |
 | `_flow-queue-runner.yml` | Picks a ready task → dispatches a fresh worker (off unless `FLOW_AI=true`). Its caller ticks **hourly** and a small `schedule-gate` job decides which tick is the day's run, from the three repo variables below (flow-0080) — so the pause switch and the local-time schedule need no file edit and survive a sync. `workflow_dispatch` bypasses the gate entirely | input `task_id`; secrets `CLAUDE_CODE_OAUTH_TOKEN` + `FLOW_PAT` (CAN-58 — so the worker's own push fires `flow-open-pr`; both are forwarded by **both** thin callers since flow-0095); caller grant `actions: read` |
-| `_flow-kickback.yml` | **The bounded auto-fix round** (flow-0082). When the `flow-review` run on a PR concludes `failure`, dispatches ONE auto-fix worker onto that same PR to address the reviewers' **blocking** findings, then re-requests review — so a red check starts the kickback instead of waiting for a human to notice. The worker **commits and does not push**; the workflow checks the round and pushes, which is what lets the test-weakening guard sit between the two. Off unless `FLOW_AI=true` **and** `review.auto_fix_rounds` is set (see below) | input `node_version`; secrets `CLAUDE_CODE_OAUTH_TOKEN` + `FLOW_PAT` (**required**, not optional — see below) |
+| `_flow-kickback.yml` | **The bounded auto-fix round** (flow-0082). When the `flow-review` run on a PR concludes `failure`, dispatches ONE auto-fix worker onto that same PR to address the reviewers' **blocking** findings, and the round's one push re-runs review — so a red check starts the kickback instead of waiting for a human to notice. The worker **commits and does not push**; the workflow checks the round and pushes, which is what lets the test-weakening guard sit between the two. Off unless `FLOW_AI=true` **and** `review.auto_fix_rounds` is set (see below) | input `node_version`; secrets `CLAUDE_CODE_OAUTH_TOKEN` + `FLOW_PAT` (**required**, not optional — see below) |
 | `_flow-sync.yml` | The adopt mechanism (Phase 4): when the repo's `.flow/VERSION` is behind canonical, copies the updated `.flow/bin/*` + thin callers in, bumps the stamp, and opens a **reviewed PR**. Safe to run anytime (only opens a PR; no `FLOW_AI` gate). The ref it adopts from is **read off the caller's own `uses:` pin** when `canonical_ref` is empty — which is every scheduled run (flow-0105) | input `canonical_ref` (overrides the pin; empty ⇒ resolved from the caller, `v2` only if no caller pins one); secret `FLOW_PAT` (optional) |
 
 ### Queue-runner timing — three repo variables, never a caller edit (flow-0080)
@@ -202,7 +202,21 @@ push   (no model)  fresh checkout of head_sha (persist-credentials: false)
                    ─▶ check 2b bundle: exactly one prerequisite, == head_sha; tip descends from it
                    ─▶ check 3 tests not weakened (default-branch helper) ─▶ check 4 committed something
                    ─▶ amend + push with FLOW_PAT, hooks off (core.hooksPath=/dev/null, --no-verify)
+                      — that push is the PR's one `synchronize`, and it re-runs the reviewers
 ```
+
+**There is no draft toggle (flow-0159).** flow-0082 converted the PR to a draft for the round,
+so the round's own work would not start three reviewers part-way through, and `push` marked it
+ready again. Two things changed under it. Since flow-0135 the fixer cannot push — its commits
+leave as a bundle and `push` makes **one** push — so a non-draft PR gets exactly one
+`synchronize`, and one review, at the end of the round: the thing the draft protected now holds
+without it. And the toggle broke every round: once FLOW_PAT was confined to `push`, the `undraft`
+job ran `convertPullRequestToDraft` on `GITHUB_TOKEN`, which GitHub refuses to an integration
+token ("Resource not accessible by integration"), so `fix` and `push` were skipped and the human
+got a card for a round that never ran. Handing `undraft` FLOW_PAT would have worked, at the cost
+of a second job holding it for a toggle that protects nothing. The accepted cost: the PR does not
+look like a draft mid-round, so a human could merge it then. Merge is human-only anyway. `decide`
+still skips a PR that is **already** a draft, because a draft is not asking for review.
 
 The bundle travels as a run **artifact**, not a job output: a job output reaches the next job
 through `env:`, and Linux caps one environment value at 128 KiB — a round that touches a lockfile
@@ -219,7 +233,6 @@ hold reads only, and the jobs that hold writes run no model:
 | job | token can write | runs a model | what it does |
 |---|---|---|---|
 | `plan` | nothing | no | reads the run's failed jobs, the PR, and the task's status on the default branch |
-| `undraft` | pull requests | no | one `gh pr ready --undo`, and nothing else |
 | `fix` | **nothing** | **yes** | the round: commit-only; its commits leave as a bundle, and nothing else here decides anything |
 | `push` | nothing (but holds `FLOW_PAT`) | no | fresh checkout, the guards, then the one push — made with `FLOW_PAT`, not with this token |
 | `round-card` | **nothing** | **yes** | writes the card's four fields for a round that handed nothing back, read-only |
@@ -265,6 +278,10 @@ read` is the jobs API, the only way to learn *which* review job failed, and it i
   handed nothing back has no account of itself, so its card comes from the same bounded,
   **read-only** model call that writes the security and exhausted-cap cards: it reads the
   verdicts, the diff and the round history and writes the four fields, and it fixes nothing.
+  When `fix` itself never succeeded (skipped, failed or cancelled), the card's **Tried /
+  disputed** field is not the model's: `escalate-round` writes it in shell from
+  `needs.fix.result`, naming the job and saying no fix was attempted (flow-0159). A model asked
+  what a dead round "appears to have attempted" will describe an attempt, even when nothing ran.
 - **Merge anything.** Merge stays human, as it always has.
 
 **Every escalation is one decision card, plus the `flow:needs-human` label.** The card is a PR

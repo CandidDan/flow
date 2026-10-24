@@ -73,7 +73,7 @@ test("both callers key concurrency on the PR, and the reusable acts only on a fa
     assert.match(group, /pull_requests\[0\]\.number/,
       `${file}: the concurrency group must be keyed on the PR number — two fixers on one branch would push over each other`);
     assert.equal(parse(file).concurrency.cancel_in_progress ?? parse(file).concurrency["cancel-in-progress"], false,
-      `${file}: a round must never be cancelled mid-flight — it would leave the PR a draft with nothing watching it`);
+      `${file}: a round must never be cancelled mid-flight — it would leave a half-finished round with nothing watching it`);
   }
   // The reusable declares no concurrency of its own: a called workflow sharing its caller's
   // group name would wait for the caller, which never finishes.
@@ -452,8 +452,12 @@ test("the pushed head carries the round trailer, stamped by the workflow and not
   assert.match(push.run, /--trailer "\$ROUND_TRAILER_LINE"/);
   assert.match(push.env.ROUND_TRAILER_LINE, /needs\.plan\.outputs\.trailer/,
     "the trailer text comes from the helper, which is where the N/CAP format is defined");
-  assert.match(push.run, /gh pr ready "\$PR_NUMBER"/,
-    "re-requesting review is what makes the round's work get checked; a push alone proves nothing");
+  // flow-0159: the FLOW_PAT push is itself what re-runs review (one `synchronize` on a PR that was
+  // never made a draft), so nothing here toggles the PR back to ready.
+  assert.doesNotMatch(push.run, /^\s*gh pr ready\b/m,
+    "the PR is never a draft during the round, so there is nothing to mark ready; the push re-triggers review");
+  assert.match(push.env.FLOW_PAT, /secrets\.FLOW_PAT/,
+    "and the push is FLOW_PAT's, because a GITHUB_TOKEN push triggers no workflow — that is what re-runs the reviewers");
   // The fixer must not be able to write the stamp the cap is counted from.
   const prompt = steps(parse(REUSABLE), "fix").find((s) => /claude-code-action/.test(s.uses ?? "")).with.prompt;
   assert.ok(!prompt.includes(ROUND_TRAILER),
@@ -504,7 +508,7 @@ test("the push job's commit and push run with hooks off — core.hooksPath and -
 // the other, so adding a model call to a job holding writes fails here rather than in the wild.
 // FLOW_PAT is a write (flow-0135): it can push and re-ready, so the job holding it is a writer.
 const MODEL_JOBS = ["fix", "card", "round-card"];
-const WRITER_JOBS = ["undraft", "push", "escalate-round", "escalate"];
+const WRITER_JOBS = ["push", "escalate-round", "escalate"];
 const CARD_POSTERS = ["escalate-round", "escalate"];
 const WRITE_SCOPES = ["write", "admin"];
 const writes = (perms) =>
@@ -536,7 +540,7 @@ test("the jobs that hold the write scopes run no model at all", { skip }, () => 
     "an empty or unexpected scan is a failure, not a pass");
   for (const name of found) {
     assert.ok(!runsAModel(wf.jobs[name]),
-      `${name} holds a write scope or FLOW_PAT, so it may not run a model — the undraft, the push, the card and the label are fixed shell over values that arrive through env: or a file`);
+      `${name} holds a write scope or FLOW_PAT, so it may not run a model — the push, the card and the label are fixed shell over values that arrive through env: or a file`);
   }
   // The model jobs hold neither.
   for (const name of MODEL_JOBS) assert.ok(!holdsPat(wf.jobs[name]), `${name} runs a model and references FLOW_PAT`);
@@ -713,18 +717,17 @@ test("a round that died part-way still escalates — the if: always() backstop",
   // The backstop is now a JOB, because posting the card needs `pull-requests: write` and the
   // job that ran the model must not have it. `always()` on the job is what makes it fire for
   // every exit, including the ones nobody predicted: a failed guard, a crashed action, a
-  // cancelled job, and — new with the split — an `undraft` that never succeeded, which skips
-  // `fix` and `push` entirely and leaves `needs.push.outputs.pushed` empty.
+  // cancelled job — any of which leaves `needs.push.outputs.pushed` empty.
   const job = wf.jobs["escalate-round"];
   assert.ok(job, "the dead-round backstop must be a job of its own");
   assert.match(job.if, /always\(\)/,
-    "a crashed or cancelled round must not leave a draft PR that nothing is watching");
+    "a crashed or cancelled round must not leave a PR that nothing is watching");
   assert.match(job.if, /needs\.push\.outputs\.pushed != 'true'/,
     "a round that pushed is not an escalation — the reviewers get it next");
   assert.match(job.if, /needs\.plan\.outputs\.action == 'dispatch'/,
     "and a run that never dispatched a round has nothing to escalate here");
-  assert.deepEqual(job.needs, ["plan", "push", "round-card"],
-    "it needs `push` for the verdict, `plan` for the PR and `round-card` for a dead round's four fields — and `needs` plus `always()` is what makes it run when any of them was skipped");
+  assert.deepEqual(job.needs, ["plan", "fix", "push", "round-card"],
+    "it needs `push` for the verdict, `plan` for the PR, `fix` for how the round ended (flow-0159) and `round-card` for a dead round's four fields — and `needs` plus `always()` is what makes it run when any of them was skipped");
   // Each guard's own sentence is what the card leads with, so the human is told WHICH check
   // fired. The sentences now cross a job boundary: guard -> the `verdict` step's output ->
   // the job output -> this job's env. Every link is asserted, because a broken one is silent.
@@ -764,7 +767,8 @@ test("a round that handed nothing back gets the read-only model call, not the fa
   assert.match(job.if, /needs\.push\.outputs\.pushed != 'true'/, "a round that pushed is not an escalation at all");
   assert.match(job.if, /needs\.push\.outputs\.handback_ok != 'true'/,
     "and a round that DID hand back describes itself; the model call is for the round that could not");
-  assert.deepEqual(job.needs, ["plan", "push"]);
+  assert.deepEqual(job.needs, ["plan", "fix", "push"],
+    "`fix` so the prompt can be told whether the round ran at all (flow-0159)");
 
   // `handback_ok` is the routing fact, and it is true only for a hand-back that parsed and named
   // an outcome the protocol knows. That keeps a guard-stopped round on its own four fields and
@@ -831,12 +835,119 @@ test("the card writer never checks out the PR's code and its model call cannot w
 test("the security escalation never routes through the fix job", { skip }, () => {
   const wf = parse(REUSABLE);
   assert.match(wf.jobs.fix.if, /action == 'dispatch'/);
-  assert.match(wf.jobs.undraft.if, /action == 'dispatch'/,
-    "the draft toggle is the round's first act, so it is fenced by the same decision");
   assert.match(wf.jobs.card.if, /action == 'escalate'/);
   assert.match(wf.jobs.escalate.if, /action == 'escalate'/);
   assert.ok(!/security/.test(wf.jobs.fix.if ?? ""),
     "the security fence is in `decide`, where it is unit-tested, and must not be duplicated as a second YAML condition that can disagree with it");
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════
+// flow-0159: no draft toggle, and a round that never ran is not narrated by a model
+// ═════════════════════════════════════════════════════════════════════════════════════════
+
+// The command lines of every `run:` script, comments dropped. A deny-list entry like
+// "Bash(gh pr ready:*)" lives in `with.claude_args`, not here: it forbids the command, it runs nothing.
+const runLines = (wf) => allRuns(wf).join("\n").split("\n").filter((l) => !l.trim().startsWith("#"));
+const draftToggles = (wf) => [
+  ...Object.keys(wf.jobs ?? {}).filter((n) => n === "undraft").map((n) => `job ${n}`),
+  ...runLines(wf).filter((l) => /\bgh pr ready\b|--undo\b/.test(l)).map((l) => l.trim()),
+];
+
+// `convertPullRequestToDraft` is refused to GITHUB_TOKEN, so the `undraft` job failed every round
+// since flow-0082 merged and `fix` never ran (CandidDan/write runs 39898027361 and 39901804031).
+test("flow-0159: there is no undraft job, and no step runs `gh pr ready` or `--undo`", { skip }, () => {
+  const wf = parse(REUSABLE);
+  assert.ok(Object.keys(wf.jobs).length >= 7 && runLines(wf).length > 50, "an empty scan is a failure, not a pass");
+  assert.deepEqual(draftToggles(wf), [],
+    "the round never toggles draft: GitHub refuses convertPullRequestToDraft to GITHUB_TOKEN, and since flow-0135 the round's one push gives one review anyway");
+  for (const [name, job] of Object.entries(wf.jobs)) {
+    assert.ok(![job.needs ?? []].flat().includes("undraft"), `${name} still needs the removed undraft job`);
+  }
+  // MUTATION: the pre-change layout — the toggle job, and the re-ready after the push — is reported.
+  const before = structuredClone(wf);
+  before.jobs.undraft = { needs: "plan", steps: [{ run: 'set -eu\ngh pr ready "$PR_NUMBER" --undo\n' }] };
+  steps(before, "push").find((st) => st.id === "stamp-and-push").run += 'gh pr ready "$PR_NUMBER"\n';
+  assert.deepEqual(draftToggles(before).sort(),
+    ["gh pr ready \"$PR_NUMBER\"", "gh pr ready \"$PR_NUMBER\" --undo", "job undraft"]);
+});
+
+test("flow-0159: `fix` needs only `plan`, and still runs only on the dispatch verdict", { skip }, () => {
+  const fix = parse(REUSABLE).jobs.fix;
+  assert.deepEqual([fix.needs].flat(), ["plan"], "nothing stands between the dispatch verdict and the round");
+  assert.match(fix.if, /needs\.plan\.outputs\.action == 'dispatch'/);
+  // `decide` still skips a PR that is ALREADY a draft — it is not asking for review. That is the
+  // helper's unit-tested rule, and the workflow still hands it the fact.
+  const decide = steps(parse(REUSABLE), "plan").find((st) => st.id === "decide");
+  assert.match(decide.run, /KICKBACK_DRAFT="\$\(jq -r \.isDraft/);
+});
+
+// The escalate-round step, run for real: real `jq`, real `base64`, the real card renderer through
+// canonical's adapter, and a `gh` stub that records what it was asked to do.
+function runEscalateRound({ fixResult, roundAmend = "", handback }) {
+  const dir = mkdtempSync(join(tmpdir(), "flow-kickback-escalate-"));
+  try {
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    mkdirSync(join(dir, "temp"));
+    writeFileSync(join(bin, "gh"), '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$GH_LOG"\n', { mode: 0o755 });
+    const step = steps(parse(REUSABLE), "escalate-round").find((st) => typeof st.run === "string" && st.run.includes("--add-label"));
+    const r = spawnSync("bash", ["-c", step.run], {
+      cwd: REPO, encoding: "utf8",
+      env: {
+        PATH: `${bin}:${process.env.PATH}`, HOME: dir, RUNNER_TEMP: join(dir, "temp"),
+        GITHUB_STEP_SUMMARY: join(dir, "summary.md"), GH_LOG: join(dir, "gh.log"),
+        PR_NUMBER: "182", KICKBACK_CHECK: "qa", KICKBACK_LINK: "https://example.test/run",
+        KICKBACK_ROUNDS_USED: "0", KICKBACK_CAP: "2", ROUND_AMEND: roundAmend, FIX_RESULT: fixResult,
+        HANDBACK_B64: handback ? Buffer.from(JSON.stringify(handback)).toString("base64") : "",
+      },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return { card: readFileSync(join(dir, "temp", "card.md"), "utf8"), gh: readFileSync(join(dir, "gh.log"), "utf8") };
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+// What `round-card` wrote for write PR #182, where nothing ran.
+const NARRATED = {
+  outcome: "disputed",
+  finding: "qa: criterion 3 has no proving test.",
+  tried: "The auto-fix round appears to have attempted a fix but handed nothing back.",
+  recommendation: { action: "kickback", change: "add a test for criterion 3" },
+  alternative: "merge as is, and criterion 3 ships unproven",
+};
+const triedOf = (card) => card.split("**Tried / disputed:** ")[1].split("\n\n")[0];
+
+test("flow-0159: a round whose `fix` was skipped or failed gets a Tried line written by shell, naming the job", { skip }, () => {
+  const wf = parse(REUSABLE);
+  // WHICH step sets it: the card-posting step of `escalate-round`, a job that runs no model, from
+  // GitHub's own record of how `fix` ended — never `round-card`'s model step.
+  const job = wf.jobs["escalate-round"];
+  assert.ok(!runsAModel(job), "the field is written by a job that runs no model");
+  assert.ok([job.needs].flat().includes("fix"), "needs.fix.result is unreadable from a job that does not need `fix`");
+  const post = steps(wf, "escalate-round").find((st) => typeof st.run === "string" && st.run.includes("--add-label"));
+  assert.equal(post.env.FIX_RESULT, "${{ needs.fix.result }}");
+  assert.equal(post.uses, undefined, "a shell step");
+  const model = steps(wf, "round-card").find((st) => /claude-code-action/.test(st.uses ?? ""));
+  assert.ok(!JSON.stringify(model.env ?? {}).includes("KICKBACK_AMEND"), "the model step does not write the card's amend");
+
+  for (const [result, how] of [["skipped", "was skipped"], ["failure", "failed"], ["cancelled", "was cancelled"]]) {
+    const { card, gh } = runEscalateRound({ fixResult: result, handback: NARRATED });
+    const tried = triedOf(card);
+    assert.equal(tried, `The \`fix\` job ${how}, so no fix was attempted and nothing was pushed.`,
+      `fix=${result}: the Tried field is the shell's sentence, and only that`);
+    assert.doesNotMatch(card, /appears to have attempted/, `fix=${result}: the model's narration of a fix that never ran is dropped`);
+    // The model may still write the recommendation.
+    assert.match(card, /kick back with: add a test for criterion 3/);
+    assert.ok(gh.indexOf("pr comment 182") < gh.indexOf("--add-label flow:needs-human"), "card first, then label");
+  }
+  // A dead round with no readable hand-back at all still names the job.
+  assert.match(triedOf(runEscalateRound({ fixResult: "failure" }).card), /^The `fix` job failed, so no fix was attempted/);
+
+  // CONTROL: when `fix` succeeded, the round's own account (or round-card's) is kept, after the guard's sentence.
+  const ran = runEscalateRound({ fixResult: "success", roundAmend: "The round DISPUTED the finding and changed no code for it.", handback: NARRATED });
+  assert.equal(triedOf(ran.card), `The round DISPUTED the finding and changed no code for it. ${NARRATED.tried}`);
+  // …and a `push` that died before its verdict says so by name, not "skipped, crashed or cancelled".
+  assert.match(triedOf(runEscalateRound({ fixResult: "success", handback: NARRATED }).card),
+    /^The `fix` job completed, but the `push` job ended without a verdict from its guards/);
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════
