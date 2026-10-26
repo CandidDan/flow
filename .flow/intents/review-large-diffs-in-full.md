@@ -30,8 +30,8 @@ part of the key migration, schema fixtures); the hand-written remainder is still
 skipping generated files alone does not bring it under the cap. The PR is being merged by owner
 override with a focused human read so the Light Club cutover holds.
 
-Every large, cross-cutting PR (a key migration, a rename, a codegen bump) can only reach `main` by
-owner override, so the change most likely to break the fleet is the one the reviewers never read.
+[assumption] While `review.max_diff_bytes` is a fixed cap, every large, cross-cutting PR (a key
+migration, a rename, a codegen bump) can only reach `main` by owner override, so the change most likely to break the fleet is the one the reviewers never read.
 G10 records the merge touchpoint as weaker than a green check looks; a review that fails on size
 rather than substance makes it weaker still.
 
