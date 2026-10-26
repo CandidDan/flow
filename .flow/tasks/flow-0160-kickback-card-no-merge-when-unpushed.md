@@ -22,6 +22,7 @@ touches: ["project-template/.flow/bin/flow-kickback.mjs", "project-template/.flo
 labels: [kickback, bug, workflows]
 notes:
   - "2026-10-26 (orchestrator): from Dan, after CandidDan/write#183. maintenance: fixes a defect in flow-0082/flow-0159's shipped card, the same precedent as flow-0157 and flow-0159."
+  - "2026-10-26 (worker): code, tests and fragment pushed on flow/flow-0160-no-merge-on-unpushed-round. Logic is recommendationFor/roundNotPushed in the template helper; escalate-round passes KICKBACK_ROUND_PUSHED/OUTCOME, push gains an `outcome` output (fixed|disputed|none) because round-card writes outcome: disputed into every dead-round hand-back. Only merge is rewritten; an existing kickback is left alone. Next: full gate, then open the PR."
 ---
 
 ## Context
