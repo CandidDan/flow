@@ -27,6 +27,7 @@ import {
   MERGE_LINE,
   MESSAGE_SEPARATOR,
   NEEDS_HUMAN_LABEL,
+  NOT_PUSHED_CHANGE,
   OUTCOME_DIR,
   OUTCOME_FILE,
   REVIEWABLE_STATUS,
@@ -43,6 +44,8 @@ import {
   isTestPath,
   parseAutoFixRounds,
   parseOutcome,
+  recommendationFor,
+  roundNotPushed,
   roundTrailer,
   runKickbackCli,
   trailerBlock,
@@ -557,6 +560,92 @@ test("a round with NO usable hand-back still shows the guard's own amend text on
   assert.match(silent, /\*\*Tried \/ disputed:\*\* not captured/);
 });
 
+// ── flow-0160: a round whose change was thrown away never recommends merging ─────────────────
+//
+// CandidDan/write#183: the round fixed the bug, `check-weakens` threw the commit away, and the
+// card still said "merge as is" — the hand-back was written before the guard ran and assumed its
+// commit would be pushed. Each of the four push-side guards' real sentences is asserted here.
+const PUSH_SIDE_AMENDS = Object.freeze({
+  "check-remote-head": "The remote branch moved during the round, so either the fixer pushed despite the limit or a human did. Nothing was pushed by this round.",
+  "check-bundle": "The round's commits did not arrive as a bundle based on this PR's recorded head (0123abc). Nothing was pushed.",
+  "check-weakens": "The round WEAKENED THE TESTS — it removed a test or an assertion. The change was thrown away, not pushed.",
+  "check-commits": "The round reported a fix and committed nothing, so the finding is still open.",
+});
+const MERGE_HANDBACK = Object.freeze({
+  outcome: "fixed",
+  finding: "qa: the parser drops the last line.",
+  tried: "Kept the last line and added a test for it.",
+  recommendation: { action: "merge" },
+  alternative: "kick back and rewrite the parser",
+});
+const recOf = (card) => card.split("**Recommendation:** ")[1].split("\n\n")[0];
+
+test("flow-0160: a merge hand-back whose push guard set an amend becomes a kickback saying the head is unchanged", () => {
+  for (const [guard, amend] of Object.entries(PUSH_SIDE_AMENDS)) {
+    const input = cardFromOutcome(MERGE_HANDBACK, {
+      amend, check: "qa", link: "https://x.test/1", rounds: 1, cap: 2, pushed: false, outcome: "fixed",
+    });
+    assert.equal(input.recommendation.action, "kickback", `${guard}: nothing was pushed, so merge is wrong`);
+    assert.equal(input.recommendation.change, NOT_PUSHED_CHANGE, `${guard}`);
+    const card = decisionCard(input);
+    assert.ok(card.startsWith(CARD_TITLE), `${guard}: still a full card, not the fallback`);
+    assert.equal(recOf(card), `kick back with: ${NOT_PUSHED_CHANGE}`, `${guard}`);
+    assert.match(recOf(card), /PR head is unchanged/, `${guard}: the card says the head did not move`);
+    assert.ok(!recOf(card).includes(MERGE_LINE), `${guard}: never "merge as is"`);
+    assert.ok(card.includes(amend), `${guard}: the guard's sentence still leads Tried`);
+    assert.ok(card.includes(`**Alternative:** ${MERGE_HANDBACK.alternative}`), `${guard}: the alternative is kept`);
+    // An amend alone is enough: `push` cannot have pushed past a guard that wrote one.
+    assert.equal(cardFromOutcome(MERGE_HANDBACK, { amend, pushed: true, outcome: "fixed" }).recommendation.action,
+      "kickback", `${guard}: an amend means nothing was pushed, whatever the flag says`);
+  }
+  // The fixer's own change text may follow the sentence, never as a merge.
+  const withChange = recommendationFor({ action: "merge", change: "then drop the trailing newline" },
+    { pushed: false, outcome: "fixed" });
+  assert.deepEqual(withChange, { action: "kickback", change: `${NOT_PUSHED_CHANGE} then drop the trailing newline` });
+  // A `push` that died with no amend at all (`pushed` false, nothing else known) is the same fact.
+  assert.equal(recommendationFor({ action: "merge" }, { pushed: false }).action, "kickback");
+  // A dead round described by `round-card` writes `"outcome": "disputed"` into the hand-back, but
+  // `push`'s own reading is what counts — `none` is not a dispute.
+  assert.equal(cardFromOutcome({ ...MERGE_HANDBACK, outcome: "disputed" }, { pushed: false, outcome: "none" })
+    .recommendation.action, "kickback");
+  // A kickback the fixer already recommended is left alone, and so is a recommendation the card
+  // must reject — the fallback card still says nothing was pushed.
+  const kick = { action: "kickback", change: "C" };
+  assert.equal(recommendationFor(kick, { pushed: false, outcome: "fixed" }), kick);
+  assert.equal(recommendationFor(undefined, { pushed: false }), undefined);
+  assert.equal(recommendationFor("merge", { pushed: false }), "merge");
+});
+
+test("flow-0160: a pushed round, and a card that describes no round, keep today's recommendation byte for byte", () => {
+  const today = decisionCard(cardFromOutcome(MERGE_HANDBACK, { check: "qa", link: "https://x.test/1", rounds: 1, cap: 2 }));
+  const pushed = decisionCard(cardFromOutcome(MERGE_HANDBACK, {
+    check: "qa", link: "https://x.test/1", rounds: 1, cap: 2, pushed: true, outcome: "fixed",
+  }));
+  assert.equal(pushed, today);
+  assert.equal(recOf(pushed), MERGE_LINE);
+  assert.equal(cardFromOutcome(MERGE_HANDBACK, { pushed: true, amend: "" }).recommendation, MERGE_HANDBACK.recommendation);
+  // `plan`'s own escalations carry their reason as the amend and describe no round: unchanged.
+  assert.equal(recOf(decisionCard(cardFromOutcome(MERGE_HANDBACK, { amend: "the security check failed" }))), MERGE_LINE);
+  assert.equal(roundNotPushed({ amend: "anything" }), false);
+  assert.equal(roundNotPushed({ pushed: null, amend: "anything" }), false);
+  assert.equal(roundNotPushed({ pushed: true }), false);
+  assert.equal(roundNotPushed({ pushed: false }), true);
+  assert.equal(roundNotPushed(), false);
+});
+
+test("flow-0160: a disputed round's recommendation is unchanged — it pushes nothing by design", () => {
+  const disputed = { ...MERGE_HANDBACK, outcome: "disputed", tried: "Nothing — the finding misreads the fixture." };
+  const amend = "The round DISPUTED the finding and changed no code for it.";
+  const today = decisionCard(cardFromOutcome(disputed, { amend, check: "qa", link: "https://x.test/1", rounds: 1, cap: 2 }));
+  const now = decisionCard(cardFromOutcome(disputed, {
+    amend, check: "qa", link: "https://x.test/1", rounds: 1, cap: 2, pushed: false, outcome: "disputed",
+  }));
+  assert.equal(now, today);
+  assert.equal(recOf(now), MERGE_LINE);
+  const kick = { action: "kickback", change: "C" };
+  assert.equal(recommendationFor(kick, { pushed: false, amend, outcome: "disputed" }), kick);
+});
+
 // ═════════════════════════════════════════════════════════════════════════════════════════
 // review.auto_fix_rounds, read from .flow/config.yml
 // ═════════════════════════════════════════════════════════════════════════════════════════
@@ -680,6 +769,21 @@ test("`card` renders from the hand-back file, and from nothing when the file is 
   assert.equal(runKickbackCli(["card", join(dir, "absent.json")], { stdout: missing.write, env }), 0);
   assert.ok(missing.text().startsWith(CARD_FALLBACK_TITLE),
     "a round that died before writing its hand-back still gets a card — the human is never left with a bare label");
+});
+
+test("flow-0160: `card` reads KICKBACK_ROUND_PUSHED / KICKBACK_ROUND_OUTCOME, and unset keeps today's card", () => {
+  const dir = withTmp();
+  const file = join(dir, OUTCOME_FILE);
+  writeFileSync(file, JSON.stringify(MERGE_HANDBACK));
+  const base = { KICKBACK_CHECK: "qa", KICKBACK_LINK: "https://x.test/9", KICKBACK_ROUNDS_USED: "1", KICKBACK_CAP: "2" };
+  const render = (env) => { const o = capture(); assert.equal(runKickbackCli(["card", file], { stdout: o.write, env }), 0); return o.text(); };
+
+  const thrownAway = render({ ...base, KICKBACK_AMEND: PUSH_SIDE_AMENDS["check-weakens"], KICKBACK_ROUND_PUSHED: "false", KICKBACK_ROUND_OUTCOME: "fixed" });
+  assert.equal(recOf(thrownAway), `kick back with: ${NOT_PUSHED_CHANGE}`);
+  assert.equal(recOf(render({ ...base, KICKBACK_ROUND_PUSHED: "true", KICKBACK_ROUND_OUTCOME: "fixed" })), MERGE_LINE);
+  assert.equal(recOf(render({ ...base, KICKBACK_AMEND: "The round DISPUTED the finding and changed no code for it.", KICKBACK_ROUND_PUSHED: "false", KICKBACK_ROUND_OUTCOME: "disputed" })), MERGE_LINE);
+  assert.equal(recOf(render({ ...base, KICKBACK_AMEND: "the security check failed" })), MERGE_LINE,
+    "`escalate` sets neither variable: no round ran, so there is no push to have missed");
 });
 
 test("an unknown subcommand exits 2 with a usage line rather than succeeding silently", () => {
