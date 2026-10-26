@@ -20,6 +20,8 @@ evidence: []
 
 — Dan, orchestrator chat, 2026-10-27.
 
+## Cost of inaction
+
 Evidence (not Dan's words): CandidDan/tanplan-platform PR #200 (tanplan-0171, the UUID key
 cutover) is 5.6 MB across 1,260 files. `review.max_diff_bytes` is 2 MB, so qa, code-review and
 security each read about 36% and failed on truncation alone, finding nothing High or Critical in
@@ -27,8 +29,6 @@ what they read. About 2.5 MB of the diff is generated (the Orval client, `api-zo
 part of the key migration, schema fixtures); the hand-written remainder is still about 3.2 MB, so
 skipping generated files alone does not bring it under the cap. The PR is being merged by owner
 override with a focused human read so the Light Club cutover holds.
-
-## Cost of inaction
 
 Every large, cross-cutting PR (a key migration, a rename, a codegen bump) can only reach `main` by
 owner override, so the change most likely to break the fleet is the one the reviewers never read.
@@ -46,17 +46,19 @@ the PR is green only when every part of it is.
 
 ## Constraints
 
-- "Skip generated files full stop" — Dan's own rule. [assumption] A file only counts as generated
-  when CI proves it: it is regenerated from its reviewed source and the result is identical, so
-  "generated" can never hide a hand edit. It fails closed: a file whose regeneration differs, or
-  whose regenerate command is missing or fails, is reviewed like any other file.
+- "Skip generated files full stop" — Dan's own rule.
+  - [assumption] A file only counts as generated when CI proves it: it is regenerated from its
+    reviewed source and the result is identical, so "generated" can never hide a hand edit. It
+    fails closed: a file whose regeneration differs, or whose regenerate command is missing or
+    fails, is reviewed like any other file.
 - [assumption] What counts as generated, and the command that regenerates it, are read from the
   base branch, never from the PR: a PR that changes either one gets every file they cover reviewed
   in full. Otherwise a PR could declare any file generated with a command that always succeeds.
 - [assumption] The regeneration runs in its own job with no secrets, no model key and read-only
   permissions, and hands the review jobs only a pass/fail list of paths.
-- "Review in chunks" — Dan's own shape. [assumption] Each chunk is reviewed in full within the
-  existing cap; one red chunk makes the check red.
+- "Review in chunks" — Dan's own shape.
+  - [assumption] Each chunk is reviewed in full within the existing cap; one red chunk makes the
+    check red.
 - [assumption] Adopting repos keep their per-repo config (`review.max_diff_bytes`,
   `review.security_paths`); the security check's conditional trigger still applies per chunk.
 - [assumption] Cost stays visible (G9): the run reports how many chunks it reviewed.
