@@ -1,12 +1,12 @@
 ---
 id: "flow-0160"
 title: "Never let a kickback card recommend merging a round whose change was thrown away"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker-flow-0160"
 created: "2026-10-26"
-started: ""
+started: "2026-10-26T03:39:23Z"
 branch: ""
 pr: ""
 issue: ""
