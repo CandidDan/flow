@@ -4,7 +4,7 @@ title: "The review checks read every line of a large PR, in chunks, and skip gen
 status: "proposed"
 created: "2026-10-27"
 source: "Dan, orchestrator chat, 2026-10-27 (TanPlan PR #200)"
-serves: ["G8", "G10"]
+serves: ["G8", "G9", "G10"]
 workstream: ""
 supersedes: ""
 approved_by: ""
@@ -48,7 +48,10 @@ the PR is green only when every part of it is.
 
 - "Skip generated files full stop" — Dan's own rule. [assumption] A file only counts as generated
   when CI proves it: it is regenerated from its reviewed source and the result is identical, so
-  "generated" can never hide a hand edit.
+  "generated" can never hide a hand edit. It fails closed: a file whose regeneration differs, or
+  whose regenerate command is missing or fails, is reviewed like any other file.
+- [assumption] The regenerate command comes from the PR branch's own config, so it runs with no
+  secrets and read-only permissions.
 - "Review in chunks" — Dan's own shape. [assumption] Each chunk is reviewed in full within the
   existing cap; one red chunk makes the check red.
 - [assumption] Adopting repos keep their per-repo config (`review.max_diff_bytes`,
@@ -60,5 +63,6 @@ the PR is green only when every part of it is.
 - How a repo declares its generated paths and the command that regenerates them (a `review:` key in
   `.flow/config.yml`, or something else).
 - How chunks are cut: by path group, by package, or by size alone.
+- How a chunked verdict is reported on the PR: one check summarising N chunks, or one check per chunk.
 - Whether code-review sees cross-chunk context (for example a signature change in one chunk and its
   callers in another).
