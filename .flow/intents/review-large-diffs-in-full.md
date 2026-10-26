@@ -26,12 +26,13 @@ Evidence (not Dan's words): CandidDan/tanplan-platform PR #200 (tanplan-0171, th
 cutover) is 5.6 MB across 1,260 files. `review.max_diff_bytes` is 2 MB, so qa, code-review and
 security each read about 36% and failed on truncation alone, finding nothing High or Critical in
 what they read. About 2.5 MB of the diff is generated (the Orval client, `api-zod`, the generated
-part of the key migration, schema fixtures); the hand-written remainder is still about 3.2 MB, so
+part of the key migration, schema fixtures); the hand-written remainder is still over 3 MB, so
 skipping generated files alone does not bring it under the cap. The PR is being merged by owner
 override with a focused human read so the Light Club cutover holds.
 
 [assumption] While `review.max_diff_bytes` is a fixed cap, every large, cross-cutting PR (a key
-migration, a rename, a codegen bump) can only reach `main` by owner override, so the change most likely to break the fleet is the one the reviewers never read.
+migration, a rename, a codegen bump) can only reach `main` by owner override, so the change most
+likely to break the fleet is the one the reviewers never read.
 G10 records the merge touchpoint as weaker than a green check looks; a review that fails on size
 rather than substance makes it weaker still.
 
@@ -40,9 +41,8 @@ not better.
 
 ## Outcome
 
-A PR of any size gets a real verdict from qa, code-review and security: every hand-written line is
-read by a reviewer, generated output is not re-read but is proven to match what generated it, and
-the PR is green only when every part of it is.
+A PR of any size gets a real verdict from qa, code-review and security instead of failing on size
+alone. Generated files are not re-read.
 
 ## Constraints
 
