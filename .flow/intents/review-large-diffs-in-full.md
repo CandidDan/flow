@@ -50,8 +50,11 @@ the PR is green only when every part of it is.
   when CI proves it: it is regenerated from its reviewed source and the result is identical, so
   "generated" can never hide a hand edit. It fails closed: a file whose regeneration differs, or
   whose regenerate command is missing or fails, is reviewed like any other file.
-- [assumption] The regenerate command comes from the PR branch's own config, so it runs with no
-  secrets and read-only permissions.
+- [assumption] What counts as generated, and the command that regenerates it, are read from the
+  base branch, never from the PR: a PR that changes either one gets every file they cover reviewed
+  in full. Otherwise a PR could declare any file generated with a command that always succeeds.
+- [assumption] The regeneration runs in its own job with no secrets, no model key and read-only
+  permissions, and hands the review jobs only a pass/fail list of paths.
 - "Review in chunks" — Dan's own shape. [assumption] Each chunk is reviewed in full within the
   existing cap; one red chunk makes the check red.
 - [assumption] Adopting repos keep their per-repo config (`review.max_diff_bytes`,
