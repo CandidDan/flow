@@ -6,6 +6,78 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 3.5.0 — 2026-10-26
+
+**MINOR: auto-fix works, and dead work has somewhere to go.** The kickback round's fix job runs
+again, after never having run since flow-0082 (flow-0159). A terminal `cancelled` status takes
+superseded work out of `blocked` (flow-0108). `flow-state --json` reports intents and
+workstreams with derived status (flow-0113), and flow-doctor checks workstreams (flow-0151). A
+sync pins the callers it copies to the ref it adopted from (flow-0158), and a worker no longer
+hands off an open decision (flow-0156).
+**Caller action:** run flow-sync. No caller grants, inputs or secrets change.
+
+- **A terminal `cancelled` status, so dead work stops squatting in `blocked`**
+  (`project-template/.flow/PROTOCOL.md`, `project-template/.flow/bin/flow-doctor.mjs`, flow-0108).
+  Work that will never ship — superseded, obsoleted, or deferred with no intent to return — can be
+  marked `status: cancelled` with a required `cancelled_reason`. It is hand-written by the
+  orchestrator only (from `ready` or `blocked`), terminal, and reversible only by a human editing
+  it back to `ready`. `pick-task` and `flow-recover` ignore it, `flow-doctor` fails a missing
+  reason and skips the `serves` check for it, `apply-board-edits` accepts it, and the board folds
+  it into the closed column. **Caller action:** run `flow-sync`; nothing else.
+
+- **`flow-state --json` reports intents and workstreams, each intent with a status derived from the tasks that name it**
+  (`project-template/.flow/bin/flow-state.mjs`, `project-template/.flow/PROTOCOL.md`, flow-0113).
+  New `schema` (starts at `1`), `intent_layer`, `workstreams[]` and `intents[]` fields; the pure
+  `buildIntentReport` and `deriveIntentStatus` are exported for inflight to import. Intent status
+  is derived, never stored. `flow-state <intent-id>` prints one intent with its tasks and PRs.
+  **Caller action:** none — the new JSON fields are additive and `schema` is new.
+
+- **flow-doctor warns when a workstream has no goal, too many goals, an unknown goal or status, or a
+  dangling dependency** (`project-template/.flow/bin/flow-doctor.mjs`, flow-0151). ADR-0009 §9.
+  **Caller action: none** — the warnings arrive with the next `flow-sync`, every one is a WARNING
+  (exit 0), and a repo with no `.flow/workstreams/` gets no finding at all.
+
+  `serves: []` (or no `serves`) warns "not tied to a goal"; three or more ids warn "probably two
+  workstreams". A `serves` id VISION.md does not declare warns, resolved exactly as an intent's is,
+  with `maintenance` reserved and no per-workstream finding when there is no VISION.md. A `status`
+  outside `active | done | retired` warns naming the three; an absent `status` is `active`. A bullet
+  under `## Dependencies` starting `workstream: <id>` that names no declared workstream warns naming
+  the file and the id.
+
+- **A worker checks the spec before asking a decision, and hands off no open decision** (`project-template/.flow/PROTOCOL.md`, flow-0156). Check the task, its notes, its intent and linked tasks first; record a found answer as a `notes` line. A PR is not opened for review with an open `decision` ask: make it `fyi`/`follow-up`, or block the task. **No caller action** — the protocol text arrives through flow-sync.
+
+- **A sync pins the callers it copies to the ref it adopted from** (`.github/workflows/_flow-sync.yml`,
+  `project-template/.flow/bin/flow-sync.mjs`, flow-0158). **No caller action.**
+
+  The template's callers are pinned `@v3`, and the copy loop used to deliver them verbatim, so a
+  repo synced at any other ref ran that ref's `.flow/bin/` against `@v3`'s reusables. On the 3.4.0
+  rollout the canary, synced at `v3.4.0`, got 3.4.0's callers passing `runner` (flow-0149) to the
+  3.3.2 reusables `v3` still pointed at, and every Flow workflow failed at startup. The loop now runs
+  `flow-sync.mjs pin-callers --file <caller> --ref "$CANONICAL_REF"` on each caller it copies,
+  rewriting only the `@<ref>` of live `uses:` lines naming a `/.github/workflows/_flow-*.yml`
+  reusable (any owner/repo). Commented-out lines, other actions and trailing comments are untouched;
+  a customised caller kept by the flow-0076 guard is not rewritten. A sync at `v3` changes nothing.
+  A sync at an explicit `canonical_ref` older than this change keeps the template's pins and
+  warns once (`Callers not pinned`) instead of aborting. A canary synced at `vX.Y.Z` now stays
+  pinned `@vX.Y.Z` until it is re-synced at `v3`.
+
+- **The auto-fix round runs again: the draft toggle is gone** (`.github/workflows/_flow-kickback.yml`,
+  flow-0159). **No caller action.** Callers' `permissions:` blocks may keep their grants unchanged:
+  `escalate-round` and `escalate` still need `pull-requests: write`.
+
+  Since flow-0082 shipped, no auto-fix round had ever run. The `undraft` job ran
+  `gh pr ready --undo` on `GITHUB_TOKEN`, which GitHub refuses (`convertPullRequestToDraft`:
+  "Resource not accessible by integration"), so `fix` and `push` were skipped and every round
+  escalated. The `undraft` job and `push`'s `gh pr ready` are removed rather than given FLOW_PAT:
+  since flow-0135 the round makes one push, so a non-draft PR is reviewed once, at the end of the
+  round, which is all the draft was for. FLOW_PAT still reaches exactly one job, `push`. A PR that
+  is already a draft is still skipped.
+
+  When `fix` was skipped, failed or was cancelled, the card's "Tried / disputed" line is now
+  written by `escalate-round`'s shell from `needs.fix.result` ("The `fix` job failed, so no fix was
+  attempted and nothing was pushed."), not by `round-card`'s model, which had narrated an attempt
+  that never happened.
+
 ## 3.4.0 — 2026-10-22
 
 **MINOR: the queue looks after itself.** A `blocked` task with machine-checkable `blocked_by`
