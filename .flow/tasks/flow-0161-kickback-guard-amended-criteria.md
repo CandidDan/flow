@@ -23,6 +23,7 @@ labels: [kickback, bug, workflows]
 notes:
   - "2026-10-26 (orchestrator): from Dan, after CandidDan/write#183. maintenance: the auto-fix round (flow-0082, flow-0159) cannot complete in a case Flow's own protocol creates, the same precedent as flow-0157 and flow-0159."
   - "2026-10-27 (worker): branch flow/flow-0161-kickback-guard-amended-criteria pushed. DONE: flow-kickback.mjs has criteriaSection/criteriaAmended/testLineBalance/guardDecision/disclosureComment and CLI `amended` + amended-aware `weakens` (KICKBACK_CRITERIA_AMENDED, KICKBACK_DISCLOSURE_FILE). NOT DONE: unit tests for them, _flow-kickback.yml wiring (plan computes criteria_amended via compare API merge base + contents API; push Check 3 passes it; new no-model `disclose` job posts the comment; fixer rule 3 sentence), workflow tests, docs, changes/flow-0161.md. NEXT: write the tests in flow-kickback.test.mjs."
+  - "2026-10-27 (worker): all code, tests, docs and changes/flow-0161.md are committed and pushed on flow/flow-0161-kickback-guard-amended-criteria. Design: plan computes criteria_amended (compare API merge base + contents API, both outside the PR head), push Check 3 keeps a replacement-only round and base64s the disclosure, new no-model `disclose` job (pull-requests: write) posts it. Per-file balance also forbids a net loss of assertions (stricter than the spec, deliberately). NEXT: run the full gate, rebase on main, open the PR."
 ---
 
 ## Context
