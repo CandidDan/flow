@@ -1,12 +1,12 @@
 ---
 id: "flow-0166"
 title: "Every setup-node step resolves the latest patch of its line, so a Node security release reaches the fleet the day it ships, not when the runner image refreshes"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude"
 created: "2026-10-27"
-started: ""
+started: "2026-10-27T04:29:06Z"
 branch: ""
 pr: ""
 issue: ""
