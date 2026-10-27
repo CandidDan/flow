@@ -25,6 +25,7 @@ touches:
 labels: [bug, workflows, status]
 notes:
   - "2026-10-27 (orchestrator): from Dan. Found when flow-0164's gate went red on a touches overlap with 0165 and 0166, both of which were really blocked but read in_progress on main."
+  - "2026-10-27 (worker claude[bot]): DONE. PR #244 is open and marked ready, on branch flow/flow-0169-draft-keeps-blocked. The draft arm of _flow-status.yml reads the frontmatter status, and a blocked task gets only branch+pr. 5 new tests in draft-pr-lifecycle.test.mjs; the two blocked tests fail with the fix reverted. Gate green. Next: review and merge #244. Known edge, not in scope: a block landing mid-run is caught by the per-field retry guard, which refuses the push, so branch/pr go unrecorded on that run."
 ---
 
 ## Context
