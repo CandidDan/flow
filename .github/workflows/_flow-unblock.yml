@@ -29,10 +29,11 @@ name: _flow-unblock (reusable)
 #
 # Credentials: GITHUB_TOKEN only, never FLOW_PAT. The release push uses the checkout credential;
 # the dispatch is `workflow_dispatch`, the documented exception to GITHUB_TOKEN-initiated events
-# not starting workflows. The caller grants `contents: write` (the release commit) and
-# `actions: write` (list the runner's runs, dispatch it) and nothing else. A PR-url entry is read
-# with `gh api repos/<owner>/<repo>/pulls/<n>`; where the token cannot read it, the lookup fails,
-# the entry resolves unknown, the task stays blocked and the run says so in a ::warning::.
+# not starting workflows. The caller grants `contents: write` (the release commit),
+# `actions: write` (list the runner's runs, dispatch it) and `pull-requests: read` (the blocked_by
+# PR lookup, flow-0163) and nothing else. A PR-url entry is read with
+# `gh api repos/<owner>/<repo>/pulls/<n>`; where the token cannot read it, the lookup fails, the
+# entry resolves unknown, the task stays blocked and the run says so in a ::warning::.
 
 on:
   workflow_call:
@@ -51,6 +52,7 @@ on:
 permissions:
   contents: write          # the release commit to main
   actions: write           # list the queue runner's runs, and dispatch it
+  pull-requests: read      # the blocked_by PR lookup (gh api repos/<owner>/<repo>/pulls/<n>)
 
 jobs:
   sweep:

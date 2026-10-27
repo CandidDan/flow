@@ -1132,7 +1132,7 @@ test("a 403 on dispatch is a ::warning:: naming actions: write, and the step sti
   } finally { rmSync(repo.root, { recursive: true, force: true }); }
 });
 
-test("both flow-unblock callers: three triggers, exactly contents+actions write, no secrets", { skip }, () => {
+test("both flow-unblock callers: three triggers, exactly contents+actions write + pull-requests read, no secrets", { skip }, () => {
   for (const [file, ref] of [[join(WORKFLOWS, "flow-unblock.yml"), "main"],
                              [join(REPO, "project-template", ".github", "workflows", "flow-unblock.yml"), "v3"]]) {
     const wf = yamlMod.parse(readFileSync(file, "utf8"));
@@ -1141,7 +1141,7 @@ test("both flow-unblock callers: three triggers, exactly contents+actions write,
     assert.ok("workflow_dispatch" in wf.on, `${file} must be dispatchable`);
     const jobs = Object.values(wf.jobs);
     assert.equal(jobs.length, 1, `${file} is a thin caller`);
-    assert.deepEqual(jobs[0].permissions, { contents: "write", actions: "write" }, file);
+    assert.deepEqual(jobs[0].permissions, { contents: "write", actions: "write", "pull-requests": "read" }, file);
     assert.equal(jobs[0].uses, `CandidDan/flow/.github/workflows/_flow-unblock.yml@${ref}`, file);
     assert.equal(jobs[0].secrets, undefined, `${file} forwards nothing — the reusable uses GITHUB_TOKEN only`);
   }
