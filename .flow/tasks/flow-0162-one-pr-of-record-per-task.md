@@ -1,14 +1,14 @@
 ---
 id: "flow-0162"
 title: "A task with an open PR keeps it: a second flow/<id>- branch gets no PR, and its PR events never rewrite or escalate the task"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "flow"
 owner: "claude"
 created: "2026-10-27"
 started: "2026-10-27T02:07:03Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0162-pr-of-record"
+pr: "https://github.com/CandidDan/flow/pull/238"
 issue: ""
 blocked_reason: ""
 cancelled_reason: ""
