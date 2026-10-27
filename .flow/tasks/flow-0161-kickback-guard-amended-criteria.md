@@ -1,7 +1,7 @@
 ---
 id: "flow-0161"
 title: "Let an auto-fix round replace an assertion its task's amended criterion made wrong, and disclose it instead of discarding the round"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-worker"
