@@ -1,14 +1,14 @@
 ---
 id: "flow-0165"
 title: "Remove the flightdeck and the watchdog from canonical: inflight is where state is viewed, and the watchdog has failed every day for a week"
-status: "blocked"
+status: "in_progress"
 priority: 3
 project: "flow"
 owner: "worker-flow-0165"
 created: "2026-10-27"
 started: "2026-10-27T04:26:22Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0165-remove-flightdeck"
+pr: "https://github.com/CandidDan/flow/pull/242"
 issue: ""
 blocked_reason: "Deleting flightdeck/ and flow-watchdog.yml breaks tests outside touches: action-pins.test.mjs (pins flow-watchdog.yml by name), adr-split-authoring.test.mjs (ADR-0005 path-existence and file-count checks), project-template/.flow/bin/source-roots.test.mjs (asserts canonical declares 4 source roots incl. flightdeck/; template is off-limits), release-assemble.test.mjs (re-runs changelog-aware tests). Orchestrator must widen touches."
 cancelled_reason: ""
