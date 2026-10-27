@@ -30,7 +30,7 @@ import { changelogEntry } from "./changelog-entry.mjs";
 import { NEEDS_HUMAN_LABEL, ROUND_TRAILER, HARD_MAX_ROUNDS } from "./flow-kickback.mjs";
 // Card text, read from the template rather than the adapter: the adapter re-exports a fixed list,
 // and the card renderer the workflow runs is the template's either way.
-import { MERGE_LINE, NOT_PUSHED_CHANGE } from "../../project-template/.flow/bin/flow-kickback.mjs";
+import { DISCLOSURE_TITLE, MERGE_LINE, NOT_PUSHED_CHANGE } from "../../project-template/.flow/bin/flow-kickback.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
@@ -1123,4 +1123,172 @@ test("the reusable invokes the adapter by the path every consuming repo has it a
     "a workflow canonical calls that invokes a helper canonical does not have dies at the first step");
   assert.match(text, /\.flow\/bin\/parse-task-id\.mjs/, "the id resolves the same way flow-status resolves it");
   assert.ok(existsSync(join(BIN, "parse-task-id.mjs")));
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════
+// flow-0161 — the amended-criteria exception: where the signal comes from, and the disclosure
+// ═════════════════════════════════════════════════════════════════════════════════════════
+
+const TEMPLATE_BIN = join(REPO, "project-template", ".flow", "bin");
+
+const taskText = (criterion) => [
+  "---", 'id: "write-0090"', 'status: "in_review"', "---", "",
+  "## Acceptance criteria", "", `- [ ] Given 8 tool rounds, ${criterion}.`, "",
+  "## Definition of done (inherited — do not edit)", "",
+].join("\n");
+
+// The `amended` step, run for real against a fake `gh` that logs every call it is given.
+function runAmendedStep({ baseText, defaultText, mergeBase = "b".repeat(40) }) {
+  const dir = mkdtempSync(join(tmpdir(), "flow-kickback-amended-"));
+  try {
+    const fakeBin = join(dir, "bin");
+    mkdirSync(fakeBin);
+    writeFileSync(join(fakeBin, "gh"), [
+      "#!/bin/sh",
+      'printf "%s\\n" "$*" >> "$GH_LOG"',
+      'case "$*" in',
+      '  *compare/*) printf "%s\\n" "$FAKE_MERGE_BASE" ;;',
+      '  *contents/*) cat "$FAKE_BASE_TEXT" ;;',
+      "esac",
+    ].join("\n"), { mode: 0o755 });
+    const baseFile = join(dir, "base.md");
+    const taskFile = join(dir, "task.md");
+    writeFileSync(baseFile, baseText);
+    writeFileSync(taskFile, defaultText);
+    const out = join(dir, "out.txt");
+    const log = join(dir, "gh.log");
+    writeFileSync(out, "");
+    writeFileSync(log, "");
+    const step = steps(parse(REUSABLE), "plan").find((s) => s.id === "amended");
+    const r = spawnSync("bash", ["-c", step.run], {
+      cwd: REPO, encoding: "utf8",
+      env: {
+        PATH: `${fakeBin}:${process.env.PATH}`, HOME: dir, RUNNER_TEMP: dir, GITHUB_OUTPUT: out,
+        GH_LOG: log, FAKE_MERGE_BASE: mergeBase, FAKE_BASE_TEXT: baseFile,
+        TASK_FILE: taskFile, GUARD_SHA: "a".repeat(40), HEAD_SHA: "c".repeat(40),
+      },
+    });
+    return { status: r.status, out: readFileSync(out, "utf8"), calls: readFileSync(log, "utf8").trim().split("\n") };
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+test("flow-0161 criterion 5: the amendment check reads the default branch and the merge base, never the PR head", { skip }, () => {
+  const wf = parse(REUSABLE);
+  const plan = steps(wf, "plan");
+  const step = plan.find((s) => s.id === "amended");
+  assert.ok(step, "plan must have an `amended` step");
+  assert.ok(!runsAModel(wf.jobs.plan), "the signal is computed in a job no model runs in");
+  assert.match(plan.find((s) => /actions\/checkout@/.test(s.uses ?? "")).with.ref, /default_branch/,
+    "the default-branch side is plan's own checkout");
+  assert.match(String(step.env.TASK_FILE), /steps\.facts\.outputs\.task_file/);
+  assert.match(String(step.env.GUARD_SHA), /steps\.pr\.outputs\.guard_sha/);
+  assert.match(step.run, /compare\/\$GUARD_SHA\.\.\.\$HEAD_SHA/, "the merge base of the PR head and the default branch");
+  assert.match(step.run, /contents\/\$TASK_FILE\?ref=\$merge_base/, "the base side is read AT the merge base");
+  assert.doesNotMatch(step.run, /ref=\$HEAD_SHA|ref=\$\{?HEAD/, "the PR head's copy of the task file is never read");
+  assert.match(step.run, /flow-kickback\.mjs amended "\$at_base" "\$TASK_FILE"/);
+  // Only `plan` runs the comparison; the fixer's job and the push job only ever READ its literal.
+  for (const [name, job] of Object.entries(wf.jobs)) {
+    if (name === "plan") continue;
+    assert.ok(!(job.steps ?? []).some((s) => /flow-kickback\.mjs amended/.test(s.run ?? "")), `${name} must not recompute it`);
+  }
+  assert.match(wf.jobs.plan.outputs.criteria_amended, /steps\.amended\.outputs\.amended == 'true' && 'true' \|\| 'false'/,
+    "normalised to one of two literals, because it is interpolated into the fixer's prompt");
+  const check3 = steps(wf, "push").find((s) => s.id === "check-weakens");
+  assert.match(String(check3.env.KICKBACK_CRITERIA_AMENDED), /needs\.plan\.outputs\.criteria_amended/,
+    "the guard takes the signal from plan, never from the fix job");
+
+  // Run for real: an amended criterion reads as amended, and the only ref ever fetched is the merge base.
+  const amended = runAmendedStep({ baseText: taskText("then no tools are declared"), defaultText: taskText("then tool_choice is none") });
+  assert.equal(amended.status, 0);
+  assert.match(amended.out, /amended<<FLOW_EOF\ntrue\nFLOW_EOF/);
+  assert.equal(amended.calls.length, 2, amended.calls.join("\n"));
+  assert.match(amended.calls[0], /compare\/a{40}\.\.\.c{40}/);
+  assert.match(amended.calls[1], /contents\/.*\?ref=b{40}/);
+  assert.ok(!amended.calls.some((c) => /ref=c{40}/.test(c)), "never the PR head");
+
+  const same = runAmendedStep({ baseText: taskText("then no tools are declared"), defaultText: taskText("then no tools are declared") });
+  assert.match(same.out, /amended<<FLOW_EOF\nfalse\nFLOW_EOF/);
+  const noBase = runAmendedStep({ baseText: taskText("x"), defaultText: taskText("y"), mergeBase: "" });
+  assert.equal(noBase.status, 0);
+  assert.match(noBase.out, /amended<<FLOW_EOF\nfalse\nFLOW_EOF/, "no merge base is no amendment");
+  assert.equal(noBase.calls.length, 1, "nothing is fetched without a merge base");
+});
+
+// Check 3, run for real: the round replaces one test and its assertion.
+function runWeakensCheck({ amended }) {
+  const dir = mkdtempSync(join(tmpdir(), "flow-kickback-weakens-"));
+  try {
+    const repo = join(dir, "repo");
+    const g = (...a) => execFileSync("git", ["-C", repo, ...a], { encoding: "utf8" }).trim();
+    mkdirSync(repo);
+    g("init", "-q");
+    g("config", "user.email", "t@example.com");
+    g("config", "user.name", "t");
+    writeFileSync(join(repo, "route.test.mjs"),
+      'test("at 8 rounds the route declares no tools", () => {\n  assert.equal(body(8).tools, undefined);\n});\n');
+    g("add", ".");
+    g("commit", "-q", "-m", "base");
+    const base = g("rev-parse", "HEAD");
+    writeFileSync(join(repo, "route.test.mjs"),
+      'test("at 8 rounds the route sends tool_choice none", () => {\n  assert.deepEqual(body(8).tool_choice, { type: "none" });\n});\n');
+    g("commit", "-q", "-am", "round");
+    const out = join(dir, "out.txt");
+    const summary = join(dir, "summary.md");
+    writeFileSync(out, "");
+    writeFileSync(summary, "");
+    const step = steps(parse(REUSABLE), "push").find((s) => s.id === "check-weakens");
+    const r = spawnSync("bash", ["-c", step.run], {
+      cwd: repo, encoding: "utf8",
+      env: {
+        PATH: process.env.PATH, HOME: dir, RUNNER_TEMP: dir, GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: summary,
+        BASE_SHA: base, KICKBACK_BIN: TEMPLATE_BIN, KICKBACK_CRITERIA_AMENDED: amended,
+        KICKBACK_ROUND: "1", KICKBACK_CAP: "2", KICKBACK_DISCLOSURE_FILE: join(dir, "disclosure.md"),
+      },
+    });
+    return { status: r.status, out: readFileSync(out, "utf8"), summary: readFileSync(summary, "utf8") };
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+test("flow-0161 criterion 5: a pushed round whose guard tripped posts the trips as a PR comment", { skip }, () => {
+  const kept = runWeakensCheck({ amended: "true" });
+  assert.equal(kept.status, 0, "the round is kept, so the push step runs");
+  const b64 = kept.out.match(/^disclosure=(\S+)$/m);
+  assert.ok(b64, "Check 3 hands the disclosure on as a base64 output");
+  const comment = Buffer.from(b64[1], "base64").toString("utf8");
+  assert.ok(comment.startsWith(DISCLOSURE_TITLE));
+  assert.match(comment, /route\.test\.mjs: removed a test declaration \(line 1\)/);
+  assert.match(comment, /route\.test\.mjs: removed an assertion \(line 2\)/);
+  assert.match(kept.summary, /pushed and disclosed/);
+
+  const discarded = runWeakensCheck({ amended: "false" });
+  assert.equal(discarded.status, 1, "not amended: discarded exactly as today");
+  assert.match(discarded.out, /^amend=The round WEAKENED THE TESTS/m);
+  assert.doesNotMatch(discarded.out, /^disclosure=/m);
+
+  const wf = parse(REUSABLE);
+  assert.match(wf.jobs.push.outputs.disclosure, /steps\.check-weakens\.outputs\.disclosure/);
+  const job = wf.jobs.disclose;
+  assert.ok(job, "a `disclose` job posts the comment");
+  assert.deepEqual(job.needs, ["plan", "push"]);
+  assert.match(job.if, /needs\.push\.outputs\.pushed == 'true'/, "only a round that was actually pushed");
+  assert.match(job.if, /needs\.push\.outputs\.disclosure != ''/);
+  assert.doesNotMatch(job.if, /always\(\)/);
+  assert.deepEqual(job.permissions, { "pull-requests": "write" }, "the comment, and nothing else");
+  assert.ok(!runsAModel(job) && !holdsPat(job), "it runs no model and holds no FLOW_PAT");
+  const post = job.steps.find((s) => /gh pr comment/.test(s.run ?? ""));
+  assert.match(String(post.env.DISCLOSURE_B64), /needs\.push\.outputs\.disclosure/);
+  assert.match(post.run, /base64 -d > "\$card"[\s\S]*gh pr comment "\$PR_NUMBER" --body-file "\$card"/,
+    "decoded into a file and posted from it — model-written test lines never become a shell word");
+});
+
+test("flow-0161 criterion 6: rule 3 permits replacing an assertion an amended criterion made wrong, and requires naming it in `tried`", { skip }, () => {
+  const prompt = steps(parse(REUSABLE), "fix")
+    .find((s) => /claude-code-action/.test(s.uses ?? "")).with.prompt;
+  const rule3 = prompt.slice(prompt.indexOf("3. NEVER WEAKEN A TEST"), prompt.indexOf("4. RUN THE GATE"));
+  assert.ok(rule3.length > 0);
+  assert.match(rule3, /acceptance criteria were amended after the PR opened, you MAY replace an assertion\s+the amendment made wrong/);
+  assert.match(rule3, /MUST name each assertion you replaced in your hand-back's\s+`tried`/);
+  assert.match(rule3, /still may not delete a test file, skip a test/, "the exception does not reach file deletion or skips");
+  assert.match(rule3, /were amended after the PR opened: \$\{\{ needs\.plan\.outputs\.criteria_amended \}\}/,
+    "the workflow tells the fixer whether the criteria were amended");
 });
