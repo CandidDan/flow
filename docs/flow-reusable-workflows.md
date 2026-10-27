@@ -193,14 +193,15 @@ every later step. A model step can plant a hook, an env var (`BASH_ENV`, `NODE_O
 guards in that job as well. So the round now crosses a job boundary as **data**:
 
 ```
-plan   (no model)  records head_sha + guard_sha
+plan   (no model)  records head_sha + guard_sha, and whether the task's criteria were amended
   │
 fix    (model)     commits ─▶ git bundle <head>..HEAD + outcome.json ─▶ artifact (1 day)
   │                           no FLOW_PAT, no write scope
 push   (no model)  fresh checkout of head_sha (persist-credentials: false)
                    ─▶ check 1 hand-back ─▶ check 2 remote head unmoved
                    ─▶ check 2b bundle: exactly one prerequisite, == head_sha; tip descends from it
-                   ─▶ check 3 tests not weakened (default-branch helper) ─▶ check 4 committed something
+                   ─▶ check 3 tests not weakened (default-branch helper; replacements kept and
+                      disclosed when plan saw the criteria amended) ─▶ check 4 committed something
                    ─▶ amend + push with FLOW_PAT, hooks off (core.hooksPath=/dev/null, --no-verify)
                       — that push is the PR's one `synchronize`, and it re-runs the reviewers
 ```
@@ -239,6 +240,7 @@ hold reads only, and the jobs that hold writes run no model:
 | `escalate-round` | pull requests, issues | no | posts the card and the label for a round that did not push |
 | `card` | **nothing** | **yes** | writes the card's four fields, read-only |
 | `escalate` | pull requests, issues | no | posts that card and the label |
+| `disclose` | pull requests | no | posts the replaced test lines of a round kept under amended criteria (flow-0161) |
 
 The model jobs get `contents: read` + `pull-requests: read` (+ `id-token: write`, which is OIDC
 minting and reaches nothing in the repo). `read` is what the fixer's prompt actually needs — it
@@ -272,6 +274,31 @@ read` is the jobs API, the only way to learn *which* review job failed, and it i
   `.skip` / `.only`. Adding tests and strengthening assertions is always allowed. The check is a
   line heuristic and deliberately errs towards escalating; a rewrite that really is stronger
   costs one tap on the card.
+
+  **One exception: the task's criteria were amended after the PR opened (flow-0161).** A human
+  ruling reaches the reviewers by amending the task's acceptance criteria on the default branch
+  (flow-0085). When the amendment reverses a criterion, the honest fix *replaces* the assertion
+  that proved the old wording — and a replaced assertion is a removed one, so every such round was
+  thrown away (CandidDan/write#183). So `plan` compares the task's `## Acceptance criteria` on the
+  default branch with the same section at the **merge base** of the PR head and the default
+  branch (`criteriaAmended`; checkbox state, whitespace and everything outside the section are not
+  amendments). Both commits are outside the fixer's reach — its prompt forbids editing the store
+  and the store-guard fails a PR that does — and the PR branch's copy of the task file, PR comments
+  and the hand-back are never read, so a difference means a person changed the contract. When the
+  criteria were amended:
+
+  | the round's diff | Check 3 |
+  |---|---|
+  | replaces declarations / assertions, no file ending with fewer of either | **pushed**, and the `disclose` job posts every trip — file, line, reason — as a headed PR comment straight after the push |
+  | deletes or renames a test file, adds a `.skip` / `.only` / `todo`, or leaves a file with fewer test declarations or assertions | discarded, as before |
+
+  When they were not amended, the guard behaves exactly as before. The fixer is told which case
+  it is in, and rule 3 requires it to name each replaced assertion in `tried`; the qa re-run,
+  judging against the amended criteria, is the backstop. A merge base that already contains the
+  amendment (the branch was updated from the default branch after it) reads as not amended, and
+  so does any failure to fetch either side — the exception has to be established, never assumed.
+  `plan` runs the repo's own `.flow/bin/flow-kickback.mjs`, so a repo whose helper predates
+  flow-0161 gets the unrelaxed guard until its next flow-sync.
 - **Push a round that disputed the finding, handed back nothing, or claimed a fix and changed
   nothing.** Each escalates instead. A dispute, and a round a later guard stopped, are described
   by the round's own hand-back — it is the only thing that knows what it tried. A round that
