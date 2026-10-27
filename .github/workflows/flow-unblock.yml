@@ -16,7 +16,8 @@ name: flow-unblock
 #
 # NOT gated on FLOW_AI (see the reusable's header). `actions: write` is for dispatching the queue
 # runner and listing its runs; a permissions block is exhaustive, so `contents: write` for the
-# release commit is listed too, and nothing else is granted. No secrets: the reusable uses
+# release commit and `pull-requests: read` for the blocked_by PR lookup are listed too, and nothing
+# else is granted. No secrets: the reusable uses
 # GITHUB_TOKEN only.
 
 on:
@@ -36,4 +37,5 @@ jobs:
     permissions:
       contents: write          # the release commit to main
       actions: write           # dispatch the queue runner, list its runs
+      pull-requests: read      # the blocked_by PR lookup, so a PR-url block releases on merge
     uses: CandidDan/flow/.github/workflows/_flow-unblock.yml@main
