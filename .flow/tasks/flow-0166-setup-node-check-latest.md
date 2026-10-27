@@ -1,14 +1,14 @@
 ---
 id: "flow-0166"
 title: "Every setup-node step resolves the latest patch of its line, so a Node security release reaches the fleet the day it ships, not when the runner image refreshes"
-status: "blocked"
+status: "in_progress"
 priority: 1
 project: "flow"
 owner: "claude"
 created: "2026-10-27"
 started: "2026-10-27T04:29:06Z"
 branch: "flow/flow-0166-setup-node-check-latest"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/243"
 issue: ""
 blocked_reason: "flow-0166 test fails on flow-watchdog.yml (unfixed setup-node, outside touches; flow-0165 deletes it). Decision: land after flow-0165, or add flow-watchdog.yml to touches. Branch flow/flow-0166-setup-node-check-latest is pushed with all else done; next: rebase after 0165 merges, rerun gate, open PR."
 cancelled_reason: ""
