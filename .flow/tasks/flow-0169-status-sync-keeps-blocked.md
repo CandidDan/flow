@@ -1,13 +1,13 @@
 ---
 id: "flow-0169"
 title: "A draft PR opening never moves a blocked task back to in_progress"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude[bot]"
 created: "2026-10-27"
-started: ""
-branch: ""
+started: "2026-10-27T06:47:00Z"
+branch: "flow/flow-0169-draft-keeps-blocked"
 pr: ""
 issue: ""
 blocked_reason: ""
