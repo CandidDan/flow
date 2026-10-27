@@ -22,6 +22,7 @@ touches: ["project-template/.flow/bin/flow-kickback.mjs", "project-template/.flo
 labels: [kickback, bug, workflows]
 notes:
   - "2026-10-26 (orchestrator): from Dan, after CandidDan/write#183. maintenance: the auto-fix round (flow-0082, flow-0159) cannot complete in a case Flow's own protocol creates, the same precedent as flow-0157 and flow-0159."
+  - "2026-10-27 (worker): branch flow/flow-0161-kickback-guard-amended-criteria pushed. DONE: flow-kickback.mjs has criteriaSection/criteriaAmended/testLineBalance/guardDecision/disclosureComment and CLI `amended` + amended-aware `weakens` (KICKBACK_CRITERIA_AMENDED, KICKBACK_DISCLOSURE_FILE). NOT DONE: unit tests for them, _flow-kickback.yml wiring (plan computes criteria_amended via compare API merge base + contents API; push Check 3 passes it; new no-model `disclose` job posts the comment; fixer rule 3 sentence), workflow tests, docs, changes/flow-0161.md. NEXT: write the tests in flow-kickback.test.mjs."
 ---
 
 ## Context
