@@ -1,12 +1,12 @@
 ---
 id: "flow-0163"
 title: "Let flow-unblock read pull requests, so a task blocked on a PR url is released when that PR merges"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-worker-opus"
 created: "2026-10-27"
-started: ""
+started: "2026-10-27T01:06:01Z"
 branch: "flow/flow-0163-unblock-pr-read"
 pr: "https://github.com/CandidDan/flow/pull/237"
 issue: ""
