@@ -111,7 +111,6 @@ project-template/     What a consuming repo gets: the protocol, .flow/ (config, 
 docs/                 Design decisions and operational runbooks — see below.
 docs/adr/             Architecture decision records. The reasoning, including what was
                       rejected and why.
-flightdeck/           Cross-project rollup: what needs you, across every repo at once.
 ```
 
 ## Documentation

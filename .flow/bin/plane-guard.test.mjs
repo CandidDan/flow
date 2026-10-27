@@ -53,6 +53,7 @@ import {
   parseGitLog,
   planIssueActions,
   renderIssueBody,
+  codeSpan,
   applyActions,
   ensureLabel,
   runPlaneGuard,
@@ -1179,21 +1180,21 @@ test("the workflow triggers on push to main and offers audit mode by dispatch", 
 });
 
 test("plane-guard is canonical-only: no reusable and no template caller", () => {
-  // Same asymmetry as flow-watchdog.yml, for the same reason: whether an adopting repo wants its
+  // Whether an adopting repo wants its
   // own `main` policed is that repo's decision, not one canonical makes by shipping a caller.
   for (const p of [".github/workflows/_flow-plane-guard.yml", "project-template/.github/workflows/plane-guard.yml"]) {
     assert.throws(() => readFileSync(join(REPO_ROOT, p)), /ENOENT/, `${p} must not exist`);
   }
 });
 
-test("the Markdown escaping is imported from watchdog.mjs, not reimplemented", () => {
-  // One implementation of a subtle CommonMark rule. Two would be two answers to one question, in
-  // the one place where a misrendered alert is a misleading alert.
+test("plane-guard imports nothing from flightdeck/ and codeSpan fences backticks", () => {
   const src = readFileSync(join(import.meta.dirname, "plane-guard.mjs"), "utf8");
-  assert.match(src, /import \{ codeSpan \} from "\.\.\/\.\.\/flightdeck\/bin\/watchdog\.mjs"/);
-  assert.doesNotMatch(src, /export function codeSpan/, "codeSpan must not be forked into this file");
+  assert.doesNotMatch(src, /flightdeck/, "no import from the removed flightdeck");
+  assert.equal(codeSpan("plain"), "`plain`");
+  assert.equal(codeSpan("a`b"), "``a`b``");
+  assert.equal(codeSpan("`c`"), "`` `c` ``");
+  assert.equal(codeSpan(""), "``");
 
-  // And it must actually hold: an author name carrying a backtick cannot escape its span.
   const body = renderIssueBody({ repo: "o/r", violation: { sha: "a".repeat(40), author: "a`b", message: "`c`", offending: ["x.md"] }, now: 0 });
   assert.ok(body.includes("``a`b``"), "a backtick in the author name is fenced, not spilled into live Markdown");
 });

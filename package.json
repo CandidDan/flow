@@ -9,15 +9,14 @@
   "scripts": {
     "build": "node .flow/bin/check-workflows.mjs",
     "lint": "node .flow/bin/check-syntax.mjs",
-    "test": "node --test \".flow/bin/*.test.mjs\" \"project-template/.flow/bin/*.test.mjs\" \"flightdeck/bin/*.test.mjs\"",
+    "test": "node --test \".flow/bin/*.test.mjs\" \"project-template/.flow/bin/*.test.mjs\"",
     "coverage": "c8 npm test"
   },
   "c8": {
     "all": true,
     "include": [
       ".flow/bin/**/*.mjs",
-      "project-template/.flow/bin/**/*.mjs",
-      "flightdeck/bin/**/*.mjs"
+      "project-template/.flow/bin/**/*.mjs"
     ],
     "exclude": [
       "**/*.test.mjs"

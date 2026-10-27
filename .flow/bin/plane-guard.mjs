@@ -38,7 +38,7 @@
 // Squash, merge-commit and rebase merges leave three different shapes in history, which is why the
 // rule is phrased in terms of pull requests at all rather than as a property of the parents.
 //
-// IO IS INJECTED, in the same shape as `flightdeck/bin/watchdog.mjs`, so every decision branch
+// IO IS INJECTED, so every decision branch
 // below is a table test with no network, no clock and no git of its own. The one real IO
 // implementation sits at the bottom and is never reached from a test.
 
@@ -46,13 +46,16 @@ import { realpathSync as __realpathSync } from "node:fs";
 import { fileURLToPath as __fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
-// Imported, not reimplemented. `codeSpan` encodes a subtle CommonMark rule — a span closes on the
-// first backtick RUN of matching length, so a fixed pair is not enough — and this file writes
-// commit subjects and author names into a Markdown issue body, both of which are supplied by
-// whoever pushed. Two implementations of that rule is two answers to one question, in the one
-// place where a misrendered alert is a misleading alert. See watchdog.mjs's header for the bug
-// that produced it. Importing it also cannot fire watchdog's CLI: that block is `__isMain`-guarded.
-import { codeSpan } from "../../flightdeck/bin/watchdog.mjs";
+// `codeSpan` encodes a subtle CommonMark rule — a span closes on the first backtick RUN of
+// matching length, so a fixed pair is not enough — and this file writes commit subjects and
+// author names into a Markdown issue body, both of which are supplied by whoever pushed.
+export function codeSpan(text) {
+  const s = String(text ?? "");
+  const runs = [...s.matchAll(/`+/g)].map((m) => m[0].length);
+  const fence = "`".repeat(Math.max(0, ...runs) + 1);
+  const pad = s.startsWith("`") || s.endsWith("`") ? " " : "";
+  return `${fence}${pad}${s}${pad}${fence}`;
+}
 
 // --- main-module detection (do not simplify back to a string compare) -------------------
 // `import.meta.url` is the RESOLVED realpath; `process.argv[1]` is the path AS INVOKED. Reached

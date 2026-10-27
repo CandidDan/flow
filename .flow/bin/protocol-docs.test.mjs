@@ -36,7 +36,7 @@ const doc = existsSync(CLAUDE_MD) ? readFileSync(CLAUDE_MD, "utf8") : "";
 const EXPECTED_ABSENT = [
   ".claude/agents",      // flow-0007 made the review gates PR checks — nothing to auto-discover
   ".flow/VERSION",       // canonical is the comparison target; root VERSION is the single source
-  ".flow/board.html",    // superseded by flightdeck/ for this repo (flow-0004)
+  ".flow/board.html",    // not kept in this repo (flow-0004)
 ];
 
 // Pull repo-relative paths out of inline code spans. Deliberately conservative: a token counts as
@@ -171,4 +171,8 @@ test("extractPaths ignores globs, placeholders and code — not just real paths"
   ].join("\n");
 
   assert.deepEqual(extractPaths(sample), [".flow/config.yml", "project-template/CLAUDE.md"]);
+});
+
+test("canonical's CLAUDE.md no longer mentions the removed flightdeck", () => {
+  assert.doesNotMatch(doc, /flightdeck/i);
 });

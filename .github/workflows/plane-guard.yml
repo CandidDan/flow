@@ -14,7 +14,7 @@ name: plane-guard
 # path restrictions — a repo-settings change, human-only, sitting directly on the path every
 # worker pushes through. Named as a follow-up in flow-0035's PR; deliberately not attempted here.
 #
-# CANONICAL-ONLY, LIKE flow-watchdog.yml. There is no `_flow-plane-guard.yml` reusable and no
+# CANONICAL-ONLY. There is no `_flow-plane-guard.yml` reusable and no
 # template caller, because whether an adopting repo wants its own `main` policed — and files
 # issues about it — is a decision for that repo, not one canonical gets to make by shipping a
 # caller. flow-0035 names the fleet-wide version as a separate task with its own argument.
@@ -71,8 +71,8 @@ jobs:
         with:
           node-version: 22
 
-      # No `npm ci`: plane-guard.mjs imports only `flightdeck/bin/watchdog.mjs` (for `codeSpan`),
-      # which is dependency-free by design. There is nothing to install and nothing to go stale.
+      # No `npm ci`: plane-guard.mjs imports only node built-ins.
+      # It is dependency-free by design. There is nothing to install and nothing to go stale.
 
       # Every value reaches the shell through `env:`, never interpolated into the `run:` script.
       # "Untrusted input reaching `run:` blocks" is a named item in this repo's own
