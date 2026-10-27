@@ -41,6 +41,20 @@ test("escalation step applies the same check before task-model escalate", () => 
   assert.match(step.slice(guard, guard + 200), /\[ "\$rc" = "3" \]; then exit 0/);
 });
 
+test("every workflow step that calls pr-of-record gives gh a token", () => {
+  for (const name of ["_flow-status.yml", "_flow-open-pr.yml"]) {
+    const s = wf(name);
+    const steps = s.split(/\n      - (?=name:|uses:)/).filter((st) => st.includes("node .flow/bin/pr-of-record.mjs"));
+    assert.ok(steps.length > 0, `${name} calls pr-of-record`);
+    for (const st of steps) {
+      const env = st.slice(0, st.indexOf("run: |"));
+      assert.match(env, /\n {10}GH_TOKEN: \$\{\{ github\.token \}\}/, `${name}: ${st.split("\n")[0]} sets GH_TOKEN`);
+    }
+  }
+  assert.equal(wf("_flow-status.yml").split(/\n      - (?=name:|uses:)/).filter((st) => st.includes("node .flow/bin/pr-of-record.mjs")).length, 2,
+    "both _flow-status.yml guard steps are checked");
+});
+
 test("open-pr passes --record-pr, read from origin/main by pr-of-record", () => {
   const s = wf("_flow-open-pr.yml");
   assert.match(s, /--record-pr "\$record_pr"/);

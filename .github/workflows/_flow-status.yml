@@ -53,6 +53,9 @@ jobs:
           PR_NUM:   ${{ github.event.pull_request.number }}
           # flow-0039. Present on every `pull_request` event, so draft state needs no API call.
           DRAFT:    ${{ github.event.pull_request.draft }}
+          # flow-0162: pr-of-record.mjs reads the record PR's state with `gh pr view`. Without a
+          # token gh fails, the helper falls back to no-record, and the guard never fires.
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Branch name first (canonical), PR title second (CAN-52 fallback for non-flow/ branches).
           # The job checks out `main`; the helper lives there once the repo adopts the template.
@@ -278,6 +281,7 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_NUM:   ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}   # flow-0162: pr-of-record.mjs's `gh pr view`, as above
         run: |
           if [ ! -f .flow/bin/task-model.mjs ] || [ ! -f .flow/bin/parse-task-id.mjs ]; then
             echo "No .flow/bin/task-model.mjs in this repo yet — no model escalation."
