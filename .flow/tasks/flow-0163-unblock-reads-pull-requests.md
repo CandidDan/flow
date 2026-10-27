@@ -1,7 +1,7 @@
 ---
 id: "flow-0163"
 title: "Let flow-unblock read pull requests, so a task blocked on a PR url is released when that PR merges"
-status: "in_progress"
+status: "blocked"
 priority: 1
 project: "flow"
 owner: "claude-worker-flow-0163"
@@ -10,7 +10,7 @@ started: "2026-10-27T00:34:15Z"
 branch: "flow/flow-0163-unblock-pr-read"
 pr: "https://github.com/CandidDan/flow/pull/237"
 issue: ""
-blocked_reason: ""
+blocked_reason: "`.flow/bin/adapters.test.mjs:1144` (outside touches) pins both flow-unblock callers to exactly `{ contents: write, actions: write }`, so adding `pull-requests: read` fails it. The task says block rather than widen; the orchestrator must add `.flow/bin/adapters.test.mjs` to touches. Not machine-checkable: it waits on a touches edit, not a task or PR."
 cancelled_reason: ""
 blocked_by: []
 serves: ["maintenance"]
@@ -28,6 +28,9 @@ touches:
 labels: [bug, workflows, unblock]
 notes:
   - "2026-10-27 (orchestrator): from Dan, after CandidDan/write run 40268705927. Dan ruled this ships as 3.5.1 (PATCH) via flow-sync, not v4: flow-sync now delivers callers to every repo (flow-0158), so a grant added to the template caller reaches the fleet without a manual caller edit. maintenance: restores flow-0041's shipped behaviour."
+  - "2026-10-27 (worker, opus): BLOCKED, everything else done. Branch flow/flow-0163-unblock-pr-read is pushed (no PR yet). Done on it: pull-requests: read with a comment in all three permissions blocks; new .flow/bin/unblock-pr-read-scope.test.mjs (5 tests, all green, covers criteria 1-4); docs/flow-reusable-workflows.md flow-unblock row; changes/flow-0163.md (caller action run flow-sync, 3.5.1 PATCH; changelog-fragments test green). Gate: build+lint green, npm test 2216 pass / 1 fail, the one being adapters.test.mjs:1144 'both flow-unblock callers: three triggers, exactly contents+actions write, no secrets', which deepEquals the grant to {contents: write, actions: write}. Coverage not yet run. NEXT ACTION once touches includes .flow/bin/adapters.test.mjs: check out the branch, rebase on main, change line 1144 to deepEqual { contents: 'write', actions: 'write', 'pull-requests': 'read' } and update the test title to say contents+actions write + pull-requests read, run all four gate commands, open the PR '[flow-0163] ...', gh pr ready."
+asks:
+  - "decision: widen touches to include .flow/bin/adapters.test.mjs? Its line 1144 pins the flow-unblock callers to exactly contents+actions write, so the grant cannot land without a one-line edit there. Recommend: yes, add it to touches and set the task back to ready; the edit just updates the pinned list, which the task's fifth criterion already allows."
 ---
 
 ## Context
