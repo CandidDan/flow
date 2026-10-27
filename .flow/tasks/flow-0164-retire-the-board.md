@@ -1,7 +1,7 @@
 ---
 id: "flow-0164"
 title: "Retire the board fleet-wide: no worker regenerates board.html, the board-builder skill is gone, and flow-sync deletes both downstream"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0164"
@@ -10,7 +10,7 @@ started: "2026-10-27T04:14:30Z"
 branch: "flow/flow-0164-retire-the-board"
 pr: "https://github.com/CandidDan/flow/pull/241"
 issue: ""
-blocked_reason: "Three board pins sit outside touches, and the spec says block rather than widen. (1) project-template/.flow/bin/apply-board-edits.mjs names the board file and the board-builder skill (header comment line 4, log line 175), so criterion 1 cannot pass; the task also says not to change that file. (2) .flow/bin/protocol-docs.test.mjs asserts that root .gitattributes still marks the board file, which contradicts scope item 5. (3) The same test asserts that every path canonical CLAUDE.md names exists, and CLAUDE.md line 84 names the deleted board-builder SKILL.md, but CLAUDE.md belongs to flow-0165. Not machine-checkable: an orchestrator ruling plus a touches edit on main."
+blocked_reason: ""
 cancelled_reason: ""
 blocked_by: []
 serves: ["maintenance"]
@@ -48,13 +48,16 @@ touches:
   - ".flow/bin/board-retired.test.mjs"
   - ".flow/bin/sync-*.test.mjs"
   - "changes/flow-0164.md"
+  - "project-template/.flow/bin/apply-board-edits.mjs"
+  - ".flow/bin/protocol-docs.test.mjs"
+  - "CLAUDE.md"
 labels: [template, protocol, sync, cost]
-asks:
-  - "decision: how to clear the three out-of-touches board pins? Recommend: widen touches on main to add project-template/.flow/bin/apply-board-edits.mjs (comment and log-line edits only; name, CLI and behaviour unchanged), .flow/bin/protocol-docs.test.mjs (drop the board line from the .gitattributes assertion) and CLAUDE.md (drop line 84 and line 104 now, rather than waiting for flow-0165). The alternative, carving apply-board-edits.mjs out of criterion 1, keeps a board-builder instruction in every adopter's store writer, which is the cost this task exists to remove."
+asks: []
 notes:
   - "2026-10-27 (orchestrator): Dan no longer uses the board. Measured cost: in the 30 days to 2026-10-27, workers committed .flow/board.html 112x in tanplan-platform, 81x in inflight, 54x in nudge, 18x in progress. Each is a session writing a whole HTML file. flow-0022 / flow-0023 had this premise but were parked as stale; this replaces them."
   - "2026-10-27T04:50Z (worker, opus): BLOCKED, with the work otherwise done. Branch flow/flow-0164-retire-the-board, pushed (2 commits); draft PR #241 opened by flow-open-pr, NOT marked ready. GENUINELY DONE: scope items 1-7. Deleted board-builder/ and board.html from the template. Removed the board from PROTOCOL.md (store paragraph, loop steps 2 and 8, What stays out), task-writer, AGENTS.md, INIT/README/RETROFIT, FLOW-handoff.html, settings.json $comment, both .gitattributes, template .gitignore, and the _flow-done and _flow-gates comments. flow-doctor no longer checks board drift (its test now asserts no board warning). flow-init writes no board and prepareBoard is gone; --repo stays REQUIRED but is now unused, see the fyi below. flow-review drops board-builder from CANONICAL_SKILLS (and from the SYNC_PR_PATHS pin). _flow-sync.yml has a literal two-entry RETIRED loop inside the copy region. New .flow/bin/board-retired.test.mjs covers the scan, the list pin, single-delete and no-variable checks, execution with both paths, with neither, and with a symlink, plus Removed in the PR body. changes/flow-0164.md is in place. Protocol-portability digests were updated for three sections. build and lint are green. ONLY LOOKS DONE: npm test has 4 failures, all from the blocker: board-retired scan (apply-board-edits.mjs), protocol-docs x2, and release-assemble, which only re-runs the protocol-docs ones. Coverage was not run. NEXT ACTION, once touches is widened: on the branch, reword apply-board-edits.mjs lines 4-5 and 175 without the forbidden strings; in protocol-docs.test.mjs drop the board.html line assertion and rename the test; remove CLAUDE.md lines 84-85 and 104. Then run all four gate commands, rebase, fill PR #241's body (checklist below), and run gh pr ready."
   - "2026-10-27 (worker): fyi for the PR: flow-init's --repo is now used only for validation. Removing the flag is a CLI change and out of scope. The first adopter sync PR that deletes .flow/board.html will be unclassified by flow-review (the path is not in SYNC_PR_PATHS), so it gets the full review. That is fail-closed and happens once."
+  - "2026-10-27 (Dan via orchestrator): decision: how to clear the three out-of-touches board pins? — answered: Accepted: widen touches to add project-template/.flow/bin/apply-board-edits.mjs (comment and log-line edits ONLY; name, CLI and behaviour unchanged), .flow/bin/protocol-docs.test.mjs and CLAUDE.md (drop the board-builder lines now; flow-0165 rebases onto this). Set ready to resume on the existing branch and PR #241."
 ---
 
 ## Context
