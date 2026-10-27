@@ -1,7 +1,7 @@
 ---
 id: "flow-0003"
 title: "Project the task store into a GitHub Project v2 board, written only by CI"
-status: "blocked"
+status: "cancelled"
 priority: 3
 project: "flow"
 owner: ""
@@ -10,7 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "TO CANCEL (Dan, 2026-10-13): premise stale (mission control left canonical per ADR-0006; inflight watchdog never written; 0003's second-person trigger not expected). Set status cancelled once flow-0108 lands. Any part still wanted gets a fresh task. Do not unblock."
+blocked_reason: ""
+cancelled_reason: "Premise stale (Dan, 2026-10-13); board and flightdeck retirement re-specified fresh as flow-0164 and flow-0165 (2026-10-27)."
 blocked_by: []
 serves: ["maintenance"]   # re-anchored 2026-09-23 from retired G5 (decision D1)
 touches: [".github/workflows/_flow-project-sync.yml", "project-template/.github/workflows/flow-project-sync.yml", "project-template/.flow/bin/project-sync.mjs", "project-template/.flow/bin/project-sync.test.mjs", "docs/adr/0002-flightdeck-projection-github-projects.md"]

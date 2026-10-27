@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0023"
 title: "Clear the retired board and flightdeck registry out of the runbooks and reference docs"
-status: "blocked"
+status: "cancelled"
 priority: 4
 project: "flow"
 owner: ""
@@ -11,7 +11,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "TO CANCEL (Dan, 2026-10-13): premise stale (mission control left canonical per ADR-0006; inflight watchdog never written; 0003's second-person trigger not expected). Set status cancelled once flow-0108 lands. Any part still wanted gets a fresh task. Do not unblock."
+blocked_reason: ""
+cancelled_reason: "Premise stale (Dan, 2026-10-13); board and flightdeck retirement re-specified fresh as flow-0164 and flow-0165 (2026-10-27)."
 blocked_by: []
 serves: ["maintenance"]   # re-anchored 2026-09-23 from retired G4 (decision D1)
 touches: ["CLAUDE.md", "project-template/INIT.md", "project-template/RETROFIT.md", "project-template/README.md", "project-template/.flow/PROTOCOL.md", "project-template/FLOW-handoff.html", "docs/flow-map.html", "docs/flow-infra-propagation-plan.md"]

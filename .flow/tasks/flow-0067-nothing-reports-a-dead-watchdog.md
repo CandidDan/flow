@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0067"
 title: "Nothing reports a dead watchdog — its liveness is self-attested, and a watchdog that stops running cannot file the issue saying so"
-status: "blocked"
+status: "cancelled"
 priority: 3
 project: "flow"
 owner: ""
@@ -11,7 +11,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "TO CANCEL (Dan, 2026-10-13): premise stale (mission control left canonical per ADR-0006; inflight watchdog never written; 0003's second-person trigger not expected). Set status cancelled once flow-0108 lands. Any part still wanted gets a fresh task. Do not unblock."
+blocked_reason: ""
+cancelled_reason: "Premise stale (Dan, 2026-10-13); board and flightdeck retirement re-specified fresh as flow-0164 and flow-0165 (2026-10-27)."
 blocked_by: []
 serves: ["maintenance"]
 touches:

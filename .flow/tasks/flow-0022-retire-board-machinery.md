@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0022"
 title: "Retire the board and the rendered flightdeck: delete the artefacts, the generators and the checks that maintain them"
-status: "blocked"
+status: "cancelled"
 priority: 3
 project: "flow"
 owner: ""
@@ -11,7 +11,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "TO CANCEL (Dan, 2026-10-13): premise stale (mission control left canonical per ADR-0006; inflight watchdog never written; 0003's second-person trigger not expected). Set status cancelled once flow-0108 lands. Any part still wanted gets a fresh task. Do not unblock."
+blocked_reason: ""
+cancelled_reason: "Premise stale (Dan, 2026-10-13); board and flightdeck retirement re-specified fresh as flow-0164 and flow-0165 (2026-10-27)."
 blocked_by: []
 serves: ["maintenance"]   # re-anchored 2026-09-23 from retired G4 (decision D1)
 touches: ["project-template/.flow/board.html", "project-template/.claude/skills/board-builder/SKILL.md", "project-template/.claude/settings.json", "project-template/.flow/bin/flow-doctor.mjs", "project-template/.flow/bin/flow-doctor.test.mjs", "project-template/.gitattributes", ".gitattributes", ".gitignore", ".flow/bin/protocol-docs.test.mjs", "flightdeck/bin/flightdeck-state.mjs", "flightdeck/bin/flightdeck-state.test.mjs", "flightdeck/projects.example.yml", "flightdeck/.claude/agents/portfolio-manager.md", "flightdeck/CLAUDE.md", "flightdeck/README.md", "changes/flow-0022.md"]

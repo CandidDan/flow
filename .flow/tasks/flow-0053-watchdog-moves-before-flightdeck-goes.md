@@ -1,7 +1,7 @@
 ---
 id: "flow-0053"
 title: "Move the watchdog off canonical before the flightdeck is deleted, and prove it runs where it lands"
-status: "blocked"
+status: "cancelled"
 priority: 2
 project: "flow"
 owner: "session_01Flow0053Worker"
@@ -10,7 +10,8 @@ started: "2026-09-28T04:05:54Z"
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "TO CANCEL (Dan, 2026-10-13): premise stale (mission control left canonical per ADR-0006; inflight watchdog never written; 0003's second-person trigger not expected). Set status cancelled once flow-0108 lands. Any part still wanted gets a fresh task. Do not unblock."
+blocked_reason: ""
+cancelled_reason: "Premise stale (Dan, 2026-10-13); board and flightdeck retirement re-specified fresh as flow-0164 and flow-0165 (2026-10-27)."
 blocked_by: []
 serves: ["maintenance"]
 touches:
