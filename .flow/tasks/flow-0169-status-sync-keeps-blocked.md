@@ -1,7 +1,7 @@
 ---
 id: "flow-0169"
 title: "A draft PR opening never moves a blocked task back to in_progress"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude[bot]"
