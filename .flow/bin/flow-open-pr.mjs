@@ -14,6 +14,7 @@
 import { realpathSync as __realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath as __fileURLToPath } from "node:url";
+import { ignoreLine } from "../../project-template/.flow/bin/pr-of-record.mjs";
 import { decideOpenPr, idFromBranch, readTaskTitle } from "../../project-template/.flow/bin/flow-open-pr.mjs";
 
 // --- main-module detection (do not simplify back to a string compare) -------------------
@@ -55,7 +56,12 @@ if (__isMain) {
   const id = flags.id || idFromBranch(branch);
   const taskTitle = id ? readTaskTitle(join(canonicalFlowDir(), "tasks"), id) : "";
 
-  const decision = decideOpenPr({ branch, baseBranch, hasOpenPr, aheadOfBase, taskTitle, id });
+  const recordPr = Number(flags["record-pr"] || 0) || null;
+
+  const decision = decideOpenPr({ branch, baseBranch, hasOpenPr, aheadOfBase, taskTitle, id, recordPr });
+  if (recordPr && !hasOpenPr && aheadOfBase && id) {
+    process.stderr.write(ignoreLine({ event: `push of ${branch}`, id, record: recordPr }) + "\n");
+  }
   if (decision) process.stdout.write(JSON.stringify(decision) + "\n");
   process.exit(0);
 }

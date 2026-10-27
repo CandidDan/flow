@@ -1,13 +1,13 @@
 ---
 id: "flow-0161"
 title: "Let an auto-fix round replace an assertion its task's amended criterion made wrong, and disclose it instead of discarding the round"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker"
 created: "2026-10-26"
-started: ""
-branch: ""
+started: "2026-10-27T02:50:04Z"
+branch: "flow/flow-0161-kickback-guard-amended-criteria"
 pr: ""
 issue: ""
 blocked_reason: ""
