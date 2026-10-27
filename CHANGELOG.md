@@ -8,9 +8,10 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## 3.5.1 — 2026-10-27
 
-**PATCH: two fixes the 3.5.0 rollout surfaced.** A task blocked on a PR url is now released when
+**PATCH: three fixes the 3.5.0 rollout surfaced.** A task blocked on a PR url is now released when
 that PR merges, because flow-unblock can read pull requests (flow-0163). A kickback card no longer
-recommends merging a round whose change a guard threw away (flow-0160).
+recommends merging a round whose change a guard threw away (flow-0160). A task with an open PR
+keeps it: a second `flow/<id>-` branch no longer gets its own PR or rewrites the task (flow-0162).
 **Caller action:** run flow-sync. It adds `pull-requests: read` to the `flow-unblock.yml` caller.
 Shipped as a PATCH by Dan's ruling (see flow-0163).
 
@@ -27,6 +28,8 @@ Shipped as a PATCH by Dan's ruling (see flow-0163).
   `merge` recommendation becomes a kickback that says the PR head is unchanged and the fix must be
   re-applied or the round re-run (`recommendationFor`). A genuine dispute, a pushed round, and
   `plan`'s own escalations render exactly as before.
+
+- **A task with an open PR keeps it** (`project-template/.flow/bin/pr-of-record.mjs`, `_flow-open-pr.yml`, `_flow-status.yml`, flow-0162). A task's PR of record is the open PR its `pr:` names on `main`; a push to a second `flow/<id>-` branch gets no PR, and PR events on any other PR no longer rewrite `branch`/`pr`/`status`, reset the task to `ready`, or escalate its model. **No caller action** — adopters get the adapter with the next `.flow/bin/` sync.
 
 - **flow-unblock can read pull requests, so a task blocked on a PR url is released when that PR
   merges** (`.github/workflows/_flow-unblock.yml`, `project-template/.github/workflows/flow-unblock.yml`,
