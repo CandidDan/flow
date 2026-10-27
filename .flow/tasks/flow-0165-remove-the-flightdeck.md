@@ -1,7 +1,7 @@
 ---
 id: "flow-0165"
 title: "Remove the flightdeck and the watchdog from canonical: inflight is where state is viewed, and the watchdog has failed every day for a week"
-status: "in_progress"
+status: "blocked"
 priority: 3
 project: "flow"
 owner: "worker-flow-0165"
@@ -10,11 +10,10 @@ started: "2026-10-27T04:26:22Z"
 branch: "flow/flow-0165-remove-flightdeck"
 pr: "https://github.com/CandidDan/flow/pull/242"
 issue: ""
-blocked_reason: "Deleting flightdeck/ and flow-watchdog.yml breaks tests outside touches: action-pins.test.mjs (pins flow-watchdog.yml by name), adr-split-authoring.test.mjs (ADR-0005 path-existence and file-count checks), project-template/.flow/bin/source-roots.test.mjs (asserts canonical declares 4 source roots incl. flightdeck/; template is off-limits), release-assemble.test.mjs (re-runs changelog-aware tests). Orchestrator must widen touches."
+blocked_reason: "Touches widened (Dan, 2026-10-27). Waits for flow-0164 (PR #241) to merge, then rebase flow/flow-0165-remove-flightdeck onto main, fix the 6 failing tests in the widened files, and mark #242 ready."
 cancelled_reason: ""
-blocked_by: []
-asks:
-  - "decision: widen touches to action-pins.test.mjs, adr-split-authoring.test.mjs, release-assemble.test.mjs and project-template/.flow/bin/source-roots.test.mjs (the last is published API, but only canonical-specific fixture expectations change)? Recommend: yes, widen; the deletion cannot go green otherwise"
+blocked_by: ["flow-0164"]
+asks: []
 serves: ["maintenance"]
 intent: ""
 model: "sonnet"
@@ -35,8 +34,13 @@ touches:
   - ".gitignore"
   - "CLAUDE.md"
   - "README.md"
+  - ".flow/bin/action-pins.test.mjs"
+  - ".flow/bin/adr-split-authoring.test.mjs"
+  - ".flow/bin/release-assemble.test.mjs"
+  - "project-template/.flow/bin/source-roots.test.mjs"
 labels: [canonical, cleanup, cost]
 notes:
+  - "2026-10-27 (orchestrator, Dan's answer): decision answered, touches widened to action-pins.test.mjs, adr-split-authoring.test.mjs, release-assemble.test.mjs and project-template/.flow/bin/source-roots.test.mjs (canonical-specific fixture expectations only). Blocked on flow-0164 so the two land in order; flow-unblock releases it when 0164 is done. Ships in 3.6.0."
   - "2026-10-27 (worker): branch flow/flow-0165-remove-flightdeck pushed with all in-scope work done (deletions, codeSpan inlined, config/package/CLAUDE/README/tests). Gate: build+lint green; npm test has 6 failures, all from the 4 out-of-touches files in blocked_reason (plus ADR-0006 path test in adr-mission-control.test.mjs, in touches, needs a filter for deleted paths). Next: once touches widened, fix those tests (drop flow-watchdog/flightdeck expectations; source-roots test: 3 roots), rerun coverage, open PR."
   - "2026-10-27 (orchestrator): Dan does not use the flightdeck. It runs no model, so the cost is not tokens: it is a daily 7-minute watchdog run that has failed 2026-10-24..26 and filed an automation-down issue on itself (#205), plus ~13 files of code and tests every gate run carries. inflight holds its own copies of liveness.mjs / mission-control.mjs and imports nothing from here (checked 2026-10-27)."
 ---
