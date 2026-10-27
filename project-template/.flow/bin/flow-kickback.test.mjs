@@ -21,6 +21,7 @@ import {
   CARD_FALLBACK_TITLE,
   CARD_MAX_CHARS,
   CARD_TITLE,
+  DISCLOSURE_MAX_LINE,
   DISCLOSURE_MAX_TRIPS,
   DISCLOSURE_TITLE,
   DISPATCH,
@@ -619,6 +620,9 @@ test("flow-0161: the disclosure comment is bounded, and says how many it left ou
   const comment = disclosureComment(many, { round: "2", cap: "2" });
   assert.equal((comment.match(/removed an assertion/g) ?? []).length, DISCLOSURE_MAX_TRIPS);
   assert.match(comment, /and 5 more/);
+  const long = disclosureComment([{ file: "x.test.mjs", at: 1, reason: "removed an assertion", line: "a".repeat(5000) }]);
+  assert.ok(!long.includes("a".repeat(DISCLOSURE_MAX_LINE)), "one model-written line cannot blow the bound");
+  assert.ok(long.includes(`${"a".repeat(DISCLOSURE_MAX_LINE - 1)}…`));
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════

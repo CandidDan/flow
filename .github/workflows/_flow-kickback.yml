@@ -145,6 +145,9 @@ jobs:
       guard_sha: ${{ steps.pr.outputs.guard_sha }}
       failed: ${{ steps.failed.outputs.checks }}
       link: ${{ steps.failed.outputs.link }}
+      # Whether the task's acceptance criteria were amended after the PR opened (flow-0161), as
+      # one of two literals — it reaches the fixer's prompt and the guard, so nothing else may.
+      criteria_amended: ${{ steps.amended.outputs.amended == 'true' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -228,6 +231,7 @@ jobs:
           title="$(jq -r .title "$RUNNER_TEMP/pr.json")"
           id="$(node .flow/bin/parse-task-id.mjs "$branch" "$title")"
           status=""
+          file=""
           if [ -n "$id" ]; then
             # The status on the DEFAULT branch — this checkout — never the PR's frozen snapshot.
             file="$(ls .flow/tasks/"$id"*.md 2>/dev/null | head -n1 || true)"
@@ -248,7 +252,41 @@ jobs:
           {
             echo "task_id=$id"
             echo "task_status=$status"
+            # The default-branch path of the task file, for the amendment check below.
+            echo "task_file=${file:-}"
           } >> "$GITHUB_OUTPUT"
+
+      # THE AMENDMENT SIGNAL (flow-0161), and why nothing the fixer controls can produce it. Both
+      # texts come from commits outside the PR branch: the task file on the DEFAULT branch (this
+      # checkout, at guard_sha) and the same file at the MERGE BASE of the PR head and guard_sha,
+      # read through the API. The PR branch's own copy of the task file is never read, and the
+      # fixer cannot edit the store on either side — its prompt forbids it, the store-guard fails
+      # it, and this job runs before any model does. So a difference means a human or the
+      # orchestrator changed the contract after the PR opened. Anything that fails here — no
+      # task file, no merge base, a 404, a consuming repo whose helper predates `amended` —
+      # leaves the output unset, which `criteria_amended` above reads as `false`: today's guard.
+      - name: Were the task's acceptance criteria amended since the PR opened
+        id: amended
+        if: ${{ steps.facts.outputs.task_file != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TASK_FILE: ${{ steps.facts.outputs.task_file }}
+          GUARD_SHA: ${{ steps.pr.outputs.guard_sha }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          set -eu
+          at_base="$RUNNER_TEMP/task-at-merge-base.md"
+          : > "$at_base"
+          merge_base="$(gh api "repos/{owner}/{repo}/compare/$GUARD_SHA...$HEAD_SHA" \
+            --jq '.merge_base_commit.sha // empty' 2>/dev/null || true)"
+          if [ -n "$merge_base" ]; then
+            gh api -H "Accept: application/vnd.github.raw" \
+              "repos/{owner}/{repo}/contents/$TASK_FILE?ref=$merge_base" > "$at_base" 2>/dev/null \
+              || : > "$at_base"
+          fi
+          node .flow/bin/flow-kickback.mjs amended "$at_base" "$TASK_FILE" \
+            || echo "::notice::the amendment check did not run, so the test-weakening guard applies unrelaxed"
 
       - name: Decide — dispatch, skip or escalate
         id: decide
@@ -279,12 +317,14 @@ jobs:
           CAP: ${{ steps.decide.outputs.cap }}
           FAILED: ${{ steps.failed.outputs.checks }}
           WARNING: ${{ steps.decide.outputs.warning }}
+          AMENDED: ${{ steps.amended.outputs.amended }}
         run: |
           {
             printf '### Flow auto-fix — %s\n\n' "${DECISION:-no decision}"
             printf -- '- Failing review checks: `%s`\n' "${FAILED:-none}"
             printf -- '- Round: %s of %s\n' "${ROUND:-?}" "${CAP:-?}"
             printf -- '- Reason: %s\n' "${REASON:-(the plan step did not complete)}"
+            printf -- '- Acceptance criteria amended since the PR opened: %s\n' "${AMENDED:-false}"
             if [ -n "${WARNING:-}" ]; then printf -- '- :warning: %s\n' "$WARNING"; fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -391,7 +431,13 @@ jobs:
                including by replacing a precise assertion with a vaguer one. The workflow checks
                your diff for exactly this before it pushes anything, and a round that trips the
                check is thrown away and handed to a human. If the honest fix really does require
-               changing an assertion, dispute instead.
+               changing an assertion, dispute instead — with one exception. When the task's
+               acceptance criteria were amended after the PR opened, you MAY replace an assertion
+               the amendment made wrong (remove it and add the one the amended criterion
+               requires), and you MUST name each assertion you replaced in your hand-back's
+               `tried`; you still may not delete a test file, skip a test, or leave a file with
+               fewer tests or assertions than it had. For this round, the task's acceptance
+               criteria were amended after the PR opened: ${{ needs.plan.outputs.criteria_amended }}.
             4. RUN THE GATE. Every command in `.flow/config.yml` — install, build, lint, test,
                coverage — and fix what they find. Never lower the coverage floor to go green.
             5. COMMIT, DO NOT PUSH. Commit your work to this branch with a clear message. Do NOT
@@ -528,6 +574,9 @@ jobs:
       # card a genuine dispute from a dead round, because `round-card` writes `"outcome":
       # "disputed"` into every hand-back it authors (flow-0160).
       outcome: ${{ steps.verdict.outputs.outcome }}
+      # The trips an amended criterion excused, base64, for `disclose` to post (flow-0161). Empty
+      # unless Check 3 kept a round it would otherwise have thrown away.
+      disclosure: ${{ steps.check-weakens.outputs.disclosure }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -645,18 +694,40 @@ jobs:
           git -c core.hooksPath=/dev/null checkout -q --detach "$tip"
           echo "tip=$tip" >> "$GITHUB_OUTPUT"
 
+      # THE AMENDED-CRITERIA EXCEPTION (flow-0161). `plan` — a job no model ran in — says
+      # whether the task's acceptance criteria on the default branch differ from its merge base.
+      # Only then does the guard keep a round whose every trip is a REPLACEMENT, and it keeps it
+      # in the open: the trips leave this job as a disclosure that `disclose` posts on the PR. A
+      # deleted, renamed or skipped test, or a file left with fewer tests or assertions, still
+      # discards the round, amended or not.
       - name: Check 3 — the round did not weaken the tests
         id: check-weakens
         env:
           BASE_SHA: ${{ needs.plan.outputs.head_sha }}
+          KICKBACK_CRITERIA_AMENDED: ${{ needs.plan.outputs.criteria_amended }}
+          KICKBACK_ROUND: ${{ needs.plan.outputs.round }}
+          KICKBACK_CAP: ${{ needs.plan.outputs.cap }}
+          KICKBACK_DISCLOSURE_FILE: ${{ runner.temp }}/disclosure.md
         run: |
           set -eu
           git diff "$BASE_SHA"..HEAD > "$RUNNER_TEMP/round.diff"
+          rm -f "$KICKBACK_DISCLOSURE_FILE"
           # No pipe into tee here, deliberately: a pipeline reports the LAST command's status, so
           # `node … | tee` would report tee's 0 and the guard would never trip.
           if node "$KICKBACK_BIN/flow-kickback.mjs" weakens "$RUNNER_TEMP/round.diff" \
                > "$RUNNER_TEMP/weakens.txt"; then
-            cat "$RUNNER_TEMP/weakens.txt" >> "$GITHUB_STEP_SUMMARY"
+            if [ -s "$KICKBACK_DISCLOSURE_FILE" ]; then
+              {
+                echo "### Flow auto-fix — the round replaced test lines the amended criteria made wrong, so it was pushed and disclosed"
+                echo '```'
+                cat "$RUNNER_TEMP/weakens.txt"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              # Base64, like the hand-back: every trip line is model-written test code.
+              printf 'disclosure=%s\n' "$(head -c 32768 "$KICKBACK_DISCLOSURE_FILE" | base64 -w0)" >> "$GITHUB_OUTPUT"
+            else
+              cat "$RUNNER_TEMP/weakens.txt" >> "$GITHUB_STEP_SUMMARY"
+            fi
           else
             {
               echo '### Flow auto-fix — the round weakened the tests, so nothing was pushed'
@@ -664,7 +735,11 @@ jobs:
               cat "$RUNNER_TEMP/weakens.txt"
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "amend=The round WEAKENED THE TESTS — it removed a test or an assertion. The change was thrown away, not pushed." >> "$GITHUB_OUTPUT"
+            if [ "$KICKBACK_CRITERIA_AMENDED" = "true" ]; then
+              echo "amend=The task's criteria were amended after the PR opened, but the round deleted, renamed or skipped a test, or removed more tests or assertions than it added. The change was thrown away, not pushed." >> "$GITHUB_OUTPUT"
+            else
+              echo "amend=The round WEAKENED THE TESTS — it removed a test or an assertion. The change was thrown away, not pushed." >> "$GITHUB_OUTPUT"
+            fi
             exit 1
           fi
 
@@ -759,6 +834,35 @@ jobs:
             fixed|disputed) printf 'handback_ok=true\noutcome=%s\n' "$OUTCOME" >> "$GITHUB_OUTPUT" ;;
             *)              printf 'handback_ok=false\noutcome=none\n' >> "$GITHUB_OUTPUT" ;;
           esac
+
+  # ── disclose ──────────────────────────────────────────────────────────────────────────
+  # A PUSHED ROUND THAT REPLACED TEST LINES SAYS SO, ON THE PR (flow-0161). When Check 3 kept a
+  # round only because the task's criteria were amended, every trip it excused is posted here as
+  # one headed comment, straight after the push and so ahead of the re-run reviews' verdicts. The
+  # qa re-run, judging against the amended criteria, is the backstop; this is what lets a human
+  # check the replacements without digging through the diff.
+  #
+  # No model, no checkout, no FLOW_PAT: it decodes a base64 job output into a file and hands the
+  # file to `gh`. `pull-requests: write` is the comment, and nothing here can label, push or merge.
+  disclose:
+    needs: [plan, push]
+    if: ${{ needs.push.outputs.pushed == 'true' && needs.push.outputs.disclosure != '' }}
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      pull-requests: write    # `gh pr comment` — the disclosure
+    steps:
+      - name: Disclose the replaced assertions on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.plan.outputs.pr }}
+          DISCLOSURE_B64: ${{ needs.push.outputs.disclosure }}
+        run: |
+          set -eu
+          card="$RUNNER_TEMP/disclosure.md"
+          printf '%s' "$DISCLOSURE_B64" | base64 -d > "$card"
+          gh pr comment "$PR_NUMBER" --body-file "$card"
+          cat "$card" >> "$GITHUB_STEP_SUMMARY"
 
   # ── round-card ─────────────────────────────────────────────────────────────────────────
   # THE DEAD ROUND'S CARD. A round that crashed, timed out, was cancelled, or simply never wrote

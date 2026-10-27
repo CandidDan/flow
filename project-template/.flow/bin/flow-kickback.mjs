@@ -395,12 +395,15 @@ export function guardDecision({ diff = "", amended = false } = {}) {
 
 export const DISCLOSURE_TITLE = "### ⚠️ Flow auto-fix replaced test assertions — this task's acceptance criteria were amended";
 export const DISCLOSURE_MAX_TRIPS = 50;
+export const DISCLOSURE_MAX_LINE = 300;
 
 // The PR comment a kept round posts. Every trip is listed — file, line and reason — inside a code
 // fence longer than any backtick run in the lines, because each line is model-written test code:
-// fenced, it can neither render as markup nor @-mention anyone.
+// fenced, it can neither render as markup nor @-mention anyone. Bounded at DISCLOSURE_MAX_TRIPS
+// trips of DISCLOSURE_MAX_LINE characters, so it always fits the job output that carries it.
 export function disclosureComment(trips = [], { round = "", cap = "" } = {}) {
-  const shown = trips.slice(0, DISCLOSURE_MAX_TRIPS);
+  const clip = (t) => (t.length > DISCLOSURE_MAX_LINE ? `${t.slice(0, DISCLOSURE_MAX_LINE - 1)}…` : t);
+  const shown = trips.slice(0, DISCLOSURE_MAX_TRIPS).map((o) => ({ ...o, line: clip(String(o.line ?? "")) }));
   const report = weakensReport(shown);
   const longest = Math.max(0, ...(report.match(/`+/g) ?? []).map((r) => r.length));
   const fence = "`".repeat(Math.max(3, longest + 1));

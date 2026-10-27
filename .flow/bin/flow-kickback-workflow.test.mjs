@@ -511,7 +511,7 @@ test("the push job's commit and push run with hooks off — core.hooksPath and -
 // the other, so adding a model call to a job holding writes fails here rather than in the wild.
 // FLOW_PAT is a write (flow-0135): it can push and re-ready, so the job holding it is a writer.
 const MODEL_JOBS = ["fix", "card", "round-card"];
-const WRITER_JOBS = ["push", "escalate-round", "escalate"];
+const WRITER_JOBS = ["push", "escalate-round", "escalate", "disclose"];
 const CARD_POSTERS = ["escalate-round", "escalate"];
 const WRITE_SCOPES = ["write", "admin"];
 const writes = (perms) =>
@@ -563,8 +563,10 @@ test("the model's hand-back crosses the job boundary as base64, never as raw tex
     assert.ok(wf.jobs[producer].outputs?.handback,
       `${producer} must expose the hand-back as a job output; there is no shared filesystem between jobs`);
   }
+  // The hand-back's encoders, not every base64 in those jobs: `push`'s Check 3 also base64s the
+  // flow-0161 disclosure, and is tested with it.
   const encoders = PRODUCERS.flatMap((j) => steps(wf, j))
-    .filter((st) => typeof st.run === "string" && /base64/.test(st.run));
+    .filter((st) => typeof st.run === "string" && /base64/.test(st.run) && st.id !== "check-weakens");
   assert.equal(encoders.length, PRODUCERS.length, "one encoder per producing job");
   for (const st of encoders) {
     assert.match(st.run, /base64 -w0/, "the hand-back is encoded, not echoed");
