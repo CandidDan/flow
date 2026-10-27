@@ -500,10 +500,37 @@ export function parseOutcome(text) {
   return { ok: true, reason: "", outcome, data };
 }
 
+// The change a card recommends when a round's own change never reached the PR (flow-0160).
+export const NOT_PUSHED_CHANGE =
+  "the PR head is unchanged — this round pushed nothing, so its fix must be re-applied or the round re-run.";
+
+// Did this round's change reach the PR? `pushed` is undefined when the card describes no round at
+// all (`plan` escalated before one ran), and that keeps today's behaviour. Otherwise a round that
+// did not push, or whose guard wrote an `amend`, left the PR head exactly where it was.
+export function roundNotPushed({ pushed, amend = "" } = {}) {
+  if (pushed === undefined || pushed === null) return false;
+  return pushed !== true || String(amend ?? "").trim() !== "";
+}
+
+// The fixer's hand-back was written BEFORE the guards ran, assuming its commit would be pushed —
+// so its "merge as is" is a recommendation to merge a head that still carries the finding.
+// When nothing was pushed, a `merge` becomes a kickback that says so, with the fixer's own change
+// text (if any) after it. A dispute is exempt: it pushes nothing by design, and its
+// recommendation is the fixer's judgement about the finding, not about a commit. `outcome` is the
+// PUSH job's reading of the round, never the hand-back's own field — `round-card` writes
+// `"outcome": "disputed"` for every dead round it describes.
+export function recommendationFor(rec, { pushed, amend = "", outcome = "" } = {}) {
+  if (!roundNotPushed({ pushed, amend }) || String(outcome ?? "").trim() === "disputed") return rec;
+  if (!rec || typeof rec !== "object" || String(rec.action ?? "").trim() !== "merge") return rec;
+  const own = String(rec.change ?? "").trim();
+  return { ...rec, action: "kickback", change: own ? `${NOT_PUSHED_CHANGE} ${own}` : NOT_PUSHED_CHANGE };
+}
+
 // Card input built from the round's own hand-back, amended with whatever stopped the round. The
 // worker's four fields are reused verbatim where they exist — it is the only thing that knows
 // what it tried — and `amend` is prefixed to `tried` so the guard's verdict is never buried.
-export function cardFromOutcome(data, { amend = "", check = "review", link = "", rounds = 0, cap = 0 } = {}) {
+// `pushed` and `outcome` describe the round's `push` job, and only `recommendationFor` reads them.
+export function cardFromOutcome(data, { amend = "", check = "review", link = "", rounds = 0, cap = 0, pushed, outcome = "" } = {}) {
   const d = data && typeof data === "object" && !Array.isArray(data) ? data : {};
   const tried = [amend, typeof d.tried === "string" ? d.tried.trim() : ""].filter(Boolean).join(" ");
   return {
@@ -513,7 +540,7 @@ export function cardFromOutcome(data, { amend = "", check = "review", link = "",
     cap,
     finding: typeof d.finding === "string" ? d.finding : "",
     tried,
-    recommendation: d.recommendation,
+    recommendation: recommendationFor(d.recommendation, { pushed, amend, outcome }),
     alternative: typeof d.alternative === "string" ? d.alternative : "",
   };
 }
@@ -526,7 +553,8 @@ export function cardFromOutcome(data, { amend = "", check = "review", link = "",
 //   decide    reads the gathered facts from the environment, writes the verdict to GITHUB_OUTPUT
 //   rounds    counts round trailers in a NUL-delimited commit-message file
 //   weakens   runs the test-weakening guard over a diff file; exit 1 when it trips
-//   card      renders the decision card from a hand-back file (or from nothing) to stdout
+//   card      renders the decision card from a hand-back file (or from nothing) to stdout;
+//             KICKBACK_ROUND_PUSHED / KICKBACK_ROUND_OUTCOME say whether a round's change landed
 
 export function runKickbackCli(argv, opts = {}) {
   const env = opts.env ?? process.env;
@@ -590,6 +618,10 @@ export function runKickbackCli(argv, opts = {}) {
       link: env.KICKBACK_LINK ?? "",
       rounds: Number(env.KICKBACK_ROUNDS_USED ?? 0),
       cap: Number(env.KICKBACK_CAP ?? 0),
+      // Unset means this card describes no round (`escalate`); set means `escalate-round` is
+      // telling us whether its round's change reached the PR.
+      pushed: env.KICKBACK_ROUND_PUSHED === undefined ? undefined : env.KICKBACK_ROUND_PUSHED === "true",
+      outcome: env.KICKBACK_ROUND_OUTCOME ?? "",
     })));
     return 0;
   }

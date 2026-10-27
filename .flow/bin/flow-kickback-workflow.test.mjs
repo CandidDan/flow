@@ -28,6 +28,9 @@ import { fileURLToPath } from "node:url";
 
 import { changelogEntry } from "./changelog-entry.mjs";
 import { NEEDS_HUMAN_LABEL, ROUND_TRAILER, HARD_MAX_ROUNDS } from "./flow-kickback.mjs";
+// Card text, read from the template rather than the adapter: the adapter re-exports a fixed list,
+// and the card renderer the workflow runs is the template's either way.
+import { MERGE_LINE, NOT_PUSHED_CHANGE } from "../../project-template/.flow/bin/flow-kickback.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
@@ -883,7 +886,7 @@ test("flow-0159: `fix` needs only `plan`, and still runs only on the dispatch ve
 
 // The escalate-round step, run for real: real `jq`, real `base64`, the real card renderer through
 // canonical's adapter, and a `gh` stub that records what it was asked to do.
-function runEscalateRound({ fixResult, roundAmend = "", handback }) {
+function runEscalateRound({ fixResult, roundAmend = "", handback, roundPushed = "", roundOutcome = "" }) {
   const dir = mkdtempSync(join(tmpdir(), "flow-kickback-escalate-"));
   try {
     const bin = join(dir, "bin");
@@ -898,6 +901,7 @@ function runEscalateRound({ fixResult, roundAmend = "", handback }) {
         GITHUB_STEP_SUMMARY: join(dir, "summary.md"), GH_LOG: join(dir, "gh.log"),
         PR_NUMBER: "182", KICKBACK_CHECK: "qa", KICKBACK_LINK: "https://example.test/run",
         KICKBACK_ROUNDS_USED: "0", KICKBACK_CAP: "2", ROUND_AMEND: roundAmend, FIX_RESULT: fixResult,
+        ROUND_PUSHED: roundPushed, ROUND_OUTCOME: roundOutcome,
         HANDBACK_B64: handback ? Buffer.from(JSON.stringify(handback)).toString("base64") : "",
       },
     });
@@ -948,6 +952,72 @@ test("flow-0159: a round whose `fix` was skipped or failed gets a Tried line wri
   // …and a `push` that died before its verdict says so by name, not "skipped, crashed or cancelled".
   assert.match(triedOf(runEscalateRound({ fixResult: "success", handback: NARRATED }).card),
     /^The `fix` job completed, but the `push` job ended without a verdict from its guards/);
+});
+
+// flow-0160: CandidDan/write#183 — `check-weakens` threw the round's fix away, and the card still
+// said "merge as is", because the hand-back was written before the guard ran.
+const PUSH_SIDE_GUARDS = ["check-remote-head", "check-bundle", "check-weakens", "check-commits"];
+const amendOf = (wf, id) => {
+  const step = steps(wf, "push").find((st) => st.id === id);
+  const m = step.run.match(/echo "amend=(.+)" >> "\$GITHUB_OUTPUT"/);
+  assert.ok(m, `${id} writes one amend sentence`);
+  return m[1];
+};
+const recOf = (card) => card.split("**Recommendation:** ")[1].split("\n\n")[0];
+
+test("flow-0160: escalate-round marks a round whose push guard set an amend as not pushed, and its card never says merge", { skip }, () => {
+  const wf = parse(REUSABLE);
+  // The wiring: `push`'s own record of whether it pushed, and its normalised reading of the round,
+  // reach the card-posting step through env: — not through an `if:` deciding anything.
+  assert.equal(wf.jobs.push.outputs.outcome, "${{ steps.verdict.outputs.outcome }}");
+  const post = steps(wf, "escalate-round").find((st) => typeof st.run === "string" && st.run.includes("--add-label"));
+  assert.equal(post.env.ROUND_PUSHED, "${{ needs.push.outputs.pushed }}");
+  assert.equal(post.env.ROUND_OUTCOME, "${{ needs.push.outputs.outcome }}");
+  assert.match(post.run, /export KICKBACK_ROUND_PUSHED="\$\{ROUND_PUSHED:-false\}"/,
+    "an empty `pushed` output is GitHub saying no push happened, and the renderer is told so explicitly");
+  assert.match(post.run, /export KICKBACK_ROUND_OUTCOME=/);
+  assert.ok(!/ROUND_PUSHED|ROUND_OUTCOME/.test(JSON.stringify(wf.jobs["escalate-round"].if ?? "")),
+    "the decision lives in flow-kickback.mjs, never in an if: expression");
+
+  const merge = {
+    outcome: "fixed", finding: "qa: the parser drops the last line.", tried: "Kept the last line.",
+    recommendation: { action: "merge" }, alternative: "kick back and rewrite the parser",
+  };
+  for (const id of PUSH_SIDE_GUARDS) {
+    const amend = amendOf(wf, id);
+    // As GitHub delivers it: `pushed` is empty, because stamp-and-push never ran.
+    const { card } = runEscalateRound({ fixResult: "success", roundAmend: amend, handback: merge, roundOutcome: "fixed" });
+    assert.equal(recOf(card), `kick back with: ${NOT_PUSHED_CHANGE}`, `${id}: the PR head did not move`);
+    assert.match(card, /PR head is unchanged/, id);
+    assert.ok(card.includes(amend), `${id}: Tried still leads with the guard's sentence`);
+    assert.ok(card.includes(merge.alternative), `${id}: the fixer's alternative is kept`);
+  }
+
+  // CONTROL: a genuine dispute keeps the fixer's recommendation, merge included.
+  const disputed = { ...merge, outcome: "disputed" };
+  const dispute = runEscalateRound({ fixResult: "success", roundAmend: "The round DISPUTED the finding and changed no code for it.",
+    handback: disputed, roundOutcome: "disputed" });
+  assert.equal(recOf(dispute.card), MERGE_LINE);
+  // …but a dead round `round-card` described, whose hand-back always says "disputed", is not one.
+  const dead = runEscalateRound({ fixResult: "success", handback: disputed, roundOutcome: "none" });
+  assert.equal(recOf(dead.card), `kick back with: ${NOT_PUSHED_CHANGE}`);
+});
+
+test("flow-0160: push's outcome output is one of three literals, never the hand-back's own text", { skip }, () => {
+  const verdict = steps(parse(REUSABLE), "push").find((st) => st.id === "verdict");
+  assert.equal(verdict.env.OUTCOME, "${{ steps.check-outcome.outputs.outcome }}");
+  for (const [given, want] of [["fixed", "fixed"], ["disputed", "disputed"], ["", "none"], ["merged\nhandback_ok=true", "none"]]) {
+    const dir = mkdtempSync(join(tmpdir(), "flow-kickback-verdict-"));
+    try {
+      const out = join(dir, "out");
+      const r = spawnSync("bash", ["-c", verdict.run], {
+        encoding: "utf8", env: { PATH: process.env.PATH, RUNNER_TEMP: dir, GITHUB_OUTPUT: out, OUTCOME: given },
+      });
+      assert.equal(r.status, 0, r.stderr);
+      const lines = readFileSync(out, "utf8").split("\n").filter((l) => l.startsWith("outcome="));
+      assert.deepEqual(lines, [`outcome=${want}`], JSON.stringify(given));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════
