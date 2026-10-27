@@ -21,6 +21,9 @@ import {
   CARD_FALLBACK_TITLE,
   CARD_MAX_CHARS,
   CARD_TITLE,
+  DISCLOSURE_MAX_LINE,
+  DISCLOSURE_MAX_TRIPS,
+  DISCLOSURE_TITLE,
   DISPATCH,
   ESCALATE,
   HARD_MAX_ROUNDS,
@@ -37,10 +40,14 @@ import {
   cardFooter,
   cardFromOutcome,
   countRounds,
+  criteriaAmended,
+  criteriaSection,
   decide,
   decisionCard,
+  disclosureComment,
   effectiveCap,
   fitFields,
+  guardDecision,
   isTestPath,
   parseAutoFixRounds,
   parseOutcome,
@@ -48,6 +55,7 @@ import {
   roundNotPushed,
   roundTrailer,
   runKickbackCli,
+  testLineBalance,
   trailerBlock,
   validateCard,
   weakensReport,
@@ -374,6 +382,247 @@ test("the test-file heuristic covers every convention the task names, and nothin
 test("an empty or absent diff is clean rather than a throw", () => {
   assert.deepEqual(weakensTests(""), []);
   assert.deepEqual(weakensTests(undefined), []);
+});
+
+test("each trip carries the line number it has in its own file — old file for a removal", () => {
+  const offenders = weakensTests(diff(
+    "diff --git a/x.test.mjs b/x.test.mjs",
+    "@@ -10,3 +10,3 @@",
+    " test(\"a\", () => {",
+    "-  assert.equal(a, 1);",
+    "+  assert.equal(a, 2);",
+    " });",
+  ));
+  assert.equal(offenders.length, 1);
+  assert.equal(offenders[0].at, 11);
+  assert.match(weakensReport(offenders), /x\.test\.mjs: removed an assertion \(line 11\) — assert\.equal\(a, 1\);/);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════
+// flow-0161 — the amended-criteria exception: criteriaAmended, guardDecision, disclosureComment
+// ═════════════════════════════════════════════════════════════════════════════════════════
+
+const taskFile = ({ status = "in_progress", notes = "first note", criterion = "then `tools` is undefined", ticked = false } = {}) => [
+  "---",
+  'id: "write-0090"',
+  `status: "${status}"`,
+  "notes:",
+  `  - "${notes}"`,
+  "---",
+  "",
+  "## Context",
+  "",
+  "Some context.",
+  "",
+  "## Acceptance criteria",
+  "",
+  `- [${ticked ? "x" : " "}] Given 8 tool rounds, when the route runs, ${criterion}.`,
+  "- [ ] Given a short reply, when it streams, then it renders.",
+  "",
+  "## Definition of done (inherited — do not edit)",
+  "",
+  "Every criterion has a proving test.",
+  "",
+].join("\n");
+
+test("flow-0161 criterion 1: a reworded criterion reads as amended", () => {
+  const base = taskFile();
+  const amended = taskFile({ criterion: "then the tools stay declared and `tool_choice` is `none`" });
+  assert.equal(criteriaAmended(base, amended), true);
+});
+
+test("flow-0161 criterion 1: texts that differ only outside the criteria section read as not amended", () => {
+  const base = taskFile();
+  assert.equal(criteriaAmended(base, taskFile({ status: "in_review" })), false, "status is not the contract");
+  assert.equal(criteriaAmended(base, taskFile({ notes: "a later note" })), false, "notes are not the contract");
+  assert.equal(criteriaAmended(base, base.replace("Some context.", "Rewritten context.")), false, "## Context is not the contract");
+  assert.equal(criteriaAmended(base, base.replace("Every criterion has a proving test.", "Changed.")), false,
+    "the next ## heading ends the section");
+  assert.equal(criteriaAmended(base, base), false);
+});
+
+test("flow-0161: whitespace, CRLF and a ticked checkbox are not amendments", () => {
+  const base = taskFile();
+  assert.equal(criteriaAmended(base, base.replace(/\n/g, "\r\n")), false);
+  assert.equal(criteriaAmended(base, base.replace("## Acceptance criteria\n", "## Acceptance criteria\n\n\n")), false);
+  assert.equal(criteriaAmended(base, base.replace("it renders.", "it renders.   ")), false);
+  assert.equal(criteriaAmended(base, taskFile({ ticked: true })), false);
+});
+
+test("flow-0161: a missing file or section on either side is never an amendment", () => {
+  const base = taskFile();
+  const noSection = base.replace("## Acceptance criteria", "## Something else");
+  assert.equal(criteriaSection(noSection), null);
+  assert.equal(criteriaAmended("", base), false, "absent at the merge base");
+  assert.equal(criteriaAmended(base, ""), false, "absent on the default branch");
+  assert.equal(criteriaAmended(noSection, base), false);
+  assert.equal(criteriaAmended(base, noSection), false);
+  assert.equal(criteriaAmended(undefined, undefined), false);
+});
+
+test("flow-0161: a heading-shaped line inside the frontmatter cannot pose as the section", () => {
+  const base = taskFile();
+  const posing = base.replace('  - "first note"', '  - "first note"\n## Acceptance criteria\n- [ ] anything');
+  assert.equal(criteriaSection(posing), criteriaSection(base));
+  assert.equal(criteriaAmended(base, posing), false);
+});
+
+// The write#183 shape: one test that asserted the old criterion replaced by one asserting the new.
+const REPLACEMENT = diff(
+  "diff --git a/src/route.mjs b/src/route.mjs",
+  "@@ -40,1 +40,1 @@",
+  "-  const tools = rounds >= 8 ? undefined : TOOLS;",
+  "+  const toolChoice = rounds >= 8 ? { type: \"none\" } : undefined;",
+  "diff --git a/src/route.test.mjs b/src/route.test.mjs",
+  "@@ -20,4 +20,4 @@",
+  "-test(\"at 8 rounds the route declares no tools\", () => {",
+  "-  assert.equal(body(8).tools, undefined);",
+  "+test(\"at 8 rounds the route keeps the tools and sends tool_choice none\", () => {",
+  "+  assert.deepEqual(body(8).tool_choice, { type: \"none\" });",
+  " });",
+);
+
+test("flow-0161 criterion 2: a replaced test and assertion, with the criteria amended, is kept and disclosed", () => {
+  const verdict = guardDecision({ diff: REPLACEMENT, amended: true });
+  assert.equal(verdict.discard, false, "the round is NOT discarded");
+  assert.deepEqual(verdict.disclose.map((o) => o.reason), ["removed a test declaration", "removed an assertion"]);
+  assert.ok(verdict.disclose.every((o) => o.file === "src/route.test.mjs"));
+  assert.deepEqual(verdict.disclose.map((o) => o.at), [20, 21], "each trip names its line");
+  assert.deepEqual(verdict.disclose, weakensTests(REPLACEMENT), "every trip is returned, none filtered out");
+  assert.match(verdict.reason, /amended/);
+});
+
+test("flow-0161 criterion 3: the same diff with the criteria NOT amended is discarded exactly as today", () => {
+  const verdict = guardDecision({ diff: REPLACEMENT, amended: false });
+  assert.equal(verdict.discard, true);
+  assert.deepEqual(verdict.offenders, weakensTests(REPLACEMENT));
+  assert.deepEqual(verdict.disclose, []);
+  // Only the boolean `true` relaxes the guard — never a string or a truthy-looking value.
+  for (const amended of ["true", 1, "yes", undefined, null]) {
+    assert.equal(guardDecision({ diff: REPLACEMENT, amended }).discard, true, `amended=${String(amended)}`);
+  }
+});
+
+test("flow-0161 criterion 4: a deleted test file is still discarded with the criteria amended", () => {
+  const deleted = diff(
+    "diff --git a/src/route.test.mjs b/src/route.test.mjs",
+    "deleted file mode 100644",
+    "--- a/src/route.test.mjs",
+    "+++ /dev/null",
+    "@@ -1,3 +0,0 @@",
+    "-test(\"at 8 rounds the route declares no tools\", () => {",
+    "-  assert.equal(body(8).tools, undefined);",
+    "-});",
+    "diff --git a/src/route2.test.mjs b/src/route2.test.mjs",
+    "@@ -1,0 +1,3 @@",
+    "+test(\"a replacement elsewhere\", () => {",
+    "+  assert.ok(true);",
+    "+});",
+  );
+  const verdict = guardDecision({ diff: deleted, amended: true });
+  assert.equal(verdict.discard, true);
+  assert.deepEqual(verdict.disclose, []);
+  assert.ok(verdict.offenders.some((o) => o.reason === "test file deleted"));
+});
+
+test("flow-0161 criterion 4: removing more test declarations than it adds is still discarded with the criteria amended", () => {
+  const netLoss = diff(
+    "diff --git a/src/route.test.mjs b/src/route.test.mjs",
+    "@@ -20,8 +20,4 @@",
+    "-test(\"at 8 rounds the route declares no tools\", () => {",
+    "-  assert.equal(body(8).tools, undefined);",
+    "-});",
+    "-test(\"at 9 rounds too\", () => {",
+    "-  assert.equal(body(9).tools, undefined);",
+    "+test(\"at 8 rounds the route sends tool_choice none\", () => {",
+    "+  assert.deepEqual(body(8).tool_choice, { type: \"none\" });",
+    "+  assert.deepEqual(body(9).tool_choice, { type: \"none\" });",
+    " });",
+  );
+  const verdict = guardDecision({ diff: netLoss, amended: true });
+  assert.equal(verdict.discard, true);
+  assert.deepEqual(verdict.disclose, []);
+  const loss = verdict.offenders.filter((o) => o.reason === "net loss of test declarations");
+  assert.equal(loss.length, 1);
+  assert.equal(loss[0].file, "src/route.test.mjs");
+  assert.match(loss[0].line, /2 removed, 1 added/);
+  assert.deepEqual(testLineBalance(netLoss), {
+    "src/route.test.mjs": { declRemoved: 2, declAdded: 1, assertRemoved: 2, assertAdded: 2 },
+  });
+});
+
+test("flow-0161: a net loss of assertions, an added skip, or a replacement in ANOTHER file is still discarded", () => {
+  const fewerAsserts = diff(
+    "diff --git a/x.test.mjs b/x.test.mjs",
+    "@@ -1,2 +1,1 @@",
+    "-  assert.equal(a, 1);",
+    "-  assert.equal(b, 2);",
+    "+  assert.equal(a, 3);",
+  );
+  assert.equal(guardDecision({ diff: fewerAsserts, amended: true }).discard, true);
+  assert.ok(guardDecision({ diff: fewerAsserts, amended: true }).offenders.some((o) => o.reason === "net loss of assertions"));
+
+  const skipped = diff(
+    "diff --git a/x.test.mjs b/x.test.mjs",
+    "@@ -1,1 +1,1 @@",
+    "-test(\"a\", () => {",
+    "+test.skip(\"a\", () => {",
+  );
+  assert.equal(guardDecision({ diff: skipped, amended: true }).discard, true);
+
+  const renamed = diff(
+    "diff --git a/x.test.mjs b/x.old.mjs",
+    "rename from x.test.mjs",
+    "rename to x.old.mjs",
+  );
+  assert.equal(guardDecision({ diff: renamed, amended: true }).discard, true);
+
+  const moved = diff(
+    "diff --git a/a.test.mjs b/a.test.mjs",
+    "@@ -1,1 +1,0 @@",
+    "-  assert.equal(a, 1);",
+    "diff --git a/b.test.mjs b/b.test.mjs",
+    "@@ -1,0 +1,1 @@",
+    "+  assert.equal(a, 2);",
+  );
+  assert.equal(guardDecision({ diff: moved, amended: true }).discard, true, "the balance is per file");
+});
+
+test("flow-0161: a clean diff is kept with nothing to disclose, amended or not", () => {
+  const clean = diff("diff --git a/src/x.mjs b/src/x.mjs", "@@ -1,1 +1,1 @@", "-const a = 1;", "+const a = 2;");
+  for (const amended of [true, false]) {
+    const verdict = guardDecision({ diff: clean, amended });
+    assert.equal(verdict.discard, false);
+    assert.deepEqual(verdict.disclose, []);
+  }
+  assert.equal(guardDecision().discard, false);
+});
+
+test("flow-0161: the disclosure comment lists every trip — file, line and reason — fenced so it cannot render or mention", () => {
+  const trips = weakensTests(REPLACEMENT);
+  const comment = disclosureComment(trips, { round: "1", cap: "2" });
+  assert.ok(comment.startsWith(DISCLOSURE_TITLE), "headed, so a reviewer sees it before the re-run");
+  assert.match(comment, /round 1 of 2/);
+  assert.match(comment, /amended/);
+  for (const t of trips) {
+    assert.ok(comment.includes(`${t.file}: ${t.reason} (line ${t.at}) — ${t.line}`), `${t.reason} is listed`);
+  }
+  // A trip line carrying backticks and an @-mention stays inside a longer fence.
+  const hostile = [{ file: "x.test.mjs", at: 3, reason: "removed an assertion", line: "assert.ok(```@someone```)" }];
+  const fenced = disclosureComment(hostile);
+  assert.ok(fenced.includes("````\n"), "the fence outgrows the longest backtick run");
+  assert.match(fenced, /round \? of \?/);
+});
+
+test("flow-0161: the disclosure comment is bounded, and says how many it left out", () => {
+  const many = Array.from({ length: DISCLOSURE_MAX_TRIPS + 5 }, (_, n) =>
+    ({ file: "x.test.mjs", at: n + 1, reason: "removed an assertion", line: `assert.equal(a, ${n});` }));
+  const comment = disclosureComment(many, { round: "2", cap: "2" });
+  assert.equal((comment.match(/removed an assertion/g) ?? []).length, DISCLOSURE_MAX_TRIPS);
+  assert.match(comment, /and 5 more/);
+  const long = disclosureComment([{ file: "x.test.mjs", at: 1, reason: "removed an assertion", line: "a".repeat(5000) }]);
+  assert.ok(!long.includes("a".repeat(DISCLOSURE_MAX_LINE)), "one model-written line cannot blow the bound");
+  assert.ok(long.includes(`${"a".repeat(DISCLOSURE_MAX_LINE - 1)}…`));
 });
 
 // ═════════════════════════════════════════════════════════════════════════════════════════
@@ -748,6 +997,59 @@ test("`weakens` exits 1 and names the offender on a weakening diff, 0 on a clean
   const go = capture();
   assert.equal(runKickbackCli(["weakens", good], { stdout: go.write, env: {} }), 0);
   assert.match(go.text(), /clean/);
+});
+
+test("flow-0161: `amended` writes amended=true|false to GITHUB_OUTPUT, and an unreadable side is false", () => {
+  const dir = withTmp();
+  const base = join(dir, "base.md");
+  const head = join(dir, "default.md");
+  const output = join(dir, "output.txt");
+  writeFileSync(base, taskFile());
+  writeFileSync(head, taskFile({ criterion: "then `tool_choice` is `none`" }));
+  writeFileSync(output, "");
+  const o = capture();
+  assert.equal(runKickbackCli(["amended", base, head], { stdout: o.write, env: { GITHUB_OUTPUT: output } }), 0);
+  assert.match(o.text(), /^amended/);
+  assert.match(readFileSync(output, "utf8"), /amended<<FLOW_EOF\ntrue\nFLOW_EOF/);
+
+  writeFileSync(output, "");
+  const n = capture();
+  assert.equal(runKickbackCli(["amended", join(dir, "absent.md"), head], { stdout: n.write, env: { GITHUB_OUTPUT: output } }), 0);
+  assert.match(n.text(), /^not amended/);
+  assert.match(readFileSync(output, "utf8"), /amended<<FLOW_EOF\nfalse\nFLOW_EOF/);
+  assert.equal(runKickbackCli(["amended"], { stdout: () => {}, env: {} }), 0, "no files at all is not an amendment, and not a crash");
+});
+
+test("flow-0161: `weakens` keeps a replacement only when KICKBACK_CRITERIA_AMENDED is the literal true, and writes the disclosure", () => {
+  const dir = withTmp();
+  const file = join(dir, "round.diff");
+  const disclosure = join(dir, "disclosure.md");
+  const output = join(dir, "output.txt");
+  writeFileSync(file, REPLACEMENT);
+
+  writeFileSync(output, "");
+  const kept = capture();
+  assert.equal(runKickbackCli(["weakens", file], { stdout: kept.write, env: {
+    KICKBACK_CRITERIA_AMENDED: "true", KICKBACK_DISCLOSURE_FILE: disclosure, KICKBACK_ROUND: "1", KICKBACK_CAP: "2", GITHUB_OUTPUT: output,
+  } }), 0);
+  assert.match(kept.text(), /removed a test declaration/, "the trips still reach the step summary");
+  assert.match(readFileSync(output, "utf8"), /disclose<<FLOW_EOF\ntrue\nFLOW_EOF/);
+  const body = readFileSync(disclosure, "utf8");
+  assert.ok(body.startsWith(DISCLOSURE_TITLE));
+  assert.match(body, /round 1 of 2/);
+  assert.match(body, /src\/route\.test\.mjs: removed an assertion \(line 21\)/);
+
+  for (const value of [undefined, "false", "TRUE", "1"]) {
+    writeFileSync(output, "");
+    const env = { KICKBACK_DISCLOSURE_FILE: join(dir, `never-${value}.md`), GITHUB_OUTPUT: output };
+    if (value !== undefined) env.KICKBACK_CRITERIA_AMENDED = value;
+    assert.equal(runKickbackCli(["weakens", file], { stdout: () => {}, env }), 1, `amended=${value} discards`);
+    assert.match(readFileSync(output, "utf8"), /disclose<<FLOW_EOF\nfalse\nFLOW_EOF/);
+    assert.throws(() => readFileSync(env.KICKBACK_DISCLOSURE_FILE), "a discarded round writes no disclosure");
+  }
+
+  // Kept without a disclosure path is still kept: the path is the workflow's to supply.
+  assert.equal(runKickbackCli(["weakens", file], { stdout: () => {}, env: { KICKBACK_CRITERIA_AMENDED: "true" } }), 0);
 });
 
 test("`card` renders from the hand-back file, and from nothing when the file is unreadable", () => {
