@@ -25,13 +25,10 @@ this session is instead acting as the **orchestrator** — turning a human's dir
 "Creating a task (orchestrator)" paragraph: read `.claude/skills/task-writer/SKILL.md` in full and
 follow it. That is not repeated here.
 
-Two companion skills the procedure itself calls out, which `PROTOCOL.md` does not point at with
-the same precision: `.claude/skills/vision-writer/SKILL.md` if the repo has no `VISION.md` yet
-(every task's `serves` needs one to resolve against — `PROTOCOL.md` never names this skill), and
-`.claude/skills/board-builder/SKILL.md` to regenerate `.flow/board.html` after writing or changing
-tasks (`PROTOCOL.md` names it but gives no path, relying on Claude Code's skill-name resolution —
-an agent that only follows the AGENTS.md convention has no such resolution). Read each in full
-before using it — they are short, load-bearing procedures, not references to skim.
+One companion skill the procedure itself calls out, which `PROTOCOL.md` never names:
+`.claude/skills/vision-writer/SKILL.md`, if the repo has no `VISION.md` yet (every task's `serves`
+needs one to resolve against). Read it in full before using it — it is a short, load-bearing
+procedure, not a reference to skim.
 
 One skill applies to every role: `.claude/skills/show-me/SKILL.md`, the formats behind
 `PROTOCOL.md`'s "show, don't tell" response rule. Read it before your first reply.

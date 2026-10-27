@@ -181,9 +181,6 @@ writing the problem in the first place.
   for the same reason. New tasks carry it; finished ones stay as they were.
 - Don't leave a real open decision inside a `ready` task. Decide it (or ask the human), then write it.
 
-After writing or changing tasks, regenerate the board with the **board-builder** skill so the
-human's view reflects the new state.
-
 ## This repo's additions
 
 If `LOCAL.md` exists beside this file, read it; it extends and overrides this skill for this repo.

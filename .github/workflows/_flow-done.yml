@@ -5,8 +5,8 @@ name: _flow-done (reusable)
 #
 # A task's `done` transition is owned by the merge, not the worker — the worker only ever
 # goes as far as `in_review`. When a flow/<id>-… PR merges into main, this flips the matching
-# task to `done` on main (the store's home) and commits it. Board regeneration is left to the
-# next board-builder run; the canonical state is correct immediately.
+# task to `done` on main (the store's home) and commits it; the canonical state is correct
+# immediately.
 #
 # The same merge is also the approval event for any intent it makes `approved` (ADR-0007), so a
 # second step stamps those intents' `approved_by` / `approved_at` from it (flow-0127).
