@@ -1,7 +1,7 @@
 ---
 id: "flow-0162"
 title: "A task with an open PR keeps it: a second flow/<id>- branch gets no PR, and its PR events never rewrite or escalate the task"
-status: "in_review"
+status: "done"
 priority: 3
 project: "flow"
 owner: "claude"
