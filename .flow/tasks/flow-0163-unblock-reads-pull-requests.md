@@ -1,7 +1,7 @@
 ---
 id: "flow-0163"
 title: "Let flow-unblock read pull requests, so a task blocked on a PR url is released when that PR merges"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-worker-opus"
