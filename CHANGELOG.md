@@ -6,6 +6,45 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 3.5.1 — 2026-10-27
+
+**PATCH: two fixes the 3.5.0 rollout surfaced.** A task blocked on a PR url is now released when
+that PR merges, because flow-unblock can read pull requests (flow-0163). A kickback card no longer
+recommends merging a round whose change a guard threw away (flow-0160).
+**Caller action:** run flow-sync. It adds `pull-requests: read` to the `flow-unblock.yml` caller.
+Shipped as a PATCH by Dan's ruling (see flow-0163).
+
+- **A kickback card no longer recommends merging a round whose change was thrown away**
+  (`project-template/.flow/bin/flow-kickback.mjs`, `.github/workflows/_flow-kickback.yml`,
+  flow-0160). **No caller action** — the fix rides the reusable workflow and the template helper;
+  callers' `flow-kickback.yml` and `permissions:` blocks are unchanged.
+
+  On CandidDan/write#183 the test-weakening guard threw the round's fix away, and the card still
+  said "merge as is": the fixer's hand-back was written before the guards ran and assumed its
+  commit would be pushed. `escalate-round` now tells the card renderer whether the round's change
+  reached the PR (`KICKBACK_ROUND_PUSHED`) and how `push` read the round (`KICKBACK_ROUND_OUTCOME`,
+  a new `push` job output normalised to `fixed`, `disputed` or `none`). When nothing was pushed, a
+  `merge` recommendation becomes a kickback that says the PR head is unchanged and the fix must be
+  re-applied or the round re-run (`recommendationFor`). A genuine dispute, a pushed round, and
+  `plan`'s own escalations render exactly as before.
+
+- **flow-unblock can read pull requests, so a task blocked on a PR url is released when that PR
+  merges** (`.github/workflows/_flow-unblock.yml`, `project-template/.github/workflows/flow-unblock.yml`,
+  `.github/workflows/flow-unblock.yml`, flow-0163). **Caller action: run flow-sync** — it delivers
+  the updated `flow-unblock.yml` caller, which adds `pull-requests: read` to the job's grant. No
+  repo edits a caller by hand.
+
+  Every PR-url `blocked_by` entry resolved `unknown` and waited for a human: the sweep reads each PR
+  with `gh api repos/<owner>/<repo>/pulls/<n>` on `GITHUB_TOKEN`, and no `permissions:` block in the
+  chain granted `pull-requests`, so the token could not read a PR in a private repo
+  (CandidDan/write run 40268705927). The grant is read-only, and goes to a job that runs no model
+  and reads only a PR's `.state` and `.merged`. `.flow/bin/unblock-pr-read-scope.test.mjs` fails,
+  naming the file, if any of the three blocks loses it, or if the sweep stops calling `pulls`.
+
+  Ships as **3.5.1 (PATCH)**, by Dan's ruling on 2026-10-27, although it changes a caller grant:
+  flow-sync now delivers callers to every repo (flow-0158), so the new grant reaches the fleet
+  without a manual caller edit, and the change restores the behaviour flow-0041 shipped in 3.4.0.
+
 ## 3.5.0 — 2026-10-26
 
 **MINOR: auto-fix works, and dead work has somewhere to go.** The kickback round's fix job runs
