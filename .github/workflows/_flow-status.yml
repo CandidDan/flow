@@ -64,6 +64,18 @@ jobs:
           fi
           if [ -z "$id" ]; then echo "No task id in branch '$HEAD_REF' or title '$PR_TITLE' — nothing to sync."; exit 0; fi
 
+          # flow-0162: a task that already has an OPEN PR of record ignores every other PR. `pr:` is
+          # read from origin/main (the checkout is `main`, refreshed here), never from a PR branch.
+          # Runs before any edit is written; a merge is flow-done's, so it is not checked here.
+          if [ "$ACTION" != "closed" ] || [ "$MERGED" != "true" ]; then
+            if [ -f .flow/bin/pr-of-record.mjs ]; then
+              git fetch -q origin main
+              rc=0
+              node .flow/bin/pr-of-record.mjs --id "$id" --event-pr "$PR_NUM" --event "$ACTION" || rc=$?
+              if [ "$rc" = "3" ]; then exit 0; fi
+            fi
+          fi
+
           # flow-0039: a DRAFT PR is not a hand-off. flow-open-pr fires on the first push, so a PR
           # existing says only "a branch was pushed" — it is `ready_for_review` that says the worker
           # is done. A draft therefore records `branch` + `pr` (genuinely new information, and
@@ -274,6 +286,14 @@ jobs:
           id="$(node .flow/bin/parse-task-id.mjs "$HEAD_REF" "$PR_TITLE" || true)"
           if [ -z "$id" ]; then echo "No task id — nothing to escalate."; exit 0; fi
           event="PR #$PR_NUM closed unmerged"
+          # flow-0162: same foreign-PR guard as the transition step — a stray PR closing must not
+          # escalate a task whose PR of record is still open.
+          if [ -f .flow/bin/pr-of-record.mjs ]; then
+            git fetch -q origin main
+            rc=0
+            node .flow/bin/pr-of-record.mjs --id "$id" --event-pr "$PR_NUM" --event closed || rc=$?
+            if [ "$rc" = "3" ]; then exit 0; fi
+          fi
           git config user.name  "flow-bot"
           git config user.email "flow-bot@users.noreply.github.com"
           attempt=1

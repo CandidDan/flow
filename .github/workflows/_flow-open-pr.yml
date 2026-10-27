@@ -121,9 +121,20 @@ jobs:
           has_open_pr="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
           echo "has_open_pr=$has_open_pr" >> "$GITHUB_OUTPUT"
 
+          # flow-0162: a task that already has an OPEN PR of record on another branch (its `pr:` on
+          # origin/main — never the checked-out branch's frozen copy) gets no second PR.
+          record_pr=""
+          if [ -f .flow/bin/pr-of-record.mjs ] && [ -f .flow/bin/parse-task-id.mjs ]; then
+            task_id="$(node .flow/bin/parse-task-id.mjs "$BRANCH" "" || true)"
+            if [ -n "$task_id" ]; then
+              record_pr="$(node .flow/bin/pr-of-record.mjs --id "$task_id" --event-pr 0 --json \
+                | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s||"{}");process.stdout.write(v.verdict==="foreign"?String(v.record):"")})' || true)"
+            fi
+          fi
+
           # Pure decision: opens only when the branch carries a task id, is ahead of base, and
           # has no open PR. Emits {id,title,head,base} JSON, or nothing.
-          decision="$(node .flow/bin/flow-open-pr.mjs --branch "$BRANCH" --base main --ahead "$ahead" --has-open-pr "$has_open_pr")"
+          decision="$(node .flow/bin/flow-open-pr.mjs --branch "$BRANCH" --base main --ahead "$ahead" --has-open-pr "$has_open_pr" --record-pr "$record_pr")"
           if [ -z "$decision" ]; then
             echo "No PR to open for '$BRANCH' (already open, not ahead of base, or no parseable id)."
             echo "open=0" >> "$GITHUB_OUTPUT"
