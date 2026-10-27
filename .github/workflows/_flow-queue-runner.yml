@@ -235,8 +235,11 @@ jobs:
           # of _flow-open-pr.yml for the full permission list. Unset, this falls back to
           # GITHUB_TOKEN and behaviour is exactly as before.
           token: ${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}
+      # check-latest (flow-0166): a major-line range alone takes the runner image's cached patch, which
+      # trailed Node's 2026-10-21 security release by days (CVE-2026-111497). Resolve the latest patch.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: 22
 
       - name: Choose the task to work

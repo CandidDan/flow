@@ -100,8 +100,11 @@ jobs:
         with:
           fetch-depth: 0          # need base + branch history for rev-list
 
+      # check-latest (flow-0166): a major-line range alone takes the runner image's cached patch, which
+      # trailed Node's 2026-10-21 security release by days (CVE-2026-111497). Resolve the latest patch.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: 22
 
       - name: Decide whether to open a PR

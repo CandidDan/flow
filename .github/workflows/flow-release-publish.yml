@@ -117,8 +117,11 @@ jobs:
           # the job, in a job that then runs `git push` at all.
           persist-credentials: false
 
+      # check-latest (flow-0166): a major-line range alone takes the runner image's cached patch, which
+      # trailed Node's 2026-10-21 security release by days (CVE-2026-111497). Resolve the latest patch.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: 22
 
       # A release named v1.3.0 that publishes a tree stamped 1.2.0 would put a pinned adopter
@@ -244,6 +247,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: 22
 
       # Invocation only, same division as the publish step. Every decision — which alias the
