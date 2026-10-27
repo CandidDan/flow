@@ -1,7 +1,7 @@
 ---
 id: "flow-0160"
 title: "Never let a kickback card recommend merging a round whose change was thrown away"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0160"
