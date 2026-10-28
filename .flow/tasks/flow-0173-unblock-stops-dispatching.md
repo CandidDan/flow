@@ -1,7 +1,7 @@
 ---
 id: "flow-0173"
 title: "flow-unblock releases blocked tasks and stops there: it no longer dispatches flow-queue-runner, because the worker routine's schedule picks up ready work"
-status: "in_review"
+status: "blocked"
 priority: 1
 project: "flow"
 owner: "claude-code:worker-flow-0173"
@@ -10,7 +10,7 @@ started: "2026-10-28T03:38:36Z"
 branch: "flow/flow-0173-unblock-stops-dispatching"
 pr: "https://github.com/CandidDan/flow/pull/254"
 issue: ""
-blocked_reason: ""
+blocked_reason: "PR #254 fails the gate on .flow/bin/protocol-portability.test.mjs (every protocol section survives the move byte-for-byte): the PROTOCOL.md wording change the task requires changes the Status lifecycle digest, and re-recording it needs that test file, which is not in touches. Not machine-checkable: a human must widen touches."
 cancelled_reason: ""
 blocked_by: []
 serves: ["G9"]
@@ -34,7 +34,9 @@ model_reason: "Changes a reusable workflow every adopting repo runs, and the pro
 notes:
   - "2026-10-28 worker: kept count-ready/count-active-runs/should-dispatch/dispatch-outcome in project-template/.flow/bin/flow-unblock.mjs. git grep shows canonical's adapter .flow/bin/flow-unblock.mjs (outside touches) re-exports shouldDispatch, countActiveRuns, httpStatusOf, dispatchOutcome by name, so removing them breaks its import. Their tests stay. A comment marks them unused."
   - "2026-10-28 worker: done on branch flow/flow-0173-unblock-stops-dispatching, PR https://github.com/CandidDan/flow/pull/254. Dispatch step removed; queue_runner_workflow declared and ignored; caller permissions untouched. Local gate: build, lint and coverage (97.46%) green. test has 5 failures that also fail on clean main (adapters flightdeck + flow-state --json, flow-init-downstream, release-assemble rerun). Next: CI and review checks, then the human merges."
+  - "2026-10-28 worker: CI gate red on protocol-portability.test.mjs (Status lifecycle digest). My local run had 6 failures, not 5, and I misread this one as known. Blocked until touches is widened. Next action: on branch flow/flow-0173-unblock-stops-dispatching, update the Status lifecycle entry in INTENTIONAL_DIVERGENCES (digest = sha256 of the new section body, task flow-0173, why = the released task is picked up by the next worker run instead of flow-unblock starting it), push, confirm the gate goes green."
 asks:
+  - "decision: widen touches to add .flow/bin/protocol-portability.test.mjs so the Status lifecycle INTENTIONAL_DIVERGENCES entry can be re-recorded for flow-0173? Recommend: yes. It is the same one-entry digest-and-reason update flow-0172 made for The loop you run, and the PROTOCOL edit is in scope."
   - "follow-up: drop the now-unused actions: write from both flow-unblock.yml callers (a caller-permission change)."
   - "follow-up: when the queue runner is retired (flow-0174 or later), delete the four dispatch subcommands and functions from project-template/.flow/bin/flow-unblock.mjs together with their re-export in .flow/bin/flow-unblock.mjs."
 ---
