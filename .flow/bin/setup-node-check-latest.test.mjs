@@ -3,19 +3,24 @@
 // Node's 2026-10-21 security release (CVE-2026-111497) by days. Empty set = parse broke = fail.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { parse } from 'yaml';
+
+// DEPENDENCY NOTE (same as check-workflows.test.mjs): `_flow-gates.yml` runs
+// `node --test .flow/bin/*.test.mjs` with no install step, so without `yaml` these tests skip
+// visibly instead of crashing the job. They run for real under `npm test` after `npm ci`.
+const yamlMod = await import('yaml').then((m) => m, () => null);
+const skip = yamlMod ? false : 'needs `npm ci` (yaml) — runs in the per-stack gate job';
 
 const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.github', 'workflows');
 
-export function findViolations(dir) {
+function findViolations(dir) {
   const bad = [];
   let seen = 0;
   for (const f of readdirSync(dir).filter((n) => /\.ya?ml$/.test(n))) {
-    const doc = parse(readFileSync(join(dir, f), 'utf8'));
+    const doc = yamlMod.parse(readFileSync(join(dir, f), 'utf8'));
     for (const [jobId, job] of Object.entries(doc?.jobs ?? {})) {
       (job?.steps ?? []).forEach((step, i) => {
         if (!String(step?.uses ?? '').startsWith('actions/setup-node@')) return;
@@ -29,28 +34,31 @@ export function findViolations(dir) {
 }
 
 // The check: throws naming every offending step, or on an empty set.
-export function checkLatest(dir) {
+function checkLatest(dir) {
   const { seen, bad } = findViolations(dir);
   assert.ok(seen > 0, `no setup-node steps found in ${dir} — the parse broke`);
   assert.deepEqual(bad, [], `setup-node without check-latest: true:\n${bad.join('\n')}`);
 }
 
-test('every setup-node step in .github/workflows sets check-latest: true', () => {
+const withDir = (fn) => {
+  const d = mkdtempSync(join(tmpdir(), 'sn-'));
+  try { return fn(d); } finally { rmSync(d, { recursive: true, force: true }); }
+};
+
+test('every setup-node step in .github/workflows sets check-latest: true', { skip }, () => {
   checkLatest(WORKFLOWS);
 });
 
-test('a step with check-latest removed fails, naming file and step', () => {
-  const d = mkdtempSync(join(tmpdir(), 'sn-'));
+test('a step with check-latest removed fails, naming file and step', { skip }, () => withDir((d) => {
   writeFileSync(join(d, 'x.yml'), 'jobs:\n  a:\n    steps:\n      - uses: actions/setup-node@abc\n        with:\n          node-version: 22\n');
   const { bad } = findViolations(d);
   assert.equal(bad.length, 1);
   assert.match(bad[0], /x\.yml: job a, step 1/);
   assert.throws(() => checkLatest(d), /x\.yml: job a, step 1/);
-});
+}));
 
-test('a directory with no setup-node steps fails rather than passing empty', () => {
-  const d = mkdtempSync(join(tmpdir(), 'sn-'));
+test('a directory with no setup-node steps fails rather than passing empty', { skip }, () => withDir((d) => {
   writeFileSync(join(d, 'x.yml'), 'jobs:\n  a:\n    steps:\n      - run: echo\n');
   assert.equal(findViolations(d).seen, 0);
   assert.throws(() => checkLatest(d), /no setup-node steps found/);
-});
+}));
