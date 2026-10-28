@@ -4,7 +4,7 @@
 // WHAT THIS IS FOR. The three Definition-of-Done reviewers run as checks on the PR
 // (`_flow-review.yml`, flow-0007). When qa or code-review fails, the protocol calls that a
 // kickback: address it on the same branch, re-run the gate, re-request review. Nothing
-// dispatched that work — the worker's session ended at `gh pr ready`, and the queue runner only
+// dispatched that work — the worker's session ended at `gh pr ready`, and the (retired) queue runner only
 // picks `ready` tasks — so an `in_review` task with a red check sat until a human noticed. The
 // human was a relay carrying a finding that already named the file, the line and the fix.
 //

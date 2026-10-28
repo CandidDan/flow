@@ -5,7 +5,8 @@ name: _flow-status (reusable)
 #
 # Event-driven state: the worker writes code and opens/closes PRs; PR events own the
 # lifecycle transitions so frontmatter never needs hand-editing for them.
-#   opened / reopened, DRAFT   -> stays in_progress (+ branch & pr recorded) — flow-0039
+#   opened / reopened, DRAFT   -> stays in_progress (+ branch & pr recorded) — flow-0039;
+#                                 a task already `blocked` stays blocked (flow-0169)
 #   opened / reopened, ready   -> in_review (+ branch & pr recorded)
 #   ready_for_review           -> in_review (the hand-off; a worker's `gh pr ready`)
 #   closed without merge       -> back to ready (owner/branch/pr cleared for re-claim), one
@@ -39,8 +40,11 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      # check-latest (flow-0166): a major-line range alone takes the runner image's cached patch, which
+      # trailed Node's 2026-10-21 security release by days (CVE-2026-111497). Resolve the latest patch.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: 22
 
       - name: Sync task state from the PR event
@@ -86,7 +90,21 @@ jobs:
           # in_review transition moves to the moment the draft is marked ready.
           case "$ACTION" in
             opened|reopened)
-              if [ "$DRAFT" = "true" ]; then
+              # flow-0169: a worker that blocks commits `blocked` to main, and its branch push opens
+              # this draft — the two race. Read the task's status from the store, and if it is
+              # `blocked`, record only `branch` + `pr`: writing in_progress over a block hides it
+              # from flow-unblock and makes its `touches` count as live overlap.
+              task_md="$(grep -lE "^id:[[:space:]]*\"?$id\"?[[:space:]]*$" .flow/tasks/*.md 2>/dev/null | head -1 || true)"
+              cur_status=""
+              if [ -n "$task_md" ]; then
+                cur_status="$(sed -n '/^---$/,/^---$/s/^status:[[:space:]]*"\{0,1\}\([a-z_]*\)"\{0,1\}[[:space:]]*$/\1/p' "$task_md" | head -1)"
+              fi
+              if [ "$DRAFT" = "true" ] && [ "$cur_status" = "blocked" ]; then
+                echo "PR #$PR_NUM opened as a draft -> $id stays blocked (branch + pr recorded)"
+                TRANSITION="blocked (branch + pr recorded)"
+                printf '{"updates":[{"id":"%s","branch":"%s","pr":"%s"}]}\n' \
+                  "$id" "$HEAD_REF" "$PR_URL" > .flow/board-edits.json
+              elif [ "$DRAFT" = "true" ]; then
                 echo "PR #$PR_NUM opened as a draft -> $id stays in_progress (branch + pr recorded)"
                 TRANSITION="in_progress (branch + pr recorded)"
                 printf '{"updates":[{"id":"%s","status":"in_progress","branch":"%s","pr":"%s"}]}\n' \
@@ -131,8 +149,8 @@ jobs:
           # flow-0083, ESCALATION TRIGGER 2: a PR closed unmerged is a failed attempt, so the task
           # goes back to `ready` ONE MODEL TIER UP, in the same commit as the transition. `--once`
           # keys on this PR's event, so a second application is a no-op. A task the resolver
-          # rejects keeps its transition: the reset to `ready` matters more than the model, and the
-          # queue runner's resolve step fails that task loudly on its next dispatch anyway.
+          # rejects keeps its transition: the reset to `ready` matters more than the model, and
+          # flow-doctor fails that task's unreadable model loudly anyway.
           # The retry block below re-derives only `$EDITS`; if a contended push drops this edit,
           # the `Escalate the model` step after this one puts it back.
           if [ "$TRANSITION" = "ready" ] && [ -f .flow/bin/task-model.mjs ]; then
@@ -146,7 +164,7 @@ jobs:
           fi
 
           # >>> flow-0059 state-push-retry — byte-identical in _flow-status.yml and _flow-done.yml >>>
-          # `main` is written constantly: the queue-runner claiming, this workflow on a PR event,
+          # `main` is written constantly: a worker claiming, this workflow on a PR event,
           # flow-done on merge, flow-recover sweeping, and humans. A single `git push origin main`
           # therefore loses whenever anything else lands between this job's checkout and its push —
           # the transition is computed correctly, committed on the runner, refused with

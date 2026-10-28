@@ -1,14 +1,14 @@
 ---
 id: "flow-0166"
 title: "Every setup-node step resolves the latest patch of its line, so a Node security release reaches the fleet the day it ships, not when the runner image refreshes"
-status: "ready"
+status: "done"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-brave-grothendieck-72536d"
 created: "2026-10-27"
-started: ""
-branch: ""
-pr: ""
+started: "2026-10-28T12:09:48Z"
+branch: "flow/flow-0166-setup-node-check-latest"
+pr: "https://github.com/CandidDan/flow/pull/243"
 issue: ""
 blocked_reason: ""
 cancelled_reason: ""
@@ -33,12 +33,15 @@ touches:
   - ".github/workflows/flow-release-publish.yml"
   - ".github/workflows/plane-guard.yml"
   - ".github/workflows/release-tag.yml"
+  - ".github/workflows/flow-watchdog.yml"
   - ".flow/bin/setup-node-check-latest.test.mjs"
   - "docs/flow-reusable-workflows.md"
   - "changes/flow-0166.md"
 labels: [security, workflows]
 notes:
+  - "2026-10-27 (orchestrator, Dan's answer): land after flow-0165 (no touches widening needed: 0165 deletes flow-watchdog.yml). Set back to blocked with blocked_by flow-0165; flow-unblock releases it. Ships in 3.6.0 (Node security release)."
   - "2026-10-27 (orchestrator): Node's 2026-10-21 security release (10 CVEs; headline CVE-2026-111497, an out-of-bounds write in the bundled Brotli decoder, rated high; also TLS hostname-check bypasses CVE-2026-106069 / CVE-2026-105483) is fixed in 22.23.4 / 24.22.1 / 26.12.1. Six days later, flow-gates run on 2026-10-27T03:14Z logged 'Found in cache @ /opt/hostedtoolcache/node/22.23.3' — the vulnerable build. Cause: setup-node with `node-version: 22` and the default `check-latest: false` takes the runner image's cached 22.x."
+  - "2026-10-27 (Dan via orchestrator): supersedes the earlier land-after-0165 answer: the security fix should not wait on the flightdeck cleanup. Touches widened to .github/workflows/flow-watchdog.yml (add check-latest: true there too, so the test passes); blocked_by changed from flow-0165 to flow-0164. flow-0165 now rebases onto this and deletes the file."
 ---
 
 ## Context

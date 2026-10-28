@@ -2,7 +2,7 @@
 //
 // THE DEFECT. `_flow-status.yml` and `_flow-done.yml` computed a task-state transition, committed
 // it on the runner, and then ran a bare `git push origin main`. `main` is written constantly —
-// the queue-runner claiming, flow-status on every PR event, flow-done on merge, flow-recover
+// a worker claiming, flow-status on every PR event, flow-done on merge, flow-recover
 // sweeping, and humans — so anything landing between the job's checkout and its push made that
 // push a non-fast-forward. Git refused it, the job died, and the container took the state change
 // with it. Observed live on run 35058472116, which dropped flow-0056's `in_review`.
@@ -16,7 +16,7 @@
 // Two things the criteria are emphatic about, and which a shape assertion could not prove:
 //   * `_flow-done.yml` is the headline case. A lost `-> done` leaves a MERGED PR's task at
 //     `in_review` permanently, because nothing re-fires flow-done; flow-recover can then sweep it
-//     back to `ready` and the queue-runner re-works merged code. So it gets the same coverage as
+//     back to `ready` and the next worker re-works merged code. So it gets the same coverage as
 //     flow-status, not a shape check that assumes the shared block behaves the same.
 //   * Exhausting the attempts must EXIT NON-ZERO and name the task and the transition. A fix that
 //     ends `|| true` reproduces the original bug with more code in front of it.

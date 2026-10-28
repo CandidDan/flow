@@ -84,8 +84,8 @@ on:
 #   escalate         PRs, issues   no      posts that card and the label
 #
 # `actions: read` is `plan`'s alone — the jobs API is how it learns WHICH review job failed —
-# and it is job-scoped for the same reason _flow-queue-runner.yml scopes its own: a top-level
-# entry would demand the scope from every caller including the jobs that never touch it.
+# and it is job-scoped because a top-level entry would demand the scope from every caller,
+# including the jobs that never touch it.
 #
 # WHERE FLOW_PAT GOES — THE INVARIANT IS A JOB ONE (flow-0135). No job that runs a model
 # references `secrets.FLOW_PAT`, and the one job that does (`push`) runs no model. On a runner
@@ -124,8 +124,8 @@ jobs:
     runs-on: ${{ inputs.runner }}
     # Reads, and only reads. `actions: read` is the jobs API (`.../actions/runs/<id>/jobs`),
     # which is the only way to learn WHICH review job failed — the event payload carries the
-    # run's conclusion and not its jobs. It is job-scoped, as _flow-queue-runner.yml scopes its
-    # own, so no other job here can reach the Actions API at all.
+    # run's conclusion and not its jobs. It is job-scoped, so no other job here can reach the
+    # Actions API at all.
     permissions:
       contents: read          # the default-branch checkout: the helper, the config, the store
       pull-requests: read     # `gh pr list` / `gh pr view` / the PR's commits
@@ -155,8 +155,11 @@ jobs:
           # implicit version of a security property is one nobody can see holding.
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
+      # check-latest (flow-0166): a major-line range alone takes the runner image's cached patch, which
+      # trailed Node's 2026-10-21 security release by days (CVE-2026-111497). Resolve the latest patch.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       - name: Resolve the PR this review run belongs to
@@ -361,6 +364,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       - name: Record this round's base
@@ -379,9 +383,9 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
-          # The same action pin and model settings as _flow-queue-runner.yml's worker — this IS
-          # that worker, pointed at a narrower job — with three limits, in increasing order of
-          # how much they actually hold.
+          # The same action pin and model settings the worker used before its retired Actions
+          # host (queue-runner, retired in flow-0174) — this IS that worker, pointed at a narrower
+          # job — with three limits, in increasing order of how much they actually hold.
           #
           #   1. A TOKEN THAT CAN ONLY READ. The token above is GITHUB_TOKEN, scoped by the
           #      `fix` JOB's own `permissions:` block to `contents: read` + `pull-requests:
@@ -590,6 +594,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       - name: Take the round from the job that ran it
@@ -910,6 +915,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       - name: Write the dead round's card fields (read-only)
@@ -1048,6 +1054,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       - name: Escalate — one decision card, then the label
@@ -1148,6 +1155,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       - name: Write the card's four fields (read-only)
@@ -1269,6 +1277,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       # No step-level `if:` here. The JOB's `always()` is the backstop; a second one on the step

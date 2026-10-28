@@ -90,9 +90,10 @@ Nine workflows sounds like a lot. It's three groups, and only the first is requi
   your PRs. Start here.
 - **Plumbing (3)** — `flow-open-pr`, `flow-recover`, `flow-sync`. Convenience and self-maintenance.
   Add when you want them.
-- **Opt-in automation (3)** — `flow-triage`, `flow-review`, `flow-queue-runner`. Unattended work:
-  issue triage, independent review, and a scheduled runner that dispatches workers. **Off by
-  default**; enable deliberately, once you trust the loop.
+- **Opt-in automation (2)** — `flow-triage`, `flow-review`. Unattended work: issue triage and
+  independent review. **Off by default**; enable deliberately, once you trust the loop. The worker
+  itself runs as a Claude Code routine, not a workflow — see
+  [`docs/flow-routines.md`](docs/flow-routines.md). (`flow-queue-runner` was retired in flow-0174.)
 
 They're thin callers — three lines each — of reusable workflows hosted here, so fixes propagate
 without editing every repo. See [`docs/flow-versioning-policy.md`](docs/flow-versioning-policy.md)

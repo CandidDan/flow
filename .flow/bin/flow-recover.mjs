@@ -30,6 +30,7 @@
 //     | node .flow/bin/flow-recover.mjs ready-pr flow-0040 <branch>
 //   node .flow/bin/flow-recover.mjs reset flow-0040
 //   node .flow/bin/flow-recover.mjs promote flow-0040 <pr-url> <branch>
+//   node .flow/bin/flow-recover.mjs escalate flow-0040 reset-to-ready "<event>"
 
 import { realpathSync as __realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -52,6 +53,7 @@ const __isMain = (() => {
 export {
   classifyStranded, buildResetEdit, buildPromoteEdit, minutesSince, readTasks, readyOpenPr,
   recoveryBranchCandidates, isTaskPrTitle, runRecoverCli, DEFAULT_THRESHOLD_MINUTES,
+  escalatesOnRecover, escalateOnRecover,
 } from "../../project-template/.flow/bin/flow-recover.mjs";
 
 // Canonical's own store — `.flow/`, one level up from this `bin/` directory. This is the whole

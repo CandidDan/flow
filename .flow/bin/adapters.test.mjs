@@ -304,7 +304,7 @@ test("config.yml and package.json name no flightdeck, and every source root exis
 // `node --test .flow/bin/*.test.mjs` with no install step, so the structural assertions that
 // need to read a workflow the way GitHub does are skipped there and run for real in the
 // per-stack gate job. The ones that can be made without a YAML loader are NOT guarded, so the
-// no-install job still proves the pins, the callers' existence and the queue-runner's cadence.
+// no-install job still proves the pins and the callers' existence.
 
 const WORKFLOWS = join(REPO, ".github", "workflows");
 const wfNames = readdirSync(WORKFLOWS).filter((n) => /\.ya?ml$/.test(n)).sort();
@@ -312,9 +312,9 @@ const wfSrc = (name) => readFileSync(join(WORKFLOWS, name), "utf8");
 
 // The reusables, by their short name: `_flow-open-pr.yml` -> `open-pr`.
 const REUSABLES = wfNames.filter((n) => n.startsWith("_flow-")).map((n) => n.slice(6, -4));
-// The five this task added, distinct from the three canonical already had.
-const ADDED = ["flow-open-pr.yml", "flow-recover.yml", "flow-triage.yml", "flow-review.yml",
-               "flow-queue-runner.yml"];
+// The callers this task added, distinct from the three canonical already had — less the
+// queue-runner's, retired in flow-0174.
+const ADDED = ["flow-open-pr.yml", "flow-recover.yml", "flow-triage.yml", "flow-review.yml"];
 
 const yamlMod = await import("yaml").then((m) => m, () => null);
 const skip = yamlMod ? false : "needs `npm ci` (yaml) — runs in the per-stack gate job";
@@ -344,16 +344,13 @@ test("every reusable has a thin caller except _flow-sync.yml, whose absence is r
 
 // Which secret(s) each ADDED caller's reusable declares in on.workflow_call.secrets — FLOW_PAT
 // for the two that only need a real git actor, CLAUDE_CODE_OAUTH_TOKEN for the two that only run
-// claude-code-action, and BOTH for flow-queue-runner (it does both: the agent, and its own git
-// push as FLOW_PAT — CAN-58). Named, not `secrets: inherit`: inheriting would additionally hand
-// each job whichever of the two it doesn't need (see secrets-scope.test.mjs for the fleet-wide
-// version of this, including the @v1-vs-@main split on queue-runner specifically).
+// claude-code-action. Named, not `secrets: inherit`: inheriting would additionally hand each job
+// whichever of the two it doesn't need (see secrets-scope.test.mjs for the fleet-wide version).
 const ADDED_SECRET = {
   "flow-open-pr.yml": "FLOW_PAT",
   "flow-recover.yml": "FLOW_PAT",
   "flow-triage.yml": "CLAUDE_CODE_OAUTH_TOKEN",
   "flow-review.yml": "CLAUDE_CODE_OAUTH_TOKEN",
-  "flow-queue-runner.yml": ["CLAUDE_CODE_OAUTH_TOKEN", "FLOW_PAT"],
 };
 
 test("every new caller references CandidDan/flow's reusable at @main, not @v1", () => {
@@ -426,30 +423,9 @@ test("id-token: write is granted on the caller wherever the reusable runs claude
   }
 });
 
-// ── criterion: flow-queue-runner is dispatch-only, and the absence of a schedule is asserted ──
-
-test("flow-queue-runner declares workflow_dispatch and NO schedule — the absence is the assertion", () => {
-  const src = wfSrc("flow-queue-runner.yml");
-  assert.match(src, /^\s*workflow_dispatch:/m);
-  assert.doesNotMatch(src, /^\s*schedule:/m,
-    "canonical's store is being restructured by hand; an unattended dispatcher claiming tasks " +
-    "against a moving queue is the wasted-worker-run failure flow-0010 was written about");
-  assert.match(src, /THERE IS DELIBERATELY NO `schedule:` BLOCK/,
-    "the omission must read as a decision, or the next person restores it from the template");
-});
-
-test("flow-queue-runner's trigger set is exactly workflow_dispatch", { skip }, () => {
-  const triggers = wfParse("flow-queue-runner.yml").on;
-  assert.deepEqual(Object.keys(triggers), ["workflow_dispatch"]);
-  assert.equal(triggers.schedule, undefined);
-  // The other schedule-bearing caller is left alone, so this is a decision about the runner
-  // rather than a blanket removal of cron from canonical.
-  assert.ok(wfParse("flow-recover.yml").on.schedule, "flow-recover keeps the template's sweep cadence");
-});
-
 // ── criterion: build still parses every workflow, five new files included ──
 
-test("checkWorkflows parses every workflow in canonical, including the five new callers", { skip }, async () => {
+test("checkWorkflows parses every workflow in canonical, including the new callers", { skip }, async () => {
   const { checkWorkflows } = await import("./check-workflows.mjs");
   const { checked, failures } = checkWorkflows(WORKFLOWS);
   assert.deepEqual(failures, [], "npm run build is what stops a malformed reusable reaching the fleet");
@@ -460,15 +436,11 @@ test("checkWorkflows parses every workflow in canonical, including the five new 
 
 // ── the adapters the autonomous workflows invoke (and that canonical did not have) ─────────
 //
-// `_flow-queue-runner.yml` runs `.flow/bin/pick-task.mjs` and `_flow-recover.yml` runs
-// `.flow/bin/flow-recover.mjs` + `.flow/bin/flow-open-pr.mjs`, all in the CONSUMING repo —
-// canonical included. All three were absent, and the two workflows failed in opposite ways that
-// were each invisible:
-//
-//   - the recover sweep opens with `if [ ! -f .flow/bin/flow-recover.mjs ]` and exits 0, so 160+
-//     scheduled runs reported success having never read canonical's store;
-//   - the queue runner has NO such guard, so its first dispatched run would have died outright at
-//     the pick step — unnoticed only because that caller is dispatch-only and has never been run.
+// `_flow-recover.yml` runs `.flow/bin/flow-recover.mjs` + `.flow/bin/flow-open-pr.mjs` in the
+// CONSUMING repo — canonical included. Both were absent, and the failure was invisible: the
+// recover sweep opens with `if [ ! -f .flow/bin/flow-recover.mjs ]` and exits 0, so 160+
+// scheduled runs reported success having never read canonical's store. (pick-task.mjs was the
+// third, for the since-retired queue-runner; the worker routine runs it now.)
 //
 // The general rule this encodes: every helper a flow-* workflow invokes by path must exist here.
 
@@ -738,6 +710,12 @@ const RECOVER_CASES = {
     argv: ["promote", "flow-9121", "https://github.com/o/r/pull/9", "claude/seeded-x"],
     want: '{"updates":[{"id":"flow-9121","status":"in_review","pr":"https://github.com/o/r/pull/9","branch":"claude/seeded-x"}]}\n',
   },
+  // flow-0174. A decision that keeps the model answers before any store read, so both CLIs agree
+  // byte for byte and neither store is written; the reset path's bump is proved in flow-recover.test.mjs.
+  "escalate": {
+    argv: ["escalate", "flow-9121", "reopen-pr", "run 1"],
+    want: "flow-9121: reopen-pr keeps the model — work was pushed\n",
+  },
 };
 
 test("every flow-recover subcommand answers identically from the adapter and the template", () => {
@@ -756,7 +734,7 @@ test("every flow-recover subcommand answers identically from the adapter and the
     assert.deepEqual(implemented, Object.keys(RECOVER_CASES).sort(),
       "a subcommand with no row here is a subcommand nobody proved the adapter can reach — " +
       "which is precisely how flow-0104's three went inert in canonical for a whole release");
-    assert.equal(implemented.length, 7, "seven subcommands, per flow-0121");
+    assert.equal(implemented.length, 8, "seven subcommands per flow-0121, and flow-0174's escalate");
 
     for (const [name, c] of Object.entries(RECOVER_CASES)) {
       const a = invoke(ADAPTER, c);
@@ -955,7 +933,7 @@ test("_flow-gates.yml runs source-roots from CANONICAL, not from the caller's .f
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────
-// flow-unblock (flow-0041): the adapter, the two callers, and the reusable's two steps run for real
+// flow-unblock (flow-0041): the adapter, the two callers, and the reusable's release step run for real
 // ─────────────────────────────────────────────────────────────────────────────────────────
 
 import * as unblockAdapter from "./flow-unblock.mjs";
@@ -998,8 +976,8 @@ function unblockRepo({ readyToo = false } = {}) {
   git("add", "-A"); git("commit", "-qm", "seed");
   git("remote", "add", "origin", join(root, "origin.git"));
   git("push", "-q", "origin", "main");
-  // A fake `gh` that logs every call: the PR reads merged, the run list is GH_RUNS, and the
-  // dispatch is refused with a 403 when GH_DISPATCH_403 is set.
+  // A fake `gh` that logs every call: the PR reads merged. The run-list and dispatch cases answer
+  // as they did before flow-0173, so a dispatch creeping back would be logged, and caught.
   mkdirSync(join(root, "bin"));
   writeFileSync(join(root, "bin", "gh"), [
     "#!/bin/sh",
@@ -1064,40 +1042,17 @@ test("the release step keeps a task blocked when its PR cannot be read", { skip 
   } finally { rmSync(repo.root, { recursive: true, force: true }); }
 });
 
-test("the dispatch step dispatches the runner with no task_id when work is ready and no run is active", { skip }, () => {
+// flow-0173: the sweep releases and stops — the next worker run picks what it released. The
+// dispatch step is gone, and a run with ready work still makes no dispatch call.
+test("flow-0173: the reusable has no dispatch step, and the release step dispatches nothing even with ready work", { skip }, () => {
+  const steps = wfParse("_flow-unblock.yml").jobs.sweep.steps;
+  assert.equal(steps.find((s) => s.name === DISPATCH_STEP), undefined, `"${DISPATCH_STEP}" must be absent`);
   const repo = unblockRepo({ readyToo: true });
   try {
-    const r = runStep(repo, DISPATCH_STEP, { RUNNER_WF: "flow-queue-runner.yml", FLOW_QUEUE_RUNNER: "" });
-    assert.equal(r.status, 0, r.stderr);
-    const post = ghLog(repo).split("\n").find((l) => l.startsWith("api -X POST"));
-    assert.equal(post, "api -X POST repos/o/r/actions/workflows/flow-queue-runner.yml/dispatches -f ref=main",
-      "exactly the ref and nothing else — no task_id input, so pick-task chooses");
-    assert.match(r.stdout, /Dispatched flow-queue-runner\.yml with no task_id/);
-  } finally { rmSync(repo.root, { recursive: true, force: true }); }
-});
-
-test("the dispatch step does not dispatch when any one condition is false", { skip }, () => {
-  for (const [name, opts, env] of [
-    ["no ready task", {}, {}],
-    ["a runner already active", { readyToo: true }, { GH_RUNS: '[{"status":"in_progress"}]' }],
-    ["FLOW_QUEUE_RUNNER paused", { readyToo: true }, { FLOW_QUEUE_RUNNER: "paused" }],
-  ]) {
-    const repo = unblockRepo(opts);
-    try {
-      const r = runStep(repo, DISPATCH_STEP, env);
-      assert.equal(r.status, 0, `${name}: ${r.stderr}`);
-      assert.match(r.stdout, /-> skip: /, name);
-      assert.doesNotMatch(ghLog(repo), /api -X POST/, `${name}: must not dispatch`);
-    } finally { rmSync(repo.root, { recursive: true, force: true }); }
-  }
-});
-
-test("a 403 on dispatch is a ::warning:: naming actions: write, and the step still succeeds", { skip }, () => {
-  const repo = unblockRepo({ readyToo: true });
-  try {
-    const r = runStep(repo, DISPATCH_STEP, { GH_DISPATCH_403: "1" });
-    assert.equal(r.status, 0, "a caller not yet synced must get a green run, never a red one");
-    assert.match(r.stdout, /^::warning::Could not dispatch flow-queue-runner\.yml: HTTP 403\. .*`actions: write`/m);
+    const r = runStep(repo, RELEASE_STEP);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /flow-9002: every blocked_by entry resolved -> ready/);
+    assert.doesNotMatch(ghLog(repo), /api -X POST|run list/, "unblock must not list or dispatch a worker");
   } finally { rmSync(repo.root, { recursive: true, force: true }); }
 });
 
@@ -1110,7 +1065,7 @@ test("both flow-unblock callers: three triggers, exactly contents+actions write 
     assert.ok("workflow_dispatch" in wf.on, `${file} must be dispatchable`);
     const jobs = Object.values(wf.jobs);
     assert.equal(jobs.length, 1, `${file} is a thin caller`);
-    assert.deepEqual(jobs[0].permissions, { contents: "write", actions: "write", "pull-requests": "read" }, file);
+    assert.deepEqual(jobs[0].permissions, { contents: "write", "pull-requests": "read" }, file);
     assert.equal(jobs[0].uses, `CandidDan/flow/.github/workflows/_flow-unblock.yml@${ref}`, file);
     assert.equal(jobs[0].secrets, undefined, `${file} forwards nothing — the reusable uses GITHUB_TOKEN only`);
   }
@@ -1122,13 +1077,13 @@ test("both flow-unblock callers: three triggers, exactly contents+actions write 
   const reusable = wfParse("_flow-unblock.yml");
   assert.deepEqual(Object.keys(reusable.on), ["workflow_call"]);
   assert.equal(reusable.on.workflow_call.secrets, undefined);
-  assert.equal(reusable.on.workflow_call.inputs.queue_runner_workflow.default, "flow-queue-runner.yml");
+  assert.equal(reusable.on.workflow_call.inputs.queue_runner_workflow.default, "", "names nothing: its worker is retired");
   assert.doesNotMatch(wfSrc("_flow-unblock.yml").replace(/^\s*#.*$/gm, ""), /FLOW_PAT|FLOW_AI/);
 });
 
 // ── flow-0157: the task-model adapter re-exports the template's WHOLE surface ──
-// The queue runner's escalate step imports named exports from `<repo>/.flow/bin/task-model.mjs`,
-// which on canonical is the adapter. A name the adapter omits imports as `undefined` here and
+// A caller that imports named exports from `<repo>/.flow/bin/task-model.mjs` gets the adapter on
+// canonical. A name the adapter omits imports as `undefined` here and
 // nowhere else, so the list is derived from the template at run time, never written by hand.
 
 test("flow-0157: every named export of the template's task-model.mjs is re-exported by the adapter", async () => {
@@ -1136,7 +1091,7 @@ test("flow-0157: every named export of the template's task-model.mjs is re-expor
   const adapter = await import(join(BIN, "task-model.mjs"));
   const names = Object.keys(template);
   assert.ok(names.includes("readAsks") && names.includes("writeAsks"),
-    "the template must still export the two names the escalate step imports, or this test is vacuous");
+    "the template must still export its frontmatter helpers, or this test is vacuous");
   const missing = names.filter((n) => !(n in adapter));
   assert.deepEqual(missing, [], `the adapter does not re-export: ${missing.join(", ")}`);
   for (const n of names) {
