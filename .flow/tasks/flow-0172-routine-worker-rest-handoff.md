@@ -1,7 +1,7 @@
 ---
 id: "flow-0172"
 title: "The worker loop runs from a Claude Code cloud routine: the PR is opened and handed off through REST, never GraphQL, and docs/flow-routines.md says how to set a routine up"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude-code-local-flow-0172"
