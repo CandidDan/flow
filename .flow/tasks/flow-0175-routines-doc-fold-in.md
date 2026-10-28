@@ -1,14 +1,14 @@
 ---
 id: "flow-0175"
 title: "docs/flow-routines.md covers firing a routine from an app, the account-wide limits, and the auto-mode stall risk, so it is the one routine runbook"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "worker-flow-0175"
 created: "2026-10-28"
 started: "2026-10-28T05:18:08Z"
-branch: ""
-pr: ""
+branch: "claude/flow-0175-routines-doc-fold-in-850a93"
+pr: "https://github.com/CandidDan/flow/pull/255"
 issue: ""
 blocked_reason: ""
 cancelled_reason: ""
