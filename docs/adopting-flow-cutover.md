@@ -31,9 +31,9 @@ The consuming repo keeps three things per-repo and intentionally divergent — *
 them**: `.flow/config.yml`, `.flow/tasks/`, and the project-specific notes in `CLAUDE.md`.
 
 1. **Replace the copied workflows with the thin callers.** For each file in
-   `project-template/.github/workflows/flow-*.yml` (9 of them: `flow-gates`, `flow-status`,
-   `flow-done`, `flow-open-pr`, `flow-recover`, `flow-triage`, `flow-review`, `flow-queue-runner`,
-   `flow-sync`), replace the repo's full `.github/workflows/<same-name>.yml` with the thin caller.
+   `project-template/.github/workflows/flow-*.yml` (`flow-gates`, `flow-status`, `flow-done`,
+   `flow-open-pr`, `flow-recover`, `flow-triage`, `flow-review`, `flow-sync`, and the others the
+   template carries — `flow-queue-runner` is retired since flow-0174, so delete it), replace the repo's full `.github/workflows/<same-name>.yml` with the thin caller.
    Each becomes the trigger + a `uses: CandidDan/flow/.github/workflows/_flow-*.yml@v1`. Delete any
    repo `flow-*.yml` that no longer has a canonical counterpart.
 2. **Sync `.flow/bin/`** to canonical's `project-template/.flow/bin/` (8 helpers + their tests):

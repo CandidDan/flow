@@ -92,7 +92,7 @@ const PRIVATE = [
   ".flow/bin/release-publish.mjs",                              // canonical's adapters
   ".flow/config.yml",                                           // canonical's gate calibration
   ".github/workflows/flow-gates.yml",                           // canonical's own callers
-  ".github/workflows/flow-queue-runner.yml",                    // AI-invoking, secret-holding
+  ".github/workflows/flow-kickback.yml",                        // AI-invoking, secret-holding
   ".github/workflows/ci.yml",
   ".github/workflows/release-tag.yml",
   "flightdeck/bin/watchdog.mjs",
@@ -179,7 +179,7 @@ test("criterion 1 — the manifest publishes reusables only, never canonical's o
   assert.ok(manifestAdmits(".github/workflows/_flow-gates.yml"));
   assert.ok(!manifestAdmits(".github/workflows/flow-gates.yml"),
     "the leading underscore is the whole distinction: `flow-*.yml` are canonical's AI-invoking callers");
-  assert.ok(neverPublishes(".github/workflows/flow-queue-runner.yml"));
+  assert.ok(neverPublishes(".github/workflows/flow-kickback.yml"));
   // The glob is single-segment by design; prove it does not reach into subdirectories.
   assert.ok(!globToRegExp(".github/workflows/_flow-*.yml").test(".github/workflows/nested/_flow-x.yml"));
 });

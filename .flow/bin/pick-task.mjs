@@ -1,12 +1,10 @@
 #!/usr/bin/env node
 // pick-task.mjs — canonical's adapter over the template's queue selector.
 //
-// WHY THIS FILE EXISTS AT ALL. `_flow-queue-runner.yml` runs `node .flow/bin/pick-task.mjs` in
-// the consuming repo, and canonical is one of those. Unlike the recover sweep, the queue runner
-// has NO bootstrap guard around this call — the "Choose the task to work" step runs the command
-// directly — so with this adapter missing, canonical's very first dispatched run would have died
-// at the pick step before reaching the worker. It has never been caught because the caller
-// (`flow-queue-runner.yml`) is workflow_dispatch-only and has never been dispatched.
+// WHY THIS FILE EXISTS AT ALL. A worker started without a task id — a Claude Code routine with
+// an empty trigger (docs/flow-routines.md) — picks with `node .flow/bin/pick-task.mjs`, and in
+// canonical that has to read canonical's store. (Its first caller was the queue-runner, retired in
+// flow-0174.)
 //
 // See parse-task-id.mjs in this directory for why canonical adapts rather than copies, and
 // flow-doctor.mjs for why the store location has to be supplied here.
@@ -40,8 +38,8 @@ export function canonicalFlowDir(here = __fileURLToPath(import.meta.url)) {
   return resolve(dirname(here), "..");
 }
 
-// ── CLI ── prints the next task id, or nothing. Always exits 0 — "queue dry" is the
-// queue-runner's documented no-op, not an error.
+// ── CLI ── prints the next task id, or nothing. Always exits 0 — "queue dry" means the worker
+// stops, not an error.
 if (__isMain) {
   const id = pickTask(readTasks(join(canonicalFlowDir(), "tasks")));
   if (id) process.stdout.write(id + "\n");

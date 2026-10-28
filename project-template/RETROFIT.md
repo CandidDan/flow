@@ -92,7 +92,7 @@ From here the routes are identical:
   `claude plugin install flow@flow`, so Cowork/orchestrator sessions can drive this repo. The worker
   needs nothing - it runs the gate from the repo's committed `.claude/`; the plugin only registers
   `task-writer`/`portfolio-manager` for Cowork, which doesn't auto-discover repo skills.
-- **8. Run the loop** - manual one-liner, or enable `FLOW_AI` + token for triage/review/queue-runner.
+- **8. Run the loop** - manual one-liner, or a Claude Code routine (canonical's `docs/flow-routines.md`); enable `FLOW_AI` + token for triage/review/recover.
 
 ## Sunset checklist (migration only)
 

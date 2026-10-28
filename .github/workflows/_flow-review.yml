@@ -56,7 +56,7 @@ name: _flow-review (reusable)
 # own change and the security review would skip, "visibly", with a reason that read as legitimate;
 # a PR could edit `verdict` itself, which is the code that turns a reviewer's words into a red
 # check. flow-0068 fenced FORK PRs; this is the same hole for PRs from inside the repo, which is
-# every PR the queue runner opens. So each job now materialises the base branch in a scratch
+# every PR the (since retired) queue runner opened. So each job now materialises the base branch in a scratch
 # worktree under RUNNER_TEMP and runs THAT helper against THAT config, while the diff, the changed
 # files and the task still come from the PR. A worktree rather than a `git show` of the one file,
 # because the helper is not one file: it imports touches-guard.mjs and parse-task-id.mjs, and in

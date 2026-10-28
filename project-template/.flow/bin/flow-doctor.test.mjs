@@ -1742,13 +1742,13 @@ test("criterion 9: changes/flow-0073.md exists and describes the additions",
 test("criterion 1: two files, one id → a problem naming the id AND both paths", () => {
   const d = fixture({
     "flow-0049-ceiling.md": task("flow-0049"),
-    "flow-0049-queue-runner.md": task("flow-0049"),
+    "flow-0049-second-slug.md": task("flow-0049"),
   });
   const r = runDoctor({ flowDir: d });
   const dup = r.problems.filter((p) => p.includes("duplicate id flow-0049"));
   assert.equal(dup.length, 1, `expected exactly one grouped message, got:\n${r.problems.join("\n")}`);
   assert.match(dup[0], /\.flow\/tasks\/flow-0049-ceiling\.md/);
-  assert.match(dup[0], /\.flow\/tasks\/flow-0049-queue-runner\.md/,
+  assert.match(dup[0], /\.flow\/tasks\/flow-0049-second-slug\.md/,
     "naming only one side leaves the reader to go find the other — the fix is choosing between them");
   cleanup(d);
 });
@@ -1756,7 +1756,7 @@ test("criterion 1: two files, one id → a problem naming the id AND both paths"
 test("criterion 1: the CLI exits NON-ZERO on a duplicate id — the half CI actually reads", () => {
   const d = cliFixture({
     "flow-0049-ceiling.md": task("flow-0049"),
-    "flow-0049-queue-runner.md": task("flow-0049"),
+    "flow-0049-second-slug.md": task("flow-0049"),
   });
   const { code, out } = runCli(d);
   assert.equal(code, 1, out);
@@ -1783,7 +1783,7 @@ test("criterion 2: three files, one id → EVERY offending path is named, not th
 test("criterion 3: two DISTINCT ids whose files sort adjacently pass — not a proximity heuristic", () => {
   const d = fixture({
     "flow-0049-ceiling.md": task("flow-0049"),
-    "flow-0050-queue-runner.md": task("flow-0050"),
+    "flow-0050-second-slug.md": task("flow-0050"),
   });
   const r = runDoctor({ flowDir: d });
   assert.deepEqual(r.problems, [], "adjacent filenames sharing a slug prefix are not a collision");
@@ -1795,17 +1795,17 @@ test("criterion 4: frontmatter id disagreeing with the filename id is a problem 
   // The 2026-09-15 collision was cleared by a rename. A rename that forgets the frontmatter
   // re-creates the same ambiguity one layer down: findable under one id, self-describing as
   // another. The store then has no single answer to "which file is flow-0050?".
-  const d = fixture({ "flow-0050-queue-runner.md": task("flow-0049") });
+  const d = fixture({ "flow-0050-second-slug.md": task("flow-0049") });
   const r = runDoctor({ flowDir: d });
   assert.equal(r.problems.length, 1, r.problems.join("\n"));
-  assert.match(r.problems[0], /flow-0050-queue-runner\.md/, "the filename must be named");
+  assert.match(r.problems[0], /flow-0050-second-slug\.md/, "the filename must be named");
   assert.match(r.problems[0], /"flow-0049"/, "the frontmatter id must be named");
   assert.match(r.problems[0], /"flow-0050"/, "the filename's id must be named");
   cleanup(d);
 });
 
 test("criterion 4: the CLI exits NON-ZERO on a filename/frontmatter disagreement", () => {
-  const d = cliFixture({ "flow-0050-queue-runner.md": task("flow-0049") });
+  const d = cliFixture({ "flow-0050-second-slug.md": task("flow-0049") });
   const { code, out } = runCli(d);
   assert.equal(code, 1, out);
   assert.match(out, /FAIL.*disagrees with the id in its own filename/);

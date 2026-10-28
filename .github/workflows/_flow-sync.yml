@@ -598,9 +598,11 @@ jobs:
           # relative to the checkout. Add a path only when canonical withdraws it; never a pattern.
           #   .claude/skills/board-builder/  the board is retired; state is viewed in inflight
           #   .flow/board.html               the board itself, which no session regenerates now
+          #   .github/workflows/flow-queue-runner.yml   the retired worker's caller (flow-0174); its
+          #                  reusable is gone, so a caller left behind fails on every scheduled tick
           # An absent path is a no-op. `${RETIRED%/}` drops the trailing slash so a symlink is
           # removed as a link, never followed; `git add -A` below stages the deletion.
-          for RETIRED in ".claude/skills/board-builder/" ".flow/board.html"; do
+          for RETIRED in ".claude/skills/board-builder/" ".flow/board.html" ".github/workflows/flow-queue-runner.yml"; do
             if [ -e "${RETIRED%/}" ] || [ -L "${RETIRED%/}" ]; then
               rm -rf -- "${RETIRED%/}"
             fi

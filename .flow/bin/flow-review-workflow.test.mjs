@@ -27,7 +27,6 @@ const skip = yamlMod ? false : "needs `npm ci` (yaml) — runs in the per-stack 
 
 const REUSABLE = join(REPO, ".github/workflows/_flow-review.yml");
 const CALLER = join(TEMPLATE, ".github/workflows/flow-review.yml");
-const QUEUE_RUNNER = join(REPO, ".github/workflows/_flow-queue-runner.yml");
 
 const reusableSrc = readFileSync(REUSABLE, "utf8");
 const wf = yamlMod ? yamlMod.parse(reusableSrc) : { jobs: {} };
@@ -348,17 +347,6 @@ test("the protocol tells the worker not to run a review agent, and says where th
     assert.doesNotMatch(protocol, new RegExp(stale),
       `the protocol still names the "${stale}" subagent, which no longer exists`);
   }
-});
-
-test("the queue-runner's worker prompt no longer dispatches review subagents", { skip: false }, () => {
-  const src = readFileSync(QUEUE_RUNNER, "utf8");
-  for (const stale of ["qa-verifier", "security-reviewer", "code-reviewer"]) {
-    assert.doesNotMatch(src, new RegExp(stale),
-      `_flow-queue-runner.yml still instructs the worker to run "${stale}" — the prompt is the ` +
-      `other place a worker is told to certify its own work`);
-  }
-  assert.match(src, /Do NOT run any review subagent/,
-    "silence is not enough: the prompt must say so, because the habit predates it");
 });
 
 test("the inherited Definition-of-Done block every future task carries is updated too", { skip: false }, () => {

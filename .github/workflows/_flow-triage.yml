@@ -566,7 +566,7 @@ jobs:
             require guessing the human's intent, ask the question in the issue comment instead
             of proposing. Apply the readiness bar honestly — a vague proposal is worse than none.
           # --max-turns 150 (was 30) + bypassPermissions: same headless-runner failure that hit
-          # flow-review and the queue-runner, and triage was the one caller left unfixed. With no
+          # flow-review and the since-retired queue-runner, and triage was the one caller left unfixed. With no
           # permission posture every gh issue-list / comment / label call was denied, so the sweep
           # burned its turns on denials and exited clean without proposing anything — the action
           # reports success either way, so it looked healthy for weeks (observed 2026-07-31:

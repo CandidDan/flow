@@ -115,16 +115,17 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0141",
   }],
   ["Concurrency — how parallel sessions don't collide", {
-    digest: "b109c9d9a05e59e910603ceae55daf82ed3d9037ec64a06898141310952ecebd",
+    digest: "d97f0e62de098ebc5d4ddfc79aa2d0d8c688ff0894a875aa31d591e084af06ee",
     why: "the `touches` paragraph told a worker to skip a `ready` task overlapping an " +
          "`in_progress` one and said nothing about `in_review`, so a task overlapping an open " +
          "unmerged PR read as claimable. It now names both, and says why: a review-stage PR " +
          "still has a live branch about to rewrite `main` in those very files. `blocked` is " +
-         "still deliberately excluded.",
-    task: "flow-0118",
+         "still deliberately excluded. flow-0174 then retired the queue-runner: the opening " +
+         "line names worker routines and people, not it, as what starts parallel sessions.",
+    task: "flow-0174",
   }],
   ["Status lifecycle", {
-    digest: "952841c4f16cddff0f3e734a514e302e5fa6363469d5d1e0e6da386afd385208",
+    digest: "43a0402f496edf5b40b59e95074778d436ef83df737319107e4d15fda23712c2",
     why: "the `blocked` bullet told a worker to record the undecidable thing in " +
          "`blocked_reason` and `blocked_by` only — both of which a person reads only once they " +
          "are already looking at the task file, which is the thing a human never opens. It now " +
@@ -138,8 +139,10 @@ const INTENTIONAL_DIVERGENCES = new Map([
          "terminal `cancelled` status: a lifecycle diagram branch, a bullet (orchestrator-only, " +
          "requires `cancelled_reason`), and \"two\" hand-written transitions becoming \"three\". " +
          "flow-0173 then stopped flow-unblock starting the next worker: the `blocked` bullet now " +
-         "says the released task is picked up by the next worker run.",
-    task: "flow-0173",
+         "says the released task is picked up by the next worker run. flow-0174 then retired " +
+         "the queue-runner: escalation trigger 1 is now a stranded claim flow-recover resets " +
+         "because nothing was pushed, not a queue-runner run that ended without a PR.",
+    task: "flow-0174",
   }],
   ["Session hygiene — context is a budget", {
     digest: "b6a0eebb93032a65950114f77279de5bbac095278b2dc44583ca959852f7a5a9",
