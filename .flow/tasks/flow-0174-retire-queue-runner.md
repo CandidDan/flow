@@ -1,12 +1,12 @@
 ---
 id: "flow-0174"
 title: "Retire flow-queue-runner: the reusable, the callers and its helpers are gone, flow-sync removes the caller downstream, and the protocol names the worker routine as what runs the loop"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-code-local_flow-0174"
 created: "2026-10-28"
-started: ""
+started: "2026-10-28T07:05:12Z"
 branch: ""
 pr: ""
 issue: ""
