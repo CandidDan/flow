@@ -207,7 +207,14 @@ export function planReleases(tasks, prFacts = new Map()) {
 
 // ── Starting the next worker ─────────────────────────────────────────────────────────────
 //
-// After the release, dispatch the queue runner — with NO task_id, so pick-task chooses, and
+// NO LONGER CALLED by `_flow-unblock.yml` (flow-0173): the sweep releases and stops, and the next
+// worker run picks the released task. These four — and the `count-ready`, `count-active-runs`,
+// `should-dispatch` and `dispatch-outcome` subcommands — are kept only because canonical's
+// `.flow/bin/flow-unblock.mjs` adapter re-exports them by name, and removing one breaks that
+// import. They go when the queue runner is retired.
+//
+// What they decided, while the workflow called them:
+// after the release, dispatch the queue runner — with NO task_id, so pick-task chooses, and
 // priority and `touches` overlap stay its rules — when all three hold:
 //   · at least one task is `ready` (a merge that released nothing may still have left one waiting
 //     for the next scheduled tick, and this is what stops it waiting a day);

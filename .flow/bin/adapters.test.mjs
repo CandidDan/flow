@@ -986,7 +986,7 @@ test("_flow-gates.yml runs source-roots from CANONICAL, not from the caller's .f
 });
 
 // ─────────────────────────────────────────────────────────────────────────────────────────
-// flow-unblock (flow-0041): the adapter, the two callers, and the reusable's two steps run for real
+// flow-unblock (flow-0041): the adapter, the two callers, and the reusable's release step run for real
 // ─────────────────────────────────────────────────────────────────────────────────────────
 
 import * as unblockAdapter from "./flow-unblock.mjs";
@@ -1029,8 +1029,8 @@ function unblockRepo({ readyToo = false } = {}) {
   git("add", "-A"); git("commit", "-qm", "seed");
   git("remote", "add", "origin", join(root, "origin.git"));
   git("push", "-q", "origin", "main");
-  // A fake `gh` that logs every call: the PR reads merged, the run list is GH_RUNS, and the
-  // dispatch is refused with a 403 when GH_DISPATCH_403 is set.
+  // A fake `gh` that logs every call: the PR reads merged. The run-list and dispatch cases answer
+  // as they did before flow-0173, so a dispatch creeping back would be logged, and caught.
   mkdirSync(join(root, "bin"));
   writeFileSync(join(root, "bin", "gh"), [
     "#!/bin/sh",
@@ -1095,40 +1095,17 @@ test("the release step keeps a task blocked when its PR cannot be read", { skip 
   } finally { rmSync(repo.root, { recursive: true, force: true }); }
 });
 
-test("the dispatch step dispatches the runner with no task_id when work is ready and no run is active", { skip }, () => {
+// flow-0173: the sweep releases and stops — the next worker run picks what it released. The
+// dispatch step is gone, and a run with ready work still makes no dispatch call.
+test("flow-0173: the reusable has no dispatch step, and the release step dispatches nothing even with ready work", { skip }, () => {
+  const steps = wfParse("_flow-unblock.yml").jobs.sweep.steps;
+  assert.equal(steps.find((s) => s.name === DISPATCH_STEP), undefined, `"${DISPATCH_STEP}" must be absent`);
   const repo = unblockRepo({ readyToo: true });
   try {
-    const r = runStep(repo, DISPATCH_STEP, { RUNNER_WF: "flow-queue-runner.yml", FLOW_QUEUE_RUNNER: "" });
-    assert.equal(r.status, 0, r.stderr);
-    const post = ghLog(repo).split("\n").find((l) => l.startsWith("api -X POST"));
-    assert.equal(post, "api -X POST repos/o/r/actions/workflows/flow-queue-runner.yml/dispatches -f ref=main",
-      "exactly the ref and nothing else — no task_id input, so pick-task chooses");
-    assert.match(r.stdout, /Dispatched flow-queue-runner\.yml with no task_id/);
-  } finally { rmSync(repo.root, { recursive: true, force: true }); }
-});
-
-test("the dispatch step does not dispatch when any one condition is false", { skip }, () => {
-  for (const [name, opts, env] of [
-    ["no ready task", {}, {}],
-    ["a runner already active", { readyToo: true }, { GH_RUNS: '[{"status":"in_progress"}]' }],
-    ["FLOW_QUEUE_RUNNER paused", { readyToo: true }, { FLOW_QUEUE_RUNNER: "paused" }],
-  ]) {
-    const repo = unblockRepo(opts);
-    try {
-      const r = runStep(repo, DISPATCH_STEP, env);
-      assert.equal(r.status, 0, `${name}: ${r.stderr}`);
-      assert.match(r.stdout, /-> skip: /, name);
-      assert.doesNotMatch(ghLog(repo), /api -X POST/, `${name}: must not dispatch`);
-    } finally { rmSync(repo.root, { recursive: true, force: true }); }
-  }
-});
-
-test("a 403 on dispatch is a ::warning:: naming actions: write, and the step still succeeds", { skip }, () => {
-  const repo = unblockRepo({ readyToo: true });
-  try {
-    const r = runStep(repo, DISPATCH_STEP, { GH_DISPATCH_403: "1" });
-    assert.equal(r.status, 0, "a caller not yet synced must get a green run, never a red one");
-    assert.match(r.stdout, /^::warning::Could not dispatch flow-queue-runner\.yml: HTTP 403\. .*`actions: write`/m);
+    const r = runStep(repo, RELEASE_STEP);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /flow-9002: every blocked_by entry resolved -> ready/);
+    assert.doesNotMatch(ghLog(repo), /api -X POST|run list/, "unblock must not list or dispatch a worker");
   } finally { rmSync(repo.root, { recursive: true, force: true }); }
 });
 
