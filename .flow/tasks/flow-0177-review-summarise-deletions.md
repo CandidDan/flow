@@ -1,7 +1,7 @@
 ---
 id: "flow-0177"
 title: "flow-review summarises whole-file deletions by name and line count when a diff is over budget, so a retirement PR is reviewed in full instead of truncated"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude-flow-0177"
