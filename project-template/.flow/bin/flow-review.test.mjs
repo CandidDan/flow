@@ -2120,7 +2120,6 @@ test("flow-0089: the two allowed-path lists are closed, and the plan summary say
     ".flow/bin/**",
     ".github/workflows/flow-*.yml",
     ".flow/PROTOCOL.md",
-    ".claude/skills/board-builder/**",
     ".claude/skills/flow-compass/**",
     ".claude/skills/show-me/**",
     ".claude/skills/task-writer/**",

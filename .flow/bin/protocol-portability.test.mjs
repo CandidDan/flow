@@ -99,10 +99,12 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0139",
   }],
   ["The store", {
-    digest: "c30a497d2fc3cdd7cc828fef501b0b921c04c6bd5d07198d809cc2b2bdd3b50c",
+    digest: "7ebadd928700ca4a4ae8c71a062cb6a4bd150feb483e6810b0c8f9421b196995",
     why: "a paragraph was added stating that a repo may skip deploys for task-state commits only " +
-         "through `.flow/bin/only-flow-changed.mjs`, and that any doubt builds (flow-0122).",
-    task: "flow-0122",
+         "through `.flow/bin/only-flow-changed.mjs`, and that any doubt builds (flow-0122). " +
+         "flow-0164 then retired the board: the paragraph naming it as the human's view now says " +
+         "state is viewed in inflight, and describes `apply-board-edits.mjs` as the store writer.",
+    task: "flow-0164",
   }],
   ["Response style — show, don't tell", {
     digest: "b260a80a382fbbc16d61f8e9646d36da489fca76966ba422d247888c08ceee59",
@@ -149,14 +151,22 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0156",
   }],
   ["The loop you run", {
-    digest: "50887be6120f947da31dc64d7a44a5a05b326f430d7be20f2e4786014be862a1",
+    digest: "011bf25b8a485affca64be1727741da5ed208bc52afe06728aa53d396dbaa969",
     why: "step 1 is the second place the claim rule is stated, and it said `in_progress` only. " +
          "Two statements of one rule drift apart unless both move; pick-task.test.mjs now " +
          "asserts on both strings for the same reason (flow-0118). flow-0172 then taught the " +
          "loop to run from a Claude Code cloud routine, where GraphQL is blocked: step 1 picks " +
          "with pick-task.mjs when started with no task id, and steps 7 and 8 fall back to the " +
-         "REST pulls route and ccr/ready_for_review on the GraphQL 403.",
-    task: "flow-0172",
+         "REST pulls route and ccr/ready_for_review on the GraphQL 403. flow-0164 then dropped " +
+         "the two board-regeneration steps (after the claim, and after the hand-off): the board " +
+         "is retired.",
+    task: "flow-0164",
+  }],
+  ["What stays out of here", {
+    digest: "73329df2df1118a3129f95d896cf5cabab03bfda2aff86d1c191ee0f405f05b1",
+    why: "the board was dropped from the list of human-facing HTML surfaces when flow-0164 " +
+         "retired it.",
+    task: "flow-0164",
   }],
 ]);
 
@@ -313,10 +323,9 @@ test("AGENTS.md holds no second copy of the protocol body", () => {
 const ORCHESTRATOR_SKILL_PATHS = [
   ".claude/skills/task-writer/SKILL.md",
   ".claude/skills/vision-writer/SKILL.md",
-  ".claude/skills/board-builder/SKILL.md",
 ];
 
-test("AGENTS.md names all three orchestrator skill paths", () => {
+test("AGENTS.md names both orchestrator skill paths", () => {
   for (const path of ORCHESTRATOR_SKILL_PATHS) {
     assert.ok(agents.includes(path),
       `AGENTS.md must name ${path} — an agent following only the AGENTS.md convention has no ` +

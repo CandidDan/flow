@@ -19,7 +19,7 @@ store-guard would otherwise block its own birth PR). No application code changes
 
 ## 1. Overlay the Flow files (merge, don't clobber)
 
-Copy from `project-template/`: `.flow/` (config, `PROTOCOL.md`, _TEMPLATE, board, `VERSION`,
+Copy from `project-template/`: `.flow/` (config, `PROTOCOL.md`, _TEMPLATE, `VERSION`,
 **all of** `bin/`), both host pointers (`CLAUDE.md`, `AGENTS.md` — see step 3),
 `.github/workflows/flow-*.yml` (thin callers of canonical's reusable workflows — see
 `docs/flow-reusable-workflows.md` in the flow repo), and **merge** `.claude/` (agents + skills)
@@ -82,7 +82,7 @@ Present the diff + final char count. **Wait for approval before committing.**
 ## 5-8. Converge with the clean route (see INIT.md)
 
 From here the routes are identical:
-- **5. Stack-specific CI line** in flow-gates.yml; **set board REPO**.
+- **5. Stack-specific CI line** in flow-gates.yml.
 - **6. Gate-green the baseline FIRST** - run the full gate on `main` and fix all latent infra debt
   in ONE pass (lockfile, lint config, undeclared source_roots, Node version) *before* the first
   task. On an existing repo this is where the debt lives; do not let the first task discover it
@@ -91,7 +91,7 @@ From here the routes are identical:
   `.claude/settings.json` (the `extraKnownMarketplaces` pointer to the private Flow plugin) and run
   `claude plugin install flow@flow`, so Cowork/orchestrator sessions can drive this repo. The worker
   needs nothing - it runs the gate from the repo's committed `.claude/`; the plugin only registers
-  `task-writer`/`board-builder`/`portfolio-manager` for Cowork, which doesn't auto-discover repo skills.
+  `task-writer`/`portfolio-manager` for Cowork, which doesn't auto-discover repo skills.
 - **8. Run the loop** - manual one-liner, or enable `FLOW_AI` + token for triage/review/queue-runner.
 
 ## Sunset checklist (migration only)
@@ -99,4 +99,4 @@ From here the routes are identical:
 - Every open `<TRACKER>` item exists as a task or an issue (spot-check a couple of detailed ones).
 - Old work-tracking docs archived; misfiled files relocated.
 - `<TRACKER>` exported, then downgraded.
-- The board reflects reality (regenerate with board-builder).
+- inflight reflects reality.

@@ -87,12 +87,12 @@ test("globsOverlap: identical paths, enclosing dir, and ** all overlap", () => {
 test("globsOverlap: sibling files and disjoint trees do not overlap", () => {
   assert.equal(globsOverlap(".flow/bin/pick-task.mjs", ".flow/bin/pick-task.test.mjs"), false);
   assert.equal(globsOverlap("src/a/**", "src/b/**"), false);
-  assert.equal(globsOverlap("app/api/**", ".flow/board.html"), false);
+  assert.equal(globsOverlap("app/api/**", ".flow/config.yml"), false);
 });
 
 test("touchesOverlap: true iff any glob pair across the lists overlaps", () => {
   assert.ok(touchesOverlap(["app/api/**", "src/x.ts"], ["src/**"]));
-  assert.equal(touchesOverlap(["app/api/**"], [".flow/board.html", "docs/x.md"]), false);
+  assert.equal(touchesOverlap(["app/api/**"], [".flow/config.yml", "docs/x.md"]), false);
 });
 
 // ── parseTask + readTasks (file IO) ──

@@ -511,7 +511,6 @@ export const RELEASE_PR_PATHS = Object.freeze([
 // by a list that predates it and is not classified. The cost is one sync PR reviewed the way
 // every other PR is reviewed; the next sync, carrying the widened list, classifies normally.
 export const CANONICAL_SKILLS = Object.freeze([
-  "board-builder",
   "flow-compass",
   "show-me",
   "task-writer",

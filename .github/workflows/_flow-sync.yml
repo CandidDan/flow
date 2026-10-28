@@ -24,6 +24,8 @@ name: _flow-sync (reusable)
 #                            — except `LOCAL.md` inside one, the repo's own overlay, which is
 #                            never touched (flow-0129)
 #   - .flow/VERSION          bumped to canonical's stamp
+# And it DELETES exactly the retired paths in the copy step's `RETIRED` list (flow-0164) — files
+# canonical once shipped and has withdrawn — so they appear under **Removed** in the sync PR.
 # It never touches .flow/config.yml, .flow/tasks/, .claude/settings.json, .claude/settings.local.json,
 # or the project's CLAUDE.md and AGENTS.md — those
 # are intentionally per-repo. The two host files stay a manual adopt because each carries a
@@ -589,6 +591,20 @@ jobs:
           else
             echo "::warning title=No skills to adopt::canonical@${CANONICAL_REF} has no project-template/.claude/skills/, so this sync cannot refresh the skill procedures AGENTS.md and PROTOCOL.md point at by path. Pin canonical_ref at a release that ships them."
           fi
+          # THE RETIRED PATHS (flow-0164). The skill loop above mirrors canonical's directories, so
+          # a skill canonical DELETES is never visited and its stale copy survives in every adopter,
+          # still instructing sessions. This is the one place a sync deletes a path it did not just
+          # copy, so it is a LITERAL list: each entry quoted, no variable, no glob, every path
+          # relative to the checkout. Add a path only when canonical withdraws it; never a pattern.
+          #   .claude/skills/board-builder/  the board is retired; state is viewed in inflight
+          #   .flow/board.html               the board itself, which no session regenerates now
+          # An absent path is a no-op. `${RETIRED%/}` drops the trailing slash so a symlink is
+          # removed as a link, never followed; `git add -A` below stages the deletion.
+          for RETIRED in ".claude/skills/board-builder/" ".flow/board.html"; do
+            if [ -e "${RETIRED%/}" ] || [ -L "${RETIRED%/}" ]; then
+              rm -rf -- "${RETIRED%/}"
+            fi
+          done
           #
           # AGENTS.md and CLAUDE.md are DELIBERATELY EXCLUDED, and this comment is the reason
           # flow-0048 asked for: they are the same class of file — canonical-authored, copied at

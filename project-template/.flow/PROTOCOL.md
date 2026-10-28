@@ -96,9 +96,9 @@ branch + PR.**
 coverage). Everything below that says "run the tests" means "run the command named in
 `config.yml`" — the protocol is identical across every project; only the commands differ.
 
-`.flow/board.html` is the human's view. You never hand-edit it; regenerate it with the
-**board-builder** skill when task state changes. Edits the human makes on the board flow
-back through `.flow/bin/apply-board-edits.mjs` (never by pasting JSON into a prompt).
+Task state is viewed in inflight, not in this repo — there is no board to regenerate.
+`.flow/bin/apply-board-edits.mjs` is **the store writer**: the workflows patch task frontmatter
+through it, never by hand-editing state they do not own.
 
 **GitHub Issues are the capture inbox, not the work queue.** Raw bugs and ideas get logged as
 issues (from anywhere, with whatever context exists at the time); the orchestrator triages them
@@ -237,7 +237,6 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
 2. **Claim (atomic).** `git pull --rebase`; set `in_progress` + `owner` + `started` (full UTC
    ISO datetime, see *Status lifecycle*); commit
    that task file and push to `main`. If the push is rejected, rebase and go back to step 1.
-   Then regenerate the board.
 3. **Branch.** `git checkout -b flow/<task-id>-<slug>` off latest `main`. One branch per task.
    **If the platform has already put you on a branch you didn't choose** — a cloud/web session
    is handed a `claude/…` branch by its harness, and that instruction outranks this file — stay
@@ -264,8 +263,8 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
    left the task `in_progress`. Marking it ready is the hand-off: it flips the task to `in_review`
    and starts the qa, code-review and security checks, which do not run on a draft. You don't write
    that transition, and you don't open the PR — you finish it. If you opened the PR yourself with
-   `gh pr create` or the REST route (no draft), that step already happened. Regenerate the board.
-   Stop. The human validates.
+   `gh pr create` or the REST route (no draft), that step already happened. Stop. The human
+   validates.
    **In a Claude Code cloud session** (a routine, or Claude Code on the web) GraphQL is blocked,
    so `gh pr create` and `gh pr ready` fail with HTTP 403 and the message *"GitHub GraphQL is not
    available from Claude Code sessions"*. The rule: **try the `gh pr` command first, and on that
@@ -485,5 +484,5 @@ buys — not a vendor-neutral reviewer.
 ## What stays out of here
 
 This file is config. It does not become HTML — none of HTML's human-facing benefits apply to a
-file the tool auto-loads and you barely read. The rich, human-facing surfaces (board, reports,
+file the tool auto-loads and you barely read. The rich, human-facing surfaces (reports,
 specs, explorations) are HTML and live elsewhere. Data stays data; views are HTML; this is config.

@@ -36,7 +36,6 @@ const doc = existsSync(CLAUDE_MD) ? readFileSync(CLAUDE_MD, "utf8") : "";
 const EXPECTED_ABSENT = [
   ".claude/agents",      // flow-0007 made the review gates PR checks — nothing to auto-discover
   ".flow/VERSION",       // canonical is the comparison target; root VERSION is the single source
-  ".flow/board.html",    // superseded by flightdeck/ for this repo (flow-0004)
 ];
 
 // Pull repo-relative paths out of inline code spans. Deliberately conservative: a token counts as
@@ -124,9 +123,8 @@ test("the coverage floor CLAUDE.md quotes matches the one actually enforced", ()
     `next session a number the gate will disagree with.`);
 });
 
-test(".gitattributes marks the generated board files", () => {
+test(".gitattributes marks the transient board-edits export", () => {
   const attrs = readFileSync(GITATTRIBUTES, "utf8");
-  assert.match(attrs, /^\.flow\/board\.html\s+linguist-generated=true$/m);
   assert.match(attrs, /^\.flow\/board-edits\.json\s+linguist-generated=true$/m);
 });
 
