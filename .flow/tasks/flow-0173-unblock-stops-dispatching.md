@@ -1,7 +1,7 @@
 ---
 id: "flow-0173"
 title: "flow-unblock releases blocked tasks and stops there: it no longer dispatches flow-queue-runner, because the worker routine's schedule picks up ready work"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
 owner: ""
@@ -10,9 +10,9 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for flow-0172 to merge: both edit project-template/.flow/PROTOCOL.md, so they cannot run in parallel."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["flow-0172"]
+blocked_by: []
 serves: ["G9"]
 intent: "model-work-off-github-actions"
 touches:
