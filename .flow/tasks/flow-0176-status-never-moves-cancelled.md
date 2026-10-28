@@ -1,7 +1,7 @@
 ---
 id: "flow-0176"
 title: "flow-status never moves a cancelled task: a PR closing unmerged leaves it cancelled and does not escalate its model"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,9 +10,9 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for flow-0169 (PR #244): both edit .github/workflows/_flow-status.yml and draft-pr-lifecycle.test.mjs, and this task should reuse the store-status read flow-0169 adds rather than write a second one."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["flow-0169"]
+blocked_by: []
 serves: ["maintenance"]
 intent: ""
 touches:
