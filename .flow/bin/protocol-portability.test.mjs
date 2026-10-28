@@ -147,11 +147,14 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0156",
   }],
   ["The loop you run", {
-    digest: "7782a30da99d62d4b00abe99fac986c27df6781fd989daa87ac399af72e5a797",
+    digest: "50887be6120f947da31dc64d7a44a5a05b326f430d7be20f2e4786014be862a1",
     why: "step 1 is the second place the claim rule is stated, and it said `in_progress` only. " +
          "Two statements of one rule drift apart unless both move; pick-task.test.mjs now " +
-         "asserts on both strings for the same reason.",
-    task: "flow-0118",
+         "asserts on both strings for the same reason (flow-0118). flow-0172 then taught the " +
+         "loop to run from a Claude Code cloud routine, where GraphQL is blocked: step 1 picks " +
+         "with pick-task.mjs when started with no task id, and steps 7 and 8 fall back to the " +
+         "REST pulls route and ccr/ready_for_review on the GraphQL 403.",
+    task: "flow-0172",
   }],
 ]);
 
