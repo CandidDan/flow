@@ -1,12 +1,12 @@
 ---
 id: "flow-0168"
 title: "Require plain, literal, unambiguous English in everything written about the work, not only in replies"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "local_zen-tu-775d79"
 created: "2026-10-27"
-started: ""
+started: "2026-10-28T12:09:08Z"
 branch: ""
 pr: ""
 issue: ""
