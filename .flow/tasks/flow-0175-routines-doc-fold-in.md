@@ -1,7 +1,7 @@
 ---
 id: "flow-0175"
 title: "docs/flow-routines.md covers firing a routine from an app, the account-wide limits, and the auto-mode stall risk, so it is the one routine runbook"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "worker-flow-0175"
