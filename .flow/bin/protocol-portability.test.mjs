@@ -124,7 +124,7 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0118",
   }],
   ["Status lifecycle", {
-    digest: "9dbf9f22572ba54edfd6b6f8a50db0ef0355e17e5da28d2f7d986decc6a5fa50",
+    digest: "952841c4f16cddff0f3e734a514e302e5fa6363469d5d1e0e6da386afd385208",
     why: "the `blocked` bullet told a worker to record the undecidable thing in " +
          "`blocked_reason` and `blocked_by` only — both of which a person reads only once they " +
          "are already looking at the task file, which is the thing a human never opens. It now " +
@@ -136,8 +136,10 @@ const INTENTIONAL_DIVERGENCES = new Map([
          "`flow-unblock` now releases a task once every `blocked_by` entry resolves, and a block " +
          "with no machine-readable entry still needs a human. flow-0108 then added the " +
          "terminal `cancelled` status: a lifecycle diagram branch, a bullet (orchestrator-only, " +
-         "requires `cancelled_reason`), and \"two\" hand-written transitions becoming \"three\".",
-    task: "flow-0108",
+         "requires `cancelled_reason`), and \"two\" hand-written transitions becoming \"three\". " +
+         "flow-0173 then stopped flow-unblock starting the next worker: the `blocked` bullet now " +
+         "says the released task is picked up by the next worker run.",
+    task: "flow-0173",
   }],
   ["Session hygiene — context is a budget", {
     digest: "b6a0eebb93032a65950114f77279de5bbac095278b2dc44583ca959852f7a5a9",
@@ -149,11 +151,15 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0156",
   }],
   ["The loop you run", {
-    digest: "ddceab6e2364785dc6bb33ed76ed1b0deef5404b810e3046769cb901fe7addf8",
+    digest: "011bf25b8a485affca64be1727741da5ed208bc52afe06728aa53d396dbaa969",
     why: "step 1 is the second place the claim rule is stated, and it said `in_progress` only. " +
          "Two statements of one rule drift apart unless both move; pick-task.test.mjs now " +
-         "asserts on both strings for the same reason. flow-0164 then dropped the two " +
-         "board-regeneration steps (after the claim, and after the hand-off): the board is retired.",
+         "asserts on both strings for the same reason (flow-0118). flow-0172 then taught the " +
+         "loop to run from a Claude Code cloud routine, where GraphQL is blocked: step 1 picks " +
+         "with pick-task.mjs when started with no task id, and steps 7 and 8 fall back to the " +
+         "REST pulls route and ccr/ready_for_review on the GraphQL 403. flow-0164 then dropped " +
+         "the two board-regeneration steps (after the claim, and after the hand-off): the board " +
+         "is retired.",
     task: "flow-0164",
   }],
   ["What stays out of here", {

@@ -1,7 +1,7 @@
 ---
 id: "flow-0164"
 title: "Retire the board fleet-wide: no worker regenerates board.html, the board-builder skill is gone, and flow-sync deletes both downstream"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-worker-flow-0164"

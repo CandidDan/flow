@@ -147,8 +147,8 @@ ready  →  in_progress  →  in_review  →  done
   because `blocked_by` is what lets a block end on its own: **`flow-unblock`** releases a blocked
   task back to `ready` once **every** entry resolves — a task id that is `done` on `main`, a PR
   url that merged (one closed unmerged never counts) — clearing `blocked_reason` and `blocked_by`
-  as it goes, then starts the next worker. A block with no machine-readable entry still needs a
-  human: an empty `blocked_by` is never released. If the block genuinely isn't mechanical (you are
+  as it goes; the released task is picked up by the next worker run. A block with no
+  machine-readable entry still needs a human: an empty `blocked_by` is never released. If the block genuinely isn't mechanical (you are
   waiting on a phone call), say so in `blocked_reason` using the words "not machine-checkable" and
   flow-doctor stops asking. Clear `blocked_by` when you lift a block by hand: flow-doctor reports a
   populated `blocked_by` on a live non-blocked task as stale data. On a `done` task it stays, as
@@ -231,7 +231,9 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
 ## The loop you run
 
 1. **Pick.** Take the highest-`priority` task in `ready` with no `touches` overlap against
-   anything `in_progress` or `in_review`. If none, stop — do not invent work.
+   anything `in_progress` or `in_review`. If none, stop — do not invent work. A worker started
+   **without a task id** (a routine run with an empty trigger, say) picks with
+   `node .flow/bin/pick-task.mjs`, and an empty result means stop.
 2. **Claim (atomic).** `git pull --rebase`; set `in_progress` + `owner` + `started` (full UTC
    ISO datetime, see *Status lifecycle*); commit
    that task file and push to `main`. If the push is rejected, rebase and go back to step 1.
@@ -252,13 +254,24 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
    branch first and this title second, so on a non-`flow/` branch it is the only thing standing
    between your PR and a silently skipped transition. Link the task file path in the description,
    paste the acceptance-criteria checklist with each item ticked + the test that proves it.
+   Normally `flow-open-pr` has already opened it as a draft (step 8), so you edit its title and
+   body. Only when **no PR exists for the branch yet** do you open one: `gh pr create`, or — in a
+   session without GraphQL (below) — `gh api repos/{owner}/{repo}/pulls -f title=… -f head=<branch>
+   -f base=main -F body=@<file>`, which opens it non-draft.
 8. **Hand off — `gh pr ready`.** `flow-open-pr` opens your PR as a **draft** on your first push,
    so it already exists by the time you get here; `flow-status` recorded `branch` + `pr` then, and
    left the task `in_progress`. Marking it ready is the hand-off: it flips the task to `in_review`
    and starts the qa, code-review and security checks, which do not run on a draft. You don't write
    that transition, and you don't open the PR — you finish it. If you opened the PR yourself with
-   `gh pr create` (no draft), that step already happened. Stop. The human
+   `gh pr create` or the REST route (no draft), that step already happened. Stop. The human
    validates.
+   **In a Claude Code cloud session** (a routine, or Claude Code on the web) GraphQL is blocked,
+   so `gh pr create` and `gh pr ready` fail with HTTP 403 and the message *"GitHub GraphQL is not
+   available from Claude Code sessions"*. The rule: **try the `gh pr` command first, and on that
+   exact message use REST instead** — never on any other failure. For step 8 the REST hand-off is
+   `gh api -X POST repos/{owner}/{repo}/pulls/{n}/ccr/ready_for_review`, with `{n}` the PR number
+   (`gh api "repos/{owner}/{repo}/pulls?head={owner}:<branch>" --jq '.[0].number'`). Setup for
+   routines: `docs/flow-routines.md` in canonical.
 9. **Kickback** (if the human comments) arrives as a new `notes` entry on the task or a PR
    comment. Address it on the same branch, re-run gates, re-request review.
 

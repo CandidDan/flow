@@ -1,6 +1,7 @@
 // queue-runner-bot-dispatch.test.mjs — proving tests for flow-0152.
 //
-// _flow-unblock.yml dispatches the queue runner with GITHUB_TOKEN, so that run's actor is
+// _flow-unblock.yml dispatched the queue runner with GITHUB_TOKEN (until flow-0173 removed that
+// dispatch; unblock-no-dispatch.test.mjs asserts it stays absent), so that run's actor was
 // github-actions[bot]. claude-code-action refuses a bot-initiated run unless the bot is in
 // `allowed_bots`. These tests pin the worker step to exactly that one bot, keep `*` out of the
 // runner (the worker writes code; the reviewers only read), and leave _flow-review.yml unchanged.
