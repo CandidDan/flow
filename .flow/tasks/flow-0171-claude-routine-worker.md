@@ -20,7 +20,7 @@ effort: "medium"
 model_reason: "Documentation and a prompt; no code paths change"
 touches:
   - "docs/claude-routine-worker.md"
-  - "changes/{{ID}}.md"
+  - "changes/flow-0171.md"
 labels: [docs, cost, routines]
 notes:
   - "2026-10-28 (orchestrator): from Dan. Replaces queue-runner's GitHub-hosted worker with a Claude Code routine (cloud session on the Max plan, no Actions minutes). Pairs with the worker.host task, which adds host: claude-routine; this task does not depend on it landing."

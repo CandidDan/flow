@@ -24,7 +24,7 @@ touches:
   - "project-template/.flow/bin/worker-host.test.mjs"
   - "project-template/.flow/config.yml"
   - "docs/flow-reusable-workflows.md"
-  - "changes/{{ID}}.md"
+  - "changes/flow-0170.md"
 labels: [workflows, cost, config]
 notes:
   - "2026-10-28 (orchestrator): from Dan. October Actions bill hit the $250 budget; queue-runner was ~$60 of it across private repos, billed per minute while the runner waits on Claude. Dan: 'queue runner has to go' and 'right now we're forcing them into using Claude'. Private repos set FLOW_QUEUE_RUNNER=paused by hand on 2026-10-28 as a stopgap."
