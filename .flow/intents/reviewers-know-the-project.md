@@ -25,7 +25,8 @@ evidence: []
 
 Evidence (not Dan's words), from `.github/workflows/_flow-review.yml` on `main` at `f23d3f9`:
 
-- The qa, code-review and security prompts are the same text in every adopting repo. None of them
+- The qa, code-review and security prompts are the same text in every adopting repo (`review:` in
+  `.flow/config.yml` varies only the model and the security trigger paths). None of them
   is handed the repo's `AGENTS.md` or `CLAUDE.md` as context (both are only security-path
   triggers), and the security reviewer is not handed
   `threat_model.md`, which tanplan-platform has.
