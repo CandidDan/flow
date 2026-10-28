@@ -40,13 +40,37 @@ touches:
   - ".flow/bin/flow-unblock.mjs"
   - "project-template/.github/workflows/flow-unblock.yml"
   - ".github/workflows/flow-unblock.yml"
+  - ".github/workflows/_flow-recover.yml"
+  - ".github/workflows/_flow-done.yml"
+  - ".github/workflows/_flow-kickback.yml"
+  - ".github/workflows/_flow-open-pr.yml"
+  - ".github/workflows/_flow-status.yml"
+  - ".github/workflows/_flow-triage.yml"
+  - ".github/workflows/_flow-unblock.yml"
+  - "project-template/.github/workflows/flow-recover.yml"
+  - "project-template/.flow/bin/flow-recover.mjs"
+  - "project-template/.flow/bin/flow-recover.test.mjs"
+  - ".flow/bin/flow-recover.mjs"
+  - "project-template/.flow/bin/task-model.mjs"
+  - "project-template/.flow/bin/task-model.test.mjs"
+  - ".flow/bin/task-model.mjs"
+  - "project-template/.flow/bin/pick-task.mjs"
+  - "project-template/.flow/bin/pick-task.test.mjs"
+  - ".flow/bin/pick-task.mjs"
+  - "flightdeck/bin/watchdog.mjs"
+  - "flightdeck/bin/watchdog.test.mjs"
+  - "docs/flow-routines.md"
+  - "docs/flow-map.html"
+  - "project-template/INIT.md"
+  - "project-template/README.md"
+  - "project-template/RETROFIT.md"
 labels: [workflows, retirement, routines, cost]
 model: "opus"
 effort: "high"
 model_reason: "Removes a reusable workflow the fleet calls and deletes its caller downstream through flow-sync; cross-cutting across tests, docs and the protocol"
-notes: []
-asks:
-  - "decision: queue-runner's escalate step moves a task up a model tier (haiku -> sonnet -> opus -> fable) when a run ends without a PR, and that step leaves with it, because a routine has no post-run step. What replaces it? Recommend: flow-recover escalates instead. When it resets a stranded in_progress task with nothing pushed back to ready, it applies the same one-tier bump through task-model.mjs. That keeps the ladder mechanical, runs no model, and recover already sees exactly the runs that ended without a PR."
+notes:
+  - "2026-10-28 (Dan via orchestrator): decision: what replaces queue-runner's model escalation? — answered: flow-recover escalates. When it resets a stranded in_progress task with nothing pushed back to ready, it applies the same one-tier bump (haiku -> sonnet -> opus -> fable) through task-model.mjs escalate --once. Touches and criteria re-cut against main after flow-0164 (PR #241) landed."
+asks: []
 ---
 
 ## Context
@@ -74,7 +98,11 @@ docs, the protocol, `flow-doctor`, `flow-init`, `pick-task` and `task-model`.
 - Update every remaining reference so nothing describes queue-runner as live. That covers the
   protocol's *Concurrency* and model-tier paragraphs, flow-doctor, flow-init, the task-writer
   skill's "Choosing the model" section, README and docs.
-- Implement the answer to this task's `decision` ask (see `asks`) before it returns to `ready`.
+- **Escalation moves to flow-recover** (Dan, 2026-10-28). In `_flow-recover.yml`'s `reset` path —
+  a stranded `in_progress` task with nothing pushed, sent back to `ready` — apply the one-tier bump
+  with `task-model.mjs escalate --once`, as queue-runner's escalate step did. The `promote` path
+  (work was pushed) does not escalate. Put the reset-or-not decision in `flow-recover.mjs` so a test
+  exercises it, not a grep of the YAML.
 - From flow-0173 (2026-10-28): delete the four dispatch-only subcommands and functions in
   `project-template/.flow/bin/flow-unblock.mjs` (`count-ready`, `count-active-runs`,
   `should-dispatch`, `dispatch-outcome`) together with their re-export in `.flow/bin/flow-unblock.mjs`,
@@ -90,12 +118,12 @@ docs, the protocol, `flow-doctor`, `flow-init`, `pick-task` and `task-model`.
 
 ## Acceptance criteria
 
-The `touches` list and these criteria are re-cut when the task returns to `ready`, after flow-0164
-lands, against the file list on `main` at that point.
-
-- [ ] Given `main` after this task, when `git grep -l "flow-queue-runner"` runs outside `.flow/tasks/`, `changes/` and `CHANGELOG.md`, then it finds only historical mentions that are marked as retired (proving test named when re-cut).
+- [ ] Given `main` after this task, when every file under `.github/workflows/` and `project-template/.github/workflows/` is scanned, then none calls, dispatches or `uses:` `flow-queue-runner` / `_flow-queue-runner`, and neither file exists (`.flow/bin/queue-runner-retired.test.mjs`).
+- [ ] Given `main` after this task, when `git grep -l "queue-runner"` runs outside `.flow/tasks/`, `.flow/intents/`, `changes/`, `CHANGELOG.md` and `docs/adr/`, then every remaining hit is in a sentence that marks it retired (same test file, with an allow-list of those files and a check that the scan can fail).
 - [ ] Given an adopting repo that has `.github/workflows/flow-queue-runner.yml`, when flow-sync runs, then the file is deleted in the sync PR (`project-template/.flow/bin/flow-sync.test.mjs`).
-- [ ] Given a task whose worker run ended with nothing pushed, when flow-recover resets it to `ready`, then its model tier behaves as the decision ask resolved (proving test named when re-cut).
+- [ ] Given a task whose worker run ended with nothing pushed, when flow-recover resets it to `ready`, then its `model` is raised one tier, and a task already at the top tier is left unchanged (`project-template/.flow/bin/flow-recover.test.mjs`).
+- [ ] Given a stranded task whose branch has pushed work, when flow-recover promotes it instead of resetting it, then its `model` is not changed (same test file).
+- [ ] Given `project-template/.flow/bin/flow-unblock.mjs`, then it no longer exports `count-ready`, `count-active-runs`, `should-dispatch` or `dispatch-outcome`, and neither `flow-unblock.yml` caller requests `actions: write` (`.flow/bin/unblock-no-dispatch.test.mjs`).
 - [ ] Given `changes/flow-0174.md`, then it states the caller action "run flow-sync" (`.flow/bin/changelog-fragments.test.mjs :: every claimed task that declares a changelog fragment has an entry stating its caller action`).
 
 ## Definition of done (inherited — do not edit)
