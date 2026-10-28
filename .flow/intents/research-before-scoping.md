@@ -25,12 +25,13 @@ evidence: []
 
 ## Cost of inaction
 
-Evidence (not Dan's words): Flow has no research stage. An intent records an outcome someone
-wants, so it comes after research. A task is done when its PR passes the gate and the qa,
-code-review and security reviewers. TanPlan works around this with a `spike` label
-(tanplan-0122) and a loose `research/` folder, but a spike PR still runs the build and test gate
-and the qa, code-review and (conditional) security reviewers over a Markdown file, and what it actually produces, a decision, has
-nowhere to go.
+Evidence (not Dan's words): Flow has no research stage. An intent records an outcome someone wants,
+so it comes after research. A task is done when its PR passes the gate and the qa, code-review and
+security reviewers. TanPlan works around this with a `spike` label (CandidDan/tanplan-platform,
+`.flow/tasks/tanplan-0122-face-match-check-in-dpia.md`) and a loose `research/` folder at that
+repo's root, but a spike PR still runs the build and test gate and the qa, code-review and
+(conditional) security reviewers over a Markdown file, and what it actually produces (a decision)
+has nowhere to go.
 
 [assumption] Without a research stage, an open question either turns into build work before
 anyone knows the answer, or stays in chat where it is lost.
