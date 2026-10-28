@@ -2,10 +2,10 @@
 
 A foundation for projects where **Cowork orchestrates** and **Claude Code works**, with the
 human as inspirator and validator. The handoff between the two isn't a doc you copy — it's a
-live, in-repo task store both sides read and write. The board is your seat in the loop.
+live, in-repo task store both sides read and write. Task state is viewed in inflight.
 
 Mark this repository as a **GitHub template** (Settings → Template repository). Every new
-project starts with *Use this template* — so the protocol, gates, agents, and board are there
+project starts with *Use this template* — so the protocol, gates and agents are there
 from commit one, not bolted on later.
 
 ## What's in here
@@ -30,24 +30,21 @@ CLAUDE.md                     A pointer, not the rules: a short host file that @
     0001-*.md                 the body. This IS the handoff. 0001 is a worked example task.
   workstreams/                Optional, beside .flow/intents/: one file per workstream, a grouping
     _TEMPLATE.md              of intents that serves goals and has an end (ADR-0009).
-  board.html                  Your glance + control surface. Drag to reprioritise/move, then
-                              "Apply edits" writes .flow/board-edits.json (no clipboard).
   bin/
-    apply-board-edits.mjs     The ONLY writer of task frontmatter from a board edit: reads
-    apply-board-edits.test.mjs  board-edits.json, patches status/priority, leaves a git diff.
+    apply-board-edits.mjs     The store writer the workflows use: reads board-edits.json,
+    apply-board-edits.test.mjs  patches task frontmatter, leaves a git diff.
     flow-doctor.mjs           Drift detection for the store (back-ported from the canary repo's
     flow-doctor.test.mjs      state:check): consistency problems fail CI; drift warns.
     flow-state.mjs            Read-only resolver: task state from origin/main, plus each intent's
     flow-state.test.mjs       derived status and workstream counts (`--json`, `schema: 1`).
     touches-guard.mjs         Fails a PR whose diff strays outside the task's declared
     touches-guard.test.mjs    `touches` globs — scope enforced, not just agent-reviewed.
-    pick-task.mjs             Queue-runner brain: next ready task, no in-flight touches overlap.
+    pick-task.mjs             The worker's pick: next ready task, no in-flight touches overlap.
     pick-task.test.mjs
                               All tooling ships with tests (node --test) — the DoD applies to it too.
 .claude/
   skills/
     task-writer/                orchestrator discipline: how to write a *ready* task
-    board-builder/              regenerate board.html from the task files
 .github/workflows/            Thin callers of canonical's reusable workflows (authored once in
                               CandidDan/flow, adopted by reference — docs/flow-reusable-workflows.md).
   flow-gates.yml              CI: the gate from config.yml + the store-is-main-only guard +
@@ -61,9 +58,7 @@ CLAUDE.md                     A pointer, not the rules: a short host file that @
                               the worker's session, so the work and its reviewer are never the
                               same context. Security trigger paths come from the
                               `review:` block in config.yml. Same off-by-default gate.
-  flow-queue-runner.yml       Scheduled/dispatchable: picks a ready task → dispatches a fresh
-                              worker through the loop. The board's "Work this" link targets it.
-.gitattributes                Marks board.html / board-edits.json as generated (diff hygiene).
+.gitattributes                Marks board-edits.json as generated (diff hygiene).
 .gitignore                    Ignores the transient .flow/board-edits.json.
 ```
 
@@ -71,7 +66,7 @@ CLAUDE.md                     A pointer, not the rules: a short host file that @
 
 **Custom skills / agents / routines — yes, all three, with distinct jobs:**
 - **Skills** shape *how Claude works*: `task-writer` (the orchestrator's definition-of-ready)
-  and `board-builder` (data→view). They ship in `.claude/skills/` so they travel with the repo.
+  among them. They ship in `.claude/skills/` so they travel with the repo.
 - **Agents** are the *gates*: qa, security, code-review subagents, invoked before every PR.
   The cross-project `portfolio-manager` lives one level up in the flightdeck.
 - **Routines** are the *unattended cadence* — see below. They're configured in the product, not
@@ -106,12 +101,10 @@ flightdeck automatically. Hand either doc to a Cowork session as the orchestrato
 ## Routines — making Code run without you holding things up
 Routines run on Anthropic's infrastructure on a schedule or on GitHub events, with no local
 machine or open IDE. Three worth setting up:
-- **Queue runner** — `flow-queue-runner.yml` ships this: on a schedule it picks the top ready
-  task (`pick-task.mjs`: highest priority, no `touches` overlap with in-flight work) and dispatches
-  a fresh worker to the full loop. Manual `workflow_dispatch` with a `task_id` works one specific
-  task now — and that's the hook the board's "Work this →" link uses, so you can pick a task on the
-  board and one click scaffolds a worker. Off by default (FLOW_AI + CLAUDE_CODE_OAUTH_TOKEN); start
-  sparse and widen the cadence once trusted.
+- **Worker** — a Claude Code routine runs the full loop (canonical's `docs/flow-routines.md`). An
+  empty trigger picks the top ready task (`pick-task.mjs`: highest priority, no `touches` overlap
+  with in-flight work); a trigger carrying a task id works that task. Start by firing it by hand
+  and widen the cadence once trusted.
 - **Portfolio digest** — run the `portfolio-manager` on a cadence (e.g. each morning) to produce
   the cross-project "needs you" digest before you sit down.
 - **Stale-task sweep** — flag tasks stuck `in_progress` or `in_review` too long, so nothing
@@ -174,7 +167,7 @@ someone else claimed it, so the session rebases and picks the next), and every t
 `touches` glob list so a session skips any `ready` task that overlaps something already
 `in_progress`. Feature code still goes branch → PR; only the state transitions commit to `main`.
 The full rules live in `.flow/PROTOCOL.md` → *Concurrency*. Practical implication: keep tasks
-small-and-disjoint in their `touches`, and the queue runner can safely fan out.
+small-and-disjoint in their `touches`, and several workers can safely run at once.
 
 Three mechanisms make this safe rather than hopeful, and they're enforced, not trusted:
 - **The store is `main`-only.** A feature branch carries code, never `.flow/` changes — otherwise
@@ -192,10 +185,9 @@ Three mechanisms make this safe rather than hopeful, and they're enforced, not t
 The system is designed to be inspected with `git log` and a directory listing; there's no hidden
 state. When something feels stuck:
 - **Where the truth is.** `git log -- .flow/tasks/` is the audit trail of every claim, hand-off,
-  and block — who moved what, when. The board is only a render of the current files.
+  and block — who moved what, when.
 - **Run the doctor.** `node .flow/bin/flow-doctor.mjs` validates the store in one shot —
-  duplicate ids, illegal statuses, half-completed claims, in_review without a PR, stale board
-  snapshot. CI runs it on every PR; run it locally whenever something feels off.
+  duplicate ids, illegal statuses, half-completed claims, in_review without a PR. CI runs it on every PR; run it locally whenever something feels off.
 - **A stuck worker.** A task sitting in `in_progress` with no branch activity is the context-rot /
   crashed-session smell. The **stale-task sweep** routine surfaces these; recover by resetting the
   task to `ready` (clear `owner`/`started`) and letting a fresh session re-claim it. Kill the dead

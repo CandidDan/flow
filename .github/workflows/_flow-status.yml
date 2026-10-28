@@ -146,8 +146,8 @@ jobs:
           # flow-0083, ESCALATION TRIGGER 2: a PR closed unmerged is a failed attempt, so the task
           # goes back to `ready` ONE MODEL TIER UP, in the same commit as the transition. `--once`
           # keys on this PR's event, so a second application is a no-op. A task the resolver
-          # rejects keeps its transition: the reset to `ready` matters more than the model, and the
-          # queue runner's resolve step fails that task loudly on its next dispatch anyway.
+          # rejects keeps its transition: the reset to `ready` matters more than the model, and
+          # flow-doctor fails that task's unreadable model loudly anyway.
           # The retry block below re-derives only `$EDITS`; if a contended push drops this edit,
           # the `Escalate the model` step after this one puts it back.
           if [ "$TRANSITION" = "ready" ] && [ -f .flow/bin/task-model.mjs ]; then
@@ -161,7 +161,7 @@ jobs:
           fi
 
           # >>> flow-0059 state-push-retry — byte-identical in _flow-status.yml and _flow-done.yml >>>
-          # `main` is written constantly: the queue-runner claiming, this workflow on a PR event,
+          # `main` is written constantly: a worker claiming, this workflow on a PR event,
           # flow-done on merge, flow-recover sweeping, and humans. A single `git push origin main`
           # therefore loses whenever anything else lands between this job's checkout and its push —
           # the transition is computed correctly, committed on the runner, refused with

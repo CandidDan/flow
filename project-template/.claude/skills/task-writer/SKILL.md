@@ -106,7 +106,7 @@ down, the anchor is in your head rather than in the store — and it dies with t
 ## Choosing the model (every task)
 A task's `model` and `effort` decide what builds it. **The default is `sonnet` / `medium`** —
 leave both unset for well-specified work. Every task that departs from the default sets `model`,
-`effort` **and** `model_reason` (one line saying why); the queue runner fails a task that sets
+`effort` **and** `model_reason` (one line saying why); `task-model.mjs` fails a task that sets
 either without a reason, or names a value outside the lists.
 
 | Tier / effort | Use it for |
@@ -116,8 +116,8 @@ either without a reason, or names a value outside the lists.
 | `sonnet` / `medium` (default) | well-specified: precise criteria, small `touches`, no design decisions, following an existing pattern |
 | `haiku` / `low` | trivial, fully mechanical |
 
-You do not have to be right first time. A queue-runner run that ends without a PR, or a PR closed
-unmerged, moves the task up a tier on its own (`haiku → sonnet → opus → fable`); at `fable` it
+You do not have to be right first time. A claim that strands with nothing pushed (flow-recover
+resets it), or a PR closed unmerged, moves the task up a tier on its own (`haiku → sonnet → opus → fable`); at `fable` it
 gets a `decision` ask recommending a split. And a worker that judges a task beyond it does not
 guess — it sets the task `blocked` with a `decision` ask carrying `Recommend: re-run on <tier>`.
 Answer that ask by raising `model` (with a new `model_reason`) and returning the task to `ready`.
@@ -180,9 +180,6 @@ writing the problem in the first place.
   to make visible. flow-doctor treats a non-`ready` task's unresolvable `serves` as a warning
   for the same reason. New tasks carry it; finished ones stay as they were.
 - Don't leave a real open decision inside a `ready` task. Decide it (or ask the human), then write it.
-
-After writing or changing tasks, regenerate the board with the **board-builder** skill so the
-human's view reflects the new state.
 
 ## This repo's additions
 

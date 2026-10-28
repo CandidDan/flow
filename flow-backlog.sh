@@ -17,7 +17,7 @@
 # nothing dispatchable in it.
 #
 # It reimplements NO judgement. Every decision below is imported from the shipped helpers, so this
-# file cannot drift from what the queue runner and the gate actually do:
+# file cannot drift from what the worker's pick (queue runner retired) and the gate actually do:
 #
 #   pickTask, touchesOverlap, readTasks  <- project-template/.flow/bin/pick-task.mjs
 #   readinessFindings                    <- project-template/.flow/bin/flow-doctor.mjs
@@ -144,7 +144,7 @@ say(`Workable now (${workable.length})`);
 if (workable.length) {
   workable.sort((a, b) => (a.priority || 999) - (b.priority || 999) || a.id.localeCompare(b.id)).forEach((t) => line(t));
   const next = pickTask(tasks);
-  console.log(`\n    ${DIM}the queue runner would dispatch:${R} ${next ?? "(nothing)"}`);
+  console.log(`\n    ${DIM}next pick (queue runner retired):${R} ${next ?? "(nothing)"}`);
 } else {
   console.log("    (nothing — see the buckets below for why)");
 }

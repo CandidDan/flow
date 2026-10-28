@@ -57,7 +57,7 @@ export const LABEL_DESCRIPTION = "Filed by flow-watchdog: a workflow in this rep
 //
 // `crit` is the obvious one. `off` is included because a DISABLED workflow is not a rest state —
 // it is machinery that has stopped, which is precisely the silent death this file exists to
-// catch, and flow-0020's first acceptance criterion names a disabled `queue-runner` explicitly.
+// catch, and flow-0020's first acceptance criterion names a disabled (since retired) `queue-runner` explicitly.
 //
 // `warn` is a deliberate DEAD-BAND, and the hysteresis matters. `scheduledLiveness` returns
 // `warn` between 1x and 2x a workflow's cron interval — late, but not yet dead. If `warn` filed,
@@ -466,7 +466,7 @@ async function listWorkflowFiles(io, fullName) {
 // THE DEFECT THIS EXISTS FOR (flow-0065). Both run lookups below used to ask for `per_page=1` and
 // take `workflow_runs[0]`, on the strength of the list-runs endpoint documenting a `created_at`
 // descending default. Observed to be wrong: CandidDan/Nudge#289, filed 2026-09-17, reported a last
-// successful run of `2026-09-07T18:04:59Z` for `flow-queue-runner` when the newest success was
+// successful run of `2026-09-07T18:04:59Z` for `flow-queue-runner` (retired since) when the newest success was
 // `2026-09-16T18:05:13Z` — wrong by nine days, on a workflow with 646 runs behind a
 // `status=success` filter. The alarm was defensible (14.1h IS past the bound); the number it
 // printed was not, and sent its reader looking for a week-long outage that never happened.

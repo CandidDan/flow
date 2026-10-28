@@ -27,7 +27,6 @@ const skip = yamlMod ? false : "needs `npm ci` (yaml) — runs in the per-stack 
 
 const REUSABLE = join(REPO, ".github/workflows/_flow-review.yml");
 const CALLER = join(TEMPLATE, ".github/workflows/flow-review.yml");
-const QUEUE_RUNNER = join(REPO, ".github/workflows/_flow-queue-runner.yml");
 
 const reusableSrc = readFileSync(REUSABLE, "utf8");
 const wf = yamlMod ? yamlMod.parse(reusableSrc) : { jobs: {} };
@@ -350,17 +349,6 @@ test("the protocol tells the worker not to run a review agent, and says where th
   }
 });
 
-test("the queue-runner's worker prompt no longer dispatches review subagents", { skip: false }, () => {
-  const src = readFileSync(QUEUE_RUNNER, "utf8");
-  for (const stale of ["qa-verifier", "security-reviewer", "code-reviewer"]) {
-    assert.doesNotMatch(src, new RegExp(stale),
-      `_flow-queue-runner.yml still instructs the worker to run "${stale}" — the prompt is the ` +
-      `other place a worker is told to certify its own work`);
-  }
-  assert.match(src, /Do NOT run any review subagent/,
-    "silence is not enough: the prompt must say so, because the habit predates it");
-});
-
 test("the inherited Definition-of-Done block every future task carries is updated too", { skip: false }, () => {
   const tmpl = readFileSync(join(TEMPLATE, ".flow/tasks/_TEMPLATE.md"), "utf8");
   const dod = tmpl.split("## Definition of done (inherited — do not edit)")[1] ?? "";
@@ -501,6 +489,41 @@ test("the security verdict rule does not contradict the truncation instruction",
   assert.match(sec, /a truncated diff is its own FAIL/,
     "the security prompt tells the reviewer to FAIL iff High/Critical; without this clause the " +
     "truncation instruction above it is a second, contradicting rule");
+});
+
+// ── flow-0177: a summarised deletion is not a truncation ───────────────────────────────────
+// Over the cap, `boundDiff` cuts each wholly deleted file to one DELETED FILE SUMMARISED line. A
+// reviewer that read that marker as truncation would FAIL every retirement PR for the very thing
+// the summary exists to prevent, so all three prompts carry the same line, and it names the
+// marker the helper writes.
+
+const DELETED_FILE_RULE =
+  "A DELETED FILE SUMMARISED marker is not truncation and does not by itself block a " +
+  "PASS: that file's body was left out because the PR removes it, so judge whether " +
+  "removing it breaks a caller.";
+
+test("qa, code-review and security all carry the same summarised-deletion line", { skip }, () => {
+  const found = prompts();
+  assert.equal(found.length, REVIEW_JOBS.length, "one reviewer invocation per check");
+  for (const [i, p] of found.entries()) {
+    assert.ok(p.includes(DELETED_FILE_RULE),
+      `the ${REVIEW_JOBS[i]} prompt does not carry the shared summarised-deletion line verbatim`);
+  }
+});
+
+test("the summarised-deletion line names the marker the helper actually writes", { skip: false }, () => {
+  const helper = readFileSync(join(TEMPLATE, ".flow/bin/flow-review.mjs"), "utf8");
+  const marker = helper.match(/export const DELETED_FILE_MARKER = "([^"]+)";/)?.[1];
+  assert.ok(marker, "flow-review.mjs must export the DELETED_FILE_MARKER the prompts name");
+  assert.ok(DELETED_FILE_RULE.startsWith(`A ${marker} marker`),
+    "the prompts must key off the exact string the helper stamps into the patch");
+  assert.doesNotMatch(marker, /TRUNCATED/,
+    "the marker must not contain the truncation token, or the truncation rule would fire on it");
+});
+
+test("the plan job publishes diff_summarised_deletions", { skip }, () => {
+  assert.equal(wf.jobs.plan.outputs?.diff_summarised_deletions,
+    "${{ steps.plan.outputs.diff_summarised_deletions }}");
 });
 
 // ── flow-0103: the truncation fact reaches all three verdict steps, from the plan's output ──

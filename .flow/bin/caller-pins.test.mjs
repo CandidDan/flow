@@ -178,20 +178,20 @@ test("every template caller pins the major root VERSION declares", () => {
     "adopts the stamp must get the reusables that go with it");
 });
 
-test("all twelve callers are covered, and each carries exactly one resolved reusable pin", () => {
-  // The count is the part a hand-sweep gets wrong: twelve files edited by hand is exactly where
+test("all eleven callers are covered, and each carries exactly one resolved reusable pin", () => {
+  // The count is the part a hand-sweep gets wrong: eleven files edited by hand is exactly where
   // one gets missed, and a missed pin is invisible until that repo's CI fails weeks later.
   // The literal below moves whenever a task publishes a new caller — flow-0082 added
   // flow-kickback.yml, taking it from ten to eleven, and flow-0041 added flow-unblock.yml, taking it
-  // to twelve. That it must be edited is the point: a derived count would pass a sweep that
-  // silently dropped a caller.
+  // to twelve, and flow-0174 retired the queue-runner's, taking it back to eleven. That it must be
+  // edited is the point: a derived count would pass a sweep that silently dropped a caller.
   const callers = workflowsIn(TEMPLATE_DIR);
   const pins = callers.map(({ name, text }) => {
     const found = text.split("\n").map((l) => l.match(USES_REUSABLE)).filter(Boolean);
     assert.equal(found.length, 1, `${name} should reference exactly one canonical reusable`);
     return `${name} -> @${found[0][2]}`;
   });
-  assert.equal(pins.length, 12, `expected twelve published callers, got:\n${pins.join("\n")}`);
+  assert.equal(pins.length, 11, `expected eleven published callers, got:\n${pins.join("\n")}`);
   const want = expectedRef(readFileSync(VERSION_FILE, "utf8"));
   for (const pin of pins) assert.ok(pin.endsWith(`@${want}`), pin);
 });
@@ -360,7 +360,7 @@ test("the 2.0.0 changelog section states the pin requirement, the delivery, and 
 // pins moving in this repo is only half of it: the other half is an edit inside somebody else's
 // repo, which nothing here can make for them. `changes/flow-0125.md` states it once, at release
 // time; the runbook is where a human looks months later, and a runbook that stops at `sed` over the
-// `uses:` lines sends them away with nine working checks and a queue runner that fails at startup.
+// `uses:` lines sends them away with nine working checks and a caller that fails at startup.
 //
 // Derived from root VERSION like everything else in this file: the section has to be about the
 // major that is current, not about whichever one was current when it was written.
@@ -370,23 +370,34 @@ test("the repinning doc has a section for reaching the current major, and names 
   const want = expectedRef(readFileSync(VERSION_FILE, "utf8"));
   const doc = readFileSync(join(REPO, "docs/repinning-a-consuming-repo.md"), "utf8");
 
-  const heading = doc.split("\n").find((l) => l.startsWith("## ") && l.includes(`@${want}`));
+  const heading = doc.split("\n").find((l) => l.startsWith("## ") && l.includes(`to \`@${want}\``));
   assert.ok(heading,
     `docs/repinning-a-consuming-repo.md has no "## " section naming @${want}. Repinning to a new ` +
     `major is the one repin that is not just the sed, and this file is the runbook for it.`);
 
   const section = doc.slice(doc.indexOf(heading)).split(/^---$/m)[0];
-  assert.match(section, /actions: read/,
-    "the section must name `actions: read` — flow-0080's caller grant is the single reason this " +
-    "major cannot ride the alias, and it is the step the sed over the `uses:` lines cannot make");
-  assert.match(section, /flow-queue-runner\.yml/,
-    "…and the file it goes in, or the reader has to guess which of the ten callers");
-  assert.match(section, /schedule-gate/,
-    "…and the job, because a top-level grant demands the scope from every caller including the " +
-    "dispatch-only ones that never reach it");
-  assert.match(section, /startup|before any step/,
-    "…and the symptom: GitHub refuses the run before any step executes, so there is no log inside " +
-    "the job to find it in");
+  // Each major's own caller steps. A major added without an entry here fails, naming it.
+  const STEPS = {
+    v3: [
+      [/actions: read/, "flow-0080's caller grant is the single reason v3 cannot ride the alias"],
+      [/schedule-gate/, "the job the grant goes on — a top-level grant demands it from every caller"],
+      [/startup|before any step/, "the symptom: GitHub refuses the run before any step executes"],
+    ],
+    v4: [
+      [/flow-queue-runner\.yml/, "the caller to delete — the retired queue-runner's (flow-0174)"],
+      [/actions: write/, "the grant to drop from flow-unblock.yml, which no longer dispatches"],
+      [/flow-sync/, "that the sync makes both edits, so the reader knows the easy path"],
+      [/startup/, "the symptom of a caller left pointing at a reusable that no longer exists"],
+    ],
+  };
+  assert.ok(STEPS[want], `no caller steps recorded for ${want} — add them to this test`);
+  for (const [re, why] of STEPS[want]) assert.match(section, re, `the ${want} section must name ${why}`);
+});
+
+test("the next major's section is written before its release, so the release PR is not the first to need it", () => {
+  const doc = readFileSync(join(REPO, "docs/repinning-a-consuming-repo.md"), "utf8");
+  assert.ok(doc.split("\n").some((l) => l.startsWith("## ") && l.includes("`@v4`")),
+    "flow-0174 is a MAJOR change: the @v3 -> @v4 runbook must exist before 4.0.0 is cut");
 });
 
 test("a comment quoting the fallback cannot stand in for the code (flow-0105)", () => {
@@ -418,7 +429,7 @@ test("a comment quoting the fallback cannot stand in for the code (flow-0105)", 
 
 /** The section of the repinning doc that covers reaching the current major, as text. */
 const majorSection = (doc, want) => {
-  const heading = doc.split("\n").find((l) => l.startsWith("## ") && l.includes(`@${want}`));
+  const heading = doc.split("\n").find((l) => l.startsWith("## ") && l.includes(`to \`@${want}\``));
   assert.ok(heading, `no "## " section naming @${want} in docs/repinning-a-consuming-repo.md`);
   return doc.slice(doc.indexOf(heading)).split(/^---$/m)[0];
 };

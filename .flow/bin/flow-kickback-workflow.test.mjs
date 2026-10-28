@@ -40,7 +40,6 @@ const TEMPLATE_WORKFLOWS = join(REPO, "project-template", ".github", "workflows"
 const REUSABLE = join(WORKFLOWS, "_flow-kickback.yml");
 const CANON_CALLER = join(WORKFLOWS, "flow-kickback.yml");
 const TEMPLATE_CALLER = join(TEMPLATE_WORKFLOWS, "flow-kickback.yml");
-const QUEUE_RUNNER = join(WORKFLOWS, "_flow-queue-runner.yml");
 
 const src = (f) => readFileSync(f, "utf8");
 
@@ -99,14 +98,16 @@ test("the reusable's header says why workflow_run is what makes holding credenti
 const pinsOf = (text) =>
   [...text.matchAll(/uses:\s*(anthropics\/claude-code-action@[0-9a-f]{40})/g)].map((m) => m[1]);
 
-test("the claude-code-action pin equals _flow-queue-runner.yml's, everywhere it appears", () => {
-  const queuePins = new Set(pinsOf(src(QUEUE_RUNNER)));
+test("the claude-code-action pin equals the other agent reusables', everywhere it appears", () => {
+  // Was pinned against _flow-queue-runner.yml's worker until flow-0174 retired it; _flow-review.yml
+  // runs the same action and is the reference now.
+  const refPins = new Set(pinsOf(src(join(WORKFLOWS, "_flow-review.yml"))));
   const ourPins = pinsOf(src(REUSABLE));
-  assert.equal(queuePins.size, 1, "the queue runner must itself resolve to one pin");
+  assert.equal(refPins.size, 1, "_flow-review.yml must itself resolve to one pin");
   assert.ok(ourPins.length >= 1, "an empty scan is a failure, not a pass — no action pin found");
   for (const pin of ourPins) {
-    assert.ok(queuePins.has(pin),
-      `_flow-kickback.yml runs ${pin} while _flow-queue-runner.yml runs ${[...queuePins][0]}. A split pin is a version bump in disguise, in the workflow that hands a model a PR branch.`);
+    assert.ok(refPins.has(pin),
+      `_flow-kickback.yml runs ${pin} while _flow-review.yml runs ${[...refPins][0]}. A split pin is a version bump in disguise, in the workflow that hands a model a PR branch.`);
   }
 });
 

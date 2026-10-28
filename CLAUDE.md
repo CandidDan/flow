@@ -81,8 +81,6 @@ Skills live under `project-template/.claude/`, and are readable there:
 
 - `project-template/.claude/skills/task-writer/SKILL.md` — the procedure for writing a task. The
   orchestrator follows it; the worker never creates tasks.
-- `project-template/.claude/skills/board-builder/SKILL.md` — regenerates a board. Not used in this
-  repo; the flightdeck supersedes it here.
 
 **There are no review agents to run, here or anywhere.** flow-0007 moved the three
 Definition-of-Done reviewers — qa, security, code-review — out of the worker's session and onto
@@ -101,7 +99,6 @@ Do not "fix" these:
 - **No `.flow/VERSION`** — that stamp exists so an *adopting* repo can detect it has fallen behind
   canonical. Canonical is the thing being compared against; the root `VERSION` file is the single
   source, and a second stamp inside `.flow/` would have nothing to compare to.
-- **No `.flow/board.html`** — superseded by the flightdeck (`flightdeck/`).
 
 ## Response style
 

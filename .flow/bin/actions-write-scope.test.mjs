@@ -1,9 +1,9 @@
 // actions-write-scope.test.mjs — pins which reusable workflows may grant `actions: write`.
 //
-// WHY. Since flow-0152 `github-actions[bot]` can start the bypassPermissions queue-runner worker,
-// and dispatching needs `actions: write`. So the real boundary is "any workflow that holds
-// `actions: write` and dispatches with GITHUB_TOKEN". This test makes widening that set a
-// deliberate, reviewed edit to ALLOWLIST below rather than a quiet permissions line.
+// WHY. A workflow holding `actions: write` can dispatch other workflows with GITHUB_TOKEN, as
+// github-actions[bot]. Since flow-0174 retired the queue-runner, NO reusable needs it, and the
+// allowlist is empty: widening it is a deliberate, reviewed edit to ALLOWLIST below rather than a
+// quiet permissions line.
 //
 // `permissions: write-all` implies `actions: write`, so it counts as a grant.
 
@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-// Same dependency note as queue-runner-switch.test.mjs: the flow-tooling step runs
+// Dependency note: the flow-tooling step runs
 // `node --test .flow/bin/*.test.mjs` with no install, so `yaml` is absent there. These tests skip
 // visibly in that step and run for real in the gate job, which does `npm ci` first.
 const yamlMod = await import("yaml").then((m) => m, () => null);
@@ -23,9 +23,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const WORKFLOWS = join(ROOT, ".github", "workflows");
 
 // Workflow file -> why it may hold `actions: write`. Add here only via a reviewed change.
-export const ALLOWLIST = {
-  "_flow-unblock.yml": "lists the queue runner's runs and dispatches it once a human answers a blocked task",
-};
+// Empty since flow-0174: _flow-unblock.yml held it to dispatch the now-retired queue-runner.
+export const ALLOWLIST = {};
 
 function grantsActionsWrite(perms) {
   if (perms === "write-all") return true;

@@ -121,7 +121,7 @@ test("scheduledLiveness: unparseable cron is crit rather than silently 'good'", 
 
 // ── flow-0057: the longest scheduled gap, not twice the average ────────────────────────────
 //
-// `0 9-18 * * 1-5` is Nudge's queue runner: hourly, but only inside a nine-hour weekday window.
+// `0 9-18 * * 1-5` was Nudge's queue runner (retired since): hourly, but only inside a nine-hour weekday window.
 // Averaging gives ~3.36h and a `crit` bound of ~6.72h, against a real overnight gap of 15h and a
 // weekend gap of 63h — so a healthy workflow read `crit` for most of the week. Weekday anchors
 // below are real: 2026-09-16 is a Wednesday, 09-18 a Friday, 09-21 the following Monday.

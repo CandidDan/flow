@@ -57,7 +57,7 @@ failure. If the repo already has a `package.json`, `pyproject.toml`, `Makefile` 
 > not a permissions message. In that case, first stand canonical up under the new owner (see
 > *Canonical under a new owner* at the end) and use that here.
 
-**Automation** [off initially] — whether to enable `FLOW_AI` (triage, review, queue-runner) now or
+**Automation** [off initially] — whether to enable `FLOW_AI` (triage, review, recover) now or
 after the first few tasks land. Default off; recommend turning it on once the loop is trusted.
 
 ---
@@ -65,7 +65,7 @@ after the first few tasks land. Default off; recommend turning it on once the lo
 ## Step 1 — Run `flow-init`
 
 The mechanical half of adoption — copy the tree, re-pin the callers, stamp the version, write
-`.flow/config.yml`, point the board at this repo — is a tested command, not a sequence you retype.
+`.flow/config.yml` — is a tested command, not a sequence you retype.
 Prose has one structural weakness: nothing fails when a step is skipped. `flow-init` fails.
 
 **Read step 2 before you run it.** Every config value is a *required input*: the five commands,
@@ -105,7 +105,7 @@ itself; passing it just reuses the checkout you already have. `--help` lists eve
 | copy **every** `flow-*.yml` caller canonical ships — the count comes from the tree, never from a number written in a doc | run the gate, seed tasks, register with the flightdeck or touch repo settings (steps 5–9) |
 | re-pin every `uses:` line **and** the `flow-sync` caller's `canonical_ref` | overwrite anything that already differs, unless you pass `--force` |
 | stamp `.flow/VERSION` from the ref you pinned | replace an existing `.gitignore` — it appends only the lines you lack |
-| write `.flow/config.yml` from your values, and set `REPO` in `.flow/board.html` (step 4) | invent a config value, ever |
+| write `.flow/config.yml` from your values | invent a config value, ever |
 
 **The protocol is not `CLAUDE.md` or `AGENTS.md`.** It ships as `.flow/PROTOCOL.md` and arrives with
 the `.flow/` copy; those two are thin pointers to that one copy — Claude Code imports it, other
@@ -114,7 +114,7 @@ files ship: dropping one silently strands whichever agent follows that conventio
 
 Two omissions are deliberate, and both are the same principle. The template's **sample task** does
 not travel — copied in it becomes a genuinely dispatchable `ready` task pointing at files that do
-not exist (the board's snapshot is emptied to match). **`VISION.md`** does not either: it ships as a
+not exist. **`VISION.md`** does not either: it ships as a
 shape full of placeholder goals, and a placeholder vision is worse than none. Write it with the
 `vision-writer` skill when you seed the store (step 6).
 
@@ -177,14 +177,10 @@ The `flow-*.yml` files are thin callers; the gate logic lives in canonical. The 
 
 ---
 
-## Step 4 — Set the board's repo
+## Step 4 — Nothing to do
 
-**Done by `flow-init`** in step 1, from `--repo`. Verify it, because an empty value doesn't error —
-it just silently drops each task's "Work this →" link:
-
-```bash
-grep -n 'const REPO' .flow/board.html    # must show your owner/repo, not ""
-```
+This step used to point a board at the repo. There is no board any more — task state is viewed in
+inflight — and the step is kept only so the numbers below stay stable.
 
 ## Step 5 — Repo settings  [STOP — human only]
 
@@ -196,7 +192,7 @@ human this list and wait.
 | 1 | **Default workflow permissions → Read and write** | Settings → Actions → General | `flow-status`, `flow-done`, `flow-recover` and `flow-sync` push task state to `main`. Without this they fail at startup with `requesting contents: write, only allowed contents: read`. Loud failure. |
 | 2 | **`FLOW_PAT` secret** — fine-grained PAT scoped to *this repo*, Contents: Read, Pull requests: Read/Write | Settings → Secrets → Actions | Without it the auto-PR paths fall back to `GITHUB_TOKEN`, and a PR opened by `GITHUB_TOKEN` **does not fire the `pull_request` event** — so `flow-gates` never runs and the PR is ungated. **Silent failure.** Adding it later is a no-break enablement. |
 | 3 | **Private reusable-workflow access** | Settings → Actions → General → Access | Only if canonical is private and owner-level access is restricted. Allow the canonical repo. |
-| 4 | *(optional, for automation)* `CLAUDE_CODE_OAUTH_TOKEN` secret + `FLOW_AI=true` variable | Settings → Secrets / Variables | Lights up triage, review, queue-runner. Generate with `claude setup-token`. Leave off until the manual loop is trusted. |
+| 4 | *(optional, for automation)* `CLAUDE_CODE_OAUTH_TOKEN` secret + `FLOW_AI=true` variable | Settings → Secrets / Variables | Lights up triage, review and recover. Generate with `claude setup-token`. Leave off until the manual loop is trusted. |
 | 5 | **Branch protection** | Settings → Rules | **Org repos:** enable a Ruleset requiring `flow-gates`, with the Actions integration as a **bypass actor** — otherwise it blocks the bot's own state pushes to `main`. **Personal repos:** leave off — personal repos can't grant Integration bypass actors, so protection blocks `flow-status`/`flow-done`. The gate still runs on every PR; your merge discipline is the check. |
 
 ---
@@ -204,8 +200,8 @@ human this list and wait.
 ## Step 6 — Seed the first ready tasks
 
 Give direction in a Cowork session; the **task-writer** skill decomposes it into `ready` tasks with
-observable acceptance criteria, explicit scope, and a `touches` glob list. Then regenerate the board
-with **board-builder**. Commit the task files + board **to `main`** — the store lives on main, and
+observable acceptance criteria, explicit scope, and a `touches` glob list. Commit the task files
+**to `main`** — the store lives on main, and
 this is the store's genesis (the same exemption task-state commits get).
 
 Half-formed ideas go to **GitHub Issues**, not `.flow/tasks/`. Triage turns them into tasks later.
@@ -252,7 +248,7 @@ The repo ships `.claude/settings.json` pointing at the Flow plugin marketplace
 claude plugin install flow@flow
 ```
 
-This registers `task-writer`, `board-builder`, and the `portfolio-manager` agent in **Cowork**,
+This registers `task-writer` and the `portfolio-manager` agent in **Cowork**,
 which does *not* auto-discover a repo's local `.claude/` the way a Claude Code worker does. The
 worker needs nothing here — the gate runs from the repo's committed `.claude/` regardless. Skipping
 the install still leaves task creation working via the `.flow/PROTOCOL.md` pointer; the plugin just removes
@@ -281,9 +277,9 @@ If (1) runs but (2) doesn't, the cause is almost always setting #1 or #2 in step
 
 - **Manually:** `claude "Work the next ready task."` — one fresh session per task, never one long
   thread across the backlog. Context rot degrades quality across a queue.
-- **Automated:** with `FLOW_AI=true` + the OAuth token set, the queue-runner picks the top ready
-  task on a schedule. Start the schedule sparse and drive via the board's "Work this →" link until
-  you trust it.
+- **Automated:** run the worker as a Claude Code cloud routine (canonical's
+  `docs/flow-routines.md`): an empty trigger picks the top ready task with `pick-task.mjs`, a task
+  id works that task. Start by firing it by hand until you trust it.
 
 ---
 

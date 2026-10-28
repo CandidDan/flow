@@ -48,11 +48,12 @@ export function checkPrRead(files) {
 
 const allFiles = () => Object.fromEntries([REUSABLE, ...CALLERS].map((f) => [f, read(f)]));
 
-test("the template caller grants pull-requests: read alongside contents: write and actions: write", { skip }, () => {
+test("the template caller grants pull-requests: read alongside contents: write, and nothing else", { skip }, () => {
   const file = CALLERS[1];
   const jobs = Object.values(parseYaml(read(file)).jobs);
   assert.equal(jobs.length, 1, `${file} is a thin caller`);
-  assert.deepEqual(jobs[0].permissions, { contents: "write", actions: "write", "pull-requests": "read" }, file);
+  // actions: write went in flow-0174 with the dispatch it served.
+  assert.deepEqual(jobs[0].permissions, { contents: "write", "pull-requests": "read" }, file);
 });
 
 test("canonical's caller and the reusable each grant pull-requests: read", { skip }, () => {
