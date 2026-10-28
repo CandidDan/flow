@@ -28,15 +28,15 @@ release or sync PR gets the same three, whatever it changes:
 - An intent PR (one Markdown file in `.flow/intents/`) is checked for proving tests and code
   quality. Nothing checks what an intent needs: the Problem is in the human's own words, writer
   detail is marked `[assumption]`, and the Outcome does not prescribe a solution.
-- A research PR, if research runs as a task (see `research-before-scoping`), would get the same
+- A research PR, if research runs as a task (see the intent `research-before-scoping`, proposed in PR #248), would get the same
   code-shaped reviewers.
-- Every check runs with `--max-turns 60` on a fixed model, so a one-line docs change and an auth
+- Each check runs with `--max-turns 60` and the same model, whatever the change, so a one-line docs change and an auth
   change get the same budget.
 
 ## Outcome
 
 Each PR gets the reviewers its kind of change needs (code, intent, research, and design where
-`usability-review` applies), each judging what matters for that kind, and how much effort review
+`usability-review`, proposed in PR #249, applies), each judging what matters for that kind, and how much effort review
 spends scales with the size and risk of the change.
 
 ## Constraints
@@ -55,4 +55,5 @@ spends scales with the size and risk of the change.
 - Whether intent review is a blocking check or advisory only.
 - How "risk" is measured for effort: diff size, `security_paths` hits, files touched, or the
   task's own `effort` field.
-- Whether a PR mixing kinds (code plus an intent) gets both sets of reviewers.
+- Whether a PR mixing kinds (code plus an intent) gets both sets of reviewers, or counts as
+  unclassified and gets the full code review.
