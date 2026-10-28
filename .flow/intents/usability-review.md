@@ -42,7 +42,7 @@ so on the PR before Dan merges.
 - [assumption] The standard it judges against is the project's own (for example Dan's Design
   Standards), not generic taste.
 - [assumption] It runs only on PRs whose change can be seen or used, decided from the paths
-  changed. See `reviewer-matches-the-change`.
+  changed. See the intent `reviewer-matches-the-change`, proposed in PR #247.
 - [assumption] Cost stays visible (G9).
 
 ## Open questions
