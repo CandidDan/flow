@@ -1,12 +1,12 @@
 ---
 id: "flow-0172"
 title: "The worker loop runs from a Claude Code cloud routine: the PR is opened and handed off through REST, never GraphQL, and docs/flow-routines.md says how to set a routine up"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-code-local-flow-0172"
 created: "2026-10-28"
-started: ""
+started: "2026-10-28T03:21:04Z"
 branch: "flow/flow-0172-routine-worker-rest-handoff"
 pr: "https://github.com/CandidDan/flow/pull/253"
 issue: ""
