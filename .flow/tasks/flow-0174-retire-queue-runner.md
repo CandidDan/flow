@@ -64,11 +64,19 @@ touches:
   - "project-template/INIT.md"
   - "project-template/README.md"
   - "project-template/RETROFIT.md"
+  - ".github/workflows/_flow-review.yml"
+  - "flow-backlog.sh"
+  - "flightdeck/bin/liveness.test.mjs"
+  - "project-template/.flow/bin/flow-kickback.mjs"
+  - "project-template/.flow/tasks/_TEMPLATE.md"
+  - "project-template/FLOW-handoff.html"
+  - "docs/adr/0005-split-authoring-from-release.md"
 labels: [workflows, retirement, routines, cost]
 model: "opus"
 effort: "high"
 model_reason: "Removes a reusable workflow the fleet calls and deletes its caller downstream through flow-sync; cross-cutting across tests, docs and the protocol"
 notes:
+  - "2026-10-28 (worker, orchestrator-approved): touches widened by 7 files. Six get a one-line wording change marking queue-runner retired, with no behaviour change: _flow-review.yml, flow-backlog.sh, flightdeck/bin/liveness.test.mjs, flow-kickback.mjs, _TEMPLATE.md and FLOW-handoff.html. ADR-0005 gets only Amendment 1's two pinned counts updated, which adr-split-authoring.test.mjs re-measures. The orchestrator session approved the widening on 2026-10-28."
   - "2026-10-28 (Dan via orchestrator): decision: what replaces queue-runner's model escalation? — answered: flow-recover escalates. When it resets a stranded in_progress task with nothing pushed back to ready, it applies the same one-tier bump (haiku -> sonnet -> opus -> fable) through task-model.mjs escalate --once. Touches and criteria re-cut against main after flow-0164 (PR #241) landed."
 asks: []
 ---
