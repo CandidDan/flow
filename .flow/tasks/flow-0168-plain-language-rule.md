@@ -1,7 +1,7 @@
 ---
 id: "flow-0168"
 title: "Require plain, literal, unambiguous English in everything written about the work, not only in replies"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,9 +10,9 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Runs after flow-0164, which is in progress and edits the same files (project-template/.flow/PROTOCOL.md, the task-writer skill, protocol-portability.test.mjs). Released by flow-unblock when flow-0164 is done."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["flow-0164"]
+blocked_by: []
 serves: ["G10"]
 intent: ""
 model: "sonnet"

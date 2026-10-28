@@ -1,7 +1,7 @@
 ---
 id: "flow-0174"
 title: "Retire flow-queue-runner: the reusable, the callers and its helpers are gone, flow-sync removes the caller downstream, and the protocol names the worker routine as what runs the loop"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,9 +10,9 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for flow-0172 (routine worker protocol) and flow-0173 (unblock stops dispatching queue-runner), and for flow-0164 (PR #241), which adds the flow-sync mechanism for deleting a retired file downstream that this task reuses. It also carries an open decision: what replaces queue-runner's automatic model-tier escalation."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["flow-0172", "flow-0173", "flow-0164"]
+blocked_by: []
 serves: ["G9"]
 intent: "model-work-off-github-actions"
 touches:

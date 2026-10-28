@@ -1,7 +1,7 @@
 ---
 id: "flow-0166"
 title: "Every setup-node step resolves the latest patch of its line, so a Node security release reaches the fleet the day it ships, not when the runner image refreshes"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
 owner: "claude"
@@ -10,9 +10,9 @@ started: "2026-10-27T04:29:06Z"
 branch: "flow/flow-0166-setup-node-check-latest"
 pr: "https://github.com/CandidDan/flow/pull/243"
 issue: ""
-blocked_reason: "Waits for flow-0164 (PR #241, shares _flow-sync/_flow-done/_flow-gates). Then rebase flow/flow-0166-setup-node-check-latest onto main, add check-latest to flow-watchdog.yml (now in touches), re-run the gate and mark #243 ready."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["flow-0164"]
+blocked_by: []
 serves: ["maintenance"]
 intent: ""
 model: "sonnet"
