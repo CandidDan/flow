@@ -1,13 +1,13 @@
 ---
 id: "flow-0170"
 title: "A repo chooses where its worker runs, and new adopters get no automatic worker"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-worker"
 created: "2026-10-28"
-started: ""
-branch: ""
+started: "2026-10-28T02:13:36Z"
+branch: "flow/flow-0170-worker-host-config"
 pr: ""
 issue: ""
 blocked_reason: ""
