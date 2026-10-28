@@ -167,7 +167,7 @@ test("the compass job is gated on the repo's FLOW_AI opt-in", { skip: yamlSkip }
   const wf = yamlMod.parse(readFileSync(COMPASS_REUSABLE, "utf8"));
   assert.ok(wf.jobs.compass, "_flow-compass.yml must define a \"compass\" job");
   assert.equal(String(wf.jobs.compass.if).trim(), "${{ vars.FLOW_AI == 'true' }}",
-    "compass ships in the same opt-in tier as triage, review and the queue-runner");
+    "compass ships in the same opt-in tier as triage and review");
 });
 
 test("CLAUDE_CODE_OAUTH_TOKEN is declared optional, so a repo without the secret gets a skip", { skip: yamlSkip }, () => {

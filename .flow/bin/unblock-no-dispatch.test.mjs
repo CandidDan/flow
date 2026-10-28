@@ -1,13 +1,14 @@
-// unblock-no-dispatch.test.mjs — proving tests for flow-0173.
+// unblock-no-dispatch.test.mjs — proving tests for flow-0173 and flow-0174.
 //
 // flow-unblock releases blocked tasks and stops there. It used to dispatch flow-queue-runner after
-// a release; the queue runner is being retired, and the worker routine's own schedule picks up what
-// the sweep releases. These tests fail if a dispatch grows back, if the declared
-// `queue_runner_workflow` input is removed (that would fail every caller still passing it), or if
-// the protocol goes back to saying flow-unblock starts the next worker.
+// a release; the queue-runner is retired (flow-0174), and the worker routine's own schedule picks
+// up what the sweep releases. These tests fail if a dispatch grows back, if the declared
+// `queue_runner_workflow` input is removed (that would fail every caller still passing it), if the
+// protocol goes back to saying flow-unblock starts the next worker, or (flow-0174) if the
+// dispatch-only helpers or the `actions: write` grant that served them come back.
 //
-// Same dependency note as queue-runner-bot-dispatch.test.mjs: without `npm ci` there is no `yaml`,
-// and the parsing tests skip visibly in the flow-tooling job and run for real in the gate job.
+// Dependency note: without `npm ci` there is no `yaml`, and the parsing tests skip visibly in the
+// flow-tooling job and run for real in the gate job.
 
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -49,4 +50,47 @@ test("PROTOCOL.md's blocked_by paragraph no longer says flow-unblock starts the 
   assert.ok(para.length > 0, "the flow-unblock sentence was not found");
   assert.doesNotMatch(para.replace(/\s+/g, " "), /starts the next worker/);
   assert.match(para.replace(/\s+/g, " "), /picked up by the next worker run/);
+});
+
+// ── flow-0174: the dispatch-only remains are gone ─────────────────────────────────────────
+
+const HELPER = join(REPO, "project-template", ".flow", "bin", "flow-unblock.mjs");
+const CALLERS = [
+  join(REPO, ".github", "workflows", "flow-unblock.yml"),
+  join(REPO, "project-template", ".github", "workflows", "flow-unblock.yml"),
+];
+const DISPATCH_ONLY = ["count-ready", "count-active-runs", "should-dispatch", "dispatch-outcome"];
+const camel = (s) => s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+
+/** The dispatch-only names a module's exports or CLI source still carry. Pure, so a mutated input proves it can fail. */
+export const dispatchRemnants = (exportNames, source) => [
+  ...DISPATCH_ONLY.filter((n) => exportNames.includes(camel(n))).map((n) => `export ${camel(n)}`),
+  ...DISPATCH_ONLY.filter((n) => new RegExp(`["'\`]${n}["'\`]`).test(source)).map((n) => `subcommand ${n}`),
+];
+
+test("flow-unblock.mjs exports none of the four dispatch-only functions or subcommands", async () => {
+  const mod = await import(HELPER);
+  const names = Object.keys(mod);
+  assert.ok(names.length > 0, "the helper exports nothing — the check would pass vacuously");
+  assert.deepEqual(dispatchRemnants(names, readFileSync(HELPER, "utf8")), []);
+  // …and the adapter re-exports none either.
+  const adapter = await import(join(BIN, "flow-unblock.mjs"));
+  assert.deepEqual(dispatchRemnants(Object.keys(adapter), ""), []);
+});
+
+test("the remnant check catches each name, as an export or a subcommand", () => {
+  assert.deepEqual(dispatchRemnants(["shouldDispatch"], ""), ["export shouldDispatch"]);
+  assert.deepEqual(dispatchRemnants([], 'if (cmd === "count-ready")'), ["subcommand count-ready"]);
+});
+
+test("neither flow-unblock.yml caller requests actions: write, and the reusable does not either", { skip }, () => {
+  for (const f of CALLERS) {
+    const wf = yamlMod.parse(readFileSync(f, "utf8"));
+    const jobs = Object.values(wf.jobs ?? {});
+    assert.ok(jobs.length > 0, `${f}: no jobs parsed`);
+    for (const j of jobs) assert.equal(j.permissions?.actions, undefined, `${f} still grants actions`);
+    assert.equal(wf.permissions?.actions, undefined, `${f} still grants actions at the top level`);
+  }
+  // A caller's grant is a ceiling: a reusable that kept requesting it would fail every v4 caller at startup.
+  assert.equal(yamlMod.parse(src).permissions?.actions, undefined, "_flow-unblock.yml must not request actions");
 });

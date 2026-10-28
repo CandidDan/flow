@@ -57,7 +57,7 @@ failure. If the repo already has a `package.json`, `pyproject.toml`, `Makefile` 
 > not a permissions message. In that case, first stand canonical up under the new owner (see
 > *Canonical under a new owner* at the end) and use that here.
 
-**Automation** [off initially] — whether to enable `FLOW_AI` (triage, review, queue-runner) now or
+**Automation** [off initially] — whether to enable `FLOW_AI` (triage, review, recover) now or
 after the first few tasks land. Default off; recommend turning it on once the loop is trusted.
 
 ---
@@ -192,7 +192,7 @@ human this list and wait.
 | 1 | **Default workflow permissions → Read and write** | Settings → Actions → General | `flow-status`, `flow-done`, `flow-recover` and `flow-sync` push task state to `main`. Without this they fail at startup with `requesting contents: write, only allowed contents: read`. Loud failure. |
 | 2 | **`FLOW_PAT` secret** — fine-grained PAT scoped to *this repo*, Contents: Read, Pull requests: Read/Write | Settings → Secrets → Actions | Without it the auto-PR paths fall back to `GITHUB_TOKEN`, and a PR opened by `GITHUB_TOKEN` **does not fire the `pull_request` event** — so `flow-gates` never runs and the PR is ungated. **Silent failure.** Adding it later is a no-break enablement. |
 | 3 | **Private reusable-workflow access** | Settings → Actions → General → Access | Only if canonical is private and owner-level access is restricted. Allow the canonical repo. |
-| 4 | *(optional, for automation)* `CLAUDE_CODE_OAUTH_TOKEN` secret + `FLOW_AI=true` variable | Settings → Secrets / Variables | Lights up triage, review, queue-runner. Generate with `claude setup-token`. Leave off until the manual loop is trusted. |
+| 4 | *(optional, for automation)* `CLAUDE_CODE_OAUTH_TOKEN` secret + `FLOW_AI=true` variable | Settings → Secrets / Variables | Lights up triage, review and recover. Generate with `claude setup-token`. Leave off until the manual loop is trusted. |
 | 5 | **Branch protection** | Settings → Rules | **Org repos:** enable a Ruleset requiring `flow-gates`, with the Actions integration as a **bypass actor** — otherwise it blocks the bot's own state pushes to `main`. **Personal repos:** leave off — personal repos can't grant Integration bypass actors, so protection blocks `flow-status`/`flow-done`. The gate still runs on every PR; your merge discipline is the check. |
 
 ---
@@ -277,9 +277,9 @@ If (1) runs but (2) doesn't, the cause is almost always setting #1 or #2 in step
 
 - **Manually:** `claude "Work the next ready task."` — one fresh session per task, never one long
   thread across the backlog. Context rot degrades quality across a queue.
-- **Automated:** with `FLOW_AI=true` + the OAuth token set, the queue-runner picks the top ready
-  task on a schedule. Start the schedule sparse and dispatch tasks by hand (`workflow_dispatch`
-  with a `task_id`) until you trust it.
+- **Automated:** run the worker as a Claude Code cloud routine (canonical's
+  `docs/flow-routines.md`): an empty trigger picks the top ready task with `pick-task.mjs`, a task
+  id works that task. Start by firing it by hand until you trust it.
 
 ---
 

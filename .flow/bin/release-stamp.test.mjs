@@ -5,7 +5,7 @@
 //      either stops being MAJOR.MINOR.PATCH, derived at run time rather than compared to a literal"
 //   · "the section named by the root stamp exists and is non-empty"
 //   · "the ## 1.3.0 section carries one entry per adopter-consumed change since v1.2.0, each
-//      naming its caller action; the queue-runner FLOW_PAT change (flow-0026) is among them"
+//      naming its caller action; the FLOW_PAT change (flow-0026) to the since-retired queue-runner is among them"
 //
 // These run over the REAL files in this repo, not a fixture: a release stamp that is only correct
 // in a temp directory is not a release stamp. `release-guard.mjs` already compares the stamps
@@ -220,12 +220,12 @@ test("mutation: delete `## Unreleased` and the check fails, naming the loss", ()
 // what shipped on 2026-09-14; if it changes, either history was rewritten or the section was
 // reused for a later release, and both are things this should fail on.
 
-test("tombstone: the 1.3.0 section records the queue-runner FLOW_PAT change, which is why it was cut", () => {
+test("tombstone: the 1.3.0 section records the FLOW_PAT change to the (since retired) queue-runner", () => {
   const section = sectionFor("1.3.0");
   assert.ok(section, `${CHANGELOG_PATH} has no "## 1.3.0" section — 1.3.0 is shipped history`);
   const text = section.body.join("\n");
   for (const [needle, why] of [
-    ["_flow-queue-runner.yml", "the file the fix lives in"],
+    ["_flow-queue-runner.yml", "the file the fix lived in, retired in flow-0174"],
     ["FLOW_PAT", "the secret the fix introduces"],
     ["flow-0026", "the task that made it"],
     ["github-actions[bot]", "the symptom — the author the worker's PR used to have"],

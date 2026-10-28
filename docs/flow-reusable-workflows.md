@@ -32,77 +32,29 @@ them. They are:
 | `_flow-status.yml` | PR marked ready for review → `in_review`; draft PR opened → stays `in_progress` with `branch` + `pr` recorded (flow-0039); a PR opened directly as non-draft still goes straight to `in_review`; closed-unmerged → `ready`. An action it does not model is a logged no-op, so a caller pinned ahead of the reusable degrades to silence. Id resolved from the branch **or** the PR title (CAN-52), so non-`flow/` branches (e.g. cloud `claude/…`) still transition | — |
 | `_flow-done.yml` | PR merged → task `done`. Same branch-**or**-title id resolution (CAN-52) | — |
 | `_flow-open-pr.yml` | On a `flow/<id>-…` branch push, auto-opens the PR if the branch is ahead of base with no PR yet (CAN-50) — a worker that stops short of `gh pr create` no longer strands the task. Opens it as a **draft** (flow-0039), falling back to non-draft where drafts are unavailable; the worker's `gh pr ready` is what asks for review. Idempotent. Opens with `FLOW_PAT` so the PR triggers `flow-gates` (CAN-58) | secret `FLOW_PAT` (optional) |
-| `_flow-recover.yml` | Scheduled self-heal sweep (CAN-51): a task stranded `in_progress` past a staleness threshold gets its PR re-opened as a **draft** (work was pushed but is unfinished by definition — flow-0039) or its claim reset to `ready` (nothing to recover). Off unless `FLOW_AI=true`; always on-demand via dispatch | input `threshold_minutes`; secret `FLOW_PAT` (optional) |
-| `_flow-unblock.yml` | **The blocked-task release sweep** (flow-0041), no model in the loop. A `blocked` task whose **every** `blocked_by` entry has resolved — a task id that is `done` on `main`, a PR url that **merged** — goes back to `ready` with `blocked_reason` and `blocked_by` cleared, through `apply-board-edits.mjs` as a commit to `main`. A PR closed unmerged never satisfies an entry (the run warns); an empty `blocked_by`, or any entry it cannot read, keeps the task blocked — only a person lifts that block. It then stops: it starts **no** worker (flow-0173) — a released task is `ready`, and the next worker run (the worker routine's own schedule, picking with `pick-task`) takes it. Trigger-agnostic: the callers fire it on `workflow_run` of `flow-done` (`completed`), hourly, and on dispatch. **Not** gated on `FLOW_AI` — a human-driven repo has dependencies that land too. `GITHUB_TOKEN` only, never `FLOW_PAT`; a PR in a repo the token cannot read resolves unknown and stays blocked | input `queue_runner_workflow` (default `flow-queue-runner.yml`) — **ignored** since flow-0173, still declared so a caller that passes it does not fail; no secrets; caller grant exactly `contents: write` + `actions: write` (unused since flow-0173, kept until a caller-permission change drops it) + `pull-requests: read` — the third is for the `blocked_by` PR lookup (`gh api repos/<owner>/<repo>/pulls/<n>`): a permissions block is exhaustive, so without it the token cannot read a PR in a private repo and every PR-url block resolves unknown and stays blocked (flow-0163) |
+| `_flow-recover.yml` | Scheduled self-heal sweep (CAN-51): a task stranded `in_progress` past a staleness threshold gets its PR re-opened as a **draft** (work was pushed but is unfinished by definition — flow-0039) or its claim reset to `ready` (nothing to recover) — and a reset also moves the task up one model tier, in the same commit (flow-0174). Off unless `FLOW_AI=true`; always on-demand via dispatch | input `threshold_minutes`; secret `FLOW_PAT` (optional) |
+| `_flow-unblock.yml` | **The blocked-task release sweep** (flow-0041), no model in the loop. A `blocked` task whose **every** `blocked_by` entry has resolved — a task id that is `done` on `main`, a PR url that **merged** — goes back to `ready` with `blocked_reason` and `blocked_by` cleared, through `apply-board-edits.mjs` as a commit to `main`. A PR closed unmerged never satisfies an entry (the run warns); an empty `blocked_by`, or any entry it cannot read, keeps the task blocked — only a person lifts that block. It then stops: it starts **no** worker (flow-0173) — a released task is `ready`, and the next worker run (the worker routine's own schedule, picking with `pick-task`) takes it. Trigger-agnostic: the callers fire it on `workflow_run` of `flow-done` (`completed`), hourly, and on dispatch. **Not** gated on `FLOW_AI` — a human-driven repo has dependencies that land too. `GITHUB_TOKEN` only, never `FLOW_PAT`; a PR in a repo the token cannot read resolves unknown and stays blocked | input `queue_runner_workflow` (default empty) — **ignored** since flow-0173 (it named the queue-runner, retired in flow-0174), still declared so a caller that passes it does not fail; no secrets; caller grant exactly `contents: write` + `pull-requests: read` (`actions: write` was dropped in 4.0.0 with the dispatch it served) — the second is for the `blocked_by` PR lookup (`gh api repos/<owner>/<repo>/pulls/<n>`): a permissions block is exhaustive, so without it the token cannot read a PR in a private repo and every PR-url block resolves unknown and stays blocked (flow-0163) |
 | `_flow-triage.yml` | Scheduled issue triage (off unless `FLOW_AI=true`) | secret `CLAUDE_CODE_OAUTH_TOKEN` |
 | `_flow-review.yml` | The three Definition-of-Done review checks on a PR — qa, code-review and a conditional security review (flow-0007). **Skipped entirely while the PR is a draft** (flow-0039) — the `plan` job carries the condition and the other three `needs: plan` — so the reviewers run once, when the worker marks the PR ready, not on every work-in-progress push. Runs for **any** PR author, not just `flow/` branches; model and security-trigger paths come from the caller's `.flow/config.yml` `review:` block, and `.flow/bin/flow-review.mjs` turns each written verdict into an exit code (fail-closed). Off unless `FLOW_AI=true` | input `node_version`; secret `CLAUDE_CODE_OAUTH_TOKEN` |
-| `_flow-queue-runner.yml` | Picks a ready task → dispatches a fresh worker (off unless `FLOW_AI=true`). Its caller ticks **hourly** and a small `schedule-gate` job decides which tick is the day's run, from the three repo variables below (flow-0080) — so the pause switch and the local-time schedule need no file edit and survive a sync. `workflow_dispatch` bypasses the gate entirely | input `task_id`; secrets `CLAUDE_CODE_OAUTH_TOKEN` + `FLOW_PAT` (CAN-58 — so the worker's own push fires `flow-open-pr`; both are forwarded by **both** thin callers since flow-0095); caller grant `actions: read` |
 | `_flow-kickback.yml` | **The bounded auto-fix round** (flow-0082). When the `flow-review` run on a PR concludes `failure`, dispatches ONE auto-fix worker onto that same PR to address the reviewers' **blocking** findings, and the round's one push re-runs review — so a red check starts the kickback instead of waiting for a human to notice. The worker **commits and does not push**; the workflow checks the round and pushes, which is what lets the test-weakening guard sit between the two. Off unless `FLOW_AI=true` **and** `review.auto_fix_rounds` is set (see below) | input `node_version`; secrets `CLAUDE_CODE_OAUTH_TOKEN` + `FLOW_PAT` (**required**, not optional — see below) |
 | `_flow-sync.yml` | The adopt mechanism (Phase 4): when the repo's `.flow/VERSION` is behind canonical, copies the updated `.flow/bin/*` + thin callers in, bumps the stamp, and opens a **reviewed PR**. Safe to run anytime (only opens a PR; no `FLOW_AI` gate). The ref it adopts from is **read off the caller's own `uses:` pin** when `canonical_ref` is empty — which is every scheduled run (flow-0105) | input `canonical_ref` (overrides the pin; empty ⇒ resolved from the caller, `v2` only if no caller pins one); secret `FLOW_PAT` (optional) |
 
-### Queue-runner timing — three repo variables, never a caller edit (flow-0080)
+### queue-runner — retired (flow-0174)
 
-`on:` is parsed statically and cannot read `vars.*`. So anything written in a caller — a cron
-hour, GitHub's native `timezone:` (available since March 2026) — is a literal in a file
-`flow-sync` overwrites, in every repo, re-edited by hand whenever it changes. The caller
-therefore ticks hourly (`0 * * * *`) and the *decision* lives in the reusable, where it can read
-repo variables. Each is set once per repo, with no file edit:
+`_flow-queue-runner.yml`, its two callers and its helpers (`queue-runner-schedule.mjs`,
+`queue-runner-verify.mjs`) were retired in 4.0.0. The worker runs as a Claude Code cloud routine
+instead — no Actions minutes — set up per `docs/flow-routines.md`. What the retired queue-runner did,
+and where each piece went:
 
-| Variable | Values | What it does |
-|---|---|---|
-| `FLOW_QUEUE_RUNNER` | `paused`, or unset | `paused` → **scheduled** ticks dispatch no worker. `workflow_dispatch` still works, and the three PR review checks, triage and compass are untouched. Any other value, or unset, is not paused |
-| `FLOW_TZ` | an IANA zone, e.g. `Australia/Sydney` | the zone the run hour and the weekday test are read in |
-| `FLOW_RUN_HOUR` | `0`–`23` | the **local** hour the day's run should start |
+| It did | Now |
+|---|---|
+| picked the next `ready` task | the routine, with `pick-task.mjs`, when its trigger is empty |
+| ran the worker on the task's model | one routine per tier (`task-model.mjs` is still the table) |
+| moved a run that produced nothing up a tier | `_flow-recover.yml`: resetting a stranded claim with nothing pushed escalates it one tier |
+| `FLOW_QUEUE_RUNNER` / `FLOW_TZ` / `FLOW_RUN_HOUR` | gone — a routine's own schedule replaces them; the variables can be deleted |
 
-```bash
-# pause autonomous work without emptying the gate, then resume
-gh variable set FLOW_QUEUE_RUNNER -R <owner>/<repo> -b paused
-gh variable delete FLOW_QUEUE_RUNNER -R <owner>/<repo>
-
-# run the day's task at 07:00 in the operator's own zone, DST included
-gh variable set FLOW_TZ -R <owner>/<repo> -b Australia/Sydney
-gh variable set FLOW_RUN_HOUR -R <owner>/<repo> -b 7
-```
-
-These are **per-repo** variables. A personal account has no account-level Actions variables, so
-there is nothing to set once for the fleet; it is one command per repo, which is still cheaper
-than a PR per repo.
-
-- **Why a `paused` string rather than a boolean.** An unset variable can never be misread as
-  "off". `FLOW_AI` remains the master switch and `FLOW_AI=false` still turns everything off —
-  including review, which is exactly the problem that `FLOW_QUEUE_RUNNER` exists to avoid:
-  during the 1.x → 2.0.0 migrations the only way to pause the runner also disabled the three
-  review checks, so repos briefly had a gate that passed on build/lint/test alone.
-- **The gate is "first tick at or after the hour, once per local day", never "hour equals".**
-  GitHub's scheduler runs 15 minutes to 2+ hours late at peak, so an exact-hour match would
-  silently skip a whole day whenever a tick was late. A scheduled tick proceeds only when the
-  local weekday is Mon–Fri, the local hour is at or after `FLOW_RUN_HOUR`, and no earlier
-  *scheduled* run has already dispatched a worker on that local date. "Dispatched" means the
-  worker step actually ran: a tick that found the queue dry does not consume the day.
-- **Both schedule variables, or neither.** Half a schedule is reported as a misconfiguration on
-  every tick, as is an unknown zone or an hour outside 0–23 — it never falls back silently to
-  UTC or to 07:00. With both unset, behaviour is exactly as before flow-0080: one run per UTC
-  weekday at 07:00.
-- **Visible skips.** An hourly workflow is mostly skips, and a skip that prints nothing is
-  indistinguishable from a runner that has quietly died. Every tick writes one line to its step
-  summary naming its answer: `paused`, `before-run-hour`, `already-ran-today`, `weekend`,
-  `bad-config`, `runs-unknown` or `run`.
-- **Where the logic is.** `.flow/bin/queue-runner-schedule.mjs` — a pure, dependency-free
-  function (`scheduleDecision`), with the git/`gh` gathering as a thin shell in the workflow, the
-  same split `queue-runner-verify.mjs` uses. Unit tests are
-  `project-template/.flow/bin/queue-runner-schedule.test.mjs`; the wiring, the `if:` conditions
-  and the three switch properties are `.flow/bin/queue-runner-switch.test.mjs`.
-- **The caller must grant `actions: read`.** The gate reads this workflow's own earlier runs to
-  answer "has today's run already gone out?". A caller `permissions:` block is exhaustive and a
-  reusable cannot raise a scope above its caller's grant, so without that line the gate fails
-  closed every hour and nothing is ever dispatched. It is granted on the caller only (and is
-  *not* in the reusable's top-level `permissions:`), because dispatch-only callers — canonical's
-  own, which has no `schedule:` block — never reach the gate job.
-- **Adoption.** Re-sync `flow-queue-runner.yml` for the hourly cron and the `actions: read`
-  grant. Until then the pause switch works (the reusable carries it) but the local-time schedule
-  cannot take effect. If you keep a customised cron whose only daily tick is before 07:00 UTC,
-  set `FLOW_RUN_HOUR` to that hour, or the default run hour falls after your tick and nothing
-  runs.
+`flow-sync` deletes `.github/workflows/flow-queue-runner.yml` from an adopting repo (the retired-paths
+list in `_flow-sync.yml`), so it appears under **Removed** in the sync PR.
 
 **`FLOW_PAT` (CAN-58).** A PR opened with the Actions `GITHUB_TOKEN` does *not* trigger downstream
 workflows, so `flow-gates` would never fire on an auto-opened PR — the gate silently bypassed.
@@ -112,35 +64,26 @@ attributed to a real actor and the gate runs. Falls back to `GITHUB_TOKEN` when 
 name — `FLOW_PAT: ${{ secrets.FLOW_PAT }}` — not `secrets: inherit`, so a caller only ever forwards
 the secret(s) its own reusable declares.
 
-`_flow-queue-runner` uses the same secret twice more (flow-0093): its `actions/checkout` takes
-`token: ${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}`, which is what the *worker's* own `git
-push` later authenticates as, and the worker step exports `GH_TOKEN` from the same expression for
-its `gh` calls. Without the checkout token the persisted credential is `GITHUB_TOKEN`, and GitHub
-refuses a `GITHUB_TOKEN` push that changes anything under `.github/workflows/` — so a worker on a
-task whose `touches` names a workflow file could not push at all. The `github_token:` input alone
-does not fix it: it reaches the action's API calls, never git's stored credential.
-
 **The one permission list.** Every workflow above that takes `FLOW_PAT` shares one credential, so
 there is one list of what it must carry. It is duplicated in `_flow-open-pr.yml`'s header, and
 `.flow/bin/flow-pat-forwarding.test.mjs` parses both copies and fails the gate when they disagree.
 
 FLOW_PAT — required permissions (fine-grained PAT, this repository only, short expiry):
 
-- Contents: Read and write — flow-queue-runner's worker pushes the claim commit to main and then
-  pushes its task branch, and flow-sync pushes the sync branch. Read alone cannot push, and the run
-  dies at the first git push.
-- Pull requests: Read and write — flow-open-pr opens the draft PR, flow-recover re-opens a stranded
-  one, flow-sync opens the sync PR, and flow-queue-runner's worker runs gh pr create and gh pr
-  ready.
-- Issues: Read and write — flow-queue-runner's worker files an issue for a problem it finds outside
-  its own task, which is how that work gets captured instead of lost.
-- Workflows: Read and write — flow-queue-runner's worker and flow-sync both push commits that
+- Contents: Read and write — flow-kickback's worker pushes its fix to the task branch, and
+  flow-sync pushes the sync branch. Read alone cannot push, and the run dies at the first
+  git push.
+- Pull requests: Read and write — flow-open-pr opens the draft PR, flow-recover re-opens a
+  stranded one, and flow-sync opens the sync PR.
+- Issues: Read and write — a worker files an issue for a problem it finds outside its own
+  task, which is how that work gets captured instead of lost.
+- Workflows: Read and write — flow-sync and a worker fixing CI both push commits that
   change files under .github/workflows/, and GitHub refuses that push from any credential lacking
   it. GITHUB_TOKEN can never have it, which is why the PAT is the only way.
 
 Grant all four. A token short one permission does not fail at setup; it fails later, at the one
 step that needed it. Keep the expiry short and rotate: `Workflows: Read and write` lets the holder
-edit CI, and `_flow-queue-runner` hands the token to an agent — the fences that make that
+edit CI, and `_flow-kickback` hands the token to an agent — the fences that make that
 acceptable are the task's declared `touches` plus the touches-guard check, the review checks, and a
 human merge, while the token's own limits are its single repository and its expiry date.
 
@@ -434,17 +377,15 @@ jobs:
 ```
 
 - **Secrets:** every caller passes its reusable's secrets **by name** — never `secrets: inherit`,
-  which would also hand the job any other configured secret it has no use for. `flow-queue-runner`
-  is the one caller that forwards two, `CLAUDE_CODE_OAUTH_TOKEN` *and* `FLOW_PAT` (flow-0095):
-  the first is the agent, the second is what the worker touches the repo with. A reusable only
-  ever receives what its caller names, so the `FLOW_PAT` line is not optional bookkeeping — omit
-  it and `secrets.FLOW_PAT` evaluates **empty inside the reusable** however the repo has set the
-  secret, the `||` falls through to `GITHUB_TOKEN`, and the worker silently loses the ability to
-  push a change under `.github/workflows/`. `.flow/bin/secrets-scope.test.mjs` is the single
+  which would also hand the job any other configured secret it has no use for. `flow-kickback`
+  forwards two, `CLAUDE_CODE_OAUTH_TOKEN` *and* `FLOW_PAT`: the first is the agent, the second is
+  what the round pushes with. A reusable only ever receives what its caller names, so the
+  `FLOW_PAT` line is not optional bookkeeping — omit it and `secrets.FLOW_PAT` evaluates **empty
+  inside the reusable** however the repo has set the secret. `.flow/bin/secrets-scope.test.mjs` is the single
   owner of this rule for every caller, and fails the gate if a caller forwards a secret its
   reusable does not declare, or if the template caller and canonical's own caller ever
   forward different names.
-- **Inputs:** `flow-queue-runner` forwards its `workflow_dispatch` `task_id` via `with:`.
+- **Inputs:** `flow-recover` forwards its `workflow_dispatch` `threshold_minutes` via `with:`.
 - **Pinning:** callers pin `@v1` for stability (the plan's choice over `@main`). Bump the tag to
   adopt a new Flow version. Repinning is **one** change, not two: `_flow-sync.yml` resolves the ref a
   scheduled sync adopts from by reading the `@<ref>` off the repo's own `flow-sync.yml` caller, so
@@ -453,8 +394,8 @@ jobs:
 - **Permissions:** consuming repos need *default workflow permissions = read+write* (the status/done
   workflows push state to `main`). The reusable workflows declare their own `permissions:`; the
   effective token is the intersection, so the repo setting must allow write.
-- **`id-token: write` for the claude-code-action workflows** (`flow-queue-runner`, `flow-triage`,
-  `flow-review`, `flow-kickback`): the action mints an OIDC token, but `id-token` is *never* in the default
+- **`id-token: write` for the claude-code-action workflows** (`flow-triage`, `flow-review`,
+  `flow-kickback`, `flow-compass`): the action mints an OIDC token, but `id-token` is *never* in the default
   `GITHUB_TOKEN` and a reusable workflow can't raise a permission above its caller's grant — so it's
   declared on **both** the reusable file and the thin caller's job. Because a caller `permissions:`
   block is exhaustive (anything unlisted drops to `none`), those callers re-list every permission
@@ -560,5 +501,5 @@ Unset the variable to return to `ubuntu-latest`. Canonical's own callers never p
 someone else's machine. Do not set `FLOW_RUNNER` on a public repo.
 
 **Secrets.** A non-GitHub runner sees every secret its jobs hold — `FLOW_PAT` in the kickback push
-job and the queue runner, `CLAUDE_CODE_OAUTH_TOKEN` in the AI jobs. Choosing `FLOW_RUNNER` is
+job, `CLAUDE_CODE_OAUTH_TOKEN` in the AI jobs. Choosing `FLOW_RUNNER` is
 choosing to trust that provider with them.

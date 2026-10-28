@@ -17,16 +17,9 @@
 // The three callers with no secret at all today (flow-gates, flow-done, flow-status) must still
 // have none — a regression there would be a silent widening, not a narrowing.
 //
-// THE PER-TAG SPLIT THAT USED TO LIVE HERE IS CLOSED, and closing it was flow-0095.
-// `_flow-queue-runner.yml` gained FLOW_PAT on `main` in flow-0026 (PR #40) while the `v1` tag
-// still declared only CLAUDE_CODE_OAUTH_TOKEN, so this table carried two different expectations
-// for the same caller: canonical forwarded both, the template forwarded one, and forwarding
-// FLOW_PAT from the template would have failed GitHub's own validation as an undeclared named
-// secret. flow-0026 has since released. The template caller pins `@v2`, and
-// `git show v2:.github/workflows/_flow-queue-runner.yml` declares BOTH secrets, each
-// `required: false` — so the forward is additive and a repo that has not set FLOW_PAT keeps
-// today's behaviour. flow-queue-runner therefore moves into COMMON with everything else, and no
-// per-tag expectation is left in this file to go stale. The only remaining asymmetry is
+// THE PER-TAG SPLIT THAT USED TO LIVE HERE IS CLOSED, and closing it was flow-0095: the one
+// caller that carried two expectations (the queue-runner's, retired in flow-0174) moved into
+// COMMON, and no per-tag expectation is left in this file to go stale. The only remaining asymmetry is
 // flow-sync.yml, which the template has and canonical deliberately has no caller for (flow-0015).
 // Every other reusable's secret set was identical between `v1` and `main` and stays identical at
 // `v2` (checked by hand against `git show <tag>:.github/workflows/_flow-*.yml`).
@@ -64,11 +57,6 @@ const COMMON = {
   "flow-done.yml": null,
   "flow-gates.yml": null,
   "flow-open-pr.yml": "FLOW_PAT",
-  // Both, and one entry rather than two: the agent's own credential plus the one the worker uses
-  // to touch the repo (checkout's persisted git credential and GH_TOKEN, flow-0093). A single
-  // shared entry is what makes "canonical and the template forward the same names" structural
-  // rather than a coincidence two lines apart.
-  "flow-queue-runner.yml": ["CLAUDE_CODE_OAUTH_TOKEN", "FLOW_PAT"],
   "flow-recover.yml": "FLOW_PAT",
   "flow-review.yml": "CLAUDE_CODE_OAUTH_TOKEN",
   "flow-status.yml": null,

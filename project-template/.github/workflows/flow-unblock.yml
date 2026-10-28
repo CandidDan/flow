@@ -11,8 +11,8 @@ name: flow-unblock
 #
 # Three triggers, one job: flow-done completing (fast), hourly (the backstop), and on demand.
 # NOT gated on FLOW_AI: a repo worked entirely by humans still has blocks whose dependencies land.
-# No secrets — the reusable uses GITHUB_TOKEN only. The reusable still declares a
-# `queue_runner_workflow` input so an older caller passing it keeps working, but ignores it.
+# No secrets — the reusable uses GITHUB_TOKEN only. The reusable still declares an ignored
+# `queue_runner_workflow` input (the retired queue-runner) so an older caller passing it keeps working.
 
 on:
   workflow_run:
@@ -30,7 +30,6 @@ jobs:
   flow-unblock:
     permissions:
       contents: write          # the release commit to main
-      actions: write           # unused since flow-0173 (unblock no longer dispatches); kept for now
       pull-requests: read      # the blocked_by PR lookup, so a PR-url block releases on merge
     uses: CandidDan/flow/.github/workflows/_flow-unblock.yml@v3
     with:

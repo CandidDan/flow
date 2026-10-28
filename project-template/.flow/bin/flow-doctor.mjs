@@ -950,7 +950,7 @@ export function taskIntentFindings(tasks, intents, requiredFrom) {
 // ── store identity: one id, one file (flow-0052) ──────────────────────────────────────────
 // `allocate-task-id.mjs` allocates correctly, but using it is optional: a session that
 // hand-writes a task file bypasses it entirely and git raises nothing, because two slugs are
-// two paths — `flow-0049-claude-md-ceiling.md` and `flow-0049-queue-runner-*.md` merge cleanly.
+// two paths — `flow-0049-claude-md-ceiling.md` and `flow-0049-<another-slug>.md` merge cleanly.
 // That happened on canonical's `main` on 2026-09-15 and was cleared by a human who happened to
 // look. The harm is silent rather than loud: `flightdeck/bin/mission-control.mjs` keys tasks by
 // id, so the second file overwrites the first and one task disappears from the state report with

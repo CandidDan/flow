@@ -74,7 +74,7 @@ jobs:
           fi
 
           # >>> flow-0059 state-push-retry — byte-identical in _flow-status.yml and _flow-done.yml >>>
-          # `main` is written constantly: the queue-runner claiming, this workflow on a PR event,
+          # `main` is written constantly: a worker claiming, this workflow on a PR event,
           # flow-done on merge, flow-recover sweeping, and humans. A single `git push origin main`
           # therefore loses whenever anything else lands between this job's checkout and its push —
           # the transition is computed correctly, committed on the runner, refused with

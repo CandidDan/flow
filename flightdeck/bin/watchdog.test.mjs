@@ -43,7 +43,7 @@ const NOW = Date.parse("2026-08-28T08:00:00Z");
 const HOUR = 3600000;
 const REPO = "CandidDan/flow";
 
-const SCHEDULED_6H = `name: queue-runner\non:\n  schedule:\n    - cron: "0 */6 * * *"\n  workflow_dispatch:\n`;
+const SCHEDULED_6H = `name: nightly\non:\n  schedule:\n    - cron: "0 */6 * * *"\n  workflow_dispatch:\n`;
 const SCHEDULED_DAILY = `name: triage\non:\n  schedule:\n    - cron: "0 8 * * *"\n`;
 const EVENT_WF = `name: gates\non:\n  pull_request:\n`;
 const MANUAL_WF = `name: release\non:\n  workflow_dispatch:\n`;
@@ -137,9 +137,9 @@ const patches = (s) => s.writes.filter((w) => w.method === "PATCH");
 
 // ── criterion 1 ──────────────────────────────────────────────────────────────────────────────
 
-test("criterion 1: a disabled queue-runner files an automation-down issue in THAT repo naming the workflow, its last success and the rule that fired", async () => {
+test("criterion 1: a disabled scheduled workflow files an automation-down issue in THAT repo naming the workflow, its last success and the rule that fired", async () => {
   const { io, state } = fakeGitHub({
-    workflows: [{ file: "flow-queue-runner.yml", text: SCHEDULED_6H, state: "disabled_manually", lastSuccessAt: "2026-08-28T05:00:00Z" }],
+    workflows: [{ file: "flow-nightly.yml", text: SCHEDULED_6H, state: "disabled_manually", lastSuccessAt: "2026-08-28T05:00:00Z" }],
   });
 
   const result = await watchRepo({ io, fullName: REPO, now: NOW });
@@ -150,7 +150,7 @@ test("criterion 1: a disabled queue-runner files an automation-down issue in THA
   assert.deepEqual(filed[0].body.labels, [AUTOMATION_DOWN_LABEL]);
 
   const body = filed[0].body.body;
-  assert.match(body, /\.github\/workflows\/flow-queue-runner\.yml/, "names the workflow");
+  assert.match(body, /\.github\/workflows\/flow-nightly\.yml/, "names the workflow");
   assert.match(body, /2026-08-28T05:00:00/, "names the last successful run");
   assert.match(body, /workflow disabled/, "names the rule that fired");
   assert.equal(result.down[0].state, "off", "a disabled workflow reports `off`, never a blank");
@@ -158,7 +158,7 @@ test("criterion 1: a disabled queue-runner files an automation-down issue in THA
 
 test("criterion 1 (rule text): a scheduled workflow silently past 2x its cron interval reports crit and the body carries the interval maths", async () => {
   const { io, state } = fakeGitHub({
-    workflows: [{ file: "flow-queue-runner.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 13 * HOUR).toISOString() }],
+    workflows: [{ file: "flow-nightly.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 13 * HOUR).toISOString() }],
   });
 
   await watchRepo({ io, fullName: REPO, now: NOW });
@@ -210,7 +210,7 @@ test("a workflow's free-text `name:` cannot escape its code span in the issue bo
 
 test("criterion 2: on a second and third run with the workflow still down, exactly ONE open issue exists and re-detection is a comment", async () => {
   const { io, state } = fakeGitHub({
-    workflows: [{ file: "flow-queue-runner.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString() }],
+    workflows: [{ file: "flow-nightly.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString() }],
   });
 
   await watchRepo({ io, fullName: REPO, now: NOW });
@@ -227,7 +227,7 @@ test("criterion 2: on a second and third run with the workflow still down, exact
 // ── criterion 3 ──────────────────────────────────────────────────────────────────────────────
 
 test("criterion 3: once the workflow has run successfully the open issue is closed with a comment linking the recovery run", async () => {
-  const wf = { file: "flow-queue-runner.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString() };
+  const wf = { file: "flow-nightly.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString() };
   const { io, state } = fakeGitHub({ workflows: [wf] });
 
   await watchRepo({ io, fullName: REPO, now: NOW });
@@ -248,7 +248,7 @@ test("criterion 3: once the workflow has run successfully the open issue is clos
 });
 
 test("criterion 3 (hysteresis): `warn` neither files nor closes — an issue opened at crit stays open through the dead-band", async () => {
-  const wf = { file: "flow-queue-runner.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString() };
+  const wf = { file: "flow-nightly.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString() };
   const { io, state } = fakeGitHub({ workflows: [wf] });
   await watchRepo({ io, fullName: REPO, now: NOW });
 
@@ -265,7 +265,7 @@ test("criterion 3 (hysteresis): `warn` neither files nor closes — an issue ope
 test("criterion 4: with no automation-down label present, the label is created BEFORE the issue and the filing succeeds", async () => {
   const { io, state } = fakeGitHub({
     labelExists: false,
-    workflows: [{ file: "flow-queue-runner.yml", text: SCHEDULED_6H, lastSuccessAt: null }],
+    workflows: [{ file: "flow-nightly.yml", text: SCHEDULED_6H, lastSuccessAt: null }],
   });
 
   await watchRepo({ io, fullName: REPO, now: NOW });
@@ -293,7 +293,7 @@ test("criterion 4 (idempotent): ensureLabel treats an existing label and a 422 d
 test("criterion 5: two different workflows down in one repo produce TWO issues, one per workflow, never one aggregate", async () => {
   const { io, state } = fakeGitHub({
     workflows: [
-      { file: "flow-queue-runner.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString() },
+      { file: "flow-nightly.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString() },
       { file: "flow-triage.yml", text: SCHEDULED_DAILY, state: "disabled_manually", lastSuccessAt: null },
     ],
   });
@@ -303,12 +303,12 @@ test("criterion 5: two different workflows down in one repo produce TWO issues, 
   const filed = filings(state);
   assert.equal(filed.length, 2, "one issue per dead workflow");
   const markers = filed.map((f) => f.body.body.match(/<!-- flow-watchdog:workflow=(.*?) -->/)[1]).sort();
-  assert.deepEqual(markers, [".github/workflows/flow-queue-runner.yml", ".github/workflows/flow-triage.yml"]);
+  assert.deepEqual(markers, [".github/workflows/flow-nightly.yml", ".github/workflows/flow-triage.yml"]);
   assert.notEqual(filed[0].body.title, filed[1].body.title, "distinct titles, not one aggregate");
 });
 
 test("criterion 5 (independence): when one of the two recovers, only its issue closes", async () => {
-  const runner = { file: "flow-queue-runner.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString() };
+  const runner = { file: "flow-nightly.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString() };
   const triage = { file: "flow-triage.yml", text: SCHEDULED_DAILY, lastSuccessAt: new Date(NOW - 200 * HOUR).toISOString() };
   const { io, state } = fakeGitHub({ workflows: [runner, triage] });
 
@@ -465,7 +465,7 @@ test("findIssueForWorkflow and markedIssues cannot disagree — one marker parse
 });
 
 test("an automation-down issue with no watchdog marker is left alone — a human's issue is not this file's to close", () => {
-  const openIssues = [{ number: 5, body: "queue runner looks dead to me" }];
+  const openIssues = [{ number: 5, body: "nightly looks dead to me" }];
   const machinery = [{ path: ".github/workflows/q.yml", name: "q", state: "good" }];
   const { actions } = planRepoActions({ fullName: REPO, machinery, openIssues, now: NOW });
   assert.deepEqual(actions, []);
@@ -487,7 +487,7 @@ test("a repo the token cannot read is reported unavailable, never silently omitt
 
 test("--dry-run plans everything and writes nothing", async () => {
   const { io, state } = fakeGitHub({
-    workflows: [{ file: "flow-queue-runner.yml", text: SCHEDULED_6H, lastSuccessAt: null }],
+    workflows: [{ file: "flow-nightly.yml", text: SCHEDULED_6H, lastSuccessAt: null }],
   });
   const r = await watchRepo({ io, fullName: REPO, now: NOW, dryRun: true });
 
@@ -501,9 +501,9 @@ test("a failed write on one repo does not abort the rest of the fleet scan", asy
   const io = {
     rest: async (path) => {
       if (/^\/search\/repositories/.test(path)) return { items: [{ full_name: "o/a" }, { full_name: "o/b" }] };
-      if (/\/contents\/\.github\/workflows$/.test(path)) return [{ type: "file", name: "flow-queue-runner.yml" }];
+      if (/\/contents\/\.github\/workflows$/.test(path)) return [{ type: "file", name: "flow-nightly.yml" }];
       if (/\/contents\/\.github\/workflows\//.test(path)) return { content: Buffer.from(SCHEDULED_6H, "utf8").toString("base64") };
-      if (/\/actions\/workflows\?/.test(path)) return { workflows: [{ id: 1, name: "queue-runner", path: ".github/workflows/flow-queue-runner.yml", state: "active" }] };
+      if (/\/actions\/workflows\?/.test(path)) return { workflows: [{ id: 1, name: "nightly", path: ".github/workflows/flow-nightly.yml", state: "active" }] };
       if (/\/runs\?/.test(path)) return { workflow_runs: [] };
       if (/\/issues\?labels=/.test(path)) return [];
       if (/\/labels\//.test(path)) return { name: AUTOMATION_DOWN_LABEL };
@@ -958,13 +958,13 @@ test("flow-0061 criterion 6: for a repo with no unparseable workflow the output 
   // Captured by running the implementation as it stood before this rule existed, over a mixed repo:
   // a scheduled workflow past its cadence (files an issue), a healthy event workflow, and a manual
   // one (dropped). Pinned as text, not as a structure, so key order and wording are both held.
-  const PRE_CHANGE_JSON = "{\n  \"repo\": \"CandidDan/flow\",\n  \"status\": \"ok\",\n  \"failures\": [],\n  \"watched\": 2,\n  \"down\": [\n    {\n      \"path\": \".github/workflows/flow-queue-runner.yml\",\n      \"state\": \"crit\",\n      \"reason\": \"last success 20.0h ago, cron interval ~6.0h, longest scheduled gap ~6.0h \u2014 past that gap plus one interval of slack\"\n    }\n  ],\n  \"actions\": [\n    {\n      \"type\": \"file\",\n      \"path\": \".github/workflows/flow-queue-runner.yml\",\n      \"issueNumber\": 100\n    }\n  ],\n  \"orphaned\": []\n}";
-  const PRE_CHANGE_TITLE = "Automation down: queue-runner";
-  const PRE_CHANGE_BODY = "<!-- flow-watchdog:workflow=.github/workflows/flow-queue-runner.yml -->\n\n**Workflow:** `.github/workflows/flow-queue-runner.yml` (`queue-runner`)\n**Repository:** `CandidDan/flow`\n**Trigger type:** scheduled\n**Last successful run:** 2026-08-27T12:00:00.000Z\n**State:** `crit`\n**Rule that fired:** last success 20.0h ago, cron interval ~6.0h, longest scheduled gap ~6.0h — past that gap plus one interval of slack\n\nGitHub notifies on failure, never on absence — a scheduled workflow that stops running emits\nno event at all. This issue is that missing event. It was filed by `flow-watchdog` in\ncanonical and will be **closed automatically** when the workflow succeeds again.\n\n_First detected 2026-08-28T08:00:00.000Z._";
+  const PRE_CHANGE_JSON = "{\n  \"repo\": \"CandidDan/flow\",\n  \"status\": \"ok\",\n  \"failures\": [],\n  \"watched\": 2,\n  \"down\": [\n    {\n      \"path\": \".github/workflows/flow-nightly.yml\",\n      \"state\": \"crit\",\n      \"reason\": \"last success 20.0h ago, cron interval ~6.0h, longest scheduled gap ~6.0h \u2014 past that gap plus one interval of slack\"\n    }\n  ],\n  \"actions\": [\n    {\n      \"type\": \"file\",\n      \"path\": \".github/workflows/flow-nightly.yml\",\n      \"issueNumber\": 100\n    }\n  ],\n  \"orphaned\": []\n}";
+  const PRE_CHANGE_TITLE = "Automation down: nightly";
+  const PRE_CHANGE_BODY = "<!-- flow-watchdog:workflow=.github/workflows/flow-nightly.yml -->\n\n**Workflow:** `.github/workflows/flow-nightly.yml` (`nightly`)\n**Repository:** `CandidDan/flow`\n**Trigger type:** scheduled\n**Last successful run:** 2026-08-27T12:00:00.000Z\n**State:** `crit`\n**Rule that fired:** last success 20.0h ago, cron interval ~6.0h, longest scheduled gap ~6.0h — past that gap plus one interval of slack\n\nGitHub notifies on failure, never on absence — a scheduled workflow that stops running emits\nno event at all. This issue is that missing event. It was filed by `flow-watchdog` in\ncanonical and will be **closed automatically** when the workflow succeeds again.\n\n_First detected 2026-08-28T08:00:00.000Z._";
 
   const { io, state } = fakeGitHub({
     workflows: [
-      { file: "flow-queue-runner.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString(), lastSuccessUrl: "https://x/1" },
+      { file: "flow-nightly.yml", text: SCHEDULED_6H, lastSuccessAt: new Date(NOW - 20 * HOUR).toISOString(), lastSuccessUrl: "https://x/1" },
       { file: "gates.yml", text: EVENT_WF, latestRun: { conclusion: "success", html_url: "https://x/2", event: "pull_request", created_at: "2026-08-28T07:00:00Z", updated_at: "2026-08-28T07:02:00Z" } },
       { file: "release.yml", text: MANUAL_WF },
     ],
@@ -1047,7 +1047,7 @@ test("flow-0061: unparseable is in the reportable set and is not treated as a re
 const NUDGE_289_SWEEP = Date.parse("2026-09-17T08:09:00Z");
 const NUDGE_289_NEWEST = "2026-09-16T18:05:13Z";  // run 646 — the true newest success
 const NUDGE_289_STALE = "2026-09-07T18:04:59Z";   // what the issue actually printed, nine days out
-const CLUSTERED_WEEKDAY = `name: flow-queue-runner\non:\n  schedule:\n    - cron: "0 9-18 * * 1-5"\n`;
+const CLUSTERED_WEEKDAY = `name: flow-nightly\non:\n  schedule:\n    - cron: "0 9-18 * * 1-5"\n`;
 
 // A `status=success` page in the shape GitHub returns it, deliberately NOT sorted.
 const successPage = (stamps) => stamps.map((created_at, i) => ({
@@ -1060,7 +1060,7 @@ const successPage = (stamps) => stamps.map((created_at, i) => ({
 test("flow-0065 criterion 1: a success newer than the first item returned is the one reported, not position 1", async () => {
   const { io } = fakeGitHub({
     workflows: [{
-      file: "flow-queue-runner.yml",
+      file: "flow-nightly.yml",
       text: SCHEDULED_6H,
       // Position 1 is a real success. It is simply not the newest one, which is the entire defect.
       successRuns: successPage(["2026-08-20T05:00:00Z", "2026-08-28T05:00:00Z", "2026-08-24T05:00:00Z"]),
@@ -1083,7 +1083,7 @@ test("flow-0065 criterion 2: over a page returned out of created_at order, lastS
     "2026-08-19T05:00:00Z",
   ];
   const { io } = fakeGitHub({
-    workflows: [{ file: "flow-queue-runner.yml", text: SCHEDULED_6H, successRuns: successPage(stamps) }],
+    workflows: [{ file: "flow-nightly.yml", text: SCHEDULED_6H, successRuns: successPage(stamps) }],
   });
 
   const [entry] = await collectRepoEntries({ io, fullName: REPO });
@@ -1102,7 +1102,7 @@ test("flow-0065 criterion 2: over a page returned out of created_at order, lastS
 test("flow-0065 criterion 3: the Nudge#289 case reports ~14.1h, the real gap, and never the ~230.1h it printed", async () => {
   const { io } = fakeGitHub({
     workflows: [{
-      file: "flow-queue-runner.yml",
+      file: "flow-nightly.yml",
       text: CLUSTERED_WEEKDAY,
       // The stale run FIRST, exactly as the filtered one-item query handed it over on 2026-09-17.
       successRuns: successPage([NUDGE_289_STALE, NUDGE_289_NEWEST]),
@@ -1134,7 +1134,7 @@ test("flow-0065 criterion 4: the close path and the staleness path cannot disagr
   // Nudge#289 filed 101 minutes later asserting it had not; that is this fixture, read twice.
   const { io, state } = fakeGitHub({
     workflows: [{
-      file: "flow-queue-runner.yml",
+      file: "flow-nightly.yml",
       text: SCHEDULED_6H,
       successRuns: successPage([
         new Date(NOW - 240 * HOUR).toISOString(),
@@ -1143,8 +1143,8 @@ test("flow-0065 criterion 4: the close path and the staleness path cannot disagr
     }],
     openIssues: [{
       number: 278,
-      title: issueTitle("flow-queue-runner"),
-      body: workflowMarker(".github/workflows/flow-queue-runner.yml"),
+      title: issueTitle("flow-nightly"),
+      body: workflowMarker(".github/workflows/flow-nightly.yml"),
       labels: [{ name: AUTOMATION_DOWN_LABEL }],
       state: "open",
     }],
@@ -1166,7 +1166,7 @@ test("flow-0065 criterion 4: the close path and the staleness path cannot disagr
 test("flow-0065 criterion 5: no successful run at all is reported as absence, never as zero or an epoch date", async () => {
   const { io, state } = fakeGitHub({
     workflows: [{
-      file: "flow-queue-runner.yml",
+      file: "flow-nightly.yml",
       text: SCHEDULED_6H,
       successRuns: [], // the page is genuinely empty: this workflow has never succeeded
     }],
@@ -1190,7 +1190,7 @@ test("flow-0065 criterion 5: no successful run at all is reported as absence, ne
 
 test("flow-0065: the bound is one page of 100, and both run lookups ask for it — never per_page=1", async () => {
   const { io, state } = fakeGitHub({
-    workflows: [{ file: "flow-queue-runner.yml", text: SCHEDULED_6H, lastSuccessAt: "2026-08-28T05:00:00Z" }],
+    workflows: [{ file: "flow-nightly.yml", text: SCHEDULED_6H, lastSuccessAt: "2026-08-28T05:00:00Z" }],
   });
 
   await collectRepoEntries({ io, fullName: REPO });

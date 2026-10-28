@@ -111,12 +111,11 @@
     <h3>Engine <span class="tag">GitHub Actions — per repo, calling canonical @v1</span></h3>
     <p class="role">The automation. Each is a thin caller; the logic lives in canonical. AI ones are gated by <code>FLOW_AI</code>.</p>
     <div class="chips">
-      <div class="chip"><b>flow-queue-runner</b> <span class="d">— cron → pick-task → dispatch a worker</span></div>
       <div class="chip"><b>flow-open-pr</b> <span class="d">— on branch push → opens the PR</span></div>
       <div class="chip"><b>flow-gates</b> <span class="d">— the Definition of Done (the wall)</span></div>
       <div class="chip"><b>flow-review</b> <span class="d">— independent AI review</span></div>
       <div class="chip"><b>flow-status / flow-done</b> <span class="d">— PR events → status transitions</span></div>
-      <div class="chip"><b>flow-recover</b> <span class="d">— rescues stranded tasks</span></div>
+      <div class="chip"><b>flow-recover</b> <span class="d">— rescues stranded tasks; a reset moves the model up a tier</span></div>
       <div class="chip"><b>flow-triage</b> <span class="d">— issues → proposed tasks</span></div>
       <div class="chip"><b>flow-sync</b> <span class="d">— adopt canonical updates as a PR</span></div>
     </div>
@@ -135,7 +134,7 @@
   <div class="pipe">
     <div class="step you"><div class="k">You</div><div class="v">Approve the spec (a ready task)</div></div>
     <div class="arrow">→</div>
-    <div class="step"><div class="k">queue-runner</div><div class="v">Picks top ready task, dispatches a worker</div></div>
+    <div class="step"><div class="k">worker routine</div><div class="v">Picks top ready task (Claude Code routine; queue-runner retired in flow-0174)</div></div>
     <div class="arrow">→</div>
     <div class="step"><div class="k">worker</div><div class="v">Claims, branches, builds, runs the gate locally</div></div>
     <div class="arrow">→</div>
@@ -165,7 +164,7 @@
   <h2>Per-repo switches (secrets &amp; variables)</h2>
   <table>
     <tr><th>Name</th><th>Type</th><th>Controls</th><th>If missing</th></tr>
-    <tr><td><code>FLOW_AI</code></td><td>Variable</td><td>Gates all AI workflows (queue-runner, review, triage). <span class="ok">Must be a Variable, not a Secret.</span></td><td>AI jobs skip silently (~1-2s "skipped").</td></tr>
+    <tr><td><code>FLOW_AI</code></td><td>Variable</td><td>Gates all AI workflows (review, triage, kickback, recover). <span class="ok">Must be a Variable, not a Secret.</span></td><td>AI jobs skip silently (~1-2s "skipped").</td></tr>
     <tr><td><code>CLAUDE_CODE_OAUTH_TOKEN</code></td><td>Secret</td><td>Worker / review / triage auth (uses your Max plan).</td><td>The action can't run.</td></tr>
     <tr><td><code>FLOW_PAT</code></td><td>Secret</td><td>Makes <code>flow-open-pr</code>'s PR trigger <code>flow-gates</code> (a default-token PR doesn't).</td><td class="warn">Auto-opened PRs merge ungated.</td></tr>
   </table>

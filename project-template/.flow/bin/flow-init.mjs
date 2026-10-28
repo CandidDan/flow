@@ -27,7 +27,7 @@
 //
 //   · The template's sample task (`.flow/tasks/0001-*.md`) is NOT copied. It is a reference for
 //     reading canonical's template, not content for a new repo — copied in, it becomes a `ready`
-//     task a queue-runner can genuinely dispatch, against files that do not exist. Only
+//     task a worker can genuinely pick, against files that do not exist. Only
 //     `_TEMPLATE.md` travels.
 //   · `VISION.md` is NOT copied. It ships as a shape with placeholder goals, and a placeholder
 //     vision is worse than none: `serves:` would resolve against slots nobody wrote. The

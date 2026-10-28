@@ -30,8 +30,10 @@ const REPO = resolve(BIN, "..", "..");
 const REUSABLE = join(REPO, ".github/workflows/_flow-sync.yml");
 
 // What flow-0164 retires, written out rather than read from the workflow: a pin derived from the
-// thing it pins moves with it and pins nothing.
-const RETIRED = [".claude/skills/board-builder/", ".flow/board.html"];
+// thing it pins moves with it and pins nothing. flow-0174 appended the retired queue-runner's
+// caller to the same list — one mechanism, not two; its own tests are in flow-sync.test.mjs.
+const BOARD = [".claude/skills/board-builder/", ".flow/board.html"];
+const RETIRED = [...BOARD, ".github/workflows/flow-queue-runner.yml"];
 
 // Built from parts so this file's own source is not a match for the strings it forbids.
 const FORBIDDEN = new RegExp(["board" + "-builder", "board\\." + "html", "regenerate the " + "board"].join("|"), "i");
@@ -98,7 +100,7 @@ export const parseRetired = (region) => {
   return m[1].trim().split(/\s+/);
 };
 
-test("the retired-paths list holds exactly the board skill and the board", () => {
+test("the retired-paths list holds exactly the board skill, the board and the queue-runner caller", () => {
   const tokens = parseRetired(extractRegion());
   assert.ok(tokens, "the step must iterate a literal `for RETIRED in … ; do` list");
   for (const t of tokens)
@@ -165,7 +167,7 @@ const runRegion = (cwd) =>
 test("an adopter with both retired paths loses both, and nothing beside them", (t) => {
   const root = adopter(t, { retired: true });
   runRegion(root);
-  for (const p of RETIRED) assert.ok(!existsSync(join(root, p)), `${p} must be gone`);
+  for (const p of BOARD) assert.ok(!existsSync(join(root, p)), `${p} must be gone`);
   for (const p of [".claude/skills/task-writer/SKILL.md", ".flow/bin/apply-board-edits.mjs", ".flow/board-edits.json"])
     assert.ok(existsSync(join(root, p)), `${p} is a sibling and must be untouched`);
   assert.equal(readFileSync(join(root, ".claude/skills/task-writer/SKILL.md"), "utf8"), "task-writer\n");

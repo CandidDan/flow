@@ -16,7 +16,7 @@ name: _flow-unblock (reusable)
 #
 # That is the whole job. It starts no worker (flow-0173): a released task is `ready`, and the next
 # worker run picks it — the worker routine's own schedule, which picks with pick-task.mjs. Until
-# flow-0173 this sweep also dispatched flow-queue-runner, which is being retired.
+# flow-0173 this sweep also dispatched flow-queue-runner, retired fleet-wide in flow-0174.
 #
 # A SWEEP, not a hook: each run re-reads the whole store, so a block written after its dependency
 # landed is still released, and a missed run loses nothing — the next one does the same work.
@@ -30,9 +30,7 @@ name: _flow-unblock (reusable)
 # whose dependencies land, so gating this the same way would switch it off where it helps most.
 #
 # Credentials: GITHUB_TOKEN only, never FLOW_PAT. The release push uses the checkout credential.
-# The caller grants `contents: write` (the release commit), `actions: write` (no longer used since
-# flow-0173 removed the dispatch; kept until a caller-permission change drops it) and
-# `pull-requests: read` (the blocked_by PR lookup, flow-0163) and nothing else. A PR-url entry is
+# The caller grants `contents: write` (the release commit) and `pull-requests: read` (the blocked_by PR lookup, flow-0163) and nothing else. A PR-url entry is
 # read with `gh api repos/<owner>/<repo>/pulls/<n>`; where the token cannot read it, the lookup
 # fails, the entry resolves unknown, the task stays blocked and the run says so in a ::warning::.
 
@@ -44,17 +42,17 @@ on:
         required: false
         type: string
         default: "ubuntu-latest"
-      # IGNORED since flow-0173: this workflow no longer dispatches anything. Still declared because
-      # removing a declared input fails every caller that still passes it, at startup.
-      queue_runner_workflow:
-        description: "Ignored (flow-0173: unblock no longer dispatches a worker). Kept so a caller that still passes it does not fail."
+      # IGNORED since flow-0173: this workflow no longer dispatches anything, and the worker it
+      # named is retired (flow-0174). Still declared because removing a declared input fails
+      # every caller that still passes it, at startup.
+      queue_runner_workflow:  # retired with queue-runner (flow-0174); ignored
+        description: "Ignored: names the retired queue-runner (flow-0174). Kept so a caller that still passes it does not fail."
         required: false
         type: string
-        default: "flow-queue-runner.yml"
+        default: ""
 
 permissions:
   contents: write          # the release commit to main
-  actions: write           # unused since flow-0173 (no dispatch); kept, see Credentials above
   pull-requests: read      # the blocked_by PR lookup (gh api repos/<owner>/<repo>/pulls/<n>)
 
 jobs:

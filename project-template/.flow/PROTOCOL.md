@@ -185,14 +185,14 @@ departs from it deliberately, by this rubric:
 either field without `model_reason`, fails the run rather than building on a guess.
 
 **A failed attempt moves the task up a tier** (`haiku → sonnet → opus → fable`), as a commit to
-the task file on `main`: a queue-runner run that ends without a PR, and a PR closed unmerged, both
-escalate it mechanically. At `fable` the task gets a `decision` ask recommending a split instead.
+the task file on `main`: a stranded claim that `flow-recover` resets because nothing was pushed, and
+a PR closed unmerged, both escalate it mechanically. At `fable` the task gets a `decision` ask recommending a split instead.
 **And you escalate yourself:** if you judge the task beyond you on the model you are running, do
 not guess — set it `blocked` with a `decision` ask carrying `Recommend: re-run on <tier>`.
 
 ## Concurrency — how parallel sessions don't collide
 
-Several Code sessions may run at once (the queue runner can dispatch more than one). The
+Several Code sessions may run at once (worker routines, and people, can start more than one). The
 store on `main` plus git's atomic push is the entire coordination mechanism — there is no
 lock file, no daemon.
 

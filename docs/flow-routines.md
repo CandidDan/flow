@@ -6,7 +6,9 @@ the Max plan. One routine per model tier, no connectors, a three-line saved prom
 and handed off through REST (steps 7 and 8 of *The loop you run*).
 
 Why: `.flow/intents/model-work-off-github-actions.md`. `flow-queue-runner` was a paid Actions
-runner mostly waiting on Claude.
+runner mostly waiting on Claude; flow-0174 retired it fleet-wide, and flow-sync deletes its caller.
+A failed attempt still moves a task up a model tier: flow-recover does it when it resets a stranded
+claim that pushed nothing.
 
 ```
 trigger (text = task id, or empty)

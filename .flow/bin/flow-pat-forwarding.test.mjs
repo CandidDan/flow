@@ -1,21 +1,16 @@
 // flow-pat-forwarding.test.mjs — proving tests for flow-0026, flow-0093 and flow-0095.
 //
-// Criteria proved here (flow-0026):
-//   · "_flow-queue-runner.yml declares FLOW_PAT in on.workflow_call.secrets with required: false"
-//   · "the 'Work the task' step's with.github_token is exactly
-//      ${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}"
+// flow-0174 retired the queue-runner, and with it the tests of its worker's wiring (flow-0026's
+// FLOW_PAT secret and github_token, flow-0093's checkout token and GH_TOKEN, flow-0095's template
+// caller header): the files they read are gone. What stays is not about that workflow.
 //
-// Criteria proved here (flow-0093 — the worker's own git and gh, not just the action's API calls):
-//   · "the worker job's actions/checkout sets token: ${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}"
-//   · "the worker step exposes GH_TOKEN from the same expression"
+// Criteria proved here (flow-0093):
 //   · "_flow-open-pr.yml's header and docs/flow-reusable-workflows.md carry the same
 //      four-permission list"
 //   · "the docs state the Actions PR-creation setting is not needed, with the reason"
 //   · "changes/flow-0093.md exists and states the caller action"
 //
 // Criteria proved here (flow-0095):
-//   · "the template caller's header no longer says the reusable never uses FLOW_PAT, and points
-//      to the permission list"
 //   · "changes/flow-0095.md exists and states the caller action"
 //
 // NOT proved here, on purpose — flow-0095's other three criteria are all instances of one rule,
@@ -39,91 +34,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { changelogEntry } from "./changelog-entry.mjs";
 
-// DEPENDENCY NOTE. Same posture as check-workflows.test.mjs: `_flow-gates.yml`'s flow-tooling
-// job runs `node --test .flow/bin/*.test.mjs` with no install step, so when `yaml` is missing
-// these tests skip *visibly* ("# skipped") instead of crashing the job. They run for real in
-// the per-stack gate job, which does `npm ci` first.
-const yamlMod = await import("yaml").then((m) => m, () => null);
-const skip = yamlMod ? false : "needs `npm ci` (yaml) — runs in the per-stack gate job";
-
 const BIN = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(BIN, "..", "..");
-const QUEUE_RUNNER = join(REPO, ".github/workflows/_flow-queue-runner.yml");
 const OPEN_PR = join(REPO, ".github/workflows/_flow-open-pr.yml");
 const DOCS = join(REPO, "docs/flow-reusable-workflows.md");
 const FRAGMENT = join(REPO, "changes/flow-0093.md");
-
-const parseQueueRunner = () => yamlMod.parse(readFileSync(QUEUE_RUNNER, "utf8"));
-
-test("_flow-queue-runner.yml declares FLOW_PAT as an optional workflow_call secret", { skip }, () => {
-  const wf = parseQueueRunner();
-  const secret = wf.on?.workflow_call?.secrets?.FLOW_PAT;
-  assert.ok(secret, "on.workflow_call.secrets.FLOW_PAT must be declared — without the " +
-    "declaration a thin caller's named `FLOW_PAT: ...` forward would be rejected as an " +
-    "undeclared secret");
-  assert.equal(secret.required, false,
-    "required:true would fail the whole workflow at call time in a repo that hasn't created " +
-    "the secret, instead of falling back to GITHUB_TOKEN (today's behaviour)");
-});
-
-test("the 'Work the task' step authenticates with FLOW_PAT, falling back to GITHUB_TOKEN", { skip }, () => {
-  const wf = parseQueueRunner();
-  const steps = wf.jobs?.dispatch?.steps ?? [];
-  const work = steps.find((s) => String(s.uses ?? "").startsWith("anthropics/claude-code-action"));
-  assert.ok(work, "the dispatch job must have a claude-code-action step — the worker itself");
-  assert.equal(work.with?.github_token, "${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}",
-    "the worker's git pushes must use FLOW_PAT (a real actor) so the branch push fires " +
-    "_flow-open-pr.yml directly — GITHUB_TOKEN pushes don't trigger downstream workflows " +
-    "(GitHub's recursion guard), which is exactly the gap observed on CandidDan/write#24. " +
-    "The || fallback keeps a repo without the secret on unchanged behaviour");
-});
-
-// ─── flow-0093: the worker's own credential ──────────────────────────────────────────────────
-//
-// The distinction this section exists to protect: `with.github_token` above reaches the ACTION's
-// API calls. It does not reach the credential `actions/checkout` persists in `.git/config`, and it
-// does not reach `gh`. So a worker could hold FLOW_PAT for the action and still be unable to
-// `git push` a workflow-file change or run `gh pr create` — which is exactly what an adopting repo
-// reported. Each of the three wirings is asserted separately because each fails on its own.
-
-const TOKEN_EXPR = "${{ secrets.FLOW_PAT || secrets.GITHUB_TOKEN }}";
-
-const dispatchSteps = () => parseQueueRunner().jobs?.dispatch?.steps ?? [];
-const workerStep = () =>
-  dispatchSteps().find((s) => String(s.uses ?? "").startsWith("anthropics/claude-code-action"));
-
-test("the worker job's checkout persists FLOW_PAT as the git credential", { skip }, () => {
-  const checkout = dispatchSteps().find((s) => String(s.uses ?? "").startsWith("actions/checkout"));
-  assert.ok(checkout, "the dispatch job must check the repo out before the worker runs");
-  assert.equal(checkout.with?.token, TOKEN_EXPR,
-    "the checkout `token:` is the credential the WORKER's later `git push` authenticates as. " +
-    "Left at the default it is GITHUB_TOKEN, and GitHub refuses a GITHUB_TOKEN push that changes " +
-    "anything under .github/workflows/ — server-side, whatever `permissions:` says, because " +
-    "`workflows` is not one of GITHUB_TOKEN's grantable permissions. A worker on a task whose " +
-    "`touches` names a workflow file then cannot push at all. `with.github_token` does not " +
-    "substitute: it reaches the action's API calls, never git's persisted credential");
-});
-
-test("the worker step exports GH_TOKEN from the same expression", { skip }, () => {
-  const work = workerStep();
-  assert.ok(work, "the dispatch job must have a claude-code-action step — the worker itself");
-  assert.equal(work.env?.GH_TOKEN, TOKEN_EXPR,
-    "`gh` reads its credential from the environment, not from the action's `github_token:` input, " +
-    "so without GH_TOKEN the worker's `gh pr create` / `gh pr ready` / `gh issue create` fail " +
-    "outright. It must be the SAME expression as the checkout token: one credential for " +
-    "everything the worker does to the repo means one permission list to reason about");
-});
-
-test("checkout token, GH_TOKEN and github_token are all the same expression", { skip }, () => {
-  const work = workerStep();
-  const checkout = dispatchSteps().find((s) => String(s.uses ?? "").startsWith("actions/checkout"));
-  assert.deepEqual(
-    [checkout.with?.token, work.env?.GH_TOKEN, work.with?.github_token],
-    [TOKEN_EXPR, TOKEN_EXPR, TOKEN_EXPR],
-    "three wirings, one credential. If they ever diverge the worker authenticates as one actor " +
-    "for git, another for gh and a third for the action, and the failure surfaces as whichever " +
-    "of the three the task happens to need — the hardest shape of this bug to diagnose");
-});
 
 // ─── flow-0093: one permission list, in two places, proved identical ─────────────────────────
 //
@@ -217,36 +132,9 @@ test("changes/flow-0093.md exists and states the caller action", () => {
 // ─── flow-0095: the prose around the caller, which no structure test can carry ───────────────
 //
 // The forwarding itself is asserted in secrets-scope.test.mjs (see the header note above). What
-// remains here is the part that is not a YAML shape: a header that told the reader the reusable
-// never used FLOW_PAT, and a changelog fragment telling an adopting repo it must act. The stale
-// sentence mattered because FLOW_PAT is optional — a reader who is talked out of setting it gets
-// a queue runner that works, and silently cannot push a workflow-file change or trigger the
-// checks on its own PR.
+// remains here is the changelog fragment telling an adopting repo it had to act.
 
-const TEMPLATE_CALLER = join(REPO, "project-template/.github/workflows/flow-queue-runner.yml");
 const FRAGMENT_0095 = join(REPO, "changes/flow-0095.md");
-
-test("the template caller's header documents FLOW_PAT and points at the permission list", { skip }, () => {
-  const source = readFileSync(TEMPLATE_CALLER, "utf8");
-  // The header is the comment block above `on:` — the part a human reads before wiring the secret.
-  const header = source.slice(0, source.indexOf("\non:"));
-  assert.doesNotMatch(header, /FLOW_PAT it never uses|never uses FLOW_PAT/,
-    "the header used to justify passing one secret by claiming the reusable never uses FLOW_PAT. " +
-    "Since flow-0093 it uses it three times, and the stale sentence is what would talk the next " +
-    "reader out of the line this task adds");
-  assert.match(header, /FLOW_PAT/,
-    "the header must say what FLOW_PAT is for — it is optional, so a reader who does not know " +
-    "what it buys will simply not set it");
-  assert.match(header, /optional|OPTIONAL/,
-    "FLOW_PAT is declared `required: false`; the header must say so, or a reader will think a " +
-    "repo without it cannot run the queue runner at all");
-  assert.match(header, /\.github\/workflows\//,
-    "the header must name the concrete thing the worker cannot do without it: GitHub refuses a " +
-    "GITHUB_TOKEN push that changes a file under .github/workflows/");
-  assert.match(header, /docs\/flow-reusable-workflows\.md/,
-    "and it must point at the permission list flow-0093 wrote, rather than restating it — a " +
-    "third copy of that list is a third thing to drift");
-});
 
 test("changes/flow-0095.md exists and states the caller action", () => {
   // Fragment while pending; assembled CHANGELOG entry after a release (flow-0098).
