@@ -1,7 +1,7 @@
 ---
 id: "flow-0178"
 title: "An intent-only PR gets an intent-shape gate and one low-effort advisory intent reviewer instead of the full gate and the code reviewers; security is unchanged"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,9 +10,9 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Shares .github/workflows/_flow-review.yml and flow-review.mjs with flow-0177 (PR #257), and the gate/review workflows with flow-0166 (setup-node). Sequence after both."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["flow-0177", "flow-0166"]
+blocked_by: []
 serves: ["G10", "G9"]
 intent: "reviewer-matches-the-change"
 touches:

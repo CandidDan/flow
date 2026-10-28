@@ -1,7 +1,7 @@
 ---
 id: "flow-0167"
 title: "Move Flow's default Node line from 22 to 24 before 22 reaches end of life, with a one-line way for an adopter to stay on 22"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,9 +10,9 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Runs after flow-0166 (same setup-node lines) and flow-0164 (shares _flow-sync/_flow-done/_flow-gates and project-template/INIT.md). Released by flow-unblock when both are done."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["flow-0166", "flow-0164"]
+blocked_by: []
 serves: ["maintenance"]
 intent: ""
 model: "sonnet"

@@ -1,7 +1,7 @@
 ---
 id: "flow-0165"
 title: "Remove the flightdeck and the watchdog from canonical: inflight is where state is viewed, and the watchdog has failed every day for a week"
-status: "blocked"
+status: "ready"
 priority: 3
 project: "flow"
 owner: "worker-flow-0165"
@@ -10,9 +10,9 @@ started: "2026-10-27T04:26:22Z"
 branch: "flow/flow-0165-remove-flightdeck"
 pr: "https://github.com/CandidDan/flow/pull/242"
 issue: ""
-blocked_reason: "Touches widened (Dan, 2026-10-27). Waits for flow-0164 (PR #241) and flow-0166 (PR #243; both edit plane-guard.yml and flow-watchdog.yml) to merge, then rebase flow/flow-0165-remove-flightdeck onto main, fix the 6 failing tests in the widened files, and mark #242 ready."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["flow-0164", "flow-0166"]
+blocked_by: []
 asks: []
 serves: ["maintenance"]
 intent: ""
