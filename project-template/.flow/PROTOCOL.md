@@ -147,8 +147,8 @@ ready  →  in_progress  →  in_review  →  done
   because `blocked_by` is what lets a block end on its own: **`flow-unblock`** releases a blocked
   task back to `ready` once **every** entry resolves — a task id that is `done` on `main`, a PR
   url that merged (one closed unmerged never counts) — clearing `blocked_reason` and `blocked_by`
-  as it goes, then starts the next worker. A block with no machine-readable entry still needs a
-  human: an empty `blocked_by` is never released. If the block genuinely isn't mechanical (you are
+  as it goes; the released task is picked up by the next worker run. A block with no
+  machine-readable entry still needs a human: an empty `blocked_by` is never released. If the block genuinely isn't mechanical (you are
   waiting on a phone call), say so in `blocked_reason` using the words "not machine-checkable" and
   flow-doctor stops asking. Clear `blocked_by` when you lift a block by hand: flow-doctor reports a
   populated `blocked_by` on a live non-blocked task as stale data. On a `done` task it stays, as
