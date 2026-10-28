@@ -31,8 +31,12 @@ labels: [workflows, unblock, routines, cost]
 model: "opus"
 effort: "medium"
 model_reason: "Changes a reusable workflow every adopting repo runs, and the protocol text describing it"
-notes: []
-asks: []
+notes:
+  - "2026-10-28 worker: kept count-ready/count-active-runs/should-dispatch/dispatch-outcome in project-template/.flow/bin/flow-unblock.mjs. git grep shows canonical's adapter .flow/bin/flow-unblock.mjs (outside touches) re-exports shouldDispatch, countActiveRuns, httpStatusOf, dispatchOutcome by name, so removing them breaks its import. Their tests stay. A comment marks them unused."
+  - "2026-10-28 worker: done on branch flow/flow-0173-unblock-stops-dispatching, PR https://github.com/CandidDan/flow/pull/254. Dispatch step removed; queue_runner_workflow declared and ignored; caller permissions untouched. Local gate: build, lint and coverage (97.46%) green. test has 5 failures that also fail on clean main (adapters flightdeck + flow-state --json, flow-init-downstream, release-assemble rerun). Next: CI and review checks, then the human merges."
+asks:
+  - "follow-up: drop the now-unused actions: write from both flow-unblock.yml callers (a caller-permission change)."
+  - "follow-up: when the queue runner is retired (flow-0174 or later), delete the four dispatch subcommands and functions from project-template/.flow/bin/flow-unblock.mjs together with their re-export in .flow/bin/flow-unblock.mjs."
 ---
 
 ## Context
