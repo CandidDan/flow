@@ -30,12 +30,16 @@ Run the normal loop for that one task, once:
 1. CLAIM: git pull --rebase; set the task in_progress with owner and started (full UTC ISO
    datetime, from `date -u +%Y-%m-%dT%H:%M:%SZ`); commit that task file to main and push. If the
    push is rejected, another worker claimed it — stop.
-2. BRANCH off latest main: flow/<task-id>-<slug>. The branch name must start with `flow/`.
+2. BRANCH off latest main: flow/<task-id>-<slug> — unless the session is already on a
+   harness-assigned branch (e.g. `claude/…`); then stay on it and do not rename. The
+   "[<task-id>]" PR title prefix is what must be right.
 3. BUILD strictly against the acceptance criteria and within the task's `touches`.
 4. GATE: run the commands in .flow/config.yml (build, lint, test, coverage). All must pass.
    Do not run review subagents; the reviewers are checks on the PR.
-5. PR: open it titled "[<task-id>] <title>" with the acceptance checklist and the proving test
-   for each item. STOP at the PR. Do not merge.
+5. PR: if a PR already exists for the branch (the first push opens a draft), set its title to
+   "[<task-id>] <title>" and its body to the acceptance checklist with the proving test for each
+   item, then run `gh pr ready`. Otherwise open it non-draft with that title and body. The PR
+   must end ready for review — a draft never gets reviewed. STOP there. Do not merge.
 
 Handle exactly one task per run. Push the branch early, and append a `notes` entry to the task
 on main after each substantial step. If a decision is needed that the task did not settle, set
@@ -80,12 +84,14 @@ curl -X POST "https://api.anthropic.com/v1/claude_code/routines/<trigger-id>/fir
 Run on a throwaway repo with a trivial `ready` task. Record each result in this file under the
 line, with the date.
 
-- [ ] **1. Branch prefix.** Pushes default to `claude/`-prefixed branches, but Flow expects
+- [ ] **1. Branch prefix.** Pushes default to `claude/`-prefixed branches, where Flow's default is
   `flow/<id>-<slug>`. *Check:* fire the routine; run `git ls-remote --heads origin 'flow/*'
-  'claude/*'`. Pass if the branch is `flow/<id>-<slug>`. If it is `claude/…`, the flow-recover and
-  branch-name checks will not find it. *Record:* result under this line.
+  'claude/*'`. Either prefix is acceptable: on a `claude/…` branch the automation resolves the
+  task from the PR title. Pass if the PR title starts with `[<id>]`. *Record:* which prefix the
+  routine got, under this line.
 - [ ] **2. Unattended PR.** `gh pr create` may fail because the session proxy rejects GraphQL.
-  *Check:* confirm the run ends with an open PR (`gh pr list --head <branch>`). If `gh pr create`
+  *Check:* confirm the run ends with a PR that is ready for review, not a draft (`gh pr list
+  --head <branch> --json isDraft`), and the task is `in_review` on `main`. If `gh pr create`
   fails, test `gh api -X POST repos/<owner>/<repo>/pulls -f title=… -f head=<branch> -f base=main`
   (REST, probably works) and change the prompt's step 5 to use it. *Record:* which form worked.
 - [ ] **3. Auto mode stalls.** Auto mode can stop an unattended run to wait for a human. *Check:*
