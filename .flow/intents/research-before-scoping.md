@@ -29,7 +29,7 @@ Evidence (not Dan's words): Flow has no research stage. An intent records an out
 wants, so it comes after research. A task is done when its PR passes the gate and the qa,
 code-review and security reviewers. TanPlan works around this with a `spike` label
 (tanplan-0122) and a loose `research/` folder, but a spike PR still runs the build and test gate
-and three code reviewers over a Markdown file, and what it actually produces, a decision, has
+and the qa, code-review and (conditional) security reviewers over a Markdown file, and what it actually produces, a decision, has
 nowhere to go.
 
 [assumption] Without a research stage, an open question either turns into build work before
