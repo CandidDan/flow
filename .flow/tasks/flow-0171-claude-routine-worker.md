@@ -1,14 +1,14 @@
 ---
 id: "flow-0171"
 title: "Runbook and prompt for working Flow tasks from a Claude Code routine"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-worker"
 created: "2026-10-28"
 started: "2026-10-28T02:28:45Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0171-claude-routine-runbook"
+pr: "https://github.com/CandidDan/flow/pull/252"
 issue: ""
 blocked_reason: ""
 cancelled_reason: ""
