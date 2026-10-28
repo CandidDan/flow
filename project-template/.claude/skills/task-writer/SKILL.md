@@ -54,17 +54,22 @@ implementation, that's yours to specify.
    task in one session puts authorship and approval in the same context, which is the one thing
    the touchpoint exists to separate. `serves: ["maintenance"]` work needs no intent; leave
    `intent: ""`. Never edit the intent to list this task — the link runs task → intent only.
-7. State scope boundaries explicitly — what the task does NOT touch. This is what stops scope creep.
-8. Sequence: if task B depends on A, note it and leave B at lower priority or a `blocked` note
+7. **Write the spec in plain, literal language.** Name things literally, not by metaphor — the
+   worker builds what the words say, not what you meant by them. Say what happens and where, and
+   rewrite any sentence that can be read two ways. The same test as the protocol's plain-language
+   rule (`.flow/PROTOCOL.md`, **Response style**). A product's own user-facing text keeps the
+   project's voice; the spec describing it does not.
+8. State scope boundaries explicitly — what the task does NOT touch. This is what stops scope creep.
+9. Sequence: if task B depends on A, note it and leave B at lower priority or a `blocked` note
    until A lands. Keep a queue of `ready` tasks so the worker never runs dry.
-9. **The queue has a cap, and the allocator enforces it — not this file.** Where
+10. **The queue has a cap, and the allocator enforces it — not this file.** Where
    `.flow/config.yml` sets `queue_cap`, that is the maximum number of `ready` tasks the store may
    hold, and `allocate-task-id` refuses a new `ready` task while that many already are, before it
    writes, commits or pushes anything. A refused task is therefore one of exactly two things:
    **not written yet** (the queue drains first — usually the right answer), or **written
    `blocked`** with a `blocked_reason`, which the cap never refuses. The one bypass is the draft's
    own `urgent` label, and that is the human's to apply — never yours on your own judgement, the
-   same rule as `auto-ok`. Step 8's "never runs dry" stops at the cap: a queue past it is not
+   same rule as `auto-ok`. Step 9's "never runs dry" stops at the cap: a queue past it is not
    depth, it is work planned faster than it can be done.
 
 ## Triaging the inbox (GitHub Issues -> ready tasks)
