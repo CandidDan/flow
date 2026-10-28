@@ -46,10 +46,10 @@ is what lets intents and tasks be written from them.
 - [assumption] Findings live in the repo, versioned, like everything else Flow produces, and the
   task store's two-planes rule holds: findings are not committed straight to `main`.
 - [assumption] The decision on findings is a decision ask, one card with a recommendation (G12),
-  answerable in inflight. This builds on inflight-0050.
+  answerable in inflight. This builds on inflight-0050 (CandidDan/inflight, `.flow/tasks/inflight-0050-act-from-screen.md`).
 - [assumption] Findings are checked by a reviewer suited to research (every question answered,
-  sources cited, a recommendation stated), not by the build and test gate. See
-  `reviewer-matches-the-change`.
+  sources cited, a recommendation stated), not by the build and test gate. See the intent
+  `reviewer-matches-the-change`, proposed in PR #247.
 - [assumption] Research never writes intents or tasks itself. It informs them.
 
 ## Open questions
