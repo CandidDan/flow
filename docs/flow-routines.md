@@ -61,6 +61,28 @@ What the canary ran in, and what a routine gets by default:
 5. **Trigger it** with the task id as the trigger's text, or on a schedule with empty text so it
    picks the top `ready` task.
 
+## Firing a routine from an app
+
+An app (inflight's "Work this →", say) starts a run by calling the routine's API trigger:
+
+```sh
+curl -X POST "https://api.anthropic.com/v1/claude_code/routines/<trigger-id>/fire" \
+  -H "Authorization: Bearer $ROUTINE_TOKEN" \
+  -H "anthropic-version: 2026-10-21" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "<task-id>"}'
+```
+
+- Create the trigger in the claude.ai routines UI: Edit → Trigger "+" → API → Generate token.
+  **The token is shown once**: store it as a secret right away; if lost, regenerate it.
+- The call returns once the session is created, with `claude_code_session_id` and
+  `claude_code_session_url`. It does not wait for the run.
+- `text` is optional and is the task id. Empty means the worker picks with `pick-task.mjs`, which
+  the saved prompt above already handles.
+- The `anthropic-version` header is from Anthropic's "Trigger a routine through the API" doc
+  (platform.claude.com/docs/en/api/claude-code/routines-fire). It is **not yet exercised by a
+  Flow run**.
+
 ## Limits that matter
 
 | Limit | Value | Consequence |
@@ -68,6 +90,15 @@ What the canary ran in, and what a routine gets by default:
 | Schedule | no more often than **hourly** | a scheduled routine picks at most one task an hour; use a trigger for anything faster |
 | Runs | **30 runs an hour** per routine | at most 30 tasks started per tier per hour |
 | Billing | usage drawn from the **Max plan** | no Actions minutes; a routine never touches the Actions budget |
+| Account | **100 API fires and 100 scheduled runs an hour** per account, across every routine | the per-routine limit above is not the only ceiling; many routines share these two |
+| Shared usage | routine usage is **shared with interactive sessions** on the same Max subscription | heavy routine use leaves less for hands-on work |
+
+### Auto-mode stalls
+
+A routine starts in **auto mode**, and repeated classifier blocks can stop an unattended run to
+wait for a human. The 2026-10-28 canary did not hit one, but that risk is **untested on a task
+that has to set itself `blocked`**: the block is a commit to `main` the classifier may refuse.
+Treat a routine run that ends without a PR or a `blocked` task as possibly stalled.
 
 ## The canary's evidence
 
