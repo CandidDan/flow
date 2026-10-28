@@ -30,7 +30,7 @@ release or sync PR gets the same three, whatever it changes:
   detail is marked `[assumption]`, and the Outcome does not prescribe a solution.
 - A research PR, if research runs as a task (see the intent `research-before-scoping`, proposed in PR #248), would get the same
   code-shaped reviewers.
-- Each check runs with `--max-turns 60` and the same model, whatever the change, so a one-line docs change and an auth
+- Each check always gets its own fixed model and `--max-turns 60`, whatever the change, so a one-line docs change and an auth
   change get the same budget.
 
 ## Outcome
