@@ -376,6 +376,100 @@ test("an oversized diff is truncated AND told the reviewer it was truncated", ()
   assert.ok(DEFAULT_MAX_DIFF_BYTES > 0);
 });
 
+// ── flow-0177: whole-file deletions are summarised before anything is truncated ───────────
+
+const deletion = (path, n) =>
+  `diff --git a/${path} b/${path}\ndeleted file mode 100644\nindex 1111111..0000000\n` +
+  `--- a/${path}\n+++ /dev/null\n@@ -1,${n} +0,0 @@\n` +
+  Array.from({ length: n }, (_, i) => `-old line ${i} ${"x".repeat(40)}\n`).join("");
+const edit = (path) =>
+  `diff --git a/${path} b/${path}\nindex 2222222..3333333 100644\n--- a/${path}\n+++ b/${path}\n` +
+  `@@ -1,2 +1,2 @@\n-const a = 1;\n+const a = 2;\n keep();\n`;
+const partial = (path) =>
+  `diff --git a/${path} b/${path}\nindex 4444444..5555555 100644\n--- a/${path}\n+++ b/${path}\n` +
+  `@@ -1,40 +1,1 @@\n` + Array.from({ length: 40 }, (_, i) => `-gone ${i} ${"y".repeat(40)}\n`).join("") +
+  ` kept();\n`;
+const rename = (from, to) =>
+  `diff --git a/${from} b/${to}\nsimilarity index 90%\nrename from ${from}\nrename to ${to}\n` +
+  `index 6666666..7777777 100644\n--- a/${from}\n+++ b/${to}\n@@ -1,1 +1,1 @@\n-x()\n+y()\n`;
+
+test("a diff under the cap with a whole-file deletion is returned byte-for-byte unchanged", () => {
+  const src = edit("src/a.mjs") + deletion("old/gone.mjs", 20);
+  const r = boundDiff(src, { maxBytes: 1_000_000 });
+  assert.equal(r.text, src, "deletions are summarised only when the budget forces a choice");
+  assert.equal(r.truncated, false);
+  assert.equal(r.summarisedDeletions, 0);
+});
+
+test("over the cap, each wholly deleted file becomes one summary line and every other hunk survives", () => {
+  const src = edit("src/a.mjs") + deletion("old/gone.mjs", 200) + edit("src/b.mjs") +
+    deletion("old/also.mjs", 150);
+  const maxBytes = 4000;
+  assert.ok(Buffer.byteLength(src) > maxBytes, "fixture must be over the cap");
+  const r = boundDiff(src, { maxBytes });
+  assert.equal(r.truncated, false, "the deletions accounted for the excess, so nothing is clipped");
+  assert.doesNotMatch(r.text, /DIFF TRUNCATED/);
+  assert.ok(r.bytes <= maxBytes);
+  assert.equal(r.fullBytes, Buffer.byteLength(src));
+  assert.ok(r.text.includes(edit("src/a.mjs")) && r.text.includes(edit("src/b.mjs")),
+    "every non-deleted hunk must be present in full");
+  assert.doesNotMatch(r.text, /old line/, "no deleted body text may remain");
+  assert.match(r.text, /^diff --git a\/old\/gone\.mjs b\/old\/gone\.mjs\n\*\*\* DELETED FILE SUMMARISED: old\/gone\.mjs \(200 lines removed\)/m,
+    "the diff --git header is kept, followed by ONE line naming the path and its line count");
+  assert.match(r.text, /DELETED FILE SUMMARISED: old\/also\.mjs \(150 lines removed\)/);
+  assert.equal(r.text.match(/^diff --git a\/old\/gone\.mjs/gm).length, 1);
+});
+
+test("a summarised diff reports the count and its header lists every summarised path", () => {
+  const src = deletion("x/one.mjs", 100) + edit("src/a.mjs") + deletion("x/two.mjs", 100);
+  const r = boundDiff(src, { maxBytes: 3000 });
+  assert.equal(r.summarisedDeletions, 2);
+  const header = r.text.slice(0, r.text.indexOf("diff --git "));
+  assert.match(header, /^\*\*\* DELETED FILE SUMMARISED: this diff was over the 3000-byte limit/);
+  assert.match(header, /2 wholly deleted file\(s\)/);
+  assert.match(header, /base\s+worktree/, "the reviewer is told where the full text still lives");
+  for (const p of ["x/one.mjs", "x/two.mjs"]) {
+    assert.ok(header.includes(`${p} (100 lines removed)`), `header must list ${p}`);
+  }
+});
+
+test("a diff still over the cap after summarising truncates exactly as before", () => {
+  const huge = Array.from({ length: 200 }, (_, i) => edit(`src/f${i}.mjs`)).join("");
+  const src = huge + deletion("old/gone.mjs", 100);
+  const r = boundDiff(src, { maxBytes: 2000 });
+  assert.equal(r.truncated, true, "a genuinely oversized change must still be unable to PASS");
+  assert.match(r.text, /\*\*\* DIFF TRUNCATED at 2000 bytes \(full diff is \d+ bytes\)\. \*\*\*/);
+  assert.equal(r.fullBytes, Buffer.byteLength(src));
+  assert.equal(r.summarisedDeletions, 1);
+});
+
+test("the plan summary quotes the summarised-deletion count", () => {
+  const diff = boundDiff(deletion("x/one.mjs", 100) + edit("src/a.mjs"), { maxBytes: 2000 });
+  const md = planSummary({
+    cfg: { model: "m", securityModel: "s", warnings: [], configured: true },
+    changedFiles: ["x/one.mjs", "src/a.mjs"], security: { run: false, reason: "r" }, diff,
+    task: { found: false, reason: "none" },
+  });
+  assert.match(md, /1 wholly deleted file\(s\) summarised by name and line count/);
+});
+
+test("partial deletions and renames are never summarised", () => {
+  const src = partial("src/shrunk.mjs") + rename("src/old.mjs", "src/new.mjs") +
+    deletion("old/gone.mjs", 200);
+  const r = boundDiff(src, { maxBytes: 3000 });
+  assert.equal(r.summarisedDeletions, 1, "only the whole-file deletion counts");
+  assert.ok(r.text.includes(partial("src/shrunk.mjs")), "a partial deletion is reviewable change");
+  assert.ok(r.text.includes(rename("src/old.mjs", "src/new.mjs")), "so is a rename");
+  assert.doesNotMatch(r.text, /SUMMARISED: src\//);
+});
+
+test("an over-cap diff with no whole-file deletion is truncated without a summary header", () => {
+  const r = boundDiff(partial("src/shrunk.mjs").repeat(10), { maxBytes: 500 });
+  assert.equal(r.truncated, true);
+  assert.equal(r.summarisedDeletions, 0);
+  assert.doesNotMatch(r.text, /DELETED FILE SUMMARISED/);
+});
+
 test("runPlan writes the changed files, the bounded diff and the task — the whole context", () => {
   const dir = tmp("plan");
   try {
@@ -1671,6 +1765,8 @@ test("`plan` publishes diff_bytes and diff_full_bytes alongside diff_truncated",
       "human guessing how far over the limit the PR is");
     assert.match(text, new RegExp(`^diff_full_bytes=${REPORTED_DIFF_BYTES}$`, "m"),
       "and the FULL count, which is the number review.max_diff_bytes has to clear");
+    assert.match(text, /^diff_summarised_deletions=0$/m,
+      "flow-0177: the summarised-deletion count is published alongside the byte counts");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

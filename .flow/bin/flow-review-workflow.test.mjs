@@ -503,6 +503,41 @@ test("the security verdict rule does not contradict the truncation instruction",
     "truncation instruction above it is a second, contradicting rule");
 });
 
+// ── flow-0177: a summarised deletion is not a truncation ───────────────────────────────────
+// Over the cap, `boundDiff` cuts each wholly deleted file to one DELETED FILE SUMMARISED line. A
+// reviewer that read that marker as truncation would FAIL every retirement PR for the very thing
+// the summary exists to prevent, so all three prompts carry the same line, and it names the
+// marker the helper writes.
+
+const DELETED_FILE_RULE =
+  "A DELETED FILE SUMMARISED marker is not truncation and does not by itself block a " +
+  "PASS: that file's body was left out because the PR removes it, so judge whether " +
+  "removing it breaks a caller.";
+
+test("qa, code-review and security all carry the same summarised-deletion line", { skip }, () => {
+  const found = prompts();
+  assert.equal(found.length, REVIEW_JOBS.length, "one reviewer invocation per check");
+  for (const [i, p] of found.entries()) {
+    assert.ok(p.includes(DELETED_FILE_RULE),
+      `the ${REVIEW_JOBS[i]} prompt does not carry the shared summarised-deletion line verbatim`);
+  }
+});
+
+test("the summarised-deletion line names the marker the helper actually writes", { skip: false }, () => {
+  const helper = readFileSync(join(TEMPLATE, ".flow/bin/flow-review.mjs"), "utf8");
+  const marker = helper.match(/export const DELETED_FILE_MARKER = "([^"]+)";/)?.[1];
+  assert.ok(marker, "flow-review.mjs must export the DELETED_FILE_MARKER the prompts name");
+  assert.ok(DELETED_FILE_RULE.startsWith(`A ${marker} marker`),
+    "the prompts must key off the exact string the helper stamps into the patch");
+  assert.doesNotMatch(marker, /TRUNCATED/,
+    "the marker must not contain the truncation token, or the truncation rule would fire on it");
+});
+
+test("the plan job publishes diff_summarised_deletions", { skip }, () => {
+  assert.equal(wf.jobs.plan.outputs?.diff_summarised_deletions,
+    "${{ steps.plan.outputs.diff_summarised_deletions }}");
+});
+
 // ── flow-0103: the truncation fact reaches all three verdict steps, from the plan's output ──
 // flow-0101 put the rule in the three prompts; this is the same rule in code, and the wiring is
 // the half the helper cannot test. Two properties matter and neither is behavioural: the fact must
