@@ -54,7 +54,7 @@ touches: []               # path globs this task expects to modify, e.g. ["src/s
 labels: []                # optional, e.g. [frontend, infra, spike]
 model: ""                 # optional: haiku | sonnet | opus | fable — the model that BUILDS this
                           # task. Unset means sonnet (Sonnet 5.5). Raise it deliberately, per the
-                          # task-writer rubric; the queue runner resolves it through
+                          # task-writer rubric; the retired queue runner resolved it via
                           # .flow/bin/task-model.mjs, the one tier -> model-ID table.
                           # A run that ends without a PR, or a PR closed unmerged, moves it up a
                           # tier on its own (haiku -> sonnet -> opus -> fable); at fable the task

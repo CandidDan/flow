@@ -14,7 +14,6 @@
 //   node .flow/bin/flow-unblock.mjs pr-refs
 //   node .flow/bin/flow-unblock.mjs plan  --pr-facts <file>
 //   node .flow/bin/flow-unblock.mjs edits --pr-facts <file>
-//   node .flow/bin/flow-unblock.mjs count-ready
 
 import { realpathSync as __realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -34,7 +33,7 @@ const __isMain = (() => {
 // Re-exported, never re-implemented.
 export {
   classifyBlocked, resolveEntry, parsePrUrl, buildReleaseEdit, readTasks, prRefs, parsePrFacts,
-  planReleases, shouldDispatch, countActiveRuns, httpStatusOf, dispatchOutcome, runUnblockCli,
+  planReleases, runUnblockCli,
 } from "../../project-template/.flow/bin/flow-unblock.mjs";
 
 // Canonical's own store — `.flow/`, one level up from this `bin/` directory.

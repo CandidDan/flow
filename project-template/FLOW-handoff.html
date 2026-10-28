@@ -144,7 +144,7 @@
     <h2>Four seats, one loop</h2>
     <div class="roles">
       <div class="role you"><div class="who">You</div><div class="what">Inspirator + validator. Decide what matters; approve spec &amp; PR. Never displaced.</div></div>
-      <div class="role"><div class="who">Cowork</div><div class="what">Orchestrator. Turns direction into ready-to-work tasks; watches the board.</div></div>
+      <div class="role"><div class="who">Cowork</div><div class="what">Orchestrator. Turns direction into ready-to-work tasks; watches inflight.</div></div>
       <div class="role"><div class="who">Claude Code</div><div class="what">Worker. Pulls a ready task, builds it, clears the gate, opens a PR.</div></div>
       <div class="role"><div class="who">The gate</div><div class="what">QA, security &amp; code-review agents + CI. Nothing reaches you un-vetted.</div></div>
     </div>
@@ -178,9 +178,9 @@
 
         <!-- VIEW -->
         <rect x="64" y="172" width="300" height="58" rx="10" fill="url(#g1)" stroke="#6fa8c7" stroke-opacity=".5"/>
-        <text x="80" y="194" fill="#6fa8c7" font-size="12.5" font-weight="600">VIEW · board.html</text>
-        <text x="80" y="212" fill="#867a64" font-size="10">HTML control surface — drag, reprioritise,</text>
-        <text x="80" y="225" fill="#867a64" font-size="10">export edits back to the files</text>
+        <text x="80" y="194" fill="#6fa8c7" font-size="12.5" font-weight="600">VIEW · inflight</text>
+        <text x="80" y="212" fill="#867a64" font-size="10">task state is viewed in inflight,</text>
+        <text x="80" y="225" fill="#867a64" font-size="10">its own repo — not in this one</text>
 
         <!-- ORCHESTRATION -->
         <rect x="396" y="172" width="300" height="58" rx="10" fill="url(#g1)" stroke="#43392a"/>
@@ -271,7 +271,7 @@
       <div class="cap">Status moves one direction only. Your two happy-path touchpoints sit at the ends; the middle runs unattended. The two dashed paths — kickback and blocked — are where the loop hands a moment back to you on purpose. A fresh Code session per task, never one long thread, keeps quality from rotting across a backlog.</div>
     </div>
     <p>The unlock for "let Code get on without holding things up" isn't speed — it's <strong>readiness</strong>. Autonomous work stalls on under-specified tasks and bounces back to ask. So the orchestrator's real product is a task that's <em>ready</em>: scoped, with observable acceptance criteria and a machine-checkable definition of done. Get that right and the loop runs itself between your touchpoints.</p>
-    <p><strong>Many of these loops run at once.</strong> The "one branch" in the diagram is per task, not per project — the queue runner can fan out several sessions. They don't collide because the store, not a lock, coordinates them: claiming a task is an atomic commit-and-push to <code>main</code> and <em>first push wins</em>; a rejected push means another session claimed it, so this one rebases and picks the next. Each task also declares the file globs it <code>touches</code>, so a session skips any ready task that overlaps something already in progress. Keep tasks small and disjoint and the fan-out is free.</p>
+    <p><strong>Many of these loops run at once.</strong> The "one branch" in the diagram is per task, not per project — worker routines can fan out several sessions (the queue runner is retired). They don't collide because the store, not a lock, coordinates them: claiming a task is an atomic commit-and-push to <code>main</code> and <em>first push wins</em>; a rejected push means another session claimed it, so this one rebases and picks the next. Each task also declares the file globs it <code>touches</code>, so a session skips any ready task that overlaps something already in progress. Keep tasks small and disjoint and the fan-out is free.</p>
   </section>
 
   <section id="gate" class="reveal">
@@ -296,7 +296,7 @@
     <div class="dec">
       <span class="q">Local in-repo store, not Linear<span class="verdict">local-first</span></span>
       <p>The contract (rules, work, outcome, acceptance) is load-bearing; the vehicle is swappable. A local store co-locates task, criteria, code and PR in one git history — and keeps the loop free of any third-party runtime dependency. The task file <em>is</em> the handoff.</p>
-      <p class="trade"><b>Trade-off:</b> a per-repo store fragments cross-project view, and markdown is a poor phone-glance. Both are answered below (flightdeck; HTML board). If single-pane-across-projects or mobile triage ever genuinely bites, the contract is the durable part — the same fields (rules, work, outcome, acceptance) map onto Linear, so the migration is real work but bounded, not a rewrite. The option stays open.</p>
+      <p class="trade"><b>Trade-off:</b> a per-repo store fragments cross-project view, and markdown is a poor phone-glance. Both are answered below (flightdeck; inflight). If single-pane-across-projects or mobile triage ever genuinely bites, the contract is the durable part — the same fields (rules, work, outcome, acceptance) map onto Linear, so the migration is real work but bounded, not a rewrite. The option stays open.</p>
     </div>
 
     <div class="dec">
@@ -307,7 +307,7 @@
 
     <div class="dec">
       <span class="q">A template repo now, a plugin later<span class="verdict">staged</span></span>
-      <p>Identical per-project structure is what lets the master agent rely on the shape. A GitHub template gives every new project the protocol, gates, agents and board from commit one.</p>
+      <p>Identical per-project structure is what lets the master agent rely on the shape. A GitHub template gives every new project the protocol, gates and agents from commit one.</p>
       <p class="trade"><b>Trade-off:</b> template copies drift the moment you improve the protocol or agents in one repo. Concrete trigger: <b>by the third project on the template</b>, lift the skills + agents into a Claude Code plugin so updates propagate without editing every repo — by then the shape is stable enough to centralise, and three diverging copies is where the back-port cost starts to bite. Until then the template is the simpler, right unit.</p>
     </div>
 
@@ -337,7 +337,7 @@
     <p>These aren't loose ends — they're where the real per-project judgement lives. The protocol, gates and loop are fixed; the calls below are the ones that decide whether a given project's gate is meaningful, and no template can make them for you.</p>
     <div class="open"><b>The five commands and the numbers</b> in <code>.flow/config.yml</code> — install, build, lint, test, coverage <em>plus</em> the coverage floor and the security focus list. The commands are mechanical; the floor and the focus list are judgement. A floor set too low is theatre, and the focus list (RLS, OAuth, secret storage…) is where this project's real risk gets promoted to a first-class check. This is the one genuinely per-stack file and the most consequential thing you'll fill in.</div>
     <div class="open"><b>The toolchain setup line</b> in <code>.github/workflows/flow-gates.yml</code> — the single irreducibly stack-specific CI step (node/python/go/…), marked in the file.</div>
-    <div class="open"><b>The board write-back is now wired, not left to you.</b> Edits on the board no longer round-trip through your clipboard: "Apply edits" produces <code>.flow/board-edits.json</code> and the committed <code>.flow/bin/apply-board-edits.mjs</code> patches only the <code>status</code>/<code>priority</code> lines of the matching task files — the single canonical writer, so the files stay the source of truth and every change is a reviewable git diff. One honest caveat on the "straight into the project" path: the File System Access API that writes the file in place is Chromium-only and won't run from a <code>file://</code> page, so for most setups the real flow is <em>download the JSON → run the script</em>. Still no clipboard, just not a silent direct write everywhere.</div>
+    <div class="open"><b>The board is retired.</b> Task state is viewed in inflight. <code>.flow/bin/apply-board-edits.mjs</code> stays, as the store writer: the workflows patch task frontmatter through it, so every change is a reviewable git diff.</div>
   </section>
 
   <section id="operating" class="reveal">
@@ -369,8 +369,7 @@
         <div class="frow"><div class="path">.flow/config.yml</div><div class="desc">The one per-stack file: commands, coverage floor, security focus.</div></div>
         <div class="frow"><div class="path">.flow/tasks/_TEMPLATE.md</div><div class="desc">Canonical task shape = the definition of ready; carries the <code>touches</code> field.</div></div>
         <div class="frow"><div class="path">.flow/tasks/0001-…md</div><div class="desc">A worked example task.</div></div>
-        <div class="frow"><div class="path">.flow/board.html</div><div class="desc">The glance + control surface; drag, reprioritise, apply edits (no clipboard).</div></div>
-        <div class="frow"><div class="path">.flow/bin/apply-board-edits.mjs</div><div class="desc">The single canonical writer of frontmatter from a board edit.</div></div>
+        <div class="frow"><div class="path">.flow/bin/apply-board-edits.mjs</div><div class="desc">The store writer: the one writer of task frontmatter the workflows use.</div></div>
         <div class="frow"><div class="path">.flow/bin/apply-board-edits.test.mjs</div><div class="desc">Its tests (node --test) — the DoD applies to the tooling too.</div></div>
         <div class="frow"><div class="path">.flow/bin/flow-doctor.mjs · .test.mjs</div><div class="desc">Store drift detection (back-ported from the canary repo's state:check), CI-enforced.</div></div>
         <div class="frow"><div class="path">.flow/bin/touches-guard.mjs · .test.mjs</div><div class="desc">Fails a PR whose diff strays outside the task's declared <code>touches</code>.</div></div>
@@ -378,13 +377,12 @@
         <div class="frow"><div class="path">.claude/agents/security-reviewer.md</div><div class="desc">Secrets, deps, authz, input validation + project focus.</div></div>
         <div class="frow"><div class="path">.claude/agents/code-reviewer.md</div><div class="desc">Correctness, scope adherence, maintainability.</div></div>
         <div class="frow"><div class="path">.claude/skills/task-writer/</div><div class="desc">Orchestrator discipline: how to write a ready task.</div></div>
-        <div class="frow"><div class="path">.claude/skills/board-builder/</div><div class="desc">Regenerate the board from the task files (data → view).</div></div>
         <div class="frow"><div class="path">.github/workflows/flow-gates.yml</div><div class="desc">CI: the gate from config + store-is-main-only guard + tooling tests.</div></div>
         <div class="frow"><div class="path">.github/workflows/flow-status.yml</div><div class="desc">PR open → <code>in_review</code> (+branch/pr) · closed-unmerged → <code>ready</code>.</div></div>
         <div class="frow"><div class="path">.github/workflows/flow-done.yml</div><div class="desc">On PR merge, flips the matching task to <code>done</code> on main.</div></div>
         <div class="frow"><div class="path">.github/workflows/flow-triage.yml</div><div class="desc">Scheduled inbox sweep: propose → approve → ready task. Off by default.</div></div>
         <div class="frow"><div class="path">.github/workflows/flow-review.yml</div><div class="desc">Independent Claude review on flow PRs. Off by default.</div></div>
-        <div class="frow"><div class="path">.gitattributes · .gitignore</div><div class="desc">Mark board.html generated; ignore the transient board-edits.json.</div></div>
+        <div class="frow"><div class="path">.gitattributes · .gitignore</div><div class="desc">Diff hygiene; ignore the transient board-edits.json.</div></div>
       </div>
       <div class="fgroup">
         <h4>flightdeck/ — the cross-project control layer</h4>

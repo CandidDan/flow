@@ -87,6 +87,48 @@ adopt from a canary ref once without repinning.
 
 ---
 
+## Moving from `@v3` to `@v4` (the steps the `sed` does not cover)
+
+The 4.0.0 major retires queue-runner (flow-0174). Flow's worker now runs as a Claude Code cloud
+routine (`docs/flow-routines.md`), not on GitHub Actions, so two caller files change. The `sed`
+over the `uses:` lines cannot make either change.
+
+### The steps
+
+1. **Delete `.github/workflows/flow-queue-runner.yml`.** Its reusable, `_flow-queue-runner.yml`,
+   no longer exists at `@v4`. A caller still pointing at it fails at startup on every scheduled
+   tick. **`flow-sync` deletes it for you.** It is on the sync's retired-paths list, so it shows
+   under **Removed** in the sync PR.
+2. **Drop `actions: write` from `flow-unblock.yml`.** It was there to dispatch the retired worker,
+   and the v4 reusable no longer requests it. The sync PR carries this caller with the line
+   removed.
+
+The model escalation the retired queue-runner applied, one tier up after an attempt that produced
+nothing, now happens in `flow-recover`. When the sweep resets a stranded claim with nothing pushed,
+it moves the task up one tier. No caller change is needed for that.
+
+### Doing it
+
+Run the sync, in the same two-step order as below: repin the `flow-sync` caller first, then
+dispatch it.
+
+```bash
+sed -i "s|\(_flow-sync\.yml\)@v3$|\1@v4|" .github/workflows/flow-sync.yml
+gh workflow run flow-sync.yml -R <owner>/<repo> -f canonical_ref=v4
+```
+
+By hand, it is the ordinary `sed`, then the two edits:
+
+```bash
+FROM="v3"; TO="v4"
+sed -i "s|\(_flow-[a-z-]*\.yml\)@$FROM$|\1@$TO|" .github/workflows/flow-*.yml
+git rm .github/workflows/flow-queue-runner.yml          # retired: its reusable is gone at v4
+sed -i "/actions: write/d" .github/workflows/flow-unblock.yml
+grep -h "uses:" .github/workflows/flow-*.yml | sort -u  # every line must show @v4
+```
+
+---
+
 ## Moving from `@v2` to `@v3` (the one step the `sed` does not cover)
 
 **A major is deliberate adoption, not maintenance.** `v2` stays at 2.2.0 and is **never** moved onto
@@ -98,7 +140,7 @@ the per-repo callers, it is MAJOR*. Here that change is flow-0080, and it is one
 
 ### The step
 
-`flow-queue-runner.yml`'s `schedule-gate` job must grant `actions: read`:
+`flow-queue-runner.yml`'s `schedule-gate` job must grant `actions: read` (retired at v4, see above):
 
 ```yaml
   schedule-gate:
@@ -154,11 +196,11 @@ next sync already runs the v3 reusable. It is the ordinary `sed` plus that one g
 FROM="v2"; TO="v3"
 sed -i "s|\(_flow-[a-z-]*\.yml\)@$FROM$|\1@$TO|" .github/workflows/flow-*.yml
 grep -h "uses:" .github/workflows/flow-*.yml | sort -u      # every line must show @v3
-grep -n "actions: read" .github/workflows/flow-queue-runner.yml   # must match, under schedule-gate
+grep -n "actions: read" .github/workflows/flow-queue-runner.yml   # must match, under schedule-gate (file retired at v4)
 ```
 
-A repin that moves the ten pins and misses the grant leaves the repo with a scheduled queue run that
-fails before it starts, and nine checks that are fine — read the changelog's caller-action notes
+A repin that moves the ten pins and misses the grant leaves the repo with a scheduled worker run
+that fails before it starts, and nine checks that are fine — read the changelog's caller-action notes
 first, every time.
 
 ---
@@ -188,8 +230,8 @@ above.
    ```
    If the callers are not all on the same pin, **stop and report it** — a mixed repo is a bug that
    predates this task, and repinning would hide it.
-3. **Rewrite the `uses:` pins** across every `flow-*.yml` caller (there are normally nine: gates,
-   status, done, open-pr, recover, sync, triage, review, queue-runner).
+3. **Rewrite the `uses:` pins** across every `flow-*.yml` caller (gates, status, done, open-pr,
+   recover, sync, triage, review, and the others the repo carries; queue-runner is retired since v4).
 4. **Set `canonical_ref`** in the `flow-sync` caller's `with:` block to the same target. See the trap
    above. If the caller has no `with:` block, add one.
 5. **Verify before committing** — every line must show the new ref, and the count must match the

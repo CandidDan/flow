@@ -56,7 +56,7 @@ name: _flow-review (reusable)
 # own change and the security review would skip, "visibly", with a reason that read as legitimate;
 # a PR could edit `verdict` itself, which is the code that turns a reviewer's words into a red
 # check. flow-0068 fenced FORK PRs; this is the same hole for PRs from inside the repo, which is
-# every PR the queue runner opens. So each job now materialises the base branch in a scratch
+# every PR the (since retired) queue runner opened. So each job now materialises the base branch in a scratch
 # worktree under RUNNER_TEMP and runs THAT helper against THAT config, while the diff, the changed
 # files and the task still come from the PR. A worktree rather than a `git show` of the one file,
 # because the helper is not one file: it imports touches-guard.mjs and parse-task-id.mjs, and in
@@ -140,6 +140,8 @@ jobs:
       diff_truncated: ${{ steps.plan.outputs.diff_truncated }}
       diff_bytes: ${{ steps.plan.outputs.diff_bytes }}
       diff_full_bytes: ${{ steps.plan.outputs.diff_full_bytes }}
+      # flow-0177. Wholly deleted files cut to one line each to fit the limit. Reporting only.
+      diff_summarised_deletions: ${{ steps.plan.outputs.diff_summarised_deletions }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
@@ -342,6 +344,9 @@ jobs:
             If the diff carries the DIFF TRUNCATED marker, do NOT return a PASS verdict: name
             the truncation in your verdict and in its summary, because passing a partial read
             certifies what you could not read.
+            A DELETED FILE SUMMARISED marker is not truncation and does not by itself block a
+            PASS: that file's body was left out because the PR removes it, so judge whether
+            removing it breaks a caller.
 
             .flow-review/task.md may instead begin with one of two sentinels that mean this PR
             has NO TASK BY DESIGN. Both are decided in code — branch prefix AND every changed
@@ -551,6 +556,9 @@ jobs:
             If the diff carries the DIFF TRUNCATED marker, do NOT return a PASS verdict: name
             the truncation in your verdict and in its summary, because passing a partial read
             certifies what you could not read.
+            A DELETED FILE SUMMARISED marker is not truncation and does not by itself block a
+            PASS: that file's body was left out because the PR removes it, so judge whether
+            removing it breaks a caller.
 
             .flow-review/task.md may instead begin with one of two sentinels that mean this PR
             has NO TASK BY DESIGN. Both are decided in code — branch prefix AND every changed
@@ -781,6 +789,9 @@ jobs:
             If the diff carries the DIFF TRUNCATED marker, do NOT return a PASS verdict: name
             the truncation in your verdict and in its summary, because passing a partial read
             certifies what you could not read.
+            A DELETED FILE SUMMARISED marker is not truncation and does not by itself block a
+            PASS: that file's body was left out because the PR removes it, so judge whether
+            removing it breaks a caller.
 
             .flow-review/task.md may instead begin with one of two sentinels that mean this PR
             has NO TASK BY DESIGN. Both are decided in code — branch prefix AND every changed

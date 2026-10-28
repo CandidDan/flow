@@ -134,7 +134,7 @@ test("checkTouches: the CAN-30 drift would have failed", () => {
 
 test("checkTouches: .flow/ is excluded (store-guard's domain)", () => {
   const r = checkTouches({
-    changedFiles: [".flow/tasks/0030-x.md", ".flow/board.html", "CLAUDE.md"],
+    changedFiles: [".flow/tasks/0030-x.md", ".flow/config.yml", "CLAUDE.md"],
     touches: ["CLAUDE.md"],
   });
   assert.deepEqual(r.outside, []);

@@ -511,7 +511,6 @@ export const RELEASE_PR_PATHS = Object.freeze([
 // by a list that predates it and is not classified. The cost is one sync PR reviewed the way
 // every other PR is reviewed; the next sync, carrying the widened list, classifies normally.
 export const CANONICAL_SKILLS = Object.freeze([
-  "board-builder",
   "flow-compass",
   "show-me",
   "task-writer",
@@ -1067,16 +1066,79 @@ export function taskContext({
 // ── the bounded context ───────────────────────────────────────────────────────────────────
 // Truncation is reported in the returned object AND written into the text, so a reviewer reading
 // a clipped diff is told it is clipped instead of reasoning confidently about half a change.
+//
+// flow-0177. Over the cap, the body of a WHOLLY deleted file is spent first: it is leaving, so what
+// a reviewer needs is that it went and how big it was, not its old text. Each one becomes a single
+// DELETED FILE SUMMARISED line under its `diff --git` header, the result is re-measured, and only
+// a diff that still does not fit is truncated — exactly as before, so an oversized change still
+// cannot PASS. Under the cap nothing is summarised: the budget has to force the choice.
+export const DELETED_FILE_MARKER = "DELETED FILE SUMMARISED";
+
+const bytesOf = (s) => Buffer.byteLength(s, "utf8");
+
+// Split at each `diff --git` line. Whatever precedes the first one (normally nothing) is kept as is.
+function diffSections(src) {
+  const starts = [];
+  const re = /^diff --git /gm;
+  for (let m; (m = re.exec(src));) starts.push(m.index);
+  if (!starts.length) return { preamble: src, sections: [] };
+  const sections = starts.map((s, i) => src.slice(s, starts[i + 1] ?? src.length));
+  return { preamble: src.slice(0, starts[0]), sections };
+}
+
+// A whole-file deletion carries `deleted file mode` in its header — the lines before the first
+// hunk. A partial deletion, a rename and a mode change never do, so none of them is summarised.
+function wholeDeletion(section) {
+  const lines = section.split("\n");
+  const firstHunk = lines.findIndex((l) => l.startsWith("@@"));
+  const header = firstHunk === -1 ? lines : lines.slice(0, firstHunk);
+  if (!header.some((l) => l.startsWith("deleted file mode "))) return null;
+  const minus = header.find((l) => l.startsWith("--- a/"));
+  const path = minus ? minus.slice("--- a/".length)
+    : (lines[0].match(/^diff --git a\/(.+?) b\//)?.[1] ?? lines[0].slice("diff --git ".length));
+  const removed = firstHunk === -1 ? 0
+    : lines.slice(firstHunk).filter((l) => l.startsWith("-")).length;
+  return { head: lines[0], path, removed };
+}
+
+function summariseDeletions(src, maxBytes) {
+  const { preamble, sections } = diffSections(src);
+  const summarised = [];
+  const body = sections.map((s) => {
+    const d = wholeDeletion(s);
+    if (!d) return s;
+    summarised.push(d);
+    return `${d.head}\n*** ${DELETED_FILE_MARKER}: ${d.path} (${d.removed} lines removed) — read it ` +
+      `at the base ref if the deletion matters. ***\n`;
+  }).join("");
+  if (!summarised.length) return { text: src, summarised };
+  const header =
+    `*** ${DELETED_FILE_MARKER}: this diff was over the ${maxBytes}-byte limit, so the bodies of ` +
+    `${summarised.length} wholly deleted file(s) are replaced below by one line each. That is not ` +
+    `truncation: every other line of the change is here. Any of them can be read from the base ` +
+    `worktree (or \`git show <base>:<path>\`): ***\n` +
+    summarised.map((d) => `***   ${d.path} (${d.removed} lines removed)\n`).join("") + "\n";
+  return { text: header + preamble + body, summarised };
+}
+
 export function boundDiff(text, { maxBytes = DEFAULT_MAX_DIFF_BYTES } = {}) {
   const src = String(text ?? "");
-  const full = Buffer.byteLength(src, "utf8");
-  if (full <= maxBytes) return { text: src, truncated: false, bytes: full, fullBytes: full };
-  const kept = Buffer.from(src, "utf8").subarray(0, maxBytes).toString("utf8");
+  const full = bytesOf(src);
+  if (full <= maxBytes) {
+    return { text: src, truncated: false, bytes: full, fullBytes: full, summarisedDeletions: 0 };
+  }
+  const { text: reduced, summarised } = summariseDeletions(src, maxBytes);
+  const summarisedDeletions = summarised.length;
+  const reducedBytes = bytesOf(reduced);
+  if (reducedBytes <= maxBytes) {
+    return { text: reduced, truncated: false, bytes: reducedBytes, fullBytes: full, summarisedDeletions };
+  }
+  const kept = Buffer.from(reduced, "utf8").subarray(0, maxBytes).toString("utf8");
   const marker =
     `\n\n*** DIFF TRUNCATED at ${maxBytes} bytes (full diff is ${full} bytes). ***\n` +
     `*** You are seeing part of this change. Say so in your verdict rather than approving ` +
     `what you could not read. ***\n`;
-  return { text: kept + marker, truncated: true, bytes: Buffer.byteLength(kept + marker, "utf8"), fullBytes: full };
+  return { text: kept + marker, truncated: true, bytes: bytesOf(kept + marker), fullBytes: full, summarisedDeletions };
 }
 
 // ── verdicts ──────────────────────────────────────────────────────────────────────────────
@@ -1291,6 +1353,8 @@ export function runReviewCli(argv, {
         // verdict step treats them as optional and this one keeps emitting them unconditionally.
         `diff_bytes=${diff.bytes}`,
         `diff_full_bytes=${diff.fullBytes}`,
+        // flow-0177: how many wholly deleted files were cut to one line to fit. Reporting only.
+        `diff_summarised_deletions=${diff.summarisedDeletions ?? 0}`,
         `task_id=${task.id ?? ""}`,
         `task_found=${task.found}`,
         `bootstrap=${Boolean(plan.bootstrap)}`,
@@ -1418,7 +1482,10 @@ export function planSummary({
     `- code-review model: \`${cfg.codeReviewModel ?? cfg.model}\``,
     `- security reviewer model: \`${cfg.securityModel}\``,
     `- changed files: ${changedFiles.length}`,
-    `- diff handed to the reviewers: ${diff.bytes} bytes${diff.truncated ? ` **(truncated from ${diff.fullBytes})**` : ""}`,
+    `- diff handed to the reviewers: ${diff.bytes} bytes${diff.truncated ? ` **(truncated from ${diff.fullBytes})**` : ""}` +
+      (diff.summarisedDeletions
+        ? ` — ${diff.summarisedDeletions} wholly deleted file(s) summarised by name and line count`
+        : ""),
     // The limit AND where it came from. Without the provenance a red gate reads as a mystery
     // number: the run that prompted flow-0100 reported the truncation perfectly well and left a
     // human unable to tell whether 300000 was anyone's decision.

@@ -82,10 +82,9 @@ const ADOPTER_TASK = [
   'priority: 2', '---', '', '## Context', 'x', '',
 ].join("\n");
 
-// The adopter's LIVE board: pointed at its own repo, holding its own tasks — and with no
-// `const REPO = "…";` declaration at all. That last part is not invented for effect: it is the
-// shape of `CandidDan/Nudge`'s board, and it is why the copied board assertion failed downstream.
-// `prepareBoard`'s patterns are anchored, so there is simply nothing here for it to rewrite.
+// A STALE board left in the adopter (flow-0164). The board is retired and flow-sync deletes it,
+// but an adopter that has not synced yet still holds one, in the shape `CandidDan/Nudge`'s had.
+// It stays in the layout so the copied tests are proven to neither need it nor trip on it.
 const ADOPTER_BOARD = [
   "<!doctype html>", "<title>other-app — Flow board</title>", "<script>",
   'const ISSUE_BASE = "https://github.com/other-co/other-app/issues";',
@@ -157,9 +156,9 @@ test("the adopter layout keeps the two properties that made the copied test fail
     assert.ok(!existsSync(join(root, "AGENTS.md")),
       "an adopter layout that already has AGENTS.md cannot catch a fixture that reads it from there");
     const board = readFileSync(join(root, ".flow", "board.html"), "utf8");
-    assert.doesNotMatch(board, /^const REPO = "[^"]*";/m,
-      "the adopter's board must have nothing for prepareBoard to rewrite — that is the downstream shape");
-    assert.match(board, /APP-0042/, "the adopter's board holds its own tasks");
+    assert.match(board, /APP-0042/, "the adopter still holds its stale board, which nothing may rely on");
+    assert.ok(!existsSync(join(root, ".claude", "skills", "board-builder")),
+      "the template's .claude/ no longer ships the retired board-builder skill (flow-0164)");
     assert.ok(existsSync(join(root, ".flow", "bin", "flow-init.mjs")),
       "the layout must carry the template's tooling, or the child has nothing to import");
   } finally {

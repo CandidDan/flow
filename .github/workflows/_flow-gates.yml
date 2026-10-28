@@ -446,7 +446,7 @@ jobs:
         run: node --test .flow/bin/*.test.mjs
 
       # Drift detection (back-ported from the canary repo's state:check): a validated store beats a
-      # trusted one. Problems fail; warnings (e.g. stale board snapshot) just report.
+      # trusted one. Problems fail; warnings just report.
       - name: flow-doctor — store consistency
         if: ${{ !cancelled() }}
         run: node .flow/bin/flow-doctor.mjs

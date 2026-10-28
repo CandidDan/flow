@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // flow-doctor.mjs — drift detection for the work store, back-ported from the canary repo's
 // `state:check` pattern: a validated store beats a trusted one. Checks that the task
-// files are internally consistent and that the board snapshot hasn't drifted from them.
+// files are internally consistent.
 // Run on demand or in CI (flow-tooling job). Exits non-zero on PROBLEMS; WARNINGS report only.
 //
 //   node .flow/bin/flow-doctor.mjs
@@ -22,7 +22,7 @@
 // WARNINGS (exit 0): ready task with owner set · blocked task with an empty `blocked_by` (a
 //   nudge, never a failure — see below) · ready task with empty touches (concurrency
 //   relies on it) · live tasks with overlapping touches (they can't run in parallel — sequence
-//   them; don't call them parallel-safe) · board snapshot ids/statuses drifted from the files ·
+//   them; don't call them parallel-safe) ·
 //   no source_roots declared yet (adoption nudge) · a source_root still holding the shipped
 //   REPLACE-ME placeholder in `path` or `check` (uncalibrated, not stale — see below) · Flow
 //   infra behind canonical (only when FLOW_CANONICAL_VERSION is set — see "version drift"
@@ -45,7 +45,7 @@
 // UNCOMMITTED-TASK GUARD (CAN-41). A task isn't in the store until it's committed to main —
 // the store IS the committed `.flow/tasks/` on main, and concurrency depends on every session
 // seeing the same committed state. A task file left uncommitted (or with uncommitted edits) is
-// invisible to other sessions and to the board: it looks claimed/done locally but isn't. This
+// invisible to other sessions: it looks claimed/done locally but isn't. This
 // fails on any `.flow/tasks/*.md` that `git status` reports as untracked or modified. Skipped
 // (a note, not a failure) outside a git work tree, so unit fixtures and tarball checkouts are
 // unaffected.
@@ -950,7 +950,7 @@ export function taskIntentFindings(tasks, intents, requiredFrom) {
 // ── store identity: one id, one file (flow-0052) ──────────────────────────────────────────
 // `allocate-task-id.mjs` allocates correctly, but using it is optional: a session that
 // hand-writes a task file bypasses it entirely and git raises nothing, because two slugs are
-// two paths — `flow-0049-claude-md-ceiling.md` and `flow-0049-queue-runner-*.md` merge cleanly.
+// two paths — `flow-0049-claude-md-ceiling.md` and `flow-0049-<another-slug>.md` merge cleanly.
 // That happened on canonical's `main` on 2026-09-15 and was cleared by a human who happened to
 // look. The harm is silent rather than loud: `flightdeck/bin/mission-control.mjs` keys tasks by
 // id, so the second file overwrites the first and one task disappears from the state report with
@@ -1216,22 +1216,6 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
     }
   }
 
-  // Board snapshot drift (warn only — live mode and regeneration both fix it).
-  const boardPath = join(flowDir, "board.html");
-  if (existsSync(boardPath)) {
-    const m = readFileSync(boardPath, "utf8").match(/const TASKS = \[([\s\S]*?)\n\];/);
-    if (m) {
-      const snapIds = new Map([...m[1].matchAll(/id:"([^"]+)"[^}]*?status:"([^"]+)"/g)].map((x) => [x[1], x[2]]));
-      for (const t of tasks) {
-        if (!snapIds.has(t.id)) warnings.push(`board snapshot missing ${t.id} — regenerate (board-builder)`);
-        else if (snapIds.get(t.id) !== t.status)
-          warnings.push(`board snapshot has ${t.id}=${snapIds.get(t.id)}, files say ${t.status} — regenerate`);
-      }
-      const storeIds = new Set(declaredIds.map((e) => e.id));
-      for (const id of snapIds.keys())
-        if (!storeIds.has(id)) warnings.push(`board snapshot has ${id} but no task file exists — regenerate`);
-    }
-  }
 
   // Gate-coverage floor: every source tree must be declared + mapped to a check, and no
   // undeclared top-level source tree may exist. Graceful adoption: a repo that hasn't declared

@@ -58,20 +58,19 @@ name: _flow-open-pr (reusable)
 # step that needs it, which is rarely the step you are looking at.
 #
 # FLOW_PAT — required permissions (fine-grained PAT, this repository only, short expiry):
-#   - Contents: Read and write — flow-queue-runner's worker pushes the claim commit to main and
-#     then pushes its task branch, and flow-sync pushes the sync branch. Read alone cannot push,
-#     and the run dies at the first git push.
+#   - Contents: Read and write — flow-kickback's worker pushes its fix to the task branch, and
+#     flow-sync pushes the sync branch. Read alone cannot push, and the run dies at the first
+#     git push.
 #   - Pull requests: Read and write — flow-open-pr opens the draft PR, flow-recover re-opens a
-#     stranded one, flow-sync opens the sync PR, and flow-queue-runner's worker runs gh pr create
-#     and gh pr ready.
-#   - Issues: Read and write — flow-queue-runner's worker files an issue for a problem it finds
-#     outside its own task, which is how that work gets captured instead of lost.
-#   - Workflows: Read and write — flow-queue-runner's worker and flow-sync both push commits that
+#     stranded one, and flow-sync opens the sync PR.
+#   - Issues: Read and write — a worker files an issue for a problem it finds outside its own
+#     task, which is how that work gets captured instead of lost.
+#   - Workflows: Read and write — flow-sync and a worker fixing CI both push commits that
 #     change files under .github/workflows/, and GitHub refuses that push from any credential
 #     lacking it. GITHUB_TOKEN can never have it, which is why the PAT is the only way.
 #
 # Short expiry and rotation are the counterweight to Workflows: Read and write — that permission
-# lets the holder edit CI, and flow-queue-runner hands the token to an agent. The fences that make
+# lets the holder edit CI, and flow-kickback hands the token to an agent. The fences that make
 # that acceptable are the task's declared `touches` plus the touches-guard CI check, the review
 # checks planned from base, and a human merge; the token's own limits are its single repository and
 # its expiry date. Nothing here needs a classic PAT, and nothing here needs organisation scope.

@@ -22,8 +22,14 @@ name: _flow-recover (reusable)
 #
 # Conservative by construction: only acts past a staleness threshold, never disturbs a task
 # with an open PR, and resets ONLY via apply-board-edits.mjs (a commit to main — never a
-# hand-edit). DORMANT until FLOW_AI=true (same switch as the queue-runner — no autonomous
-# workers, nothing to strand); always runnable on demand via the caller's workflow_dispatch.
+# hand-edit). DORMANT until FLOW_AI=true (no autonomous workers, nothing to strand); always
+# runnable on demand via the caller's workflow_dispatch.
+#
+# flow-0174: the reset path also ESCALATES. A claim that strands with nothing pushed is a failed
+# attempt, so the task moves up one model tier in the same commit that returns it to `ready` —
+# the bump the now-retired queue-runner used to apply when its own run ended without a PR. Only
+# reset escalates; reopen-pr and promote-in-review mean work was pushed. The rule is
+# `escalatesOnRecover` in flow-recover.mjs, which the step passes its decision to.
 #
 # Reopened PRs use FLOW_PAT (CAN-58) so flow-gates fires on them too; falls back to GITHUB_TOKEN
 # when the secret is unset (recovery still works, just ungated). The thin caller passes the
@@ -191,7 +197,7 @@ jobs:
               # day, not its midnight. `date -d 2026-08-14` resolves to 00:00Z, so a task claimed
               # at 09:23Z measured "563 minutes old" the moment it was claimed — past the 75m
               # threshold before the worker had cut a branch. The sweep then reset the live claim
-              # to `ready` within a minute of every claim, the next queue-runner re-picked the
+              # to `ready` within a minute of every claim, the next worker run re-picked the
               # same task from zero, and no run's work ever carried forward (observed: three
               # consecutive error_max_turns runs on one task, ~$13 each, no PR). Anchoring to
               # 23:59:59Z errs the only safe way for a destructive sweep: it can delay a genuine
@@ -259,6 +265,10 @@ jobs:
               reset-to-ready)
                 node .flow/bin/flow-recover.mjs reset "$id" > .flow/board-edits.json
                 node .flow/bin/apply-board-edits.mjs
+                # Same commit as the reset: nothing was pushed, so the attempt failed and the task
+                # moves up one tier (flow-0174). The helper decides from "$decision"; --once-style
+                # dedup on the event means a re-run of this sweep cannot bump it twice.
+                node .flow/bin/flow-recover.mjs escalate "$id" "$decision" "flow-recover run $GITHUB_RUN_ID reset it with nothing pushed"
                 if git diff --quiet -- .flow/tasks/; then
                   echo "No change for $id (already reset / not found)."
                 else

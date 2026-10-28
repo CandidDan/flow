@@ -34,7 +34,7 @@ export const ALIASES = Object.freeze(["opus", "sonnet", "haiku", "fable", "mytho
 export const PIN_SHA = "6fed3ca145920b639991cb756090506e1bcaf515";
 export const PIN_VERSION = "v1.0.245";
 export const PINNED_REUSABLES = Object.freeze([
-  "_flow-queue-runner.yml", "_flow-review.yml", "_flow-compass.yml", "_flow-triage.yml", "_flow-kickback.yml",
+  "_flow-review.yml", "_flow-compass.yml", "_flow-triage.yml", "_flow-kickback.yml",
 ]);
 const REPORT_STEP = "Report the model that answered";
 const HEREDOC = "FLOW_MODEL_REPORT";
@@ -121,11 +121,7 @@ test("AC2: no model value in the reusables or the template/canonical config is a
   const { files, judged, violations } = checkModelIds({ dir: WORKFLOWS, configs: [TEMPLATE_CONFIG, CANON_CONFIG] });
   assert.ok(files.length > 0 && judged > 0, "an empty scan verified nothing");
   assert.deepEqual(violations, []);
-  // flow-0083: the worker's model is the TASK's, resolved through task-model.mjs's TIERS table, so
-  // the queue runner carries no literal `--model` at all — a literal there is the per-task choice
-  // silently overridden. Kickback still names its own (flow-0083 does not touch it).
-  assert.deepEqual(modelFlags(readFileSync(join(WORKFLOWS, "_flow-queue-runner.yml"), "utf8")), [],
-    "the queue runner must take its worker's --model from task-model.mjs, never a literal");
+  // Kickback names its own worker model (flow-0083 does not touch it).
   assert.ok(modelFlags(readFileSync(join(WORKFLOWS, "_flow-kickback.yml"), "utf8"))
     .some((m) => m.value === "claude-opus-5-5"), "precondition: kickback's worker still names its full id");
 });
@@ -143,10 +139,7 @@ test("flow-0144: neither the template config nor canonical's sets review.model, 
 });
 
 test("AC2 mutation: reintroducing `--model opus` into a copy of a workflow fails, naming file and line", () => {
-  // The queue runner no longer carries a literal to replace (flow-0083), so its mutation puts the
-  // bare alias back in front of the resolver's args — the regression this guards against.
   const MUTATIONS = {
-    "_flow-queue-runner.yml": ["--max-turns 120 ${{ steps.model.outputs.args }}", "--max-turns 120 --model opus ${{ steps.model.outputs.args }}"],
     "_flow-kickback.yml": ["--model claude-opus-5-5", "--model opus"],
   };
   for (const [f, [from, to]] of Object.entries(MUTATIONS)) {
@@ -164,7 +157,7 @@ test("AC2 mutation: reintroducing `--model opus` into a copy of a workflow fails
 
   const dir = mkdtempSync(join(tmpdir(), "flow-model-ids-"));
   try {
-    writeFileSync(join(dir, "_flow-queue-runner.yml"), readFileSync(join(WORKFLOWS, "_flow-queue-runner.yml"), "utf8"));
+    writeFileSync(join(dir, "_flow-kickback.yml"), readFileSync(join(WORKFLOWS, "_flow-kickback.yml"), "utf8"));
     const cfg = join(dir, "config.yml");
     writeFileSync(cfg, `project:\n  name: x\nreview:\n  model: "sonnet"\n  security_model: claude-opus-5\nother:\n  model: opus\n`);
     const bad = checkModelIds({ dir, configs: [cfg] }).violations.filter((v) => v.startsWith(cfg));
@@ -239,14 +232,15 @@ test("AC5: every Claude step is followed by a report step reading that step's ex
       assert.ok(r.always, `${f}:${r.line} — the report must run with always(), so a failed run still says what ran`);
     });
   }
-  assert.equal(total, 10, "the ten Claude steps: worker, qa, code-review, security, guide, compass, triage, " +
+  // Ten until flow-0174 retired the worker's Actions host; it runs as a routine now.
+  assert.equal(total, 9, "the nine Claude steps: qa, code-review, security, guide, compass, triage, " +
     "and kickback's fixer, round-card and card");
 });
 
 test("AC5: the report script is byte-identical in every copy", () => {
   const scripts = reportedFiles().flatMap((f) => reportScripts(readFileSync(join(WORKFLOWS, f), "utf8")));
-  assert.equal(scripts.length, 10);
-  for (const s of scripts) assert.equal(s, scripts[0], "ten copies of one script must not drift apart");
+  assert.equal(scripts.length, 9);
+  for (const s of scripts) assert.equal(s, scripts[0], "nine copies of one script must not drift apart");
 });
 
 // Runs the extracted script exactly as the step does (`node -`, script on stdin).
@@ -304,4 +298,33 @@ test("AC5: a model value that is not a plain identifier never reaches the summar
   const r = runReport({ execution: [{ type: "result", modelUsage: { "x`](javascript:alert(1))": {}, "claude-opus-5-5": {} } }] });
   assert.match(r.summary, /answered: `claude-opus-5-5`\n/);
   assert.doesNotMatch(r.summary, /javascript/);
+});
+
+// ── flow-0083 decision 1, kept when flow-0174 retired the queue-runner tests that held it ─────
+// A tier name used as a key or arrow source, pointing at a full model id: `opus: "claude-…"`,
+// `sonnet → claude-…`, `fable = 'claude-…'`. `model: "claude-sonnet-5-5"` in flow-review.mjs maps a
+// ROLE to an id, not a tier, and is deliberately not matched.
+export const TIER_MAPPING = /\b(haiku|sonnet|opus|fable)\b["']?\s*(:|=>|->|→|=)\s*["'`]?claude-[a-z]+-\d/;
+
+test("TIERS is the only place that maps a tier to a model ID", () => {
+  const templateBin = join(REPO, "project-template", ".flow", "bin");
+  const files = [
+    ...readdirSync(WORKFLOWS).filter((n) => /\.ya?ml$/.test(n)).map((n) => join(WORKFLOWS, n)),
+    ...readdirSync(templateBin).filter((n) => n.endsWith(".mjs") && !n.endsWith(".test.mjs"))
+      .map((n) => join(templateBin, n)),
+  ];
+  assert.ok(files.length > 10, "the scan found nothing to check");
+  const hits = [];
+  for (const f of files) {
+    readFileSync(f, "utf8").split("\n").forEach((line, i) => {
+      if (TIER_MAPPING.test(line)) hits.push(`${f.slice(REPO.length + 1)}:${i + 1}`);
+    });
+  }
+  const tierFile = "project-template/.flow/bin/task-model.mjs";
+  assert.deepEqual(hits.filter((h) => !h.startsWith(`${tierFile}:`)), [], "a second tier -> model-ID table exists");
+  assert.equal(hits.length, 4, `task-model.mjs's TIERS must hold the four mappings, found: ${hits.join(", ")}`);
+  for (const s of ['  opus: "claude-opus-5-5",', "sonnet → claude-sonnet-5-5", "FABLE=claude-fable-5-1".toLowerCase()]) {
+    assert.match(s, TIER_MAPPING);
+  }
+  assert.doesNotMatch('  model: "claude-sonnet-5-5",', TIER_MAPPING);
 });
