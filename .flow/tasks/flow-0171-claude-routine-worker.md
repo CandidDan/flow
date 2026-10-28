@@ -1,7 +1,7 @@
 ---
 id: "flow-0171"
 title: "Runbook and prompt for working Flow tasks from a Claude Code routine"
-status: "in_review"
+status: "cancelled"
 priority: 2
 project: "flow"
 owner: "claude-worker"
@@ -11,7 +11,7 @@ branch: "flow/flow-0171-claude-routine-runbook"
 pr: "https://github.com/CandidDan/flow/pull/252"
 issue: ""
 blocked_reason: ""
-cancelled_reason: ""
+cancelled_reason: "Duplicates docs/flow-routines.md (flow-0172, PR #253, merged). Dan ruled 2026-10-28: fold into flow-routines. The three additions (firing from an app, account-wide limits, auto-mode stalls) moved to flow-0175; PR #252 closed unmerged."
 blocked_by: []
 serves: ["maintenance"]
 intent: ""
@@ -23,6 +23,7 @@ touches:
   - "changes/flow-0171.md"
 labels: [docs, cost, routines]
 notes:
+  - "2026-10-28 (orchestrator): cancelled by Dan's ruling \"Fold into flow-routines\". flow-0172 merged docs/flow-routines.md first; this task's unique content is carried by flow-0175. PR #252 closed unmerged."
   - "2026-10-28 (orchestrator): from Dan. Replaces queue-runner's GitHub-hosted worker with a Claude Code routine (cloud session on the Max plan, no Actions minutes). Pairs with the worker.host task, which adds host: claude-routine; this task does not depend on it landing."
 ---
 
