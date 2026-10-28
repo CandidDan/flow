@@ -35,8 +35,9 @@ adding more expense to github".
 
 Evidence (not Dan's words):
 
-- October 2026 billing across the private Flow repos came to $321 gross, $250 billed. The largest
-  lines were `flow-gates` at $112, `flow-queue-runner` at $74 and `flow-review` at $56.
+- October 2026 Actions usage across all of Dan's repos came to $321 gross; public repos are free,
+  so $250 was billed. The largest lines (gross) were `flow-gates` at $112, `flow-queue-runner` at
+  $74 and `flow-review` at $56.
 - The tanplan-platform repo alone came to $154.
 - On 2026-10-28 a canary ran the full worker loop (claim on `main`, push a `flow/` branch, gate,
   open the PR) as a Claude Code cloud routine on the Max plan, using zero Actions minutes:
@@ -58,7 +59,8 @@ model-driven step) stop billing GitHub Actions minutes while they wait on a mode
   GitHub bill.
 - "queue runner has to go" — Dan's own call on `flow-queue-runner`.
 - "a PR should be ready before anything starts, it's just a waste otherwise" — Dan's own rule.
-  - [assumption] Read as: no paid step starts until there is a PR for it to act on.
+  - [assumption] Read as: the PR checks (gates, review) start only once a PR is marked ready for
+    review, never on pushes to a draft.
 - "I don't mind a self-hosted runner but would rather not have it tied to my machine and it being
   on." — a self-hosted runner is acceptable; one that only works while Dan's own machine is on is
   not.
