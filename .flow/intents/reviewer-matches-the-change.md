@@ -36,8 +36,10 @@ release or sync PR gets the same three, whatever it changes:
 ## Outcome
 
 Each PR gets the reviewers its kind of change needs (code, intent, research, and design where
-`usability-review`, proposed in PR #249, applies), each judging what matters for that kind, and how much effort review
-spends scales with the size and risk of the change.
+`usability-review`, proposed in PR #249, applies), each judging what matters for that kind.
+
+[assumption] How much effort review spends also scales with the size and risk of the change.
+Dan did not ask for this; the writer added it from the same review of the prompts.
 
 ## Constraints
 
