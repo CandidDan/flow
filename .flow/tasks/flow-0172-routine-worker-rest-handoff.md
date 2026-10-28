@@ -1,7 +1,7 @@
 ---
 id: "flow-0172"
 title: "The worker loop runs from a Claude Code cloud routine: the PR is opened and handed off through REST, never GraphQL, and docs/flow-routines.md says how to set a routine up"
-status: "in_progress"
+status: "blocked"
 priority: 1
 project: "flow"
 owner: "claude-code-local-flow-0172"
@@ -10,7 +10,7 @@ started: "2026-10-28T03:10:50Z"
 branch: "flow/flow-0172-routine-worker-rest-handoff"
 pr: "https://github.com/CandidDan/flow/pull/253"
 issue: ""
-blocked_reason: ""
+blocked_reason: "Editing the loop in PROTOCOL.md breaks the byte-for-byte pin on \"The loop you run\" in .flow/bin/protocol-portability.test.mjs (INTENTIONAL_DIVERGENCES, recorded by flow-0118). Re-recording that divergence is the intended fix, but the file is outside touches, so touches-guard would fail the PR. Waiting on the orchestrator to widen touches; not machine-checkable."
 cancelled_reason: ""
 blocked_by: []
 serves: ["G9"]
@@ -25,8 +25,11 @@ labels: [protocol, routines, cost]
 model: "opus"
 effort: "high"
 model_reason: "Edits PROTOCOL.md, the published contract every adopting repo's worker reads, and writes the setup doc the fleet will follow"
-notes: []
-asks: []
+notes:
+  - "2026-10-28 claude-code-local-flow-0172: built on flow/flow-0172-routine-worker-rest-handoff (commit pushed): PROTOCOL.md steps 1/7/8 (try gh pr first, fall back to REST only on the exact GraphQL 403 text), docs/flow-routines.md, .flow/bin/protocol-routine-handoff.test.mjs (8 tests, green), changes/flow-0172.md. draft-pr-lifecycle.test.mjs needed no change and still passes. build + lint green. npm test: 1 failure caused by this task, the protocol-portability pin on \"The loop you run\"; 3 more (adapters.test.mjs x2, flow-init-downstream.test.mjs) fail identically on origin/main locally, so they predate this task. Coverage not run yet. Next action once touches is widened: in protocol-portability.test.mjs update the \"The loop you run\" entry digest to sha256 of the new section (the failure message prints it: 50887be6120f947da31dc64d7a44a5a05b326f430d7be20f2e4786014be862a1) and add a why naming flow-0172, rerun the gate, open the PR, hand off."
+asks:
+  - "decision: add .flow/bin/protocol-portability.test.mjs to flow-0172 touches? Recommend: yes. The step 7/8 edit the task asks for changes the pinned \"The loop you run\" section, and the test itself says the fix is to re-record the divergence in the same commit; one map entry, digest + why."
+  - "follow-up: PROTOCOL.md *Concurrency* still says \"the queue runner can dispatch more than one\", and *Which model builds a task* says a queue-runner run escalates a tier; the queue-runner retirement task should rewrite both."
 ---
 
 ## Context
