@@ -314,6 +314,17 @@ test("the ADR records that it decides without implementing, and names the sequel
 
 // ── a doc that names paths must name paths that exist ────────────────────────────────────────
 
+// flow-0165 removed the flightdeck from canonical. The ADR is history and is not edited, so the
+// paths it names under flightdeck/ are expected to be gone; the tests below account for them.
+const RETIRED_DIR = "flightdeck/";
+// The one file flow-0165 deleted that named the bare CandidDan/flow when the amendment counted.
+const RETIRED_NAMING_BARE_REF = ["flightdeck/bin/watchdog.test.mjs"];
+
+test("what flow-0165 retired is really gone, so the allowances below hide nothing live", () => {
+  assert.ok(!existsSync(join(REPO, RETIRED_DIR)));
+  for (const f of RETIRED_NAMING_BARE_REF) assert.ok(!existsSync(join(REPO, f)), f);
+});
+
 test("every repo-relative path ADR-0005 names actually exists", () => {
   // Conservative extraction, same posture as adr-vision-layer.test.mjs. Narrower on one point:
   // only a trailing-slash directory or a path with a file extension is checked, so a GitHub
@@ -326,6 +337,7 @@ test("every repo-relative path ADR-0005 names actually exists", () => {
     const isDir = raw.endsWith("/");
     const hasExt = /\.(md|ya?ml|mjs|json|html)$/i.test(raw);
     if (!isDir && !hasExt) continue;
+    if (raw.startsWith(RETIRED_DIR)) continue;
     if (!existsSync(join(REPO, raw))) missing.push(raw);
   }
   assert.deepEqual(missing, [], `ADR-0005 names paths that do not exist: ${missing.join(", ")}`);
@@ -481,7 +493,7 @@ test("the amendment's file counts still match the working tree", () => {
   // ADR: consistent, self-confirming, and wrong by three files. A test that re-derives the claim's
   // own mistake proves only that the mistake was made twice.
   const claimed = parseInt(AMD.match(/\*\*(\d+) files outside the task store/)[1], 10);
-  const actual = filesNamingBareRef().length;
+  const actual = filesNamingBareRef().length + RETIRED_NAMING_BARE_REF.length;
   assert.equal(claimed, actual,
     `the amendment claims ${claimed} files outside the store name the bare CandidDan/flow; ` +
     `the tree has ${actual}`);

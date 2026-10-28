@@ -139,12 +139,12 @@ const withDir = (name, fn) => {
 const SHA_A = "0123456789abcdef0123456789abcdef01234567";
 const stepsWorkflow = (uses) => `name: fixture\non: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n${uses.map((u) => `      - uses: ${u}\n`).join("")}`;
 
-// The files flow-0031 names, less the one flow-0174 retired. The CHECK reads the directory; this
+// The files flow-0031 names, less the ones flow-0174 and flow-0165 retired. The CHECK reads the directory; this
 // list exists so the task's own promise — every one of these, pinned — is asserted by name.
 const FLOW_0031_FILES = [
   "_flow-compass.yml", "_flow-done.yml", "_flow-gates.yml", "_flow-open-pr.yml",
   "_flow-recover.yml", "_flow-review.yml", "_flow-status.yml",
-  "_flow-sync.yml", "_flow-triage.yml", "ci.yml", "flow-watchdog.yml", "release-tag.yml",
+  "_flow-sync.yml", "_flow-triage.yml", "ci.yml", "release-tag.yml",
 ];
 const THIRD_PARTY_ACTIONS = ["actions/checkout", "actions/setup-node", "anthropics/claude-code-action"];
 
