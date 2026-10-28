@@ -10,7 +10,7 @@ started: "2026-10-28T02:13:36Z"
 branch: "flow/flow-0170-worker-host-config"
 pr: "https://github.com/CandidDan/flow/pull/251"
 issue: ""
-blocked_reason: "The gate needs a canonical adapter at .flow/bin/worker-host.mjs (adapters.test.mjs: every helper a workflow canonical calls must exist in .flow/bin/), and that path is not in touches. Not machine-checkable: waits on the orchestrator widening touches."
+blocked_reason: "Superseded in mechanism: flow-0174 (PR #256, merged 2026-10-28) deleted _flow-queue-runner.yml, the only workflow this task gates. Waits on Dan: cancel, or re-scope to the routines host."
 cancelled_reason: ""
 blocked_by: []
 serves: ["maintenance"]
@@ -30,7 +30,7 @@ notes:
   - "2026-10-28 (orchestrator): from Dan. October Actions bill hit the $250 budget; queue-runner was ~$60 of it across private repos, billed per minute while the runner waits on Claude. Dan: 'queue runner has to go' and 'right now we're forcing them into using Claude'. Private repos set FLOW_QUEUE_RUNNER=paused by hand on 2026-10-28 as a stopgap."
   - "2026-10-28 (worker, opus): DONE on branch flow/flow-0170-worker-host-config (pushed, commit 'flow-0170: worker.host decides...'): project-template/.flow/bin/worker-host.mjs + worker-host.test.mjs (16 tests, incl. running the workflow's real decision step for manual/claude-routine/github-actions x schedule/workflow_dispatch), a 'Decide where this repo's worker runs' step (id: host) in the dispatch job of _flow-queue-runner.yml that gates the pick step (bootstrap: helper absent => github-actions), worker.host: manual + comment in project-template/.flow/config.yml, a docs section, changes/flow-0170.md. build+lint pass; coverage 97.49% lines. ONLY LOOKS DONE: npm test has exactly 2 failures, both the same cause: .flow/bin/adapters.test.mjs:512 (and its re-run in release-assemble.test.mjs) requires canonical's adapter .flow/bin/worker-host.mjs, which is outside touches. NEXT ACTION once touches includes .flow/bin/worker-host.mjs: on the branch, add that adapter modelled on .flow/bin/queue-runner-schedule.mjs (import runCli from ../../project-template/.flow/bin/worker-host.mjs, same __isMain block, process.exitCode = runCli(argv)), git add, run all gate commands, open PR '[flow-0170] A repo chooses where its worker runs, and new adopters get no automatic worker'."
 asks:
-  - "decision: add .flow/bin/worker-host.mjs (canonical's thin adapter over the new template helper) to this task's touches? Recommend: yes — adapters.test.mjs fails the gate without it, flow-0080 set the same precedent with queue-runner-schedule.mjs, and it is CLI shell only"
+  - "decision: cancel flow-0170 and close PR #251? Recommend: yes. flow-0174 retired queue-runner, so new adopters already get no automatic worker, and worker.host has no workflow left to gate. If you want a per-repo host switch for routines, that is a new task under model-work-off-github-actions, not this branch."
 ---
 
 ## Context
