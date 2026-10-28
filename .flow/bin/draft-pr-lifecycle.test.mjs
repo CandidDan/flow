@@ -24,6 +24,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { applyEdits } from "./apply-board-edits.mjs";
 
 // DEPENDENCY NOTE — see check-workflows.test.mjs. `_flow-gates.yml`'s `flow-tooling` job runs
 // `node --test .flow/bin/*.test.mjs` with no install step; these tests need `yaml` to read a
@@ -169,6 +170,100 @@ test("closed-unmerged still returns the task to ready", { skip }, () => {
     assert.equal(edits.updates[0].status, "ready");
     assert.equal(edits.updates[0].owner, "");
   });
+});
+
+// ── flow-0169: a draft opening never un-blocks a task ────────────────────────────────────────
+//
+// A worker that blocks commits `blocked` to main, and its branch push opens a draft PR; the
+// status sync used to land second and write `in_progress` over the block (flow-0165, flow-0166 on
+// 2026-10-27). These run the workflow's own case block against a real task file in the scratch
+// store, then apply the edits it wrote with the real applyEdits — so they prove what the TASK
+// FILE ends up saying, not merely what JSON the shell printed.
+function writeTask(dir, status, extra = "") {
+  const tasks = join(dir, ".flow", "tasks");
+  mkdirSync(tasks, { recursive: true });
+  const file = join(tasks, "flow-0039-some-task.md");
+  writeFileSync(file, [
+    "---",
+    'id: "flow-0039"',
+    `status: "${status}"`,
+    'owner: "worker"',
+    'branch: ""',
+    'pr: ""',
+    extra,
+    "---",
+    "",
+    "## Context",
+    "",
+    "---",
+    'status: "prose, not state"',
+    "",
+  ].join("\n"));
+  return file;
+}
+
+const BLOCKED_EXTRA = [
+  'blocked_reason: "needs a test outside touches"',
+  'blocked_by: ["flow-0164", "https://github.com/CandidDan/flow/pull/241"]',
+].join("\n");
+
+function syncAndApply(dir, env) {
+  const { edits } = runStatusCase(dir, env);
+  const r = applyEdits({ tasksDir: join(dir, ".flow", "tasks"), updates: edits.updates });
+  assert.deepEqual(r.problems, []);
+  return { edits, md: readFileSync(join(dir, ".flow", "tasks", "flow-0039-some-task.md"), "utf8") };
+}
+
+const field = (md, f) => (md.slice(0, md.indexOf("\n---", 3)).match(new RegExp(`^${f}:\\s*(.*)$`, "m")) || [])[1];
+
+for (const ACTION of ["opened", "reopened"]) {
+  test(`a draft PR ${ACTION} on a BLOCKED task keeps status, blocked_reason and blocked_by, and records branch + pr`, { skip }, () => {
+    withTmp((dir) => {
+      const before = readFileSync(writeTask(dir, "blocked", BLOCKED_EXTRA), "utf8");
+      const { edits, md } = syncAndApply(dir, { ...EVENT, ACTION, DRAFT: "true" });
+      assert.equal(edits.updates[0].status, undefined, "a blocked task's status must not be written at all");
+      assert.equal(field(md, "status"), '"blocked"');
+      assert.equal(field(md, "blocked_reason"), field(before, "blocked_reason"));
+      assert.equal(field(md, "blocked_by"), field(before, "blocked_by"));
+      assert.equal(field(md, "branch"), `"${EVENT.HEAD_REF}"`);
+      assert.equal(field(md, "pr"), `"${EVENT.PR_URL}"`);
+    });
+  });
+}
+
+test("a draft PR opening on an in_progress task still records in_progress + branch + pr", { skip }, () => {
+  withTmp((dir) => {
+    writeTask(dir, "in_progress");
+    const { edits, md } = syncAndApply(dir, { ...EVENT, ACTION: "opened", DRAFT: "true" });
+    assert.deepEqual(edits.updates, [{
+      id: "flow-0039", status: "in_progress", branch: EVENT.HEAD_REF, pr: EVENT.PR_URL,
+    }]);
+    assert.equal(field(md, "status"), '"in_progress"');
+    assert.equal(field(md, "branch"), `"${EVENT.HEAD_REF}"`);
+  });
+});
+
+// Only the frontmatter `status:` counts — a body line reading `status: "blocked"` is prose.
+test("a `status: blocked` line in the task BODY does not count as blocked", { skip }, () => {
+  withTmp((dir) => {
+    const file = writeTask(dir, "in_progress");
+    writeFileSync(file, readFileSync(file, "utf8").replace("prose, not state", "blocked"));
+    const { edits } = runStatusCase(dir, { ...EVENT, ACTION: "opened", DRAFT: "true" });
+    assert.equal(edits.updates[0].status, "in_progress");
+  });
+});
+
+// Deliberately unchanged: a ready PR is a hand-off, and still moves a blocked task to in_review
+// (a human may have lifted the block by hand).
+test("a blocked task whose PR opens ready, or is marked ready, still moves to in_review", { skip }, () => {
+  for (const [ACTION, DRAFT] of [["opened", "false"], ["reopened", "false"], ["ready_for_review", "false"]]) {
+    withTmp((dir) => {
+      writeTask(dir, "blocked", BLOCKED_EXTRA);
+      const { edits, md } = syncAndApply(dir, { ...EVENT, ACTION, DRAFT });
+      assert.equal(edits.updates[0].status, "in_review", `${ACTION}/draft=${DRAFT}`);
+      assert.equal(field(md, "status"), '"in_review"', `${ACTION}/draft=${DRAFT}`);
+    });
+  }
 });
 
 // The skew guard. A caller pinned to a ref newer than the reusable can send an action the reusable
