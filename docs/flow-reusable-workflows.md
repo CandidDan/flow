@@ -104,6 +104,38 @@ than a PR per repo.
   set `FLOW_RUN_HOUR` to that hour, or the default run hour falls after your tick and nothing
   runs.
 
+### Where the worker runs — `worker.host` (flow-0170)
+
+Whether queue-runner starts a worker at all is the repo's choice, in its own `.flow/config.yml`
+rather than a repo variable, because it is a decision about the repo and belongs in review:
+
+```yaml
+worker:
+  host: manual   # manual | claude-routine | github-actions
+```
+
+| `worker.host` | What queue-runner does |
+|---|---|
+| `manual` | starts no worker. A person, or any agent in a session, works `ready` tasks |
+| `claude-routine` | starts no worker. A Claude Code cloud routine, set up outside GitHub, works the queue |
+| `github-actions` | dispatches a worker exactly as before |
+| *(no `worker` key)* | same as `github-actions`, so repos that adopted earlier are unchanged until they opt out |
+
+- **New adopters get `manual`.** The template's `config.yml` ships `host: manual`, so adopting
+  Flow starts no automatic worker and no per-minute Actions bill.
+- **Decided on both ways in.** The `dispatch` job's *Decide where this repo's worker runs* step
+  runs on a scheduled tick and on `workflow_dispatch` alike, before the pick step. Unless the host
+  is `github-actions` the pick step is skipped, so no task is chosen and the worker session never
+  starts; the run ends green with one line in its step summary naming the host.
+- **An unknown value fails the run**, naming the three allowed values. It never falls back to
+  `github-actions`: a typo that silently meant "run on Actions" is the surprise bill this exists
+  to prevent.
+- **Independent of the switches above.** `FLOW_AI` and `FLOW_QUEUE_RUNNER=paused` still apply
+  first, exactly as before.
+- **Where the logic is.** `.flow/bin/worker-host.mjs`, dependency-free; tests in
+  `project-template/.flow/bin/worker-host.test.mjs`, including one that runs the workflow's own
+  decision step. A repo that has not synced the helper yet behaves as `github-actions`.
+
 **`FLOW_PAT` (CAN-58).** A PR opened with the Actions `GITHUB_TOKEN` does *not* trigger downstream
 workflows, so `flow-gates` would never fire on an auto-opened PR — the gate silently bypassed.
 `_flow-open-pr` / `_flow-recover` open PRs with a `FLOW_PAT` so the `pull_request` event is

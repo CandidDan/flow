@@ -60,6 +60,22 @@ coverage_min: 80
 # you measure, with stated headroom — the same way `coverage_min` is set. Never raise it to go green.
 claude_md_max: 50000
 
+# WHERE THIS REPO'S WORKER RUNS (flow-0170). The template ships `manual`: adopting Flow starts no
+# automatic worker and no Actions bill. Change it deliberately, to one of exactly three values —
+# anything else fails the queue-runner run with an error naming them:
+#
+#   manual          nothing starts a worker. A person, or any agent in a session, works `ready` tasks.
+#   claude-routine  a Claude Code cloud routine works the queue, set up outside GitHub; the
+#                   queue-runner workflow does nothing.
+#   github-actions  the queue-runner workflow dispatches a Claude Code worker on an Actions runner
+#                   (needs FLOW_AI=true and CLAUDE_CODE_OAUTH_TOKEN). Billed per runner minute,
+#                   including every minute the runner waits on the model.
+#
+# A config with NO `worker` key behaves as `github-actions`, so repos that adopted before this key
+# existed are unchanged until they add it. Read by `.flow/bin/worker-host.mjs`.
+worker:
+  host: manual
+
 # OPTIONAL — the queue cap: a WIP limit on what gets PLANNED, not on what gets worked.
 #
 # Uncomment it and at most that many tasks may be `ready` at once: `allocate-task-id` refuses a

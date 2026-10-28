@@ -239,8 +239,29 @@ jobs:
         with:
           node-version: 22
 
+      # flow-0170: where this repo's worker runs is the repo's choice, `worker.host` in
+      # `.flow/config.yml` (manual | claude-routine | github-actions). It is decided HERE, on both
+      # ways in — a scheduled tick and a `workflow_dispatch` alike — and before anything that
+      # spends: unless the host is `github-actions`, the pick step below is skipped, so its
+      # `task_id` is empty and every later step (the worker session included) skips on it. The
+      # run ends green with the reason as one line in the step summary. FLOW_AI and
+      # FLOW_QUEUE_RUNNER are untouched and still apply first.
+      #
+      # Bootstrap guard: a repo that has not synced the helper yet keeps today's behaviour, which
+      # is also the helper's own default for a config with no `worker` key.
+      - name: Decide where this repo's worker runs
+        id: host
+        run: |
+          if [ ! -f .flow/bin/worker-host.mjs ]; then
+            { echo "host=github-actions"; echo "run=true"; } >> "$GITHUB_OUTPUT"
+            echo "- **worker dispatch** (\`github-actions\`) — no \`.flow/bin/worker-host.mjs\` in this repo yet, so queue-runner dispatches a worker as before. flow-sync delivers the \`worker.host\` setting." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node .flow/bin/worker-host.mjs --config .flow/config.yml
+
       - name: Choose the task to work
         id: pick
+        if: ${{ steps.host.outputs.run == 'true' }}
         env:
           INPUT_ID: ${{ inputs.task_id }}
         run: |
