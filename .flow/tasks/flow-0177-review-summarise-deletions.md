@@ -1,14 +1,14 @@
 ---
 id: "flow-0177"
 title: "flow-review summarises whole-file deletions by name and line count when a diff is over budget, so a retirement PR is reviewed in full instead of truncated"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-flow-0177"
 created: "2026-10-28"
 started: "2026-10-28T11:12:25Z"
 branch: "claude/flow-0177-review-summarise-deletions-ac905c"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/257"
 issue: ""
 blocked_reason: ""
 cancelled_reason: ""
