@@ -21,7 +21,7 @@ touches:
   - ".github/workflows/_flow-review.yml"
   - ".flow/bin/flow-review-workflow.test.mjs"
   - ".flow/bin/flow-review-adapter.test.mjs"
-  - "changes/flow-*.md"
+  - "changes/flow-0177.md"
 labels: [workflows, review]
 model: "opus"
 effort: "medium"
@@ -68,7 +68,7 @@ the board; flow-0174 retires queue-runner) will hit this again.
   `DELETED FILE SUMMARISED` marker is not truncation, does not by itself block a PASS, and the
   reviewer judges whether removing that file breaks a caller. Keep `flow-review-workflow.test.mjs`
   holding the marker text and the prompts in step, as it already does for the PASS lines.
-- Changelog fragment under `changes/` named for this task's id. This is a behaviour change inside a
+- Changelog fragment `changes/flow-0177.md`. This is a behaviour change inside a
   reusable workflow's helper with no caller change; state the caller action that
   `docs/flow-versioning-policy.md` gives for it.
 
