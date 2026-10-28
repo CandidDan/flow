@@ -1,7 +1,7 @@
 ---
 id: "flow-0168"
 title: "Require plain, literal, unambiguous English in everything written about the work, not only in replies"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "local_zen-tu-775d79"
