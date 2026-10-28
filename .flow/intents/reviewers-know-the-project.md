@@ -23,10 +23,11 @@ evidence: []
 
 ## Cost of inaction
 
-Evidence (not Dan's words), from `.github/workflows/_flow-review.yml` on `main`:
+Evidence (not Dan's words), from `.github/workflows/_flow-review.yml` on `main` at `f23d3f9`:
 
 - The qa, code-review and security prompts are the same text in every adopting repo. None of them
-  is handed the repo's `AGENTS.md` or `CLAUDE.md`, and the security reviewer is not handed
+  is handed the repo's `AGENTS.md` or `CLAUDE.md` as context (both are only security-path
+  triggers), and the security reviewer is not handed
   `threat_model.md`, which tanplan-platform has.
 - code-review is asked to check the change "follows the patterns already in this codebase" while
   being told "Do NOT read the repository at large", so it has no patterns to compare against.
