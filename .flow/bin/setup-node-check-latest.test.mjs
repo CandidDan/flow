@@ -28,10 +28,15 @@ export function findViolations(dir) {
   return { seen, bad };
 }
 
-test('every setup-node step in .github/workflows sets check-latest: true', () => {
-  const { seen, bad } = findViolations(WORKFLOWS);
-  assert.ok(seen > 0, 'no setup-node steps found — the parse broke');
+// The check: throws naming every offending step, or on an empty set.
+export function checkLatest(dir) {
+  const { seen, bad } = findViolations(dir);
+  assert.ok(seen > 0, `no setup-node steps found in ${dir} — the parse broke`);
   assert.deepEqual(bad, [], `setup-node without check-latest: true:\n${bad.join('\n')}`);
+}
+
+test('every setup-node step in .github/workflows sets check-latest: true', () => {
+  checkLatest(WORKFLOWS);
 });
 
 test('a step with check-latest removed fails, naming file and step', () => {
@@ -40,10 +45,12 @@ test('a step with check-latest removed fails, naming file and step', () => {
   const { bad } = findViolations(d);
   assert.equal(bad.length, 1);
   assert.match(bad[0], /x\.yml: job a, step 1/);
+  assert.throws(() => checkLatest(d), /x\.yml: job a, step 1/);
 });
 
-test('a directory with no setup-node steps reports zero seen (the gate test fails on it)', () => {
+test('a directory with no setup-node steps fails rather than passing empty', () => {
   const d = mkdtempSync(join(tmpdir(), 'sn-'));
   writeFileSync(join(d, 'x.yml'), 'jobs:\n  a:\n    steps:\n      - run: echo\n');
   assert.equal(findViolations(d).seen, 0);
+  assert.throws(() => checkLatest(d), /no setup-node steps found/);
 });
