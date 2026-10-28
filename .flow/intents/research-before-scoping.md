@@ -38,14 +38,15 @@ anyone knows the answer, or stays in chat where it is lost.
 
 ## Outcome
 
-Dan (or Jaime) can hand Flow a question, get back findings that answer it with a recommendation,
+Dan can hand Flow a question, get back findings that answer it with a recommendation,
 and review and decide on them in inflight, without reading a code review. Accepting the findings
 is what lets intents and tasks be written from them.
 
 ## Constraints
 
-- [assumption] Findings live in the repo, versioned, like everything else Flow produces, and the
-  task store's two-planes rule holds: findings are not committed straight to `main`.
+- [assumption] Findings live in the repo, versioned, like everything else Flow produces.
+- [assumption] The task store's two-planes rule holds: findings are not committed straight to
+  `main`.
 - [assumption] The decision on findings is a decision ask, one card with a recommendation (G12),
   answerable in inflight. This builds on inflight-0050 (CandidDan/inflight, `.flow/tasks/inflight-0050-act-from-screen.md`).
 - [assumption] Findings are checked by a reviewer suited to research (every question answered,
