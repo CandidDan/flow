@@ -1,7 +1,7 @@
 ---
 id: "flow-0171"
 title: "Runbook and prompt for working Flow tasks from a Claude Code routine"
-status: "ready"
+status: "cancelled"
 priority: 2
 project: "flow"
 owner: ""
@@ -23,6 +23,7 @@ touches:
   - "changes/flow-0171.md"
 labels: [docs, cost, routines]
 notes:
+  - "2026-10-28 (worker): dispatched as ready, but this task is cancelled per Dan's ruling (see cancelled_reason). Commit 5e38216 (status sync on closed PR #252) reset cancelled -> ready; restored to cancelled, no work done. Bug: status sync should not reopen a cancelled task when its PR closes unmerged."
   - "2026-10-28 (orchestrator): cancelled by Dan's ruling \"Fold into flow-routines\". flow-0172 merged docs/flow-routines.md first; this task's unique content is carried by flow-0175. PR #252 closed unmerged."
   - "2026-10-28 (orchestrator): from Dan. Replaces queue-runner's GitHub-hosted worker with a Claude Code routine (cloud session on the Max plan, no Actions minutes). Pairs with the worker.host task, which adds host: claude-routine; this task does not depend on it landing."
 ---
