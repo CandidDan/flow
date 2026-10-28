@@ -1,12 +1,12 @@
 ---
 id: "flow-0173"
 title: "flow-unblock releases blocked tasks and stops there: it no longer dispatches flow-queue-runner, because the worker routine's schedule picks up ready work"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-code:worker-flow-0173"
 created: "2026-10-28"
-started: ""
+started: "2026-10-28T03:55:20Z"
 branch: "flow/flow-0173-unblock-stops-dispatching"
 pr: "https://github.com/CandidDan/flow/pull/254"
 issue: ""
