@@ -66,6 +66,17 @@ visual — table, tree, call stack, mermaid, diff — not a paragraph. Terse is 
 words, full sentences, no unexplained jargon. Formats and examples:
 `.claude/skills/show-me/SKILL.md`.
 
+**Plain, literal, unambiguous English — in everything written about the work.** Not only replies:
+task specs, intents, design notes, code comments, commit messages and PR descriptions too. Name
+things literally, never by metaphor. Say what happens and where. A sentence that can be read two
+ways gets rewritten until it can be read one way — a worker builds whichever reading it picked.
+
+| Bad | Good |
+|---|---|
+| "Settings are sentences at the foot of the same shelf." | "The sidebar is the only extra panel; settings sit at its bottom." |
+
+Out of scope: the product's own user-facing text. Its voice is the project's decision.
+
 End a response with a one-line **TL;DR** only when it runs past about 15 lines; a short reply is
 its own summary. If the human has to act, end with a numbered **checklist of just those to-dos**,
 in order; omit it when there are none.

@@ -28,7 +28,7 @@ test("the response TL;DR is conditional on length, not always", () => {
 });
 
 test("the PR description order is TL;DR, visual, captures, criteria checklist, to-dos", () => {
-  const pr = responseStyle.slice(responseStyle.indexOf("PR description"));
+  const pr = responseStyle.slice(responseStyle.indexOf("**PR description**"));
   const parts = ["TL;DR", "visual", "captures", "criteria checklist", "to-dos"];
   const order = parts.map((w) => pr.indexOf(w));
   assert.ok(order.every((i) => i >= 0), `PR description must mention each part: ${order}`);
@@ -97,4 +97,38 @@ test("protocol and skill both say terse is not cryptic, and the skill lists over
   const anti = skill.slice(skill.indexOf("## Anti-patterns"));
   assert.match(anti, /Too much:/);
   assert.match(anti, /Too little:[\s\S]*jargon/);
+});
+
+// flow-0168: the plain-language rule covers everything written about the work, not only replies.
+const flatStyle = responseStyle.replace(/\s+/g, " ");
+
+test("Response style requires plain, unambiguous English in specs, comments, commits and PRs", () => {
+  assert.match(flatStyle, /Plain, literal, unambiguous English — in everything written about the work/);
+  for (const kind of ["task specs", "intents", "design notes", "code comments", "commit messages", "PR descriptions"]) {
+    assert.ok(flatStyle.includes(kind), `the plain-language rule must cover ${kind}`);
+  }
+  assert.match(flatStyle, /Name things literally, never by metaphor/);
+  assert.match(flatStyle, /A sentence that can be read two ways gets rewritten/);
+  assert.match(flatStyle, /\| Bad \| Good \|/, "the rule carries one bad/good example");
+});
+
+test("Response style puts a product's own user-facing text out of scope of the plain-language rule", () => {
+  assert.match(flatStyle, /Out of scope: the product's own user-facing text\. Its voice is the project's decision\./);
+});
+
+test("Response style still says terse is not cryptic after the plain-language rule was added", () => {
+  assert.match(flatStyle, /Terse is not cryptic: plain words, full sentences, no unexplained jargon\./);
+});
+
+test("show-me rule 6 points at the protocol's plain-language rule", () => {
+  const rule6 = read(SKILL_PATH).match(/^6\. \*\*Terse is not cryptic\.\*\*[\s\S]*?(?=\n\n)/m);
+  assert.ok(rule6, "show-me has no rule 6");
+  assert.match(rule6[0].replace(/\s+/g, " "), /protocol's plain-language rule \(`\.flow\/PROTOCOL\.md`, \*\*Response style\*\*\)/);
+});
+
+test("task-writer requires a spec to name things literally, not by metaphor", () => {
+  const tw = read(".claude/skills/task-writer/SKILL.md");
+  const procedure = tw.slice(tw.indexOf("## Procedure"), tw.indexOf("## Triaging")).replace(/\s+/g, " ");
+  assert.match(procedure, /\*\*Write the spec in plain, literal language\.\*\* Name things literally, not by metaphor/);
+  assert.match(procedure, /rewrite any sentence that can be read two ways/);
 });
