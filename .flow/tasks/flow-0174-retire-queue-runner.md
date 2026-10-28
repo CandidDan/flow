@@ -35,6 +35,11 @@ touches:
   - "docs/repinning-a-consuming-repo.md"
   - "README.md"
   - "changes/flow-0174.md"
+  - "project-template/.flow/bin/flow-unblock.mjs"
+  - "project-template/.flow/bin/flow-unblock.test.mjs"
+  - ".flow/bin/flow-unblock.mjs"
+  - "project-template/.github/workflows/flow-unblock.yml"
+  - ".github/workflows/flow-unblock.yml"
 labels: [workflows, retirement, routines, cost]
 model: "opus"
 effort: "high"
@@ -70,6 +75,11 @@ docs, the protocol, `flow-doctor`, `flow-init`, `pick-task` and `task-model`.
   protocol's *Concurrency* and model-tier paragraphs, flow-doctor, flow-init, the task-writer
   skill's "Choosing the model" section, README and docs.
 - Implement the answer to this task's `decision` ask (see `asks`) before it returns to `ready`.
+- From flow-0173 (2026-10-28): delete the four dispatch-only subcommands and functions in
+  `project-template/.flow/bin/flow-unblock.mjs` (`count-ready`, `count-active-runs`,
+  `should-dispatch`, `dispatch-outcome`) together with their re-export in `.flow/bin/flow-unblock.mjs`,
+  and drop the now-unused `actions: write` from both `flow-unblock.yml` callers. The latter is a
+  caller-permission change, which this task's MAJOR release already covers.
 - Changelog fragment `changes/flow-0174.md`. Removing a reusable that callers reference, and
   deleting a caller downstream, is a **MAJOR** release under `docs/flow-versioning-policy.md`
   unless the decision ask's answer says otherwise. **Caller action: run flow-sync.**
