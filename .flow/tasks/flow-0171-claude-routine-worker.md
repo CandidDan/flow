@@ -1,23 +1,23 @@
 ---
 id: "flow-0171"
 title: "Runbook and prompt for working Flow tasks from a Claude Code routine"
-status: "cancelled"
+status: "ready"
 priority: 2
 project: "flow"
-owner: "claude-worker"
+owner: ""
 created: "2026-10-28"
 started: "2026-10-28T02:28:45Z"
-branch: "flow/flow-0171-claude-routine-runbook"
-pr: "https://github.com/CandidDan/flow/pull/252"
+branch: ""
+pr: ""
 issue: ""
 blocked_reason: ""
 cancelled_reason: "Duplicates docs/flow-routines.md (flow-0172, PR #253, merged). Dan ruled 2026-10-28: fold into flow-routines. The three additions (firing from an app, account-wide limits, auto-mode stalls) moved to flow-0175; PR #252 closed unmerged."
 blocked_by: []
 serves: ["maintenance"]
 intent: ""
-model: "sonnet"
+model: "opus"
 effort: "medium"
-model_reason: "Documentation and a prompt; no code paths change"
+model_reason: "escalated after PR #252 closed unmerged (was sonnet)"
 touches:
   - "docs/claude-routine-worker.md"
   - "changes/flow-0171.md"
