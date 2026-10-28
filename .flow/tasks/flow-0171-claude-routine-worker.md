@@ -1,12 +1,12 @@
 ---
 id: "flow-0171"
 title: "Runbook and prompt for working Flow tasks from a Claude Code routine"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude-worker"
 created: "2026-10-28"
-started: ""
+started: "2026-10-28T02:28:45Z"
 branch: ""
 pr: ""
 issue: ""
