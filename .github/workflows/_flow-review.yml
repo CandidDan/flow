@@ -145,8 +145,11 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
+      # check-latest (flow-0166): a major-line range alone takes the runner image's cached patch, which
+      # trailed Node's 2026-10-21 security release by days (CVE-2026-111497). Resolve the latest patch.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
       - name: Materialise the review gate from the BASE branch
         # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
@@ -239,6 +242,7 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
       - name: Materialise the review gate from the BASE branch
         # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
@@ -453,6 +457,7 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
       - name: Materialise the review gate from the BASE branch
         # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
@@ -680,6 +685,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         if: ${{ needs.plan.outputs.security_run == 'true' }}
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
       - name: Materialise the review gate from the BASE branch
         if: ${{ needs.plan.outputs.security_run == 'true' }}
@@ -927,6 +933,7 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
       - name: Materialise the review gate from the BASE branch
         # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT

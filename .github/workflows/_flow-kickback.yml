@@ -155,8 +155,11 @@ jobs:
           # implicit version of a security property is one nobody can see holding.
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
+      # check-latest (flow-0166): a major-line range alone takes the runner image's cached patch, which
+      # trailed Node's 2026-10-21 security release by days (CVE-2026-111497). Resolve the latest patch.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       - name: Resolve the PR this review run belongs to
@@ -361,6 +364,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       - name: Record this round's base
@@ -590,6 +594,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       - name: Take the round from the job that ran it
@@ -910,6 +915,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       - name: Write the dead round's card fields (read-only)
@@ -1048,6 +1054,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       - name: Escalate — one decision card, then the label
@@ -1148,6 +1155,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       - name: Write the card's four fields (read-only)
@@ -1269,6 +1277,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.node_version }}
 
       # No step-level `if:` here. The JOB's `always()` is the backstop; a second one on the step

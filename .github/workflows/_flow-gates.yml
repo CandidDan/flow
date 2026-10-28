@@ -106,10 +106,13 @@ jobs:
 
       # Language toolchain. Node by default (the common Flow stack); non-Node callers pass
       # setup_node_version: "" and provision their toolchain inside the config commands.
+      # check-latest (flow-0166): a major-line range alone takes the runner image's cached patch, which
+      # trailed Node's 2026-10-21 security release by days (CVE-2026-111497). Resolve the latest patch.
       - name: Set up Node
         if: inputs.setup_node_version != ''
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ inputs.setup_node_version }}
 
       - name: Read commands from .flow/config.yml
@@ -300,6 +303,7 @@ jobs:
           fetch-depth: 0          # the touches-guard diffs against the base
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: 22
 
       # ── Canonical's own helpers, at THIS workflow's own commit (flow-0094, ADR-0008) ──
@@ -473,6 +477,7 @@ jobs:
         if: matrix.runtime == 'node'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
+          check-latest: true
           node-version: ${{ matrix.version }}
           cache: ${{ matrix.cache }}
           cache-dependency-path: ${{ matrix.cache_dependency_path }}
