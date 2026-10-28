@@ -1,12 +1,12 @@
 ---
 id: "flow-0165"
 title: "Remove the flightdeck and the watchdog from canonical: inflight is where state is viewed, and the watchdog has failed every day for a week"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
 owner: "worker-flow-0165"
 created: "2026-10-27"
-started: "2026-10-27T04:26:22Z"
+started: "2026-10-28T23:22:15Z"
 branch: "flow/flow-0165-remove-flightdeck"
 pr: "https://github.com/CandidDan/flow/pull/242"
 issue: ""
