@@ -86,3 +86,32 @@ test("flow-routines.md states the hourly scheduling limit", () => {
 test("flow-routines.md states one routine per model tier", () => {
   assert.match(flat(ROUTINES), /One routine per model tier/i);
 });
+
+// ── flow-0175: firing from an app, account-wide limits, auto-mode stalls ──
+
+test("flow-routines.md has the fire endpoint in a fenced block with the auth and version headers", () => {
+  const fenced = [...ROUTINES.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].map((m) => m[1]);
+  const call = fenced.find((b) => b.includes("https://api.anthropic.com/v1/claude_code/routines/<trigger-id>/fire"));
+  assert.ok(call, "no fenced block holds the fire endpoint");
+  assert.match(call, /Authorization: Bearer/);
+  assert.match(call, /anthropic-version:/);
+});
+
+test("flow-routines.md says the trigger token is shown once and must be stored as a secret", () => {
+  const d = flat(ROUTINES);
+  assert.match(d, /token is shown once/i);
+  assert.match(d, /store it as a secret/i);
+});
+
+test("flow-routines.md states the per-account limit of 100 an hour and shared interactive usage", () => {
+  const d = flat(ROUTINES);
+  assert.match(d, /100 API fires and 100 scheduled runs an hour\*\* per account/);
+  assert.match(d, /shared with interactive sessions/i);
+});
+
+test("flow-routines.md names the auto-mode stall risk as untested on a task that blocks", () => {
+  const d = flat(ROUTINES);
+  assert.match(d, /auto mode/i);
+  assert.match(d, /classifier blocks can stop an unattended run/);
+  assert.match(d, /untested on a task\s+that has to set itself `blocked`|untested on a task that has to set itself `blocked`/);
+});
