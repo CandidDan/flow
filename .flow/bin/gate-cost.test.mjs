@@ -219,3 +219,87 @@ test("flow-0137 criterion 3: source-root still reads its matrix from a job outpu
   assert.equal(jobs[PLAN_JOB].needs, undefined, "the plan job must not wait on anything, gate included");
   findStep(jobs[PLAN_JOB], (s) => s.id === "plan", "id: plan");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// flow-0178: an intent-only PR runs flow-doctor in the gate job instead of the five config commands
+// ─────────────────────────────────────────────────────────────────────────────────────────
+
+const CONFIG_COMMANDS = ["install", "build", "lint", "test", "coverage"];
+const configStep = (cmd) => (s) => s.run === `\${{ steps.cfg.outputs.${cmd} }}`;
+const DOCTOR = (s) => String(s.run ?? "").trim() === "node .flow/bin/flow-doctor.mjs";
+const CLASSIFY = (s) => s.id === "kind";
+
+// Evaluate a STEP condition for one value of the classification. Only the shapes these steps use
+// are understood; anything else fails the assertion inside, rather than guessing.
+function stepRuns(cond, { intentPr, event = "pull_request" }) {
+  if (cond == null) return true;
+  let expr = String(cond).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
+  expr = expr
+    .replaceAll("steps.kind.outputs.intent_pr", JSON.stringify(intentPr))
+    .replaceAll("github.event_name", JSON.stringify(event))
+    .replace(/'([^']*)'/g, (_, s) => JSON.stringify(s))
+    .replace(/(?<![=!])==(?!=)/g, "===").replace(/!=(?!=)/g, "!==");
+  assert.match(expr, /^[\s()&|!=a-z"_0-9.-]+$/, `unexpected token in step condition: ${cond}`);
+  return Function(`"use strict"; return (${expr});`)();
+}
+
+// What the gate job runs for one classification: which of the five config commands, and flow-doctor.
+function gateRuns(text, ctx) {
+  const gate = jobsOf(text).gate;
+  const ran = CONFIG_COMMANDS.filter((cmd) => stepsOf(gate).filter(configStep(cmd)).some((s) => stepRuns(s.if, ctx)));
+  const doctor = stepsOf(gate).filter(DOCTOR).some((s) => stepRuns(s.if, ctx));
+  return { ran, doctor };
+}
+
+test("flow-0178 criterion 2: for an intent-only PR the gate job runs flow-doctor and skips install, build, lint, test and coverage", { skip }, () => {
+  assert.deepEqual(gateRuns(WF(REUSABLE_GATES), { intentPr: "true" }), { ran: [], doctor: true });
+});
+
+test("flow-0178 criterion 2: a non-intent PR, and a manual run, still run all five", { skip }, () => {
+  for (const ctx of [{ intentPr: "false" }, { intentPr: "", event: "workflow_dispatch" }]) {
+    assert.deepEqual(gateRuns(WF(REUSABLE_GATES), ctx), { ran: CONFIG_COMMANDS, doctor: false }, JSON.stringify(ctx));
+  }
+});
+
+test("flow-0178 criterion 2 (mutation): a config command that loses its condition, or a doctor step that runs always, is caught", { skip }, () => {
+  const text = WF(REUSABLE_GATES);
+  for (const cmd of CONFIG_COMMANDS) {
+    const doc = parse(text);
+    delete doc.jobs.gate.steps.find(configStep(cmd)).if;
+    assert.deepEqual(gateRuns(yamlMod.stringify(doc), { intentPr: "true" }).ran, [cmd], cmd);
+  }
+  const doc = parse(text);
+  delete doc.jobs.gate.steps.find(DOCTOR).if;
+  assert.equal(gateRuns(yamlMod.stringify(doc), { intentPr: "false" }).doctor, true);
+});
+
+test("flow-0178 criterion 2: the classification comes from canonical's helper, before the commands, and the gate job still reports", { skip }, () => {
+  const jobs = jobsOf(WF(REUSABLE_GATES));
+  for (const name of ["gate", PLAN_JOB]) {
+    const steps = stepsOf(jobs[name]);
+    const kind = findStep(jobs[name], CLASSIFY, `${name} classify`);
+    assert.equal(String(kind.run).trim().split("\n").pop(), 'node "$FLOW_BIN"/flow-review.mjs classify',
+      `${name}: canonical's copy at this workflow's commit, never the PR's .flow/bin/`);
+    assert.match(String(kind.if), /github\.event_name == 'pull_request'/);
+    const materialise = steps.findIndex((s) => s.name === "Materialise canonical's helpers at this workflow's commit");
+    assert.ok(materialise >= 0 && steps.indexOf(kind) > materialise, `${name}: classify must follow the helper fetch`);
+  }
+  const gate = stepsOf(jobs.gate);
+  assert.ok(gate.indexOf(findStep(jobs.gate, CLASSIFY, "classify")) < gate.findIndex(configStep("install")));
+  // The job itself is not skipped for an intent PR: it keeps flow-0136's condition and nothing more.
+  assert.equal(jobs.gate.if, NOT_DRAFT);
+});
+
+test("flow-0178: an intent-only PR runs no source-root matrix", { skip }, () => {
+  const jobs = jobsOf(WF(REUSABLE_GATES));
+  const count = String(jobs[PLAN_JOB].outputs.count).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
+  const evalCount = (intentPr, planned) => Function(`"use strict"; return (${count
+    .replaceAll("steps.kind.outputs.intent_pr", JSON.stringify(intentPr))
+    .replaceAll("steps.plan.outputs.count", JSON.stringify(planned))
+    .replace(/'([^']*)'/g, (_, s) => JSON.stringify(s))
+    .replace(/(?<![=!])==(?!=)/g, "===")});`)();
+  assert.equal(evalCount("true", "3"), "0", "intent PR: no matrix");
+  assert.equal(evalCount("false", "3"), "3", "any other PR keeps the planned count");
+  assert.equal(evalCount("", "2"), "2", "a manual run keeps the planned count");
+  assert.match(String(jobs["source-root"].if), /needs\.source-roots-plan\.outputs\.count != '0'/);
+});

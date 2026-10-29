@@ -237,20 +237,51 @@ jobs:
           set -euo pipefail
           node "$FLOW_BIN"/check-claude-md.mjs --entry CLAUDE.md
 
+      # ── An intent-only PR (flow-0178) ──
+      #
+      # A PR whose every changed path is `.flow/intents/*.md` (never `_TEMPLATE.md`) has no code to
+      # install, build, lint, test or cover. What an intent needs checked — frontmatter, required
+      # fields, unique ids — is flow-doctor's job, so that is all this job runs for one. The job
+      # still runs and still reports under its own name, so no required check goes missing.
+      #
+      # The decision is `classifyIntentPr` in flow-review.mjs, run from CANONICAL's copy at this
+      # workflow's commit (`$FLOW_BIN`), never the PR's: a PR cannot widen the list that exempts
+      # it, and the rule is not re-implemented in shell. Pull requests only; a manual run has no
+      # diff, so `intent_pr` is empty and the full gate runs. A git failure fails this step.
+      - name: Classify — is this an intent-only PR?
+        id: kind
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          node "$FLOW_BIN"/flow-review.mjs classify
+
       - name: Install
+        if: steps.kind.outputs.intent_pr != 'true'
         run: ${{ steps.cfg.outputs.install }}
 
       - name: Build
+        if: steps.kind.outputs.intent_pr != 'true'
         run: ${{ steps.cfg.outputs.build }}
 
       - name: Lint
+        if: steps.kind.outputs.intent_pr != 'true'
         run: ${{ steps.cfg.outputs.lint }}
 
       - name: Test
+        if: steps.kind.outputs.intent_pr != 'true'
         run: ${{ steps.cfg.outputs.test }}
 
       - name: Coverage (fails under coverage_min)
+        if: steps.kind.outputs.intent_pr != 'true'
         run: ${{ steps.cfg.outputs.coverage }}
+
+      # flow-0178: the whole per-stack gate for an intent-only PR. It fails on malformed intent
+      # frontmatter, a missing required field and a duplicate id.
+      - name: flow-doctor — the gate for an intent-only PR
+        if: steps.kind.outputs.intent_pr == 'true'
+        run: node .flow/bin/flow-doctor.mjs
 
       # Optional but recommended: a dependency audit. Wire to the stack's auditor.
       # - name: Dependency audit
@@ -296,7 +327,9 @@ jobs:
     runs-on: ${{ inputs.runner }}
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
-      count: ${{ steps.plan.outputs.count }}
+      # flow-0178: an intent-only PR runs no source-root matrix, so its count is 0 and
+      # `source-root` reports SKIPPED — the same state it is in for any repo with nothing extra.
+      count: ${{ steps.kind.outputs.intent_pr == 'true' && '0' || steps.plan.outputs.count }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -378,6 +411,16 @@ jobs:
           done
           echo "flow-helpers: decision=materialised repo=$repo ref=$ref source=$src bin=$bin"
           echo "FLOW_BIN=$bin" >> "$GITHUB_ENV"
+
+      # flow-0178: the same classification the `gate` job runs, from the same canonical helper.
+      - name: Classify — is this an intent-only PR?
+        id: kind
+        if: ${{ !cancelled() && env.FLOW_BIN != '' && github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          node "$FLOW_BIN"/flow-review.mjs classify
 
       # Scope enforcement: a task-carrying PR's diff must stay within the task's declared `touches`.
       # Pull requests only — a manual run has no diff to scope. Mirrors the store-guard in `gate`.

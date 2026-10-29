@@ -142,6 +142,10 @@ jobs:
       diff_full_bytes: ${{ steps.plan.outputs.diff_full_bytes }}
       # flow-0177. Wholly deleted files cut to one line each to fit the limit. Reporting only.
       diff_summarised_deletions: ${{ steps.plan.outputs.diff_summarised_deletions }}
+      # flow-0178. "true" only when every changed path is an intent file (`classifyIntentPr`, run
+      # from BASE's helper). qa and code-review then skip their model call and PASS with the fixed
+      # line, and the advisory `intent-review` job runs. Security does not read it.
+      intent_pr: ${{ steps.plan.outputs.intent_pr }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with: { fetch-depth: 0 }
@@ -316,8 +320,21 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: node "$FLOW_REVIEW_DIR"/flow-review.mjs plan
+      # flow-0178. An intent-only PR has no code and no tests, so this check calls no model: it writes
+      # the fixed PASS line as its verdict, and the verdict step below enforces it exactly as it
+      # enforces a reviewer's, truncation fact included. The line is pinned in flow-review.mjs
+      # (`INTENT_PR_PASS_LINE`) and `flow-review-workflow.test.mjs` holds the two copies in step.
+      - name: Intent PR — the fixed PASS line, no model call
+        if: ${{ needs.plan.outputs.intent_pr == 'true' }}
+        env:
+          PASS_LINE: "intent PR: intent files only; read by the advisory intent reviewer"
+          VERDICT_FILE: .flow-review/qa.json
+        run: |
+          node -e 'const fs = require("fs"); fs.writeFileSync(process.env.VERDICT_FILE, JSON.stringify({ verdict: "PASS", unproven: [], blocking: [], summary: process.env.PASS_LINE }) + "\n");'
+          printf '### qa — intent PR\n\n%s\n' "$PASS_LINE" >> "$GITHUB_STEP_SUMMARY"
       - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         id: claude
+        if: ${{ needs.plan.outputs.intent_pr != 'true' }}
         continue-on-error: true          # the verdict step below decides; never this action's exit
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -396,7 +413,7 @@ jobs:
       # flow-0140: name the model that actually answered, read from the action's own output,
       # so a pin whose CLI resolves to a different model can never again run unreported.
       - name: Report the model that answered
-        if: ${{ always() }}
+        if: ${{ always() && needs.plan.outputs.intent_pr != 'true' }}
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
           REQUESTED_MODEL: ${{ needs.plan.outputs.model }}
@@ -531,8 +548,21 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: node "$FLOW_REVIEW_DIR"/flow-review.mjs plan
+      # flow-0178. An intent-only PR has no code and no tests, so this check calls no model: it writes
+      # the fixed PASS line as its verdict, and the verdict step below enforces it exactly as it
+      # enforces a reviewer's, truncation fact included. The line is pinned in flow-review.mjs
+      # (`INTENT_PR_PASS_LINE`) and `flow-review-workflow.test.mjs` holds the two copies in step.
+      - name: Intent PR — the fixed PASS line, no model call
+        if: ${{ needs.plan.outputs.intent_pr == 'true' }}
+        env:
+          PASS_LINE: "intent PR: intent files only; read by the advisory intent reviewer"
+          VERDICT_FILE: .flow-review/code-review.json
+        run: |
+          node -e 'const fs = require("fs"); fs.writeFileSync(process.env.VERDICT_FILE, JSON.stringify({ verdict: "PASS", unproven: [], blocking: [], summary: process.env.PASS_LINE }) + "\n");'
+          printf '### code-review — intent PR\n\n%s\n' "$PASS_LINE" >> "$GITHUB_STEP_SUMMARY"
       - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         id: claude
+        if: ${{ needs.plan.outputs.intent_pr != 'true' }}
         continue-on-error: true
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -603,7 +633,7 @@ jobs:
       # flow-0140: name the model that actually answered, read from the action's own output,
       # so a pin whose CLI resolves to a different model can never again run unreported.
       - name: Report the model that answered
-        if: ${{ always() }}
+        if: ${{ always() && needs.plan.outputs.intent_pr != 'true' }}
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
           REQUESTED_MODEL: ${{ needs.plan.outputs.code_review_model || needs.plan.outputs.model }}
@@ -892,6 +922,185 @@ jobs:
           node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/security.json --check security
           --diff-truncated "$DIFF_TRUNCATED"
           --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
+
+  # ── intent-review ──────────────────────────────────────────────────────────────────────
+  # flow-0178. ONE advisory reviewer, for an intent-only PR and nothing else, in place of what qa
+  # and code-review cannot usefully say about an intent. It checks the intent against the format
+  # in `.flow/intents/_TEMPLATE.md` and posts one comment. Dan, 2026-10-28: advisory and low effort.
+  #
+  # ADVISORY, AND THAT IS ASSERTED RATHER THAN ASSUMED (`flow-review-workflow.test.mjs`):
+  #   · no verdict step — nothing here calls `flow-review.mjs verdict`, so it has no PASS or FAIL;
+  #   · `continue-on-error: true` on the job and on the model step, so it cannot fail the run;
+  #   · no job declares `needs: intent-review`, so it holds nothing up;
+  #   · the workflow grants no `checks:` or `statuses:` permission it could set a status with.
+  # It never approves either: `approved_by` / `approved_at` are written by CI on merge (ADR-0007).
+  #
+  # LOW EFFORT is the turn budget, pinned as `INTENT_REVIEW_MAX_TURNS` in flow-review.mjs and held
+  # equal to the flag below by a test. The model is `review.model`, like every other call here.
+  #
+  # The draft and fork fences are inherited from `plan` through `needs`, like every reviewer's.
+  intent-review:
+    needs: plan
+    if: ${{ needs.plan.outputs.intent_pr == 'true' }}
+    # Advisory. Nothing it does may turn this PR red.
+    continue-on-error: true
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          check-latest: true
+          node-version: ${{ inputs.node_version }}
+      - name: Materialise the review gate from the BASE branch
+        # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
+        # comes from the PR. The env vars written below are what keeps those two apart —
+        # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` + `REVIEW_TASKS_DIR` (the task file and its acceptance
+        # criteria, flow-0085) point at base, `REVIEW_REPO_DIR` / `REVIEW_OUT_DIR` point back at
+        # the PR checkout. `REVIEW_REPO_DIR` is load-bearing for
+        # a repo whose `.flow/bin/flow-review.mjs` is an ADAPTER (canonical's is): an adapter pins
+        # its git to its own realpath, which inside the base worktree would diff base against
+        # itself and hand the reviewers an empty patch.
+        #
+        # The branch name reaches the shell through `env:`, not `${{ }}` — same rule as the PR
+        # title and `security_reason`. A ref name is less attacker-chosen than a title, but the
+        # rule is cheaper to keep than to reason about case by case.
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+        run: |
+          set -eu
+          git fetch -q origin "$BASE_BRANCH"
+          base_dir="$RUNNER_TEMP/flow-review-base"
+          rm -rf "$base_dir"
+          git worktree prune
+          if git cat-file -e "origin/$BASE_BRANCH:.flow/bin/flow-review.mjs" 2>/dev/null \
+             && git cat-file -e "origin/$BASE_BRANCH:.flow/config.yml" 2>/dev/null; then
+            git worktree add -q --detach "$base_dir" "origin/$BASE_BRANCH"
+            {
+              echo "FLOW_REVIEW_DIR=$base_dir/.flow/bin"
+              echo "FLOW_CONFIG=$base_dir/.flow/config.yml"
+              # flow-0085: the task file is the STANDARD the PR is judged against, so it comes
+              # from base too. A PR that edits its own acceptance criteria must not hand the
+              # reviewers the edited copy.
+              echo "REVIEW_TASKS_DIR=$base_dir/.flow/tasks"
+            } >> "$GITHUB_ENV"
+          elif [ -f .flow/bin/flow-review.mjs ]; then
+            # BOOTSTRAP — this PR is the one adopting the gate. The helper below forces the
+            # security review on (REVIEW_BOOTSTRAP) and repeats this warning in the plan summary.
+            {
+              echo "FLOW_REVIEW_DIR=$GITHUB_WORKSPACE/.flow/bin"
+              echo "REVIEW_BOOTSTRAP=1"
+              # No independent copy exists on base, so the task file can only come from the PR.
+              echo "REVIEW_TASKS_DIR=$GITHUB_WORKSPACE/.flow/tasks"
+            } >> "$GITHUB_ENV"
+            echo "::warning::BOOTSTRAP: the base branch carries no review gate, so this PR's own" \
+                 "copy is planning the review of this PR. The security review is forced on."
+            printf '### Flow review gate — :warning: BOOTSTRAP\n\n%s\n\n' \
+              'The base branch carries no `.flow/bin/flow-review.mjs` and/or no `.flow/config.yml`, so the gate was planned from THIS PR rather than from an independent copy. The security review is forced on. Expected exactly once, on the PR that adopts the review gate.' \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            # Neither base nor this PR has the helper: an adopting repo that bumped the workflow
+            # tag but has not run flow-sync. Say so, instead of failing on "node: not found".
+            echo "::error::.flow/bin/flow-review.mjs is missing from this PR and from the base" \
+                 "branch. This repo adopted a newer _flow-review.yml than its .flow/bin/ — run" \
+                 "the flow-sync workflow to adopt the helper, then re-run these checks."
+            exit 1
+          fi
+          {
+            echo "REVIEW_REPO_DIR=$GITHUB_WORKSPACE"
+            echo "REVIEW_OUT_DIR=$GITHUB_WORKSPACE/.flow-review"
+          } >> "$GITHUB_ENV"
+      - name: Bounded context — the diff and the files it changes
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          # CAN-52: the task id has two sources and the helper resolves both in code. The branch
+          # arrives as `github.head_ref` — the underscore form, deliberately. The dotted
+          # `pull_request` spelling of the same value is forbidden ANYWHERE in this file by
+          # `flow-review-workflow.test.mjs`, so that a real branch fence cannot be smuggled in
+          # behind an id lookup; that test refuses prose too, which is why this comment does not
+          # spell it either. A branch NAME here is an id source, never a gate. The PR title is
+          # attacker-controlled text: it travels through `env`, where it is data, and is never
+          # interpolated into the shell.
+          HEAD_REF: ${{ github.head_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node "$FLOW_REVIEW_DIR"/flow-review.mjs plan
+      - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
+        id: claude
+        continue-on-error: true          # advisory: its exit decides nothing
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_bots: "*"
+          claude_args: "--max-turns 15 --model ${{ needs.plan.outputs.model }} --permission-mode bypassPermissions"
+          prompt: |
+            You are the ADVISORY intent reviewer for this pull request. It changes intent files
+            only: an intent records an outcome a human wants and why, in their own words. You
+            did not write it. Your comment informs a human; it does not pass or fail anything.
+
+            YOUR CONTEXT IS BOUNDED. Read:
+              · .flow-review/diff.patch  — the full PR diff
+              · .flow-review/files.txt   — the intent files it changes
+              · .flow/intents/_TEMPLATE.md — the format every intent is written to
+              · the changed intent files themselves
+            Do NOT read the repository at large.
+            If the diff carries the DIFF TRUNCATED marker, say so first: you read part of it.
+
+            For EACH changed intent, check these four things against the template:
+              1. The Problem quotes the human's own words, and the `source` field names whose
+                 words they are and how they were captured.
+              2. Anything the writer added that the human never said is marked `[assumption]`.
+              3. The Outcome states a result someone could observe, not a solution or a design.
+              4. Each Open question is a real question someone still has to answer, not a
+                 decision already made and phrased as one.
+
+            Post ONE pull-request comment. Start it with the line "Intent review (advisory, does
+            not block)". Then, per intent: each of the four checks as met or not met, and for
+            each one not met, the exact line and the smallest change that would meet it. No
+            praise, no restating the intent, no verdict.
+
+            You review only. Never push commits, never edit source files, never change labels or
+            task state, never set a check status, and never write `approved_by` or `approved_at`.
+            You write no files.
+      # flow-0140: name the model that actually answered, read from the action's own output,
+      # so a pin whose CLI resolves to a different model can never again run unreported.
+      - name: Report the model that answered
+        if: ${{ always() }}
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          REQUESTED_MODEL: ${{ needs.plan.outputs.model }}
+          CLAUDE_STEP: intent-review
+        run: |
+          # flow-0140. claude-code-action has no output naming the model. Its `execution_file` output is
+          # the SDK message stream as JSON (base-action/src/run-claude-sdk.ts at v1.0.245): the `result`
+          # message's `modelUsage` is keyed by every model that answered, `assistant` messages carry
+          # `message.model`, and `system`/`init` carries the model the CLI resolved. Read in that order.
+          # Every value arrives through env, never an expression. Reporting only: it never fails the job.
+          node - <<'FLOW_MODEL_REPORT'
+          const fs = require("fs");
+          const { EXECUTION_FILE: file = "", REQUESTED_MODEL: want = "", CLAUDE_STEP: step = "claude" } = process.env;
+          let seen = [];
+          try {
+            const msgs = JSON.parse(fs.readFileSync(file, "utf8"));
+            const from = (f) => [...new Set(msgs.flatMap((m) => { try { return f(m) ?? []; } catch { return []; } }))]
+              .filter((v) => typeof v === "string" && /^[A-Za-z0-9][\w.:\[\]-]*$/.test(v));
+            for (const f of [
+              (m) => (m.type === "result" ? Object.keys(m.modelUsage ?? {}) : []),
+              (m) => (m.type === "assistant" ? [m.message.model] : []),
+              (m) => (m.type === "system" && m.subtype === "init" ? [m.model] : []),
+            ]) { seen = from(f); if (seen.length) break; }
+          } catch { seen = []; }
+          const code = (v) => "`" + v + "`";
+          const lines = [`### Model: ${step}`, "",
+            `- requested: ${want ? code(want) : "none passed, so the CLI's default"}`,
+            `- answered: ${seen.length ? seen.map(code).join(", ") : `not reported by the action (requested ${want ? code(want) : "the CLI's default"})`}`];
+          if (want && seen.length && !seen.includes(want)) {
+            lines.push(`- **mismatch:** requested ${code(want)}, answered by ${seen.map(code).join(", ")}`);
+            console.log(`::warning::${step} requested ${want} but was answered by ${seen.join(", ")}`);
+          }
+          const out = lines.join("\n") + "\n\n";
+          process.stdout.write(out);
+          if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          FLOW_MODEL_REPORT
 
   # ── guide ──────────────────────────────────────────────────────────────────────────────
   # ONE comment that tells the human where to look (flow-0084). It runs AFTER the three checks,

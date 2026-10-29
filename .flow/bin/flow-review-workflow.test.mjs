@@ -36,7 +36,10 @@ const REVIEW_JOBS = ["qa", "code-review", "security"];
 // in every assertion about where the helper comes from. The distinction is load-bearing: a `guide`
 // that crept into REVIEW_JOBS would be asserted to carry a verdict step and to block the PR.
 const GUIDE_JOB = "guide";
-const HELPER_JOBS = ["plan", ...REVIEW_JOBS, GUIDE_JOB];
+// flow-0178 added a sixth, `intent-review`: advisory like the guide, so it is NOT in REVIEW_JOBS
+// (it carries no verdict and blocks nothing), but it materialises the base gate and runs `plan`.
+const INTENT_JOB = "intent-review";
+const HELPER_JOBS = ["plan", ...REVIEW_JOBS, GUIDE_JOB, INTENT_JOB];
 
 // flow-0079: the helper is no longer invoked by its path in the checkout. `$FLOW_REVIEW_DIR` is
 // written to $GITHUB_ENV by the materialise step and points at the BASE branch's copy — so these
@@ -164,8 +167,8 @@ test("the security reviewer itself is gated on the config-driven decision", { sk
 test("no reviewer names a model — every one reads it from the plan job", { skip }, () => {
   // The value is an expression containing spaces, so match the whole `${{ … }}` rather than \S+.
   const modelFlags = [...reusableSrc.matchAll(/--model\s+(\$\{\{[^}]*\}\}|\S+)/g)].map((m) => m[1]);
-  assert.equal(modelFlags.length, REVIEW_JOBS.length + 1,
-    "one --model per reviewer, plus the guide's (flow-0084). The guide reads `review.model` like " +
+  assert.equal(modelFlags.length, REVIEW_JOBS.length + 2,
+    "one --model per reviewer, plus the guide's (flow-0084) and the intent reviewer's (flow-0178). The guide reads `review.model` like " +
     "everything else here: it cannot have a knob of its own without a `guide_model` output on the " +
     "plan job, and the point stands either way — no model is named in this file.");
   for (const flag of modelFlags) {
@@ -253,8 +256,9 @@ test("the fork fence sits on `plan` and nowhere else — so it suppresses all fo
 
 test("every `plan` invocation is handed BOTH id sources, as env, never as shell text", { skip }, () => {
   const planSteps = allSteps().filter((s) => PLAN_RUN.test(String(s.run ?? "")));
-  assert.equal(planSteps.length, 5,
-    "the plan job, one bounded-context step per reviewer, and the guide's (flow-0084) — each " +
+  assert.equal(planSteps.length, 6,
+    "the plan job, one bounded-context step per reviewer, the guide's (flow-0084) and the intent "
+    + "reviewer's (flow-0178) — each " +
     "materialises its own context rather than passing an artifact around");
   for (const s of planSteps) {
     assert.equal(s.env?.HEAD_REF, "${{ github.head_ref }}",
@@ -376,8 +380,9 @@ test("no step invokes the helper from the PR checkout — every call goes throug
   }
   const invocations = allSteps().filter((s) =>
     PLAN_RUN.test(String(s.run ?? "")) || VERDICT_RUN.test(String(s.run ?? "")));
-  assert.equal(invocations.length, 8,
-    "five plans (the plan job, one bounded context per reviewer, and the guide's) and three verdicts");
+  assert.equal(invocations.length, 9,
+    "six plans (the plan job, one bounded context per reviewer, the guide's and the intent "
+    + "reviewer's) and three verdicts");
 });
 
 test("every job that runs the helper materialises the BASE branch first", { skip }, () => {
@@ -1089,4 +1094,112 @@ test("flow-0084: the adapter's CLI block actually runs — silence is the symlin
   writeFileSync(list, "[]");
   assert.equal(run(["comment-id", list]).stdout.trim(), "",
     "empty output is how the workflow decides to post a new comment");
+});
+
+// ── flow-0178: an intent-only PR — fixed PASS lines, and one ADVISORY intent reviewer ───────
+// `intent-pr-kind.test.mjs` proves the classification. These prove the wiring: qa and
+// code-review call no model on an intent PR and still enforce a verdict, the line they pass with
+// is the helper's, and the intent reviewer can neither block, approve nor set a check status.
+
+const helperMod = await import("../../project-template/.flow/bin/flow-review.mjs");
+const INTENT_JOB_NAME = "intent-review";
+const INTENT_IF = "${{ needs.plan.outputs.intent_pr == 'true' }}";
+const NOT_INTENT_IF = "${{ needs.plan.outputs.intent_pr != 'true' }}";
+const intentPassStep = (job) =>
+  stepsOf(job).find((s) => String(s.name ?? "").startsWith("Intent PR — the fixed PASS line"));
+
+test("flow-0178 criterion 3: the plan job publishes intent_pr from the helper's output", { skip }, () => {
+  assert.equal(wf.jobs.plan.outputs?.intent_pr, "${{ steps.plan.outputs.intent_pr }}");
+});
+
+test("flow-0178 criterion 3: on an intent PR, qa and code-review skip the model call and still enforce a verdict", { skip }, () => {
+  for (const job of ["qa", "code-review"]) {
+    const reviewers = reviewerSteps(job);
+    assert.equal(reviewers.length, 1, job);
+    assert.equal(reviewers[0].if, NOT_INTENT_IF, `${job}: the Claude step must not run on an intent PR`);
+    const report = stepsOf(job).find((s) => s.name === "Report the model that answered");
+    assert.equal(report.if, "${{ always() && needs.plan.outputs.intent_pr != 'true' }}",
+      `${job}: no model ran, so there is no model to report`);
+    const pass = intentPassStep(job);
+    assert.ok(pass, `${job}: no fixed-PASS step`);
+    assert.equal(pass.if, INTENT_IF, `${job}: the fixed line is for an intent PR only`);
+    assert.equal(pass.env?.VERDICT_FILE, `.flow-review/${job}.json`);
+    const steps = stepsOf(job);
+    const verdict = steps.find((s) => VERDICT_RUN.test(String(s.run ?? "")));
+    assert.ok(steps.indexOf(pass) < steps.indexOf(verdict), `${job}: the verdict step reads what the pass step wrote`);
+    assert.match(String(verdict.if), /always\(\)/);
+    assert.equal(verdict.if.includes("intent_pr"), false, `${job}: the verdict step runs for every kind`);
+  }
+});
+
+test("flow-0178 criterion 3: the pinned PASS line in the workflow is the helper's, and the step writes a passing verdict", { skip }, async (t) => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  assert.match(helperMod.INTENT_PR_PASS_LINE, /^intent PR: intent files only; read by the advisory intent reviewer$/);
+  for (const job of ["qa", "code-review"]) {
+    const pass = intentPassStep(job);
+    assert.equal(pass.env?.PASS_LINE, helperMod.INTENT_PR_PASS_LINE, `${job}: the two copies of the line drifted`);
+    // Run the step's own script, and grade what it wrote with the helper's own verdict code.
+    const script = String(pass.run).match(/node -e '([^']*)'/)?.[1];
+    assert.ok(script, `${job}: the pass step's node script was not found`);
+    const dir = mkdtempSync(join(tmpdir(), "flow-intent-pass-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const file = join(dir, `${job}.json`);
+    const r = spawnSync(process.execPath, ["-e", script], {
+      encoding: "utf8", env: { ...process.env, PASS_LINE: pass.env.PASS_LINE, VERDICT_FILE: file },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const parsed = helperMod.parseVerdict(readFileSync(file, "utf8"));
+    assert.equal(parsed.summary, helperMod.INTENT_PR_PASS_LINE);
+    assert.equal(helperMod.verdictOutcome(parsed, { check: job }).ok, true);
+    assert.equal(helperMod.verdictOutcome(parsed, { check: job, diffTruncated: true }).ok, false,
+      `${job}: a truncated diff still fails, even on the fixed line`);
+  }
+});
+
+test("flow-0178 criterion 5: the intent reviewer runs only for the intent kind, at --max-turns 15 or fewer", { skip }, () => {
+  const job = wf.jobs[INTENT_JOB_NAME];
+  assert.ok(job, "_flow-review.yml must define the intent-review job");
+  assert.equal(job.if, INTENT_IF);
+  assert.deepEqual(job.needs, "plan", "it inherits the draft and fork fences from plan");
+  const reviewers = reviewerSteps(INTENT_JOB_NAME);
+  assert.equal(reviewers.length, 1);
+  const args = String(reviewers[0].with?.claude_args ?? "");
+  const turns = Number(args.match(/--max-turns (\d+)/)?.[1]);
+  assert.ok(turns > 0 && turns <= 15, `--max-turns is ${turns}; the intent reviewer is low effort`);
+  assert.equal(turns, helperMod.INTENT_REVIEW_MAX_TURNS, "the run summary must report the budget that runs");
+  assert.match(args, /--model \$\{\{ needs\.plan\.outputs\.model \}\}/, "the configured review model");
+  const blocking = ["qa", "code-review"].map((j) => Number(String(reviewerSteps(j)[0].with.claude_args).match(/--max-turns (\d+)/)[1]));
+  assert.deepEqual(blocking, [helperMod.REVIEWER_MAX_TURNS, helperMod.REVIEWER_MAX_TURNS]);
+});
+
+test("flow-0178 criterion 5: the intent reviewer cannot set a check status, block, or approve", { skip }, () => {
+  const job = wf.jobs[INTENT_JOB_NAME];
+  assert.equal(job["continue-on-error"], true, "a broken intent reviewer must not turn the PR red");
+  assert.equal(reviewerSteps(INTENT_JOB_NAME)[0]["continue-on-error"], true);
+  assert.equal(stepsOf(INTENT_JOB_NAME).some((s) => VERDICT_RUN.test(String(s.run ?? ""))), false,
+    "no verdict step: it has no PASS or FAIL to report");
+  for (const [name, other] of Object.entries(wf.jobs)) {
+    assert.ok(![].concat(other.needs ?? []).includes(INTENT_JOB_NAME), `${name} must not wait on the intent reviewer`);
+  }
+  for (const perms of [wf.permissions, job.permissions].filter(Boolean)) {
+    assert.equal(perms.checks, undefined, "no checks: permission to set a status with");
+    assert.equal(perms.statuses, undefined, "no statuses: permission to set a status with");
+  }
+  const prompt = String(reviewerSteps(INTENT_JOB_NAME)[0].with.prompt).replace(/\s+/g, " ");
+  assert.match(prompt, /\.flow\/intents\/_TEMPLATE\.md/);
+  for (const check of [/human's own words/, /`\[assumption\]`/, /Outcome states a result/, /Open question is a real question/]) {
+    assert.match(prompt, check);
+  }
+  assert.match(prompt, /never set a check status, and never write `approved_by` or `approved_at`/);
+  assert.match(prompt, /Post ONE pull-request comment/);
+});
+
+test("flow-0178: changes/flow-0178.md states its caller action", () => {
+  const text = changelogEntry(REPO, "flow-0178");
+  assert.ok(text, "a change to what every adopting repo's gate runs owes the changelog an entry");
+  assert.match(text, /caller action/i);
+  assert.match(text, /flow-doctor/);
+  assert.ok(!/^#/m.test(text), "a fragment carries no heading of its own");
 });

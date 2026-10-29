@@ -488,7 +488,7 @@ test("runPlan writes the changed files, the bounded diff and the task — the wh
     });
 
     assert.deepEqual(calls, [
-      "diff --name-only origin/main...HEAD",
+      "diff --name-only --no-renames origin/main...HEAD",
       "diff origin/main...HEAD",
     ], "the context is the PR diff and nothing else — no whole-repo read");
 
@@ -873,7 +873,7 @@ test("runPlan materialises task.md and publishes the id — from the title, on a
     assert.equal(plan.task.id, "flow-0068");
     assert.equal(plan.task.found, true);
     assert.match(readFileSync(join(dir, "out", "task.md"), "utf8"), /body of flow-0068-a-slug\.md/);
-    assert.deepEqual(calls, ["diff --name-only origin/main...HEAD", "diff origin/main...HEAD"],
+    assert.deepEqual(calls, ["diff --name-only --no-renames origin/main...HEAD", "diff origin/main...HEAD"],
       "resolving the task must not add a git call — the store is already on disk");
 
     // And the no-task direction writes the file too, so a reviewer never reads an absent file as
@@ -1798,7 +1798,7 @@ function fakeGit({ files = [], diff = "", tree = {}, trailers = null, canon = {}
   return (args) => {
     const cmd = args.join(" ");
     calls.push(cmd);
-    if (cmd === "diff --name-only origin/main...HEAD") return files.join("\n");
+    if (cmd === "diff --name-only --no-renames origin/main...HEAD") return files.join("\n");
     if (cmd === "diff origin/main...HEAD") return diff;
     if (cmd === TRAILER_LOG) {
       if (trailers === null) throw new Error("fatal: no trailer log expected in this fixture");
@@ -2450,3 +2450,17 @@ test("flow-0128: changes/flow-0128.md exists and states that no caller action is
     assert.match(text, /caller action/i,
       "every fragment says what an adopting repo must do — here, nothing");
   });
+
+// ── flow-0178: the intent-only PR ─────────────────────────────────────────────────────────
+// Canonical's `.flow/bin/intent-pr-kind.test.mjs` carries the full matrix and the workflow half;
+// this is the copy every adopting repo runs, so the rule that skips its gate is tested there too.
+
+test("flow-0178: classifyIntentPr accepts intent files only, fail-closed on everything else", async () => {
+  const { classifyIntentPr, INTENT_PR_SENTINEL } = await import("./flow-review.mjs");
+  const c = classifyIntentPr({ changedFiles: [".flow/intents/a.md", ".flow/intents/b.md"] });
+  assert.equal(c.classified, true);
+  assert.equal(c.sentinel, INTENT_PR_SENTINEL);
+  for (const files of [[], [".flow/intents/_TEMPLATE.md"], [".flow/intents/a.md", "src/a.mjs"], [".flow/intents/x/a.md"]]) {
+    assert.equal(classifyIntentPr({ changedFiles: files }).classified, false, JSON.stringify(files));
+  }
+});

@@ -467,11 +467,11 @@ export function securityDecision({ changedFiles = [], securityPaths = [], bootst
 // allowed to touch. A `release/*` branch carrying one line of source is not a release PR and gets
 // the ordinary no-task handling, unchanged.
 //
-// DELIBERATELY NOT EXTENDED to the other two task-less kinds a human can open — a `[vision]` PR
-// (ADR-0004) and an intent-only PR (ADR-0007). Both hit the same guess and both deserve the same
-// treatment, but each needs its own closed path list agreed first, and agreeing one is a decision
-// rather than an implementation detail — the same reason the two lists below are closed. The
-// table is the extension point: a new kind is a row plus its prompt line.
+// DELIBERATELY NOT EXTENDED to a `[vision]` PR (ADR-0004). It hits the same guess, but it needs
+// its own closed path list agreed first, and agreeing one is a decision rather than an
+// implementation detail — the same reason the two lists below are closed. The table is the
+// extension point: a new kind is a row plus its prompt line. The intent-only PR (ADR-0007) got
+// its list agreed in flow-0178, and is classified below by `classifyIntentPr`, not by this table.
 export const RELEASE_PR_SENTINEL = "RELEASE PR";
 export const SYNC_PR_SENTINEL = "SYNC PR";
 
@@ -569,6 +569,80 @@ export function classifyPr({ headRef = "", changedFiles = [] } = {}) {
     // nothing must not be waved through as "release files only".
     classified: files.length > 0 && outside.length === 0,
   };
+}
+
+// ── an INTENT-ONLY PR (flow-0178) ─────────────────────────────────────────────────────────
+// An intent PR changes Markdown under `.flow/intents/` and nothing else. It used to run the full
+// gate and all three code reviewers, and qa and code-review then judged it for tests and code
+// quality, which an intent has neither of (PR #248: one intent file, ~5 Actions minutes). What it
+// does need — well-formed frontmatter, required fields, unique ids — is what flow-doctor checks.
+//
+// CLASSIFIED BY PATHS ALONE, and that is the difference from `classifyPr`. There is no codified
+// intent-branch prefix to pair with the path list, so the closed list is the whole rule:
+//   · `.flow/intents/*.md` — one level only; `*` does not cross `/`, so a subdirectory is outside.
+//   · minus any `_`-prefixed file. `_TEMPLATE.md` is the intent FORMAT, and editing it changes the
+//     protocol every intent is written to, so it gets full review. Excluding the whole `_` prefix
+//     rather than the one name is the fail-closed reading: a store-convention file that is not an
+//     intent is never waved through as one.
+// PURE and FAIL-CLOSED: an empty diff, any other path, or an intent mixed with anything else is
+// not intent-only, and gets the ordinary handling unchanged. It runs from the BASE branch's copy
+// of this helper (`_flow-review.yml`) or canonical's (`_flow-gates.yml`), never the PR's, so a PR
+// cannot widen the list that classifies it.
+export const INTENT_PR_SENTINEL = "INTENT PR";
+// Pinned here AND in `_flow-review.yml`'s qa and code-review jobs; `flow-review-workflow.test.mjs`
+// holds the copies in step, as it does for the release and sync lines.
+export const INTENT_PR_PASS_LINE = "intent PR: intent files only; read by the advisory intent reviewer";
+export const INTENT_PR_PATHS = Object.freeze([".flow/intents/*.md"]);
+export const INTENT_PR_EXCLUDED = Object.freeze([".flow/intents/_*"]);
+// The advisory intent reviewer's turn budget, which is its effort bound. Pinned in the workflow
+// too, and tested to match; Dan, 2026-10-28: the intent reviewer runs at low effort.
+export const INTENT_REVIEW_MAX_TURNS = 15;
+// The budget every blocking reviewer runs at, so the run summary can say so (G9).
+export const REVIEWER_MAX_TURNS = 60;
+
+export function classifyIntentPr({ changedFiles = [] } = {}) {
+  const files = changedFiles.filter(Boolean);
+  const inside = INTENT_PR_PATHS.map(globToRegExp);
+  const excluded = INTENT_PR_EXCLUDED.map(globToRegExp);
+  const outside = files.filter((f) => excluded.some((r) => r.test(f)) || !inside.some((r) => r.test(f)));
+  return {
+    kind: "intent",
+    sentinel: INTENT_PR_SENTINEL,
+    paths: INTENT_PR_PATHS,
+    files,
+    outside,
+    // As with `classifyPr`: `[].every(…)` is vacuously true, and an empty diff is not an intent.
+    classified: files.length > 0 && outside.length === 0,
+  };
+}
+
+// The decision line `_flow-gates.yml` prints and greps, in the `<name>: decision=` shape the other
+// guards use, so a classification that never ran cannot pass for one that found nothing.
+export function intentDecisionLine(intent) {
+  return intent.classified
+    ? `pr-kind: decision=intent files=${intent.files.length}`
+    : `pr-kind: decision=full files=${intent.files.length} outside=${intent.outside.length}`;
+}
+
+// `task.md` for an intent-only PR with no task id. Short on purpose: qa and code-review do not
+// read it (they call no model on this kind), so its readers are the security reviewer, which
+// reviews the diff exactly as on any PR, and the advisory intent reviewer.
+export function intentPrText({ files = [] } = {}) {
+  return [
+    INTENT_PR_SENTINEL,
+    "",
+    "No task resolved, and none is expected: this PR was classified IN CODE as an intent-only PR. " +
+    `All ${files.length} changed file(s) match ${INTENT_PR_PATHS.join(", ")}, and none is ` +
+    "`_`-prefixed (`_TEMPLATE.md` is the format, and an edit to it gets full review). A PR " +
+    "that adds any other path is NOT classified and is reviewed in full.",
+    "",
+    "The changed files, in full:",
+    files.map((f) => `  - ${f}`).join("\n"),
+    "",
+    `qa and code-review PASS this kind with exactly: "${INTENT_PR_PASS_LINE}", and call no ` +
+    "model. Security reviews the diff as it would on any PR. There are no acceptance criteria " +
+    "to map and no missing task to report.",
+  ].join("\n") + "\n";
 }
 
 // ── a sync PR's PROVENANCE, not just its location (flow-0115) ─────────────────────────────
@@ -982,6 +1056,15 @@ export function taskContext({
   // `[flow-0088] …` has criteria, and those are what it is judged against — but once no id
   // resolved, "this PR is a release PR" is a stronger and truer statement than either "no task"
   // or "we never looked", and it is the statement the reviewers were improvising.
+  if (!id && prKind?.classified && prKind.kind === "intent") {
+    return {
+      id: null, source: null, path: null, matches: [], found: false,
+      kind: "intent", sentinel: INTENT_PR_SENTINEL, problems: [],
+      reason: `${INTENT_PR_SENTINEL} — classified in code (intent files only)`,
+      text: intentPrText(prKind),
+    };
+  }
+
   if (!id && prKind?.classified) {
     const problems = prKind.kind === "release" ? (prKind.report?.problems ?? []) : [];
     const verdict = prKind.kind !== "release"
@@ -1358,6 +1441,10 @@ export function runReviewCli(argv, {
         `task_id=${task.id ?? ""}`,
         `task_found=${task.found}`,
         `bootstrap=${Boolean(plan.bootstrap)}`,
+        // flow-0178: qa and code-review skip their model call on `true`, and the advisory intent
+        // reviewer runs only on it. Exactly "true" or "false", never empty, so a workflow
+        // comparing against 'true' can only fall back to the full review.
+        `intent_pr=${Boolean(plan.intentPr)}`,
       ].join("\n"));
       const summary = planSummary(plan);
       emit(env.GITHUB_STEP_SUMMARY, summary);
@@ -1387,7 +1474,24 @@ export function runReviewCli(argv, {
       return outcome.code;
     }
 
-    throw new ReviewError(`unknown command ${JSON.stringify(cmd ?? "")} — expected "plan" or "verdict"`);
+    // flow-0178. The gate's half of the intent classification: `_flow-gates.yml` runs this from
+    // canonical's copy of the helper, never the PR's, and skips install/build/lint/test/coverage
+    // on `intent_pr=true`. A git failure throws, which fails the step: an unclassified PR must
+    // never read as an intent PR.
+    if (cmd === "classify") {
+      // `--no-renames`: rename detection lists a `git mv src/x.mjs .flow/intents/x.md` as the
+      // destination ONLY, which reads as intent-only. Off, a rename is its source AND its
+      // destination, and the source keeps the PR on the full gate. Same flag in `runPlan`.
+      const run = gitFor ?? ((args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 1024 * 1024 * 64 }));
+      const changedFiles = run(["diff", "--name-only", "--no-renames", `${env.BASE_REF || "origin/main"}...HEAD`])
+        .split("\n").map((s) => s.trim()).filter(Boolean);
+      const intent = classifyIntentPr({ changedFiles });
+      emit(env.GITHUB_OUTPUT, `intent_pr=${intent.classified}`);
+      console.log(intentDecisionLine(intent));
+      return 0;
+    }
+
+    throw new ReviewError(`unknown command ${JSON.stringify(cmd ?? "")} — expected "plan" or "verdict" (or "classify", for the gate)`);
   } catch (e) {
     console.error(`::error::flow-review: ${e.message}`);
     return 1;
@@ -1425,7 +1529,10 @@ export function runPlan({
   // from base for the same reason `security_paths` is: a PR must not be able to raise the limit
   // on its own diff, any more than it can delete the glob that would have reviewed it.
   const limit = resolveMaxDiffBytes({ env, configured: cfg.maxDiffBytes });
-  const changedFiles = git(["diff", "--name-only", `${baseRef}...HEAD`])
+  // `--no-renames` (flow-0178): a renamed file is listed at its old path AS WELL as its new one,
+  // so a move into `.flow/intents/` cannot hide the code it moved from the classification or
+  // from the security triggers. See the `classify` command for the case.
+  const changedFiles = git(["diff", "--name-only", "--no-renames", `${baseRef}...HEAD`])
     .split("\n").map((s) => s.trim()).filter(Boolean);
   const security = securityDecision({ changedFiles, securityPaths: cfg.securityPaths, bootstrap });
   const diff = boundDiff(git(["diff", `${baseRef}...HEAD`]), { maxBytes: limit.bytes });
@@ -1446,6 +1553,12 @@ export function runPlan({
     const provenance = syncProvenance({ git, baseRef, files: classified.files });
     prKind = { ...classified, provenance, classified: provenance.ok };
   }
+  // flow-0178. Only when no branch prefix claimed the PR: a `release/` branch carrying intent
+  // files has already been answered above, and answering it twice would let the looser rule win.
+  // Never under BOOTSTRAP, where the helper deciding is the PR's own copy.
+  const intent = classifyIntentPr({ changedFiles });
+  const intentPr = !classified && !bootstrap && intent.classified;
+  if (intentPr) prKind = intent;
   const task = taskContext({
     headRef, prTitle, tasksDir, ls, read, prKind,
     ...(callerSupplied === undefined ? {} : { callerSupplied }),
@@ -1456,7 +1569,7 @@ export function runPlan({
   writeFileSync(join(outDir, "diff.patch"), diff.text);
   writeFileSync(join(outDir, "task.md"), task.text);
 
-  return { cfg, changedFiles, security, diff, task, prKind, limit, outDir, bootstrap: Boolean(bootstrap) };
+  return { cfg, changedFiles, security, diff, task, prKind, limit, outDir, bootstrap: Boolean(bootstrap), intentPr };
 }
 
 const LIMIT_SOURCE = {
@@ -1465,8 +1578,24 @@ const LIMIT_SOURCE = {
   default: "the built-in default — set `review.max_diff_bytes` in .flow/config.yml to change it",
 };
 
+// flow-0178 (G9): which reviewers this plan runs, and at what effort, in one line a human reads
+// before the verdicts. An intent-only PR runs a different set, and the summary is where that has
+// to be visible, or a PR with no model-written qa comment reads as a reviewer that broke.
+export function reviewersLine({ cfg, security, intentPr = false }) {
+  const sec = `security ${security.run ? "RUNNING" : "SKIPPED"} (unchanged by PR kind)`;
+  if (intentPr) {
+    return `- reviewers: **intent PR** — qa and code-review PASS with the fixed line and call no ` +
+      `model; ${sec}; one ADVISORY intent reviewer on \`${cfg.model}\` at ` +
+      `\`--max-turns ${INTENT_REVIEW_MAX_TURNS}\`, which posts a comment and sets no check status`;
+  }
+  return `- reviewers: qa on \`${cfg.model}\` and code-review on \`${cfg.codeReviewModel ?? cfg.model}\`, ` +
+    `each at \`--max-turns ${REVIEWER_MAX_TURNS}\`; ${sec}`;
+}
+
 export function planSummary({
   cfg, changedFiles, security, diff, task, bootstrap = false,
+  // flow-0178. Defaulted, like `prKind`, so an older plan object renders as the full review.
+  intentPr = false,
   // flow-0115. Defaulted for the same reason `limit` is: a caller holding an older plan object
   // still renders, and simply reports no provenance verdict — which is the truth for one.
   prKind = null,
@@ -1491,6 +1620,7 @@ export function planSummary({
     // human unable to tell whether 300000 was anyone's decision.
     `- diff limit: ${limit.bytes} bytes — ${LIMIT_SOURCE[limit.source] ?? limit.source}`,
     `- security review: **${security.run ? "RUNNING" : "SKIPPED"}** — ${security.reason}`,
+    reviewersLine({ cfg, security, intentPr }),
     task.found
       ? `- task under review: \`${task.id}\` (${task.reason}) — \`${task.path}\``
       // flow-0089: "none resolved" and "none, by design" are different facts, and the summary is
