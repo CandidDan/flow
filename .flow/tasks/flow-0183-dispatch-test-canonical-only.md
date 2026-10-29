@@ -1,7 +1,7 @@
 ---
 id: "flow-0183"
 title: "flow-dispatch's config-cap test checks the template's config only in canonical, so it no longer fails every consuming repo's gate"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude-worker-flow-0183"
