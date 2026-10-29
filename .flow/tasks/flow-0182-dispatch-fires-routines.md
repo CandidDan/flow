@@ -1,14 +1,14 @@
 ---
 id: "flow-0182"
 title: "flow-dispatch fires the worker routine for the task's tier whenever a task becomes ready, with a daily sweep as the fallback"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-code-brave-bun-9d506c"
 created: "2026-10-29"
 started: "2026-10-29T07:33:29Z"
-branch: ""
-pr: ""
+branch: "claude/brave-bun-9d506c"
+pr: "https://github.com/CandidDan/flow/pull/266"
 issue: ""
 blocked_reason: ""
 blocked_by: []
