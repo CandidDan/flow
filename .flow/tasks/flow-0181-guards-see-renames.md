@@ -1,7 +1,7 @@
 ---
 id: "flow-0181"
 title: "Every guard that reads a PR's changed paths sees both sides of a rename, so moving a file into or out of a protected folder cannot slip past it"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude-code-ecstatic-shaw-4abc20"
