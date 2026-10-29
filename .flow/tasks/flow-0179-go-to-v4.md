@@ -1,7 +1,7 @@
 ---
 id: "flow-0179"
 title: "Flow goes to v4: template callers and flow-sync's fallback pin @v4, and VERSION moves to 4.0.0, because flow-0174 deleted the queue-runner reusable"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "flow-0179-worker"
