@@ -1011,9 +1011,44 @@ function staticPrefix(glob) {
 }
 // Segment-aware path containment, so "app/foo" and "app/foobar" do NOT match.
 function pathContains(p, q) { return p === q || q.startsWith(p + "/") || p.startsWith(q + "/"); }
-// Two globs overlap if identical or one's static prefix contains the other's. Heuristic (no full
-// glob-intersection), but it catches the dominant cases: an exact shared file, and nested trees.
-function globsOverlap(a, b) { return a === b || pathContains(staticPrefix(a), staticPrefix(b)); }
+// A glob whose only wildcard is `*` in its last segment ("a/b/x*.mjs") matches files directly in
+// one folder, never below it (touches-guard's `*` stops at "/"). Returns { dir, name }, or null for
+// a literal path, `**`, a wildcard in a folder segment, or any other glob character.
+function fileNameGlob(glob) {
+  const slash = glob.lastIndexOf("/");
+  const dir = glob.slice(0, slash + 1).replace(/\/+$/, ""), name = glob.slice(slash + 1);
+  if (/[*?[\]{}]/.test(dir) || /[?[\]{}]/.test(name) || !name.includes("*") || name.includes("**")) return null;
+  return { dir, name };
+}
+// Whether a literal file name matches a last-segment pattern where `*` is the only wildcard.
+function nameMatches(pattern, name) {
+  const re = pattern.split("*").map((s) => s.replace(/[\\^$+?.()|{}[\]]/g, "\\$&")).join("[^/]*");
+  return new RegExp("^" + re + "$").test(name);
+}
+// Whether two last-segment patterns could match a common name. Conservative: they are disjoint
+// only when their literal starts (before the first `*`) or literal ends (after the last `*`)
+// cannot agree — "a*.mjs" vs "b*.mjs", "x*.mjs" vs "x*.md"; otherwise they may overlap.
+function namesMayOverlap(p, q) {
+  const head = (s) => s.slice(0, s.indexOf("*")), tail = (s) => s.slice(s.lastIndexOf("*") + 1);
+  const hp = head(p), hq = head(q), tp = tail(p), tq = tail(q);
+  return (hp.startsWith(hq) || hq.startsWith(hp)) && (tp.endsWith(tq) || tq.endsWith(tp));
+}
+// Two globs overlap when some real path could match both. A file-name glob is compared precisely
+// (its folder, then its name pattern); everything else falls back to static-prefix containment,
+// which over-reports but never misses a nested tree. A literal path may name a folder, so a literal
+// that contains a file-name glob's folder still overlaps it.
+export function globsOverlap(a, b) {
+  if (a === b) return true;
+  const fa = fileNameGlob(a), fb = fileNameGlob(b);
+  if (fa && fb) return fa.dir === fb.dir && namesMayOverlap(fa.name, fb.name);
+  const [g, other] = fa ? [fa, b] : [fb, a];
+  if (g && !/[*?[\]{}]/.test(other)) {
+    const lit = other.replace(/\/+$/, ""), slash = lit.lastIndexOf("/");
+    if (lit.slice(0, slash + 1).replace(/\/+$/, "") === g.dir && nameMatches(g.name, lit.slice(slash + 1))) return true;
+    return g.dir === lit || g.dir.startsWith(lit + "/");
+  }
+  return pathContains(staticPrefix(a), staticPrefix(b));
+}
 // First overlapping (a, b) glob pair between two touches lists, or null.
 function touchesOverlap(A, B) {
   for (const a of A) for (const b of B) if (globsOverlap(a, b)) return [a, b];

@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, copyFileSync, lstatSync,
 import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { runDoctor, parseSourceRootsIgnore, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, asksFindings, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES, taskIntentFindings, parseIntentsRequiredFrom, INTENTS_REQUIRED_FROM_KEY, workstreamFindings, WORKSTREAM_REQUIRED, WORKSTREAM_STATUSES, workstreamDependencies } from "./flow-doctor.mjs";
+import { runDoctor, parseSourceRootsIgnore, compareVersions, duplicateIdProblems, filenameTaskId, findUncommittedTasks, parseVisionGoals, readinessFindings, blockedByFindings, isBlockedByEntry, asksFindings, intentFindings, evidenceShape, INTENT_REQUIRED, INTENT_STATUSES, taskIntentFindings, parseIntentsRequiredFrom, INTENTS_REQUIRED_FROM_KEY, workstreamFindings, WORKSTREAM_REQUIRED, WORKSTREAM_STATUSES, workstreamDependencies, globsOverlap } from "./flow-doctor.mjs";
 
 // The vision every fixture gets unless it asks for none: two live goals, one non-goal, one
 // retired goal. Written in the shape flow-doctor's line regex reads, deliberately mixing the
@@ -218,6 +218,57 @@ test("disjoint touches → no overlap warning (different trees are genuinely par
     "0002-b.md": task("P-0002", { touches: '["app/meetings/**"]' }),
   });
   const r = runDoctor({ flowDir: d });
+  assert.ok(!r.warnings.some((w) => w.includes("overlapping touches")));
+  cleanup(d);
+});
+
+// flow-0180: a wildcard in a file name no longer collapses the glob to its whole folder.
+test("globsOverlap: a file-name glob does not overlap a different file in its folder", () => {
+  assert.equal(globsOverlap(".flow/bin/status-transition*.mjs", ".flow/bin/plane-guard.mjs"), false);
+  assert.equal(globsOverlap(".flow/bin/plane-guard.mjs", ".flow/bin/status-transition*.mjs"), false);
+  assert.equal(globsOverlap("project-template/.flow/bin/status-transition*.mjs", "project-template/.flow/bin/flow-review.mjs"), false);
+});
+
+test("globsOverlap: a file-name glob overlaps a file it matches", () => {
+  assert.equal(globsOverlap(".flow/bin/status-transition*.mjs", ".flow/bin/status-transition.test.mjs"), true);
+  assert.equal(globsOverlap("changes/flow-*.md", "changes/flow-0177.md"), true);
+  assert.equal(globsOverlap("changes/flow-0177.md", "changes/flow-*.md"), true);
+});
+
+test("globsOverlap: ** and a wildcard folder keep the conservative prefix rule", () => {
+  assert.equal(globsOverlap("a/**", "a/b/c.mjs"), true);
+  assert.equal(globsOverlap("a/*/x.mjs", "a/b/x.mjs"), true);
+  assert.equal(globsOverlap("a/**", "a/b/x*.mjs"), true);
+});
+
+test("globsOverlap: segment-aware containment and identical globs", () => {
+  assert.equal(globsOverlap("app/foo", "app/foobar"), false);
+  assert.equal(globsOverlap("app/foo*.ts", "app/foo*.ts"), true);
+  assert.equal(globsOverlap(".flow/bin/status-transition*.mjs", ".flow/bin/status-transition*.mjs"), true);
+});
+
+test("globsOverlap: two file-name globs in one folder overlap only when their names can agree", () => {
+  assert.equal(globsOverlap("a/x*.mjs", "a/y*.mjs"), false);
+  assert.equal(globsOverlap("a/x*.mjs", "a/x*.md"), false);
+  assert.equal(globsOverlap("a/x*.mjs", "a/xy*.mjs"), true);
+  assert.equal(globsOverlap("a/*.mjs", "a/x*"), true);
+  assert.equal(globsOverlap("a/x*.mjs", "b/x*.mjs"), false);
+});
+
+test("globsOverlap: a literal folder still overlaps a file-name glob inside it", () => {
+  assert.equal(globsOverlap("a/b", "a/b/x*.mjs"), true);
+  assert.equal(globsOverlap("a", "a/b/x*.mjs"), true);
+  assert.equal(globsOverlap("a/c", "a/b/x*.mjs"), false);
+  assert.equal(globsOverlap("a/b/x*.mjs", "a/b/sub/x1.mjs"), false);
+});
+
+test("two in_progress tasks sharing only .flow/bin/ with names that cannot collide → no FAIL", () => {
+  const d = fixture({
+    "0001-a.md": task("P-0001", { status: "in_progress", owner: "s1", started: "2026-06-05", touches: '[".flow/bin/plane-guard.mjs"]' }),
+    "0002-b.md": task("P-0002", { status: "in_progress", owner: "s2", started: "2026-06-05", touches: '[".flow/bin/status-transition*.mjs"]' }),
+  });
+  const r = runDoctor({ flowDir: d });
+  assert.ok(!r.problems.some((p) => p.includes("overlapping touches")), r.problems.join("\n"));
   assert.ok(!r.warnings.some((w) => w.includes("overlapping touches")));
   cleanup(d);
 });
