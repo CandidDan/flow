@@ -13,7 +13,8 @@ The hourly `flow-queue-runner` caller billed Actions minutes to wait on a model;
 flow-sync deletes it downstream (flow-0174). flow-unblock releases blocked tasks and no longer
 dispatches anything (flow-0173). The protocol now runs inside a cloud routine, opening and handing
 off the PR through REST where GraphQL is blocked (flow-0172), and `docs/flow-routines.md` is the
-setup (flow-0175). Nothing starts a worker routine automatically yet; that is the next task.
+setup (flow-0175). flow-dispatch starts the routine for the next ready task's tier when a task
+becomes ready, with a daily sweep as the fallback (flow-0182).
 Also: intent-only PRs get a light review (flow-0178), retirement PRs are reviewed in full
 (flow-0177), the board is retired (flow-0164), a task keeps its one PR of record (flow-0162), and
 status sync no longer moves `blocked` or `cancelled` tasks it should leave alone (flow-0169,
@@ -21,8 +22,10 @@ flow-0176), flow-doctor reports `touches` overlap only where two globs can match
 file (flow-0180), and the guards see both paths of a rename (flow-0181). Every template caller
 pins `@v4` and both VERSION stamps read 4.0.0 (flow-0179).
 **Caller action:** repin every caller from `@v3` to `@v4` (`docs/repinning-a-consuming-repo.md`),
-then run flow-sync. The sync deletes `.github/workflows/flow-queue-runner.yml` and drops
-`actions: write` from `flow-unblock.yml`.
+then run flow-sync. The sync deletes `.github/workflows/flow-queue-runner.yml`, drops
+`actions: write` from `flow-unblock.yml` and adds `flow-dispatch.yml`. To start workers
+automatically, set `FLOW_ROUTINE_<TIER>_TOKEN` (secret) and `FLOW_ROUTINE_<TIER>_ID` (variable)
+for each tier (`docs/flow-routines.md`); without them dispatch logs a skip and exits 0.
 
 - **A kickback card no longer recommends merging a round whose change was thrown away**
   (`project-template/.flow/bin/flow-kickback.mjs`, `.github/workflows/_flow-kickback.yml`,
@@ -259,6 +262,10 @@ then run flow-sync. The sync deletes `.github/workflows/flow-queue-runner.yml` a
   `:(exclude)` pathspecs are applied before git pairs renames, so a move from `src/` into `.flow/`
   already built. The only visible change is that a rename between Flow paths counts as two files
   in the skip line.
+
+- **flow-dispatch fires the worker routine for the next `ready` task's model tier** (`.github/workflows/_flow-dispatch.yml`, `project-template/.github/workflows/flow-dispatch.yml`, `project-template/.flow/bin/flow-dispatch.mjs`, `project-template/.flow/config.yml`, flow-0182). **Caller action:** none to stay green — `flow-sync` adds the caller, and a repo with no routine wired logs `decision=skipped reason=no-routine-for-<tier>` and exits 0. To start workers automatically, for each tier your tasks use, create the routine's API trigger and set the repo secret `FLOW_ROUTINE_<TIER>_TOKEN` and the repo variable `FLOW_ROUTINE_<TIER>_ID` (`docs/flow-routines.md`, *Wiring the trigger*). Optionally set `dispatch.max_in_progress` in `.flow/config.yml` (default 3).
+
+  It runs on a push to `.flow/tasks/**` on `main`, after `flow-unblock` or `flow-recover` completes (their `GITHUB_TOKEN` pushes start no workflow), daily as a sweep, and on demand. Each run fires at most one task, re-reads it from `main` and fires only if it is still `ready`, and prints exactly one `flow-dispatch: decision=fired|skipped|failed` line. A non-2xx from the fire endpoint fails the job naming the status and the tier; the token is never printed.
 
 ## 3.5.0 — 2026-10-26
 
