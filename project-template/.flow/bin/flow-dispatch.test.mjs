@@ -6,8 +6,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, cpSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
@@ -16,6 +16,10 @@ import {
 } from "./flow-dispatch.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
+// The template's own config.yml sits next to this file's bin/ only in canonical. flow-sync copies
+// this test into a consuming repo's .flow/bin/ but never that repo's config, so tests that read it
+// are canonical-only (flow-0183).
+const inCanonical = resolve(BIN, "..", "..", "..", "project-template", ".flow", "bin") === resolve(BIN);
 const TOKEN = "sk-ant-rt-SECRET-do-not-print-0123456789";
 
 const task = (id, { status = "ready", priority = 1, touches = [`src/${id}/**`], model = "", effort = "" } = {}) =>
@@ -322,11 +326,35 @@ test("readMaxInProgress: default, set, quoted, commented, and confined to the di
   }
 });
 
-test("the template's config declares the dispatch cap at the default", () => {
+test("the template's config declares the dispatch cap at the default",
+  { skip: inCanonical ? false : "reads the template's config.yml, which only exists beside canonical's project-template/.flow/bin" }, () => {
   const text = readFileSync(join(BIN, "..", "config.yml"), "utf8");
   assert.equal(readMaxInProgress(text), 3);
   assert.match(text, /^dispatch:\n {2}max_in_progress: 3$/m);
 });
+
+test("readMaxInProgress: a config with no dispatch block yields the default of 3", () => {
+  assert.equal(readMaxInProgress("project:\n  name: x\ncoverage_min: 80\n"), DEFAULT_MAX_IN_PROGRESS);
+  assert.equal(DEFAULT_MAX_IN_PROGRESS, 3);
+});
+
+test("downstream layout: this file run beside a config.yml with no dispatch block has 0 failures and skips the template-config test",
+  { skip: inCanonical ? false : "canonical-only: it builds the downstream layout itself" }, (t) => {
+    const root = mkdtempSync(join(tmpdir(), "flow-dispatch-downstream-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    mkdirSync(join(root, ".flow", "tasks"), { recursive: true });
+    writeFileSync(join(root, ".flow", "config.yml"), "project:\n  name: downstream\ncoverage_min: 80\n");
+    cpSync(BIN, join(root, ".flow", "bin"), { recursive: true });
+    const env = { ...process.env, NODE_V8_COVERAGE: "" };
+    delete env.NODE_TEST_CONTEXT; // otherwise the child believes it is nested and refuses to run
+    const r = spawnSync(process.execPath, ["--test", "--test-reporter=tap", join(root, ".flow", "bin", "flow-dispatch.test.mjs")],
+      { cwd: root, encoding: "utf8", env });
+    const out = r.stdout + r.stderr;
+    assert.match(out, /^# fail 0$/m, out);
+    assert.equal(r.status, 0, out);
+    assert.match(out, /^# skipped 2$/m, "the template-config test and this test are the two skips downstream");
+    assert.match(out, /^\s*ok \d+ - the template's config declares the dispatch cap at the default # SKIP /m, out);
+  });
 
 test("routineFor / routineEnvNames / planDispatch / decisionLine", () => {
   assert.deepEqual(routineEnvNames("fable"), { id: "FLOW_ROUTINE_FABLE_ID", token: "FLOW_ROUTINE_FABLE_TOKEN" });
