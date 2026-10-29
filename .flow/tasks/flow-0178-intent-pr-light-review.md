@@ -1,7 +1,7 @@
 ---
 id: "flow-0178"
 title: "An intent-only PR gets an intent-shape gate and one low-effort advisory intent reviewer instead of the full gate and the code reviewers; security is unchanged"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-session-angry-matsumoto-202d23"
