@@ -1,14 +1,14 @@
 ---
 id: "flow-0176"
 title: "flow-status never moves a cancelled task: a PR closing unmerged leaves it cancelled and does not escalate its model"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "worker-flow-0176"
 created: "2026-10-28"
 started: "2026-10-28T23:50:06Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0176-status-never-moves-cancelled"
+pr: "https://github.com/CandidDan/flow/pull/259"
 issue: ""
 blocked_reason: ""
 cancelled_reason: ""
