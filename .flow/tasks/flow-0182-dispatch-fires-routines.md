@@ -30,6 +30,7 @@ touches:
   - "docs/flow-routines.md"
   - "docs/flow-reusable-workflows.md"
   - "changes/flow-0182.md"
+  - "docs/adr/0005-split-authoring-from-release.md"
 labels: [workflows, routines, worker]
 model: "opus"
 effort: "high"
