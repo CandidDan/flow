@@ -488,7 +488,7 @@ test("runPlan writes the changed files, the bounded diff and the task — the wh
     });
 
     assert.deepEqual(calls, [
-      "diff --name-only origin/main...HEAD",
+      "diff --name-only --no-renames origin/main...HEAD",
       "diff origin/main...HEAD",
     ], "the context is the PR diff and nothing else — no whole-repo read");
 
@@ -873,7 +873,7 @@ test("runPlan materialises task.md and publishes the id — from the title, on a
     assert.equal(plan.task.id, "flow-0068");
     assert.equal(plan.task.found, true);
     assert.match(readFileSync(join(dir, "out", "task.md"), "utf8"), /body of flow-0068-a-slug\.md/);
-    assert.deepEqual(calls, ["diff --name-only origin/main...HEAD", "diff origin/main...HEAD"],
+    assert.deepEqual(calls, ["diff --name-only --no-renames origin/main...HEAD", "diff origin/main...HEAD"],
       "resolving the task must not add a git call — the store is already on disk");
 
     // And the no-task direction writes the file too, so a reviewer never reads an absent file as
@@ -1798,7 +1798,7 @@ function fakeGit({ files = [], diff = "", tree = {}, trailers = null, canon = {}
   return (args) => {
     const cmd = args.join(" ");
     calls.push(cmd);
-    if (cmd === "diff --name-only origin/main...HEAD") return files.join("\n");
+    if (cmd === "diff --name-only --no-renames origin/main...HEAD") return files.join("\n");
     if (cmd === "diff origin/main...HEAD") return diff;
     if (cmd === TRAILER_LOG) {
       if (trailers === null) throw new Error("fatal: no trailer log expected in this fixture");

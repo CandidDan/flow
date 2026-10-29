@@ -1479,8 +1479,11 @@ export function runReviewCli(argv, {
     // on `intent_pr=true`. A git failure throws, which fails the step: an unclassified PR must
     // never read as an intent PR.
     if (cmd === "classify") {
+      // `--no-renames`: rename detection lists a `git mv src/x.mjs .flow/intents/x.md` as the
+      // destination ONLY, which reads as intent-only. Off, a rename is its source AND its
+      // destination, and the source keeps the PR on the full gate. Same flag in `runPlan`.
       const run = gitFor ?? ((args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 1024 * 1024 * 64 }));
-      const changedFiles = run(["diff", "--name-only", `${env.BASE_REF || "origin/main"}...HEAD`])
+      const changedFiles = run(["diff", "--name-only", "--no-renames", `${env.BASE_REF || "origin/main"}...HEAD`])
         .split("\n").map((s) => s.trim()).filter(Boolean);
       const intent = classifyIntentPr({ changedFiles });
       emit(env.GITHUB_OUTPUT, `intent_pr=${intent.classified}`);
@@ -1526,7 +1529,10 @@ export function runPlan({
   // from base for the same reason `security_paths` is: a PR must not be able to raise the limit
   // on its own diff, any more than it can delete the glob that would have reviewed it.
   const limit = resolveMaxDiffBytes({ env, configured: cfg.maxDiffBytes });
-  const changedFiles = git(["diff", "--name-only", `${baseRef}...HEAD`])
+  // `--no-renames` (flow-0178): a renamed file is listed at its old path AS WELL as its new one,
+  // so a move into `.flow/intents/` cannot hide the code it moved from the classification or
+  // from the security triggers. See the `classify` command for the case.
+  const changedFiles = git(["diff", "--name-only", "--no-renames", `${baseRef}...HEAD`])
     .split("\n").map((s) => s.trim()).filter(Boolean);
   const security = securityDecision({ changedFiles, securityPaths: cfg.securityPaths, bootstrap });
   const diff = boundDiff(git(["diff", `${baseRef}...HEAD`]), { maxBytes: limit.bytes });

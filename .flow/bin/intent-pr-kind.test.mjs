@@ -142,7 +142,7 @@ test("flow-0178: the classify CLI publishes intent_pr and fails closed when git 
     assert.equal(runReviewCli(["classify"], {
       env: { GITHUB_OUTPUT: out, BASE_REF: "origin/main" },
       git: (args) => {
-        assert.deepEqual(args, ["diff", "--name-only", "origin/main...HEAD"]);
+        assert.deepEqual(args, ["diff", "--name-only", "--no-renames", "origin/main...HEAD"]);
         return ".flow/intents/a.md\n.flow/intents/b.md\n";
       },
     }), 0);
@@ -200,4 +200,54 @@ test("flow-0178: the plan summary names the reviewers and their turn budgets for
   assert.match(planSummary(plan), /- reviewers: \*\*intent PR\*\*/);
   assert.match(planSummary({ ...plan, intentPr: undefined }), /- reviewers: qa on/,
     "an older plan object with no intentPr renders as the full review");
+});
+
+// ── a RENAME into .flow/intents/ is not an intent PR (security finding on PR #260) ──────────
+// With git's default rename detection, `diff --name-only` lists a moved file at its destination
+// only, so `git mv src/x.mjs .flow/intents/x.md` read as intent-only and skipped the gate and the
+// code reviewers. Run against a REAL repository, because the bug lived in git's output, not in the
+// classifier: a fake `git` that returns both paths would pass with or without the fix.
+
+test("flow-0178 (regression): renaming src/x.mjs to .flow/intents/x.md classifies as decision=full", async (t) => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdirSync } = await import("node:fs");
+  const repo = mkdtempSync(join(tmpdir(), "flow-intent-rename-"));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args],
+    { cwd: repo, encoding: "utf8" });
+  git("init", "-q", "-b", "main");
+  mkdirSync(join(repo, "src"));
+  mkdirSync(join(repo, ".flow", "intents"), { recursive: true });
+  writeFileSync(join(repo, "src", "x.mjs"), "export const answer = 42;\n".repeat(20));
+  git("add", "-A");
+  git("commit", "-q", "-m", "base");
+  git("checkout", "-q", "-b", "feature");
+  git("mv", "src/x.mjs", ".flow/intents/x.md");
+  git("commit", "-q", "-m", "move code into intents");
+
+  // The precondition, so this test cannot pass for the wrong reason: git's default really does
+  // hide the source path.
+  assert.equal(git("diff", "--name-only", "main...HEAD").trim(), ".flow/intents/x.md");
+
+  const out = join(repo, "gh");
+  const logs = [];
+  const log = t.mock.method(console, "log", (line) => logs.push(line));
+  try {
+    assert.equal(runReviewCli(["classify"], {
+      env: { GITHUB_OUTPUT: out, BASE_REF: "main", REVIEW_REPO_DIR: repo },
+    }), 0);
+  } finally { log.mock.restore(); }
+  assert.equal(readFileSync(out, "utf8"), "intent_pr=false\n");
+  assert.deepEqual(logs, ["pr-kind: decision=full files=2 outside=1"]);
+
+  // And the review plan, which reaches git the same way, agrees.
+  const cfg = join(repo, "config.yml");
+  writeFileSync(cfg, CONFIG);
+  const plan = runPlan({
+    configPath: cfg, outDir: join(repo, "out"), baseRef: "main", headRef: "claude/x", prTitle: "t",
+    tasksDir: join(repo, "tasks"), ls: () => [],
+    git: (args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }),
+  });
+  assert.equal(plan.intentPr, false);
+  assert.deepEqual([...plan.changedFiles].sort(), [".flow/intents/x.md", "src/x.mjs"]);
 });
