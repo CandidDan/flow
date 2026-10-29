@@ -1,7 +1,7 @@
 ---
 id: "flow-0179"
 title: "Flow goes to v4: template callers and flow-sync's fallback pin @v4, and VERSION moves to 4.0.0, because flow-0174 deleted the queue-runner reusable"
-status: "ready"
+status: "blocked"
 priority: 1
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: ""
-blocked_by: []
+blocked_reason: "Waits for release PR #261 to put the `## 4.0.0` changelog section on main; release-stamp.test.mjs needs it before VERSION can read 4.0.0."
+blocked_by: ["https://github.com/CandidDan/flow/pull/261"]
 serves: ["maintenance"]
 intent: "model-work-off-github-actions"
 touches:
