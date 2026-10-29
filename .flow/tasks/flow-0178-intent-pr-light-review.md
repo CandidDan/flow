@@ -23,6 +23,7 @@ touches:
   - ".flow/bin/flow-review-workflow.test.mjs"
   - ".flow/bin/intent-pr-kind.test.mjs"
   - ".flow/bin/gate-cost.test.mjs"
+  - ".flow/bin/model-ids.test.mjs"
   - "docs/flow-reusable-workflows.md"
   - "changes/flow-0178.md"
 labels: [workflows, review, intents]
