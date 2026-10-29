@@ -232,15 +232,16 @@ test("AC5: every Claude step is followed by a report step reading that step's ex
       assert.ok(r.always, `${f}:${r.line} — the report must run with always(), so a failed run still says what ran`);
     });
   }
-  // Ten until flow-0174 retired the worker's Actions host; it runs as a routine now.
-  assert.equal(total, 9, "the nine Claude steps: qa, code-review, security, guide, compass, triage, " +
-    "and kickback's fixer, round-card and card");
+  // Ten until flow-0174 retired the worker's Actions host; it runs as a routine now. Ten again
+  // since flow-0178 added the advisory intent reviewer.
+  assert.equal(total, 10, "the ten Claude steps: qa, code-review, security, guide, intent-review, " +
+    "compass, triage, and kickback's fixer, round-card and card");
 });
 
 test("AC5: the report script is byte-identical in every copy", () => {
   const scripts = reportedFiles().flatMap((f) => reportScripts(readFileSync(join(WORKFLOWS, f), "utf8")));
-  assert.equal(scripts.length, 9);
-  for (const s of scripts) assert.equal(s, scripts[0], "nine copies of one script must not drift apart");
+  assert.equal(scripts.length, 10);
+  for (const s of scripts) assert.equal(s, scripts[0], "ten copies of one script must not drift apart");
 });
 
 // Runs the extracted script exactly as the step does (`node -`, script on stdin).
