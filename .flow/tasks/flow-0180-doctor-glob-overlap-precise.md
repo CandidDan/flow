@@ -1,7 +1,7 @@
 ---
 id: "flow-0180"
 title: "flow-doctor reports touches overlap only where two globs can match the same file, so a wildcard in a file name no longer collides with every file in its folder"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude-code-clever-wiles-97b799"
