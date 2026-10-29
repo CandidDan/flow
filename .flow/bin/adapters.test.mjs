@@ -36,6 +36,7 @@ import { canonicalFlowDir as pickFlowDir, pickTask, readTasks } from "./pick-tas
 import { canonicalFlowDir as recoverFlowDir, readTasks as recoverReadTasks } from "./flow-recover.mjs";
 import { canonicalFlowDir as openPrFlowDir } from "./flow-open-pr.mjs";
 import { canonicalFlowDir as unblockFlowDir } from "./flow-unblock.mjs";
+import { canonicalFlowDir as dispatchFlowDir } from "./flow-dispatch.mjs";
 import { parseTaskId } from "./parse-task-id.mjs";
 
 const BIN = dirname(fileURLToPath(import.meta.url));
@@ -55,7 +56,8 @@ test("every adapter resolves CANONICAL's store, not the template's fixture store
                              ["pick-task", pickFlowDir()],
                              ["flow-recover", recoverFlowDir()],
                              ["flow-open-pr", openPrFlowDir()],
-                             ["flow-unblock", unblockFlowDir()]]) {
+                             ["flow-unblock", unblockFlowDir()],
+                             ["flow-dispatch", dispatchFlowDir()]]) {
     assert.equal(dir, FLOW, `${name} must resolve canonical's .flow/`);
     assert.notEqual(dir, TEMPLATE_FLOW,
       `${name} must NOT resolve project-template/.flow — that is the fixture store, and ` +
@@ -447,7 +449,7 @@ test("checkWorkflows parses every workflow in canonical, including the new calle
 const WORKFLOW_INVOKED_ADAPTERS = [
   "flow-doctor.mjs", "apply-board-edits.mjs", "touches-guard.mjs", "parse-task-id.mjs",
   "flow-review.mjs", "pick-task.mjs", "flow-recover.mjs", "flow-open-pr.mjs",
-  "source-roots.mjs", "flow-unblock.mjs",
+  "source-roots.mjs", "flow-unblock.mjs", "flow-dispatch.mjs",
 ];
 
 test("every .flow/bin/<helper>.mjs a workflow canonical CALLS invokes by path exists here", () => {
@@ -1098,4 +1100,23 @@ test("flow-0157: every named export of the template's task-model.mjs is re-expor
   for (const n of names) {
     assert.equal(adapter[n], template[n], `${n} must BE the template's export, not a reimplementation`);
   }
+});
+
+// ── flow-0182: the dispatch adapter re-exports the template's WHOLE surface ──
+// Same rule as task-model's above: derived from the template at run time, never written by hand,
+// and each name must BE the template's export — the adapter adds only canonical's store.
+
+test("flow-0182: every named export of the template's flow-dispatch.mjs is re-exported by the adapter", async () => {
+  const template = await import(join(TEMPLATE_FLOW, "bin", "flow-dispatch.mjs"));
+  const adapter = await import(join(BIN, "flow-dispatch.mjs"));
+  const names = Object.keys(template);
+  assert.ok(names.includes("dispatch") && names.includes("runDispatchCli"),
+    "the template must still export its dispatcher, or this test is vacuous");
+  const missing = names.filter((n) => !(n in adapter));
+  assert.deepEqual(missing, [], `the adapter does not re-export: ${missing.join(", ")}`);
+  for (const n of names) {
+    assert.equal(adapter[n], template[n], `${n} must BE the template's export, not a reimplementation`);
+  }
+  assert.doesNotMatch(readFileSync(join(BIN, "flow-dispatch.mjs"), "utf8").replace(/^\s*\/\/.*$/gm, ""),
+    /fetch\(|FLOW_ROUTINE_/, "the adapter is a CLI shell; firing logic belongs in the template");
 });

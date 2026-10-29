@@ -198,6 +198,14 @@ review:
     - "package.json"                    # dependency changes, whatever the lockfile stack
     - "package-lock.json"
 
+# The routine dispatcher (flow-0182, `flow-dispatch.yml`). It fires the worker routine for the
+# next `ready` task, one task a run, and stops while this many tasks are already `in_progress`.
+# Each claim it causes is a push that starts the next run, so this number is how many workers run
+# at once. A value that is not a positive whole number fails the run rather than falling back.
+# Omitted, it is 3. Routines are set up per docs/flow-routines.md in canonical.
+dispatch:
+  max_in_progress: 3
+
 # The intent rule's start date (ADR-0007 slice 2). Uncomment when this repo starts writing intents
 # (`.flow/intents/`, via the intent-writer skill), set to that day. From then on, a `ready` task
 # created on or after the date and serving anything other than `maintenance` should name the
