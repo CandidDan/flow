@@ -6,6 +6,15 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 4.0.1 — 2026-10-29
+
+**PATCH: the 4.0.0 sync PR no longer fails its own gate.** flow-0182's dispatch test asserted on
+`.flow/config.yml`, which downstream is the repo's own config, so every repo syncing 4.0.0 went red
+(found by the canary, CandidDan/progress#137). It now runs only in canonical (flow-0183).
+**Caller action:** none beyond 4.0.0's.
+
+- **flow-dispatch's config-cap test now runs only in canonical, so it no longer fails a consuming repo's gate** (`project-template/.flow/bin/flow-dispatch.test.mjs`, flow-0183). **No caller action.** The 4.0.0 test read `.flow/config.yml` beside `bin/`, which in a consuming repo is the repo's own config with no `dispatch:` block, so every `flow-sync` PR for 4.0.0 failed `flow-gates`. Downstream the test is skipped with a reason. Canonical now also proves, by running the file in a downstream-shaped layout, that it reports 0 failures there. No helper, workflow or config changed.
+
 ## 4.0.0 — 2026-10-29
 
 **MAJOR: queue-runner is retired, and the worker loop can run as a Claude Code cloud routine.**
