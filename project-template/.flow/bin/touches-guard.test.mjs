@@ -323,3 +323,41 @@ test("without FLOW_CI the guard keeps its old behaviour — a repo on an older w
   assert.match(r.out, /docs\/drift\.md/);
   rmSync(root, { recursive: true, force: true });
 });
+
+// ── flow-0181: a rename lists both paths ────────────────────────────────────────────────
+// With git's default rename detection, `diff --name-only` lists a moved file at its destination
+// only, so `git mv src/x.mjs other/x.mjs` under `touches: ["other/**"]` hid an undeclared deletion
+// from `src/`. Run against a REAL repository, because the bug lived in git's output, not in
+// `checkTouches`: a fake diff that returns both paths would pass with or without the fix.
+test("flow-0181: a file renamed out of an undeclared path fails the guard and is named", () => {
+  const root = mkdtempSync(join(tmpdir(), "flow-tg-rename-"));
+  try {
+    const bin = join(root, ".flow", "bin");
+    mkdirSync(join(root, ".flow", "tasks"), { recursive: true });
+    mkdirSync(bin, { recursive: true });
+    for (const f of HELPER_FILES) copyFileSync(join(import.meta.dirname, f), join(bin, f));
+    writeFileSync(join(root, ".flow", "tasks", "0181-x.md"),
+      '---\nid: "CAN-181"\ntouches: ["other/**"]\n---\nbody\n');
+    const git = (...a) => execFileSync("git", a, { cwd: root, encoding: "utf8", stdio: "pipe" });
+    git("init", "-q", "-b", "main");
+    git("config", "user.email", "t@t.t");
+    git("config", "user.name", "t");
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src", "x.mjs"), "export const answer = 42;\n".repeat(20));
+    git("add", "-A"); git("commit", "-qm", "base");
+    mkdirSync(join(root, "other"));
+    git("mv", "src/x.mjs", "other/x.mjs");
+    git("commit", "-qm", "move");
+
+    // The precondition, so this test cannot pass for the wrong reason: git's default really does
+    // hide the source path.
+    assert.equal(git("diff", "--name-only", "HEAD~1...HEAD").trim(), "other/x.mjs");
+
+    const r = runGuard(root, { HEAD_REF: "flow/CAN-181-x", PR_TITLE: "" });
+    assert.equal(r.code, 1, `a rename out of an undeclared path must fail the gate:\n${r.out}`);
+    assert.match(r.out, /outside touches: src\/x\.mjs/);
+    assert.doesNotMatch(r.out, /outside touches: other\/x\.mjs/, "the destination is in scope");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

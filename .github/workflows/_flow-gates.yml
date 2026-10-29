@@ -66,6 +66,8 @@ jobs:
       # bad `base`, an empty diff, a shell that died before the `if` — and exit 0, at which
       # point "the guard found nothing wrong" and "the guard never ran" were indistinguishable.
       # Branch names reach the script through `env:`, never through `${{ }}` interpolation.
+      # `--no-renames` (flow-0181): with rename detection on, a task file moved OUT of .flow/tasks/
+      # is listed only at its new path, so the store edit passed. Off, both paths are listed.
       - name: Guard — store is main-only
         if: github.event_name == 'pull_request'
         env:
@@ -73,7 +75,7 @@ jobs:
           DECISION_LOG: ${{ runner.temp }}/store-guard.log
         run: |
           set -euo pipefail
-          changed="$(git diff --name-only "origin/$BASE_BRANCH"...HEAD)"
+          changed="$(git diff --name-only --no-renames "origin/$BASE_BRANCH"...HEAD)"
           offenders="$(printf '%s\n' "$changed" | grep -E '^\.flow/tasks/' || true)"
           n="$(printf '%s' "$offenders" | grep -c . || true)"
           if [ "$n" -gt 0 ]; then reason=store-modified; else reason=clean; fi
