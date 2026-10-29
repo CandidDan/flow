@@ -2450,3 +2450,17 @@ test("flow-0128: changes/flow-0128.md exists and states that no caller action is
     assert.match(text, /caller action/i,
       "every fragment says what an adopting repo must do — here, nothing");
   });
+
+// ── flow-0178: the intent-only PR ─────────────────────────────────────────────────────────
+// Canonical's `.flow/bin/intent-pr-kind.test.mjs` carries the full matrix and the workflow half;
+// this is the copy every adopting repo runs, so the rule that skips its gate is tested there too.
+
+test("flow-0178: classifyIntentPr accepts intent files only, fail-closed on everything else", async () => {
+  const { classifyIntentPr, INTENT_PR_SENTINEL } = await import("./flow-review.mjs");
+  const c = classifyIntentPr({ changedFiles: [".flow/intents/a.md", ".flow/intents/b.md"] });
+  assert.equal(c.classified, true);
+  assert.equal(c.sentinel, INTENT_PR_SENTINEL);
+  for (const files of [[], [".flow/intents/_TEMPLATE.md"], [".flow/intents/a.md", "src/a.mjs"], [".flow/intents/x/a.md"]]) {
+    assert.equal(classifyIntentPr({ changedFiles: files }).classified, false, JSON.stringify(files));
+  }
+});

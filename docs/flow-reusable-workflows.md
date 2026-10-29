@@ -274,6 +274,26 @@ pinned by a SHA that `plan` resolves on its default-branch checkout, in a job no
 (flow-0079's rule: everything that decides comes from base). Fork PRs are skipped outright, matching the fork fence in
 `_flow-review.yml`.
 
+### What an intent-only PR runs (flow-0178)
+
+A PR is **intent-only** when it changes at least one file and every changed path is
+`.flow/intents/<slug>.md`. A `_`-prefixed file such as `.flow/intents/_TEMPLATE.md` does not count:
+that file is the intent format, and an edit to it gets the full gate and full review. A PR that
+mixes an intent with any other file is not intent-only. `classifyIntentPr` in `flow-review.mjs`
+decides this from the paths alone, and both workflows run it from a copy the PR cannot edit
+(canonical's for the gate, the base branch's for the review).
+
+| Check | Any other PR | Intent-only PR |
+|---|---|---|
+| `gate` | install, build, lint, test, coverage | `flow-doctor` only (frontmatter, required fields, duplicate ids). Same check name |
+| `source-roots-plan` | touches-guard, flow-tooling tests, flow-doctor, plan | unchanged; the planned count is forced to `0` |
+| `source-root` | one job per extra source root | skipped, as in any repo with none |
+| `qa`, `code-review` | model review at `--max-turns 60` | no model call; PASS with `intent PR: intent files only; read by the advisory intent reviewer` |
+| `security` | per `review.security_paths` and the floor | **unchanged**; the `.flow/**` floor always triggers it |
+| `intent-review` | not run | one **advisory** comment at `--max-turns 15` on `review.model`: checks the intent against `_TEMPLATE.md`. No verdict, no check status, never approves |
+
+The review run summary's `reviewers:` line names which of these ran and at what turn budget.
+
 ### Which copy of a helper CI runs — and why there are two (flow-0094)
 
 A repo adopts the two halves of Flow on **different clocks**, and that used to be a live bug:
