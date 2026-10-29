@@ -29,7 +29,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: CandidDan/flow/.github/workflows/_flow-recover.yml@v3
+    uses: CandidDan/flow/.github/workflows/_flow-recover.yml@v4
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
       threshold_minutes: ${{ inputs.threshold_minutes }}

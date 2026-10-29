@@ -78,7 +78,7 @@ Three things follow:
   longer carries one.
 - **Two callers pinned at different refs fail the sync**, with an error naming each file and its ref.
   That is the state a half-finished repin leaves behind, and it is now loud instead of silent.
-- **No flow-sync caller at all** falls back to the current major — `v3` — with a warning saying
+- **No flow-sync caller at all** falls back to the current major — `v4` — with a warning saying
   so. The fallback is the only hard-coded ref left in `_flow-sync.yml`, and `caller-pins.test.mjs`
   derives the expected value from root `VERSION`, so cutting a major moves it there and nowhere else.
 
@@ -111,6 +111,12 @@ it moves the task up one tier. No caller change is needed for that.
 
 Run the sync, in the same two-step order as below: repin the `flow-sync` caller first, then
 dispatch it.
+
+The order matters because `canonical_ref` picks the files the sync copies, not the reusable that
+copies them: the `@v3` pin in your caller still runs the v3 reusable. That reusable has no
+retired-paths list for queue-runner and does not know the v4 skills tree, so a sync dispatched
+from the old pin copies v4 files and leaves `flow-queue-runner.yml` in place, failing every tick.
+If you already dispatched from the old pin, merge that PR, repin, and run the sync a second time.
 
 ```bash
 sed -i "s|\(_flow-sync\.yml\)@v3$|\1@v4|" .github/workflows/flow-sync.yml

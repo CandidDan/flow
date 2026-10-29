@@ -1057,8 +1057,9 @@ test("flow-0173: the reusable has no dispatch step, and the release step dispatc
 });
 
 test("both flow-unblock callers: three triggers, exactly contents+actions write + pull-requests read, no secrets", { skip }, () => {
+  const major = `v${readFileSync(join(REPO, "VERSION"), "utf8").trim().split(".")[0]}`;
   for (const [file, ref] of [[join(WORKFLOWS, "flow-unblock.yml"), "main"],
-                             [join(REPO, "project-template", ".github", "workflows", "flow-unblock.yml"), "v3"]]) {
+                             [join(REPO, "project-template", ".github", "workflows", "flow-unblock.yml"), major]]) {
     const wf = yamlMod.parse(readFileSync(file, "utf8"));
     assert.deepEqual(wf.on.workflow_run, { workflows: ["flow-done"], types: ["completed"] }, file);
     assert.ok(Array.isArray(wf.on.schedule) && wf.on.schedule.length === 1 && wf.on.schedule[0].cron, file);
