@@ -1,14 +1,14 @@
 ---
 id: "flow-0179"
 title: "Flow goes to v4: template callers and flow-sync's fallback pin @v4, and VERSION moves to 4.0.0, because flow-0174 deleted the queue-runner reusable"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "flow-0179-worker"
 created: "2026-10-29"
 started: "2026-10-29T04:28:00Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0179-go-to-v4"
+pr: "https://github.com/CandidDan/flow/pull/264"
 issue: ""
 blocked_reason: ""
 blocked_by: []
