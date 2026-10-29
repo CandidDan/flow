@@ -1,0 +1,101 @@
+name: _flow-dispatch (reusable)
+
+# Reusable form of the routine dispatcher (flow-0182). Repos call it from a thin caller that owns
+# the triggers — a push to `.flow/tasks/**` on main, `workflow_run` of flow-unblock and
+# flow-recover, a daily `schedule` (the sweep) and `workflow_dispatch`; this file is
+# trigger-agnostic. See docs/flow-reusable-workflows.md and docs/flow-routines.md.
+#
+# A Flow worker runs as a Claude Code cloud routine: one routine per model tier per repo, started by
+# POSTing the task id to that routine's API trigger. This job picks the next `ready` task, resolves
+# its tier, and fires that tier's routine — at most one task per run. The claim the worker pushes
+# is itself a push to `.flow/tasks/`, which starts the next run; `dispatch.max_in_progress` in
+# `.flow/config.yml` (default 3) is what ends the chain. All the logic is in
+# `.flow/bin/flow-dispatch.mjs`, which prints exactly one decision line: fired, skipped (with a
+# reason) or failed.
+#
+# No model runs here. The job spends seconds of Actions time, then the routine runs on the plan's
+# usage, not on Actions minutes.
+#
+# A repo with no routine for the picked task's tier gets `decision=skipped
+# reason=no-routine-for-<tier>` and a green run. A non-2xx answer from the fire endpoint fails the
+# job, naming the status and the tier.
+#
+# Credentials. The four routine tokens arrive as named secrets and reach the helper only through
+# the step's `env:` — never interpolated into `run:`, where they would be part of the script text.
+# The trigger ids are not secret and arrive as inputs (the caller reads them from repo variables).
+# GITHUB_TOKEN needs `contents: read` only: the checkout, and the `git fetch` that re-reads the task
+# from main just before firing.
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: "runs-on label for every job. Callers pass vars.FLOW_RUNNER; see docs/flow-reusable-workflows.md before choosing a non-GitHub runner."
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      haiku_routine_id:
+        description: "API trigger id of the haiku-tier worker routine (vars.FLOW_ROUTINE_HAIKU_ID). Empty: none."
+        required: false
+        type: string
+        default: ""
+      sonnet_routine_id:
+        description: "API trigger id of the sonnet-tier worker routine (vars.FLOW_ROUTINE_SONNET_ID). Empty: none."
+        required: false
+        type: string
+        default: ""
+      opus_routine_id:
+        description: "API trigger id of the opus-tier worker routine (vars.FLOW_ROUTINE_OPUS_ID). Empty: none."
+        required: false
+        type: string
+        default: ""
+      fable_routine_id:
+        description: "API trigger id of the fable-tier worker routine (vars.FLOW_ROUTINE_FABLE_ID). Empty: none."
+        required: false
+        type: string
+        default: ""
+    secrets:
+      FLOW_ROUTINE_HAIKU_TOKEN:
+        required: false
+      FLOW_ROUTINE_SONNET_TOKEN:
+        required: false
+      FLOW_ROUTINE_OPUS_TOKEN:
+        required: false
+      FLOW_ROUTINE_FABLE_TOKEN:
+        required: false
+
+permissions:
+  contents: read           # the checkout, and the re-read of the task from main
+
+jobs:
+  dispatch:
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+
+      # check-latest (flow-0166): a major-line range alone takes the runner image's cached patch, which
+      # trailed Node's 2026-10-21 security release by days (CVE-2026-111497). Resolve the latest patch.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          check-latest: true
+          node-version: 22
+
+      - name: Fire the worker routine for the next ready task
+        env:
+          FLOW_ROUTINE_HAIKU_ID: ${{ inputs.haiku_routine_id }}
+          FLOW_ROUTINE_HAIKU_TOKEN: ${{ secrets.FLOW_ROUTINE_HAIKU_TOKEN }}
+          FLOW_ROUTINE_SONNET_ID: ${{ inputs.sonnet_routine_id }}
+          FLOW_ROUTINE_SONNET_TOKEN: ${{ secrets.FLOW_ROUTINE_SONNET_TOKEN }}
+          FLOW_ROUTINE_OPUS_ID: ${{ inputs.opus_routine_id }}
+          FLOW_ROUTINE_OPUS_TOKEN: ${{ secrets.FLOW_ROUTINE_OPUS_TOKEN }}
+          FLOW_ROUTINE_FABLE_ID: ${{ inputs.fable_routine_id }}
+          FLOW_ROUTINE_FABLE_TOKEN: ${{ secrets.FLOW_ROUTINE_FABLE_TOKEN }}
+        run: |
+          # Bootstrap guard: the helper lives in the consuming repo once flow-sync delivers it.
+          if [ ! -f .flow/bin/flow-dispatch.mjs ]; then
+            echo "flow-dispatch: decision=skipped reason=no-helper"
+            exit 0
+          fi
+          node .flow/bin/flow-dispatch.mjs
