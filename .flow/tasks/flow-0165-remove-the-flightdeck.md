@@ -1,7 +1,7 @@
 ---
 id: "flow-0165"
 title: "Remove the flightdeck and the watchdog from canonical: inflight is where state is viewed, and the watchdog has failed every day for a week"
-status: "in_review"
+status: "done"
 priority: 3
 project: "flow"
 owner: "worker-flow-0165"
