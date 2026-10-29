@@ -170,3 +170,7 @@ test("extractPaths ignores globs, placeholders and code — not just real paths"
 
   assert.deepEqual(extractPaths(sample), [".flow/config.yml", "project-template/CLAUDE.md"]);
 });
+
+test("canonical's CLAUDE.md no longer mentions the removed flightdeck", () => {
+  assert.doesNotMatch(doc, /flightdeck/i);
+});

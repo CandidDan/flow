@@ -50,7 +50,7 @@ Canonical runs the same gate it imposes on everyone else. The five commands live
 | `npm ci` | install (devDependencies are pinned to exactly c8 and yaml — a third fails a test) |
 | `npm run build` | parses every file in `.github/workflows/` |
 | `npm run lint` | `node --check` over every **tracked** `.mjs` |
-| `npm test` | `node --test` over `.flow/bin/`, `project-template/.flow/bin/`, and the flightdeck bin directory once flow-0001 creates it |
+| `npm test` | `node --test` over `.flow/bin/`, `project-template/.flow/bin/` |
 | `npm run coverage` | c8, failing under the floor of **83.5** |
 
 Three things that will waste your time if you do not know them:
@@ -115,7 +115,6 @@ response runs past about 15 lines, and a numbered to-do list when the human has 
 | `.flow/bin/` | Adapters over the template's helpers (see above). |
 | `project-template/` | What a consuming repo gets. Published artefact. |
 | `.github/workflows/` | Reusable `_flow-*.yml` workflows, plus canonical's own thin callers. |
-| `flightdeck/` | Cross-project rollup: what needs a human, across every repo. |
 | `docs/adr/` | Architecture decisions, including the rejected alternatives. |
 
 TL;DR — canonical authors Flow rather than adopting it; read `project-template/CLAUDE.md` for the

@@ -84,16 +84,10 @@ intents:
 # So the automatic half of this check cannot fire here, and the declarations below carry the
 # weight on their own. `npm run lint` is the backstop that makes that safe: it checks every
 # tracked .mjs in the repo, so a new helper is parsed wherever someone puts it.
-#
-# `flightdeck/` is declared as the whole tree rather than `flightdeck/bin/` (which flow-0001
-# creates) — a declared root that does not exist on disk is a flow-doctor failure, and the
-# broader path covers the bin directory the moment it lands.
 source_roots:
   - path: ".flow/bin/"
     check: "npm run lint"
   - path: "project-template/.flow/bin/"
-    check: "npm run lint"
-  - path: "flightdeck/"
     check: "npm run lint"
   - path: ".github/workflows/"
     check: "npm run build"

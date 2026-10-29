@@ -82,7 +82,7 @@ test("flow-doctor finds no undeclared top-level source tree", () => {
   const r = run("flow-doctor.mjs");
   assert.doesNotMatch(r.stderr, /not covered by any source_root/, r.stderr);
   assert.doesNotMatch(r.stderr, /does not exist on disk/,
-    "every declared source_root must exist — flightdeck/bin/ does not yet, flightdeck/ does");
+    "every declared source_root must exist");
 });
 
 test("parse-task-id CLI resolves an id from the branch, then the PR title", () => {
@@ -277,50 +277,19 @@ test("the adapter's CLI block actually runs against this checkout — silence is
     "this task must appear in canonical's own resolved state, whatever the lifecycle has done to it");
 });
 
-test("flightdeck-state resolves canonical as ok, closing the 'unavailable' finding from PR #13", () => {
-  const dir = canonicalClone();
-  const registry = join(dir, "..", "registry.yml");
-  writeFileSync(registry,
-    `projects:\n  - name: "canonical"\n    repo: "CandidDan/flow"\n    path: "${dir}"\n    enabled: true\n`);
-
-  const r = spawnSync(process.execPath,
-    [join(REPO, "flightdeck", "bin", "flightdeck-state.mjs"), "--registry", registry, "--no-pr"],
-    { encoding: "utf8" });
-
-  assert.equal(r.status, 0, r.stderr);
-  const out = JSON.parse(r.stdout);
-  const canonical = out.projects.find((p) => p.name === "canonical");
-  assert.ok(canonical, "canonical must appear in the aggregation");
-  assert.equal(canonical.status, "ok",
-    `canonical must resolve, not be reported unavailable — reason given: ${canonical.reason}`);
-  assert.equal(canonical.reason, undefined);
-  assert.equal(out.summary.unavailable, 0);
-  assert.ok(canonical.tasks.length > 1, "an 'ok' project with no tasks is the empty-store failure wearing a green badge");
-  assert.ok(canonical.tasks.every((t) => t.project === "canonical"));
-  assert.match(canonical.provenance.commit, /^[0-9a-f]{40}$/);
+test("no flightdeck/ tree and no flow-watchdog.yml remain tracked", () => {
+  const tracked = spawnSync("git", ["ls-files"], { cwd: REPO, encoding: "utf8" }).stdout.split("\n");
+  assert.deepEqual(tracked.filter((f) => f.startsWith("flightdeck/")), []);
+  assert.ok(!tracked.includes(".github/workflows/flow-watchdog.yml"));
 });
 
-test("removing the adapter reproduces PR #13's exact failure — the test that would have caught it", () => {
-  // Same repo, same origin/main — only `.flow/bin/flow-state.mjs` is absent, which is exactly
-  // what canonical was before this task. The omission is matched by absolute path, so the
-  // template's own flow-state.mjs (same trailing path) stays put and the missing file really
-  // is the adapter.
-  const { root, dir } = buildClone({ omit: join(".flow", "bin", "flow-state.mjs") });
-  try {
-    assert.ok(existsSync(join(dir, "project-template", ".flow", "bin", "flow-state.mjs")),
-      "only the adapter is removed — the template's resolver must survive, or this proves nothing");
-    assert.ok(!existsSync(join(dir, ".flow", "bin", "flow-state.mjs")));
-
-    const registry = join(root, "registry-missing.yml");
-    writeFileSync(registry, `projects:\n  - name: "canonical"\n    path: "${dir}"\n    enabled: true\n`);
-
-    const r = spawnSync(process.execPath,
-      [join(REPO, "flightdeck", "bin", "flightdeck-state.mjs"), "--registry", registry, "--no-pr"],
-      { encoding: "utf8" });
-    const p = JSON.parse(r.stdout).projects[0];
-    assert.equal(p.status, "unavailable");
-    assert.match(p.reason, /flow-state\.mjs/, "the reason must name the resolver that is missing");
-  } finally { rmSync(root, { recursive: true, force: true }); }
+test("config.yml and package.json name no flightdeck, and every source root exists", () => {
+  for (const f of [".flow/config.yml", "package.json"]) {
+    assert.doesNotMatch(readFileSync(join(REPO, f), "utf8"), /flightdeck/, f);
+  }
+  const roots = [...readFileSync(join(REPO, ".flow/config.yml"), "utf8").matchAll(/^\s+- path: "([^"]+)"/gm)].map((m) => m[1]);
+  assert.ok(roots.length > 0);
+  for (const r of roots) assert.ok(existsSync(join(REPO, r)), `${r} must exist`);
 });
 
 // ══ the workflow callers (flow-0015) ══════════════════════════════════════════════════════
@@ -907,15 +876,15 @@ test("source-roots.mjs is an ADAPTER — not a symlink, and not a copy of the te
     "only the CLI shell and the store location belong in an adapter");
 });
 
-test("source-roots plan against canonical: count 0 because all four entries are ALREADY GATED", () => {
+test("source-roots plan against canonical: count 0 because all three entries are ALREADY GATED", () => {
   const { matrix, count, excluded, errors } = srPlan({ configPath: srConfigPath(), repoRoot: srRepoRoot() });
   assert.deepEqual(errors, [], "canonical's own config must satisfy the schema it publishes");
   assert.deepEqual(matrix, []);
   assert.equal(count, 0);
   // The assertion that tells the two zeroes apart.
   assert.deepEqual(excluded.map((x) => x.path).sort(),
-    [".flow/bin/", ".github/workflows/", "flightdeck/", "project-template/.flow/bin/"],
-    "these are canonical's four declared trees; seeing REPLACE-ME here means the template's " +
+    [".flow/bin/", ".github/workflows/", "project-template/.flow/bin/"],
+    "these are canonical's three declared trees; seeing REPLACE-ME here means the template's " +
     "config was read instead");
   for (const x of excluded) {
     assert.equal(x.reason, "covered by the primary gate",

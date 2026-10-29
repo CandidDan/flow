@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 // flow-state.mjs — canonical's adapter over the template's flow-state resolver.
 //
-// WHY THIS FILE EXISTS AT ALL. `flightdeck-state.mjs` resolves every registered project by
-// shelling out to that project's own `.flow/bin/flow-state.mjs --json`. Canonical had no such
-// file, so the flightdeck reported the repo that AUTHORS the flightdeck as
-// `unavailable — no .flow/bin/flow-state.mjs` (PR #13). `flow-0004` created the four adapters
-// the reusable workflows invoke; nothing in CI invokes flow-state, so it was never added. This
+// WHY THIS FILE EXISTS AT ALL. Any tool that resolves a project's state shells out to that
+// project's own `.flow/bin/flow-state.mjs --json`. Canonical had no such file, so it read as
+// `unavailable — no .flow/bin/flow-state.mjs`. `flow-0004` created the four adapters the
+// reusable workflows invoke; nothing in CI invokes flow-state, so it was never added. This
 // closes that.
 //
 // See parse-task-id.mjs in this directory for why canonical adapts rather than copies, and
@@ -15,14 +14,14 @@
 // resolve state from. The template resolves it from its own realpath, which is
 // `project-template/` — and `project-template/.flow/tasks/` holds only `_TEMPLATE.md`. So a
 // copy or a symlink here would not merely read the wrong store: it would report canonical as
-// having NO TASKS AT ALL, exit 0, and the flightdeck would render that as a healthy, empty
+// having NO TASKS AT ALL, exit 0, and a consumer would render that as a healthy, empty
 // project. An empty answer that looks like an answer is the exact failure the resolver exists
 // to remove, which is why `runStateCli` takes the root as a required argument rather than
 // defaulting it.
 //
 //   node .flow/bin/flow-state.mjs              # resolved state of every task, one line each
 //   node .flow/bin/flow-state.mjs flow-0015    # just that task, with detail
-//   node .flow/bin/flow-state.mjs --json       # machine-readable (what flightdeck-state calls)
+//   node .flow/bin/flow-state.mjs --json       # machine-readable (what external consumers call)
 //   node .flow/bin/flow-state.mjs --no-pr      # store-only (skip gh reconciliation)
 //   node .flow/bin/flow-state.mjs --fetch      # force a `git fetch origin main` first
 //
@@ -35,7 +34,7 @@ import { runStateCli } from "../../project-template/.flow/bin/flow-state.mjs";
 
 // --- main-module detection (do not simplify back to a string compare) -------------------
 // See project-template/.flow/bin/flow-state.mjs for the incident this guards against. Here the
-// failure is quiet in a particular way: flightdeck-state treats an empty stdout as "the
+// failure is quiet in a particular way: a consumer treats an empty stdout as "the
 // resolver failed" and reports canonical unavailable — back to the bug this file fixes.
 const __isMain = (() => {
   try {

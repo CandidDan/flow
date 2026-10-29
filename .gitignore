@@ -1,4 +1,4 @@
-# CandidDan/flow — canonical Flow infrastructure (template, flightdeck, docs, + reusable
+# CandidDan/flow — canonical Flow infrastructure (template, docs, + reusable
 # workflows and the bin package as they land). Nested repos and local artifacts are excluded.
 
 # Nested repos that are their own distributables — NOT part of canonical:
@@ -19,7 +19,6 @@ npm-debug.log*
 **/.flow/board-edits.json
 
 # --- kept local: private registry, business scaffolding, Cowork mount ---
-flightdeck/projects.yml
 NUDGE-RETROFIT-NOTES.md
 nudge-migration/
 flow-validation/

@@ -194,6 +194,15 @@ test("the ADR states that it decides and does not implement", () => {
     "the setup steps a worker cannot claim must be named as human-only");
 });
 
+// flow-0165 removed the flightdeck and its watchdog from canonical. The ADR is history and is not
+// edited, so the paths it names there are expected to be gone — and must stay gone.
+const retiredByFlow0165 = (p) => p.startsWith("flightdeck/") || p === ".github/workflows/flow-watchdog.yml";
+
+test("the paths flow-0165 retired are really gone, so the filter below hides nothing live", () => {
+  assert.ok(!existsSync(join(REPO, "flightdeck")));
+  assert.ok(!existsSync(join(REPO, ".github/workflows/flow-watchdog.yml")));
+});
+
 test("every path the ADR names as existing in canonical actually exists", () => {
   // flow-review caught this on the first draft: the ADR named two gitignored local-only scripts
   // as repository consequences, sending the next worker after files that are not there.
@@ -201,7 +210,8 @@ test("every path the ADR names as existing in canonical actually exists", () => 
     .map((m) => m[1])
     .filter((p) => p.includes("/"))                 // bare filenames are ambiguous; paths are not
     .filter((p) => !p.startsWith("inflight/"))      // the repo this ADR creates does not exist yet
-    .filter((p) => !p.includes("flightdeck/index.html"));
+    .filter((p) => !p.includes("flightdeck/index.html"))
+    .filter((p) => !retiredByFlow0165(p));         // history: flow-0165 deleted these on purpose
   const missing = [...new Set(claimed)].filter((p) => !existsSync(join(REPO, p)));
   assert.deepEqual(missing, [],
     `ADR-0006 names path(s) that do not exist in this repository: ${missing.join(", ")}`);
