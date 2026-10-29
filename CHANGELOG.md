@@ -17,7 +17,9 @@ setup (flow-0175). Nothing starts a worker routine automatically yet; that is th
 Also: intent-only PRs get a light review (flow-0178), retirement PRs are reviewed in full
 (flow-0177), the board is retired (flow-0164), a task keeps its one PR of record (flow-0162), and
 status sync no longer moves `blocked` or `cancelled` tasks it should leave alone (flow-0169,
-flow-0176).
+flow-0176), flow-doctor reports `touches` overlap only where two globs can match the same
+file (flow-0180), and the guards see both paths of a rename (flow-0181). Every template caller
+pins `@v4` and both VERSION stamps read 4.0.0 (flow-0179).
 **Caller action:** repin every caller from `@v3` to `@v4` (`docs/repinning-a-consuming-repo.md`),
 then run flow-sync. The sync deletes `.github/workflows/flow-queue-runner.yml` and drops
 `actions: write` from `flow-unblock.yml`.
@@ -223,6 +225,40 @@ then run flow-sync. The sync deletes `.github/workflows/flow-queue-runner.yml` a
   new `intent-review` job posts one advisory comment at `--max-turns 15`. It sets no check status
   and never approves. The plan summary gains a `reviewers:` line naming who ran, and at what turn
   budget.
+
+- **Flow is v4; repin your callers `@v3` → `@v4`**
+  (`project-template/.github/workflows/flow-*.yml`, `.github/workflows/_flow-sync.yml`, `VERSION`,
+  `project-template/.flow/VERSION`, `docs/repinning-a-consuming-repo.md`, flow-0179). Every
+  template caller now pins `_flow-<name>.yml@v4`, `_flow-sync.yml` defaults and falls back to
+  `v4`, and both VERSION stamps read 4.0.0.
+
+  **Caller action:** repin the `flow-sync` caller to `@v4` first, then run flow-sync. It deletes
+  `flow-queue-runner.yml` (its reusable is gone at v4) and drops `actions: write` from
+  `flow-unblock.yml`. Steps and the by-hand `sed`: `docs/repinning-a-consuming-repo.md`.
+
+- **flow-doctor reports `touches` overlap only where two globs can match the same file**
+  (`project-template/.flow/bin/flow-doctor.mjs`, flow-0180). **No caller action.** A `*` in a file
+  name no longer collapses the glob to its whole folder, so `.flow/bin/status-transition*.mjs` no
+  longer overlaps `.flow/bin/plane-guard.mjs`. Before, two `in_progress` tasks like these failed the
+  gate of every open PR through the flow-doctor consistency test.
+
+  A glob whose only wildcard is `*` in its last segment is compared by folder and then by name: it
+  overlaps a literal file it matches, a literal folder that contains it, and a glob in the same
+  folder whose literal start and end can agree. `**`, a wildcard in a folder segment, and `?`,
+  `[]` or `{}` keep the old static-prefix rule, which over-reports but never misses a nested tree.
+
+- **touches-guard and the store-guard see both paths of a rename** (`project-template/.flow/bin/touches-guard.mjs`,
+  `.github/workflows/_flow-gates.yml`, `project-template/.flow/bin/only-flow-changed.mjs`, flow-0181).
+  **No caller action.** `git diff --name-only` pairs renames by default and lists only the new path,
+  so `git mv src/x.mjs other/x.mjs` under `touches: ["other/**"]` passed touches-guard, and
+  `git mv .flow/tasks/flow-0001-x.md docs/x.md` passed the store-guard. Both diffs now run with
+  `--no-renames`, the flag flow-0178 added to flow-review. Both fixes start at the next tag,
+  because `_flow-gates.yml` runs canonical's copy of touches-guard.
+
+  only-flow-changed gets the same flag for consistency. Its skip decision was already safe: its
+  `:(exclude)` pathspecs are applied before git pairs renames, so a move from `src/` into `.flow/`
+  already built. The only visible change is that a rename between Flow paths counts as two files
+  in the skip line.
 
 ## 3.5.0 — 2026-10-26
 
