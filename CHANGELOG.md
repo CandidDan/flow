@@ -6,6 +6,224 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 4.0.0 — 2026-10-29
+
+**MAJOR: queue-runner is retired, and the worker loop can run as a Claude Code cloud routine.**
+The hourly `flow-queue-runner` caller billed Actions minutes to wait on a model; it is deleted, and
+flow-sync deletes it downstream (flow-0174). flow-unblock releases blocked tasks and no longer
+dispatches anything (flow-0173). The protocol now runs inside a cloud routine, opening and handing
+off the PR through REST where GraphQL is blocked (flow-0172), and `docs/flow-routines.md` is the
+setup (flow-0175). Nothing starts a worker routine automatically yet; that is the next task.
+Also: intent-only PRs get a light review (flow-0178), retirement PRs are reviewed in full
+(flow-0177), the board is retired (flow-0164), a task keeps its one PR of record (flow-0162), and
+status sync no longer moves `blocked` or `cancelled` tasks it should leave alone (flow-0169,
+flow-0176).
+**Caller action:** repin every caller from `@v3` to `@v4` (`docs/repinning-a-consuming-repo.md`),
+then run flow-sync. The sync deletes `.github/workflows/flow-queue-runner.yml` and drops
+`actions: write` from `flow-unblock.yml`.
+
+- **A kickback card no longer recommends merging a round whose change was thrown away**
+  (`project-template/.flow/bin/flow-kickback.mjs`, `.github/workflows/_flow-kickback.yml`,
+  flow-0160). **No caller action** — the fix rides the reusable workflow and the template helper;
+  callers' `flow-kickback.yml` and `permissions:` blocks are unchanged.
+
+  On CandidDan/write#183 the test-weakening guard threw the round's fix away, and the card still
+  said "merge as is": the fixer's hand-back was written before the guards ran and assumed its
+  commit would be pushed. `escalate-round` now tells the card renderer whether the round's change
+  reached the PR (`KICKBACK_ROUND_PUSHED`) and how `push` read the round (`KICKBACK_ROUND_OUTCOME`,
+  a new `push` job output normalised to `fixed`, `disputed` or `none`). When nothing was pushed, a
+  `merge` recommendation becomes a kickback that says the PR head is unchanged and the fix must be
+  re-applied or the round re-run (`recommendationFor`). A genuine dispute, a pushed round, and
+  `plan`'s own escalations render exactly as before.
+
+- **An auto-fix round may replace an assertion its task's amended criterion made wrong, and says so
+  on the PR instead of being thrown away** (`project-template/.flow/bin/flow-kickback.mjs`,
+  `.github/workflows/_flow-kickback.yml`, flow-0161). **No caller action** — the callers and their
+  `permissions:` blocks are unchanged (the new `disclose` job's `pull-requests: write` is already in
+  the union they grant). The exception runs on the repo's own `.flow/bin/flow-kickback.mjs`, so it
+  takes effect when the next flow-sync delivers it; until then the guard behaves exactly as before.
+
+  On CandidDan/write#183 the orchestrator amended a criterion on `main` to say the opposite of what
+  it had said, the round correctly replaced the test that asserted the old wording, and the
+  test-weakening guard discarded the round. `plan` now compares the task's `## Acceptance criteria`
+  on the default branch with the same section at the PR's merge base (`criteriaAmended`; both
+  commits are outside the fixer's reach, and the PR branch's copy is never read). When they differ,
+  `guardDecision` keeps a round whose every trip is a **replacement** and the new `disclose` job
+  posts every trip — file, line and reason — as a PR comment. A deleted, renamed or skipped test,
+  or a file left with fewer test declarations or assertions, is still discarded. The fixer's rule 3
+  says so, and requires naming each replaced assertion in `tried`.
+
+- **A task with an open PR keeps it** (`project-template/.flow/bin/pr-of-record.mjs`, `_flow-open-pr.yml`, `_flow-status.yml`, flow-0162). A task's PR of record is the open PR its `pr:` names on `main`; a push to a second `flow/<id>-` branch gets no PR, and PR events on any other PR no longer rewrite `branch`/`pr`/`status`, reset the task to `ready`, or escalate its model. **No caller action** — adopters get the adapter with the next `.flow/bin/` sync.
+
+- **flow-unblock can read pull requests, so a task blocked on a PR url is released when that PR
+  merges** (`.github/workflows/_flow-unblock.yml`, `project-template/.github/workflows/flow-unblock.yml`,
+  `.github/workflows/flow-unblock.yml`, flow-0163). **Caller action: run flow-sync** — it delivers
+  the updated `flow-unblock.yml` caller, which adds `pull-requests: read` to the job's grant. No
+  repo edits a caller by hand.
+
+  Every PR-url `blocked_by` entry resolved `unknown` and waited for a human: the sweep reads each PR
+  with `gh api repos/<owner>/<repo>/pulls/<n>` on `GITHUB_TOKEN`, and no `permissions:` block in the
+  chain granted `pull-requests`, so the token could not read a PR in a private repo
+  (CandidDan/write run 40268705927). The grant is read-only, and goes to a job that runs no model
+  and reads only a PR's `.state` and `.merged`. `.flow/bin/unblock-pr-read-scope.test.mjs` fails,
+  naming the file, if any of the three blocks loses it, or if the sweep stops calling `pulls`.
+
+  Ships as **3.5.1 (PATCH)**, by Dan's ruling on 2026-10-27, although it changes a caller grant:
+  flow-sync now delivers callers to every repo (flow-0158), so the new grant reaches the fleet
+  without a manual caller edit, and the change restores the behaviour flow-0041 shipped in 3.4.0.
+
+- **The board is retired: no worker regenerates `.flow/board.html`, the `board-builder` skill is
+  gone, and flow-sync deletes both in adopters** (`project-template/.flow/PROTOCOL.md`,
+  `project-template/.flow/bin/flow-doctor.mjs`, `flow-init.mjs`, `flow-review.mjs`,
+  `.github/workflows/_flow-sync.yml`, flow-0164). **MINOR. Caller action: run flow-sync** — no
+  caller is edited; the sync delivers the new protocol and tooling, and removes
+  `.claude/skills/board-builder/` and `.flow/board.html`, which its PR lists under **Removed**.
+
+  Nobody read the board, and every regeneration was a session writing a whole HTML file: 265
+  board commits across four adopters in the 30 days to 2026-10-27. The protocol, task-writer,
+  AGENTS.md and the adoption docs no longer ask for one; task state is viewed in inflight.
+  flow-doctor drops its board-snapshot drift warning, flow-init writes no board, and flow-review
+  no longer lists `board-builder` as a canonical skill. The sync's deletion is a literal,
+  two-entry list scoped to the checkout — no glob, no variable — and a path that is absent is a
+  no-op. `apply-board-edits.mjs` is unchanged: it is the store writer every workflow uses.
+
+- **Every `actions/setup-node` step now sets `check-latest: true`, so a Node security release reaches
+  the fleet the day it ships** (`.github/workflows/*.yml`, `.flow/bin/setup-node-check-latest.test.mjs`,
+  flow-0166). **PATCH. No caller action** — callers are unchanged; the reusables they pin pick it up
+  at the next release.
+
+  A major-line `node-version: 22` with the default `check-latest: false` takes the runner image's
+  cached patch: 22.23.3 on 2026-10-27, six days after 22.23.4 fixed CVE-2026-111497 (out-of-bounds
+  write in the bundled Brotli decoder). No `node-version` value or input default changed.
+
+- **The protocol requires plain, literal, unambiguous English in everything written about the work, not only in replies**
+  (`project-template/.flow/PROTOCOL.md`, `project-template/.claude/skills/show-me/SKILL.md`,
+  `project-template/.claude/skills/task-writer/SKILL.md`, flow-0168).
+  **No caller action.** Adopters get the rule at the next `flow-sync`.
+
+  The rule in **Response style** covers task specs, intents, design notes, code comments, commit
+  messages and PR descriptions: name things literally, not by metaphor, and rewrite any sentence
+  that can be read two ways. A product's own user-facing text is out of scope. task-writer's
+  procedure gains a step requiring a spec to be written the same way.
+
+- **A draft PR opening no longer un-blocks a task** (`.github/workflows/_flow-status.yml`,
+  flow-0169). When a draft PR is opened or reopened, the status sync now reads the task's status
+  from the store: a `blocked` task gains `branch` and `pr` and keeps `status`, `blocked_reason` and
+  `blocked_by` as they were. A worker's `blocked` commit and the sync from its draft PR race, and the
+  sync used to land second and write `in_progress` over the block, which hid it from flow-unblock
+  and made its `touches` count as live overlap (flow-0165 and flow-0166, 2026-10-27). A PR that opens
+  ready, or is marked ready, still moves a blocked task to `in_review`. **No caller action** — the
+  change is inside the reusable workflow, which callers reach by reference.
+
+- **The worker loop runs from a Claude Code cloud routine: the PR is opened and handed off through
+  REST when GraphQL is blocked** (`project-template/.flow/PROTOCOL.md`, `docs/flow-routines.md`,
+  flow-0172). **Caller action: run flow-sync** — it delivers the updated `.flow/PROTOCOL.md`. No
+  caller, secret or permission changes.
+
+  In a Claude Code cloud session `gh pr create` and `gh pr ready` fail with HTTP 403 ("GitHub
+  GraphQL is not available from Claude Code sessions"). Steps 7 and 8 of *The loop you run* now say
+  to try the `gh pr` command first and, on that exact message only, use
+  `gh api repos/{owner}/{repo}/pulls` to open the PR and
+  `POST repos/{owner}/{repo}/pulls/{n}/ccr/ready_for_review` to hand it off. Step 1 adds that a
+  worker started with no task id picks with `pick-task.mjs` and stops on an empty result.
+  `docs/flow-routines.md` is the setup: one routine per model tier, no connectors, a short saved
+  prompt that defers to the protocol, the hourly and 30-runs-an-hour limits, and the canary's
+  evidence. The `ccr/ready_for_review` route is advertised but not yet exercised; the first
+  routine-run task proves it. Ships as a MINOR release.
+
+- **flow-unblock releases blocked tasks and stops there: it no longer dispatches flow-queue-runner**
+  (`.github/workflows/_flow-unblock.yml`, `project-template/.flow/PROTOCOL.md`, flow-0173).
+  **Caller action: run flow-sync** — it delivers the updated caller comments and `.flow/PROTOCOL.md`.
+  No caller needs a new input, secret or permission. Ships as a MINOR release.
+
+  The "Start the next worker" step is gone: a released task is `ready`, and the next worker run —
+  the worker routine's own schedule, picking with `pick-task.mjs` — takes it. The
+  `queue_runner_workflow` input stays declared and is ignored, so a caller that still passes it
+  does not fail at startup. Callers keep `actions: write` for now; it is unused, and dropping it is
+  a separate caller-permission change. The `count-ready`, `count-active-runs`, `should-dispatch`
+  and `dispatch-outcome` subcommands of `flow-unblock.mjs` stay until the queue runner is retired,
+  because canonical's adapter re-exports their functions by name.
+
+- **queue-runner is retired: its reusable, both callers and its helpers are gone, flow-sync deletes
+  the caller downstream, and flow-recover now applies the model escalation** (`.github/workflows/`
+  `_flow-queue-runner.yml` deleted, `_flow-recover.yml`, `_flow-sync.yml`, `_flow-unblock.yml`,
+  `project-template/.flow/bin/flow-recover.mjs`, `task-model.mjs`, `flow-unblock.mjs`,
+  `project-template/.flow/PROTOCOL.md`, flow-0174). **MAJOR. Caller action: run flow-sync.** The
+  sync makes both caller edits: it deletes `.github/workflows/flow-queue-runner.yml`, listed under
+  **Removed** in its PR, and it ships `flow-unblock.yml` without `actions: write`. Repin to `@v4`
+  first. `docs/repinning-a-consuming-repo.md` has the steps.
+
+  The worker runs as a Claude Code cloud routine now (`docs/flow-routines.md`), so the hourly Actions
+  caller was billing a minute a tick for nothing. One piece of queue-runner's behaviour is kept, in a
+  new place. When `flow-recover` resets a stranded `in_progress` claim with nothing pushed, it also
+  moves the task up one model tier (`haiku → sonnet → opus → fable`), in the same commit, through
+  `task-model.mjs`'s `escalate` with once-per-event dedup. At `fable` it adds the usual split-it
+  `decision` ask instead. The reopen-PR and promote paths mean work was pushed, so they never
+  escalate.
+
+  Also removed:
+  - `queue-runner-schedule.mjs` and `queue-runner-verify.mjs`.
+  - `task-model.mjs`'s `decide` mode.
+  - `flow-unblock.mjs`'s four dispatch-only subcommands: `count-ready`, `count-active-runs`,
+    `should-dispatch` and `dispatch-outcome`.
+  - The `FLOW_QUEUE_RUNNER`, `FLOW_TZ` and `FLOW_RUN_HOUR` repo variables. They are no longer read,
+    so they can be deleted.
+
+  `_flow-unblock.yml` still declares its ignored `queue_runner_workflow` input, so a caller that
+  passes it does not fail.
+
+- **docs/flow-routines.md is the one routine runbook: it now covers firing a routine from an app, the account-wide limits and the auto-mode stall risk**
+  (`docs/flow-routines.md`, flow-0175).
+  **No caller action.** Docs only; nothing is delivered by `flow-sync`.
+
+  Carried over from the closed duplicate runbook: the fire API call and its once-shown token, the
+  100-an-hour per-account limits and the shared Max usage, and the auto-mode stall risk, recorded
+  as untested on a task that blocks.
+
+- **A PR closing unmerged no longer moves a cancelled task** (`.github/workflows/_flow-status.yml`,
+  `project-template/.flow/bin/status-transition.mjs`, flow-0176). `cancelled` is terminal and only a
+  human reverses it, but the orchestrator cancels a task and then closes its PR, and flow-status
+  answered that close by resetting the task to `ready` (owner, branch and pr cleared) and raising its
+  model a tier. That happened to flow-0171 on 2026-10-28. Both the transition and the escalate step
+  now ask the new `status-transition.mjs closed` first: a cancelled task gets no edit at all and the
+  run logs one line saying so. Any other task is reset and escalated exactly as before. flow-0169's
+  draft-on-`blocked` read moved into the same helper. **Caller action: none to the callers** — this is
+  a PATCH inside the reusable workflow. A repo picks it up through flow-sync's repin, which also
+  copies the new `.flow/bin/status-transition.mjs`. Until that helper is in a repo's `.flow/bin/`,
+  the workflow keeps its old behaviour there.
+
+- **flow-review summarises wholly deleted files by name and line count when a diff is over the
+  byte limit, so a retirement PR is reviewed in full instead of truncated**
+  (`project-template/.flow/bin/flow-review.mjs`, `.github/workflows/_flow-review.yml`, flow-0177).
+  **No caller action.** The thin `flow-review.yml` callers are unchanged; the reusable workflow
+  picks up the three prompt lines at the next tag, and an adopting repo's helper changes at its
+  next `flow-sync` PR — the plan job runs the helper from the base branch, so the new behaviour
+  starts once that sync has merged.
+
+  Over the limit, `boundDiff` now replaces the body of every file the PR deletes outright
+  (`deleted file mode`) with one `DELETED FILE SUMMARISED` line, lists those paths in a header,
+  and re-measures. A diff that then fits is not truncated; one that still does not fit is
+  truncated with the same `DIFF TRUNCATED` marker as before and still fails. A diff under the
+  limit is unchanged, and partial deletions, renames and mode changes are never summarised. The
+  plan publishes `diff_summarised_deletions` next to `diff_bytes` and `diff_full_bytes`.
+
+- **An intent-only PR runs flow-doctor instead of the full gate, and one advisory intent reviewer
+  instead of the qa and code-review model calls; security is unchanged**
+  (`project-template/.flow/bin/flow-review.mjs`, `.github/workflows/_flow-gates.yml`,
+  `.github/workflows/_flow-review.yml`, flow-0178). **No caller action.** The thin callers are
+  unchanged. The gate half starts at the next tag, because `_flow-gates.yml` runs canonical's copy
+  of the helper. The review half starts in an adopting repo once its next `flow-sync` PR has merged,
+  because `_flow-review.yml` plans from the base branch's helper; until then that helper publishes
+  no `intent_pr`, and every PR keeps the full review.
+
+  A PR is intent-only when every changed path is `.flow/intents/<slug>.md` and none is
+  `_`-prefixed (`_TEMPLATE.md` keeps full review). For one, the `gate` job runs only
+  `node .flow/bin/flow-doctor.mjs`, the `source-root` matrix does not run, qa and code-review pass
+  with the fixed line `intent PR: intent files only; read by the advisory intent reviewer`, and a
+  new `intent-review` job posts one advisory comment at `--max-turns 15`. It sets no check status
+  and never approves. The plan summary gains a `reviewers:` line naming who ran, and at what turn
+  budget.
+
 ## 3.5.0 — 2026-10-26
 
 **MINOR: auto-fix works, and dead work has somewhere to go.** The kickback round's fix job runs
