@@ -1,14 +1,14 @@
 ---
 id: "flow-0183"
 title: "flow-dispatch's config-cap test checks the template's config only in canonical, so it no longer fails every consuming repo's gate"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-worker-flow-0183"
 created: "2026-10-29"
 started: "2026-10-29T11:18:04Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0183-dispatch-test-canonical-only"
+pr: "https://github.com/CandidDan/flow/pull/267"
 issue: ""
 blocked_reason: ""
 blocked_by: []
