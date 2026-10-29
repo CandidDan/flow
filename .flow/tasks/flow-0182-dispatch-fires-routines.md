@@ -1,7 +1,7 @@
 ---
 id: "flow-0182"
 title: "flow-dispatch fires the worker routine for the task's tier whenever a task becomes ready, with a daily sweep as the fallback"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for flow-0179 (go to v4): the new caller must pin @v4, and flow-0179 rewrites the caller-pin tests this task also extends."
-blocked_by: ["flow-0179"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G9"]
 intent: "model-work-off-github-actions"
 touches:
