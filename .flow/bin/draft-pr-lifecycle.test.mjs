@@ -17,7 +17,7 @@
 // Both would fail if the logic were reverted, which a shape assertion on the same lines would not.
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -69,8 +69,13 @@ const withTmp = (fn) => {
 // case block ends before it — so nothing here touches a real store.
 const STATUS_YML = join(WF, "_flow-status.yml");
 
+// The case block reads the task's status through `.flow/bin/status-transition.mjs` (flow-0176), so
+// the scratch repo carries the template's real helper, as an adopting repo's `.flow/bin/` does.
+const STATUS_HELPER = join(TEMPLATE, ".flow", "bin", "status-transition.mjs");
+
 function runStatusCase(dir, env) {
-  mkdirSync(join(dir, ".flow"), { recursive: true });
+  mkdirSync(join(dir, ".flow", "bin"), { recursive: true });
+  copyFileSync(STATUS_HELPER, join(dir, ".flow", "bin", "status-transition.mjs"));
   const edits = join(dir, ".flow", "board-edits.json");
   if (existsSync(edits)) rmSync(edits);
 

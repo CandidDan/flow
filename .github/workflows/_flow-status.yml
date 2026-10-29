@@ -10,7 +10,8 @@ name: _flow-status (reusable)
 #   opened / reopened, ready   -> in_review (+ branch & pr recorded)
 #   ready_for_review           -> in_review (the hand-off; a worker's `gh pr ready`)
 #   closed without merge       -> back to ready (owner/branch/pr cleared for re-claim), one
-#                                 model tier up (flow-0083: a closed PR is a failed attempt)
+#                                 model tier up (flow-0083: a closed PR is a failed attempt);
+#                                 a task already `cancelled` is left exactly as it is (flow-0176)
 #   closed by merge            -> handled by flow-done.yml (this job no-ops)
 #   anything else              -> logged no-op (a caller pinned ahead of this reusable)
 # Workers write only two transitions by hand: the claim (ready -> in_progress, which must
@@ -93,11 +94,11 @@ jobs:
               # flow-0169: a worker that blocks commits `blocked` to main, and its branch push opens
               # this draft — the two race. Read the task's status from the store, and if it is
               # `blocked`, record only `branch` + `pr`: writing in_progress over a block hides it
-              # from flow-unblock and makes its `touches` count as live overlap.
-              task_md="$(grep -lE "^id:[[:space:]]*\"?$id\"?[[:space:]]*$" .flow/tasks/*.md 2>/dev/null | head -1 || true)"
+              # from flow-unblock and makes its `touches` count as live overlap. The read is
+              # status-transition.mjs's (flow-0176), shared with the `closed` guard below.
               cur_status=""
-              if [ -n "$task_md" ]; then
-                cur_status="$(sed -n '/^---$/,/^---$/s/^status:[[:space:]]*"\{0,1\}\([a-z_]*\)"\{0,1\}[[:space:]]*$/\1/p' "$task_md" | head -1)"
+              if [ -f .flow/bin/status-transition.mjs ]; then
+                cur_status="$(node .flow/bin/status-transition.mjs status --id "$id" || true)"
               fi
               if [ "$DRAFT" = "true" ] && [ "$cur_status" = "blocked" ]; then
                 echo "PR #$PR_NUM opened as a draft -> $id stays blocked (branch + pr recorded)"
@@ -124,10 +125,22 @@ jobs:
               ;;
             closed)
               if [ "$MERGED" = "true" ]; then echo "Merged — flow-done owns this transition."; exit 0; fi
-              echo "PR #$PR_NUM closed unmerged -> $id back to ready"
               TRANSITION="ready"
-              printf '{"updates":[{"id":"%s","status":"ready","owner":"","branch":"","pr":""}]}\n' \
-                "$id" > .flow/board-edits.json
+              # flow-0176: `cancelled` is terminal and only a human reverses it. The orchestrator
+              # cancels a task and then closes its PR, so status-transition.mjs reads the task's
+              # status first: a cancelled task gets no edit at all (exit 3), and keeps its owner,
+              # branch and pr as the record of the PR it had. Otherwise it writes the reset edit.
+              if [ -f .flow/bin/status-transition.mjs ]; then
+                rc=0
+                node .flow/bin/status-transition.mjs closed --id "$id" --event-pr "$PR_NUM" \
+                  --edits .flow/board-edits.json || rc=$?
+                if [ "$rc" = "3" ]; then exit 0; fi
+                if [ "$rc" != "0" ]; then exit "$rc"; fi
+              else
+                echo "PR #$PR_NUM closed unmerged -> $id back to ready"
+                printf '{"updates":[{"id":"%s","status":"ready","owner":"","branch":"","pr":""}]}\n' \
+                  "$id" > .flow/board-edits.json
+              fi
               ;;
             *)
               # An action this reusable does not model. Reachable whenever a caller is pinned to a
@@ -322,6 +335,13 @@ jobs:
           while :; do
             git fetch -q origin main
             git reset -q --hard FETCH_HEAD
+            # flow-0176: a cancelled task's model is not raised. Read on every attempt, from the
+            # tip just reset to, with the same decision the transition step used.
+            if [ -f .flow/bin/status-transition.mjs ]; then
+              rc=0
+              node .flow/bin/status-transition.mjs closed --id "$id" --event-pr "$PR_NUM" || rc=$?
+              if [ "$rc" = "3" ]; then exit 0; fi
+            fi
             if ! node .flow/bin/task-model.mjs escalate --once --task-id "$id" --event "$event"; then
               echo "::warning::flow: $id's model could not be escalated after $event (see above)."
               exit 0
