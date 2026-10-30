@@ -1,7 +1,7 @@
 ---
 id: "flow-0184"
 title: "A flow-sync PR that deletes a retired path still classifies as a sync PR, so the reviewers apply the sync rule instead of reading a 400 KB diff as a feature"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "claude-worker-flow-0184"
