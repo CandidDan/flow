@@ -6,6 +6,16 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 4.0.2 — 2026-10-30
+
+**PATCH: a 3.x → 4.x sync PR is reviewed as a sync PR again.** The sync deletes retired paths
+(`.flow/board.html`, the `board-builder` skill), and those deletions put the PR outside the sync
+surface, so the reviewers read the whole diff as a feature PR and failed it on truncation
+(found on CandidDan/Nudge#392). Deletions of the retired paths now classify (flow-0184).
+**Caller action:** none.
+
+- **A `flow-sync/` PR that deletes a retired path (`.flow/board.html`, the board-builder skill) now classifies as a sync PR instead of being reviewed as a feature PR and failing on truncation** (`project-template/.flow/bin/flow-review.mjs`, `.github/workflows/_flow-sync.yml`, flow-0184). Only deletions are accepted; adds and modifications of those paths still fail to classify, and the flow-0115 provenance check is unchanged. **No caller action.**
+
 ## 4.0.1 — 2026-10-29
 
 **PATCH: the 4.0.0 sync PR no longer fails its own gate.** flow-0182's dispatch test asserted on
