@@ -603,6 +603,8 @@ jobs:
           #   .flow/board.html               the board itself, which no session regenerates now
           #   .github/workflows/flow-queue-runner.yml   the retired worker's caller (flow-0174); its
           #                  reusable is gone, so a caller left behind fails on every scheduled tick
+          # This list must equal `SYNC_RETIRED_PATHS` in flow-review.mjs (flow-0184): the review gate
+          # accepts DELETIONS of exactly these paths as part of a sync PR.
           # An absent path is a no-op. `${RETIRED%/}` drops the trailing slash so a symlink is
           # removed as a link, never followed; `git add -A` below stages the deletion.
           for RETIRED in ".claude/skills/board-builder/" ".flow/board.html" ".github/workflows/flow-queue-runner.yml"; do

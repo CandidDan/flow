@@ -40,6 +40,7 @@ import {
   ReviewError,
   SYNC_PR_PASS_LINE,
   SYNC_PR_PATHS,
+  SYNC_RETIRED_PATHS,
   SYNC_PR_SENTINEL,
   CANONICAL_SKILLS,
   skillSurfaceGlob,
@@ -1792,13 +1793,14 @@ const CANON_SHA = "a".repeat(39) + "7";
 // flow-0115. `trailers` is what `git log --format=%(trailers:…)` reports over the PR's commits,
 // and `canon` is canonical's tree at CANON_SHA, keyed by canonical path. `calls` is handed in by
 // a test that needs to assert what git was asked to do — specifically, that no fetch happened.
-function fakeGit({ files = [], diff = "", tree = {}, trailers = null, canon = {},
+function fakeGit({ files = [], deleted = [], diff = "", tree = {}, trailers = null, canon = {},
                    fetchFails = false, calls = [] } = {}) {
   const TRAILER_LOG = `log --format=%(trailers:key=${CANONICAL_SHA_TRAILER},valueonly) origin/main..HEAD`;
   return (args) => {
     const cmd = args.join(" ");
     calls.push(cmd);
     if (cmd === "diff --name-only --no-renames origin/main...HEAD") return files.join("\n");
+    if (cmd === "diff --name-only --diff-filter=D --no-renames origin/main...HEAD") return deleted.join("\n");
     if (cmd === "diff origin/main...HEAD") return diff;
     if (cmd === TRAILER_LOG) {
       if (trailers === null) throw new Error("fatal: no trailer log expected in this fixture");
@@ -1839,7 +1841,7 @@ const RELEASE_FILES = ["CHANGELOG.md", "VERSION", "project-template/.flow/VERSIO
 
 // Plan a PR against a throwaway store, and hand back both the plan and the `task.md` a reviewer
 // would actually open.
-function planPr(name, { headRef, prTitle = "Cut the release", files, tree = {},
+function planPr(name, { headRef, prTitle = "Cut the release", files, deleted = [], tree = {},
                         trailers = null, canon = {}, fetchFails = false, calls = [] }) {
   const dir = tmp(name);
   try {
@@ -1851,7 +1853,7 @@ function planPr(name, { headRef, prTitle = "Cut the release", files, tree = {},
       headRef,
       prTitle,
       tasksDir,
-      git: fakeGit({ files, tree, trailers, canon, fetchFails, calls }),
+      git: fakeGit({ files, deleted, tree, trailers, canon, fetchFails, calls }),
     });
     return { plan, md: readFileSync(join(dir, "out", "task.md"), "utf8"), calls };
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -2463,4 +2465,54 @@ test("flow-0178: classifyIntentPr accepts intent files only, fail-closed on ever
   for (const files of [[], [".flow/intents/_TEMPLATE.md"], [".flow/intents/a.md", "src/a.mjs"], [".flow/intents/x/a.md"]]) {
     assert.equal(classifyIntentPr({ changedFiles: files }).classified, false, JSON.stringify(files));
   }
+});
+
+// ── flow-0184: a sync PR that DELETES a retired path is still a sync PR ───────────────────────
+// In parts: `board-retired.test.mjs` forbids the template from naming the retired board.
+const BOARD_FILE = ".flow/board" + ".html";
+const BOARD_SKILL = ".claude/skills/board" + "-builder/SKILL.md";
+const RETIRED_DELETES = [BOARD_FILE, BOARD_SKILL];
+
+test("flow-0184: copied surface + DELETED retired paths classifies as a sync PR", () => {
+  const files = [...SYNCED_FILES, ...RETIRED_DELETES];
+  const direct = classifyPr({ headRef: "flow-sync/4.0.1", changedFiles: files, deletedFiles: RETIRED_DELETES });
+  assert.equal(direct.kind, "sync");
+  assert.equal(direct.classified, true);
+  assert.deepEqual(direct.outside, []);
+
+  // Through the plan, and with provenance still applied: canonical lacks both files, as does HEAD.
+  const { plan, md } = syncPr("sync-retired-deletes", { files, deleted: RETIRED_DELETES });
+  assert.equal(plan.prKind.classified, true);
+  assert.ok(plan.prKind.provenance.ok, "flow-0115's byte-comparison still ran, and passed");
+  assert.ok(md.startsWith(SYNC_PR_SENTINEL));
+});
+
+test("flow-0184: the same paths MODIFIED or ADDED are not classified, and are named", () => {
+  const files = [...SYNCED_FILES, BOARD_FILE];
+  // Present in the diff but not among the deletions: an add or a modification.
+  const direct = classifyPr({ headRef: "flow-sync/4.0.1", changedFiles: files, deletedFiles: [] });
+  assert.equal(direct.classified, false);
+  assert.deepEqual(direct.outside, [BOARD_FILE]);
+
+  const { plan } = syncPr("sync-retired-added", { files, deleted: [] });
+  assert.equal(plan.prKind.classified, false);
+  assert.deepEqual(plan.prKind.outside, [BOARD_FILE]);
+
+  // A deleted path that is not retired gets no exemption, and neither does a release branch.
+  assert.equal(classifyPr({ headRef: "flow-sync/4.0.1", changedFiles: ["src/x.mjs"], deletedFiles: ["src/x.mjs"] }).classified, false);
+  assert.equal(classifyPr({ headRef: "release/v4.0.1", changedFiles: ["VERSION", BOARD_FILE],
+    deletedFiles: [BOARD_FILE] }).classified, false);
+});
+
+test("flow-0184: a deleted retired path that canonical still ships fails provenance", () => {
+  const { plan } = syncPr("sync-retired-still-shipped", {
+    files: [...SYNCED_FILES, BOARD_FILE], deleted: [BOARD_FILE],
+    canon: { ...SYNCED_CANON, ["project-template/" + BOARD_FILE]: "<html>\n" },
+  });
+  assert.equal(plan.prKind.classified, false, "the sentinel is granted by evidence, not by the path list");
+  assert.deepEqual(plan.prKind.provenance.mismatched.map((m) => m.path), [BOARD_FILE]);
+});
+
+test("flow-0184: SYNC_RETIRED_PATHS is the exported single list", () => {
+  assert.ok(SYNC_RETIRED_PATHS.length >= 3 && Object.isFrozen(SYNC_RETIRED_PATHS));
 });
