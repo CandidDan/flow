@@ -540,9 +540,24 @@ export const SYNC_PR_PATHS = Object.freeze([
   ".flow/VERSION",
 ]);
 
+// The paths `_flow-sync.yml` DELETES downstream (flow-0164), in its `for RETIRED in …` line, in
+// that order. A trailing `/` is a directory removed wholesale. They are accepted by `classifyPr`
+// for DELETIONS ONLY (flow-0184): a sync PR that adds or modifies one is not a sync, and a
+// retired path that canonical still ships fails `syncProvenance`. `sync-retired-paths.test.mjs`
+// fails if this list and the workflow's loop differ.
+// Written in parts: `board-retired.test.mjs` forbids the template from naming the retired board.
+export const SYNC_RETIRED_PATHS = Object.freeze([
+  ".claude/skills/board" + "-builder/",
+  ".flow/board" + ".html",
+  ".github/workflows/flow-queue-runner.yml", // retired in flow-0174
+]);
+
+export const isRetiredPath = (f) =>
+  SYNC_RETIRED_PATHS.some((r) => (r.endsWith("/") ? f.startsWith(r) : f === r));
+
 export const PR_KINDS = Object.freeze([
   Object.freeze({ kind: "release", prefix: "release/", sentinel: RELEASE_PR_SENTINEL, paths: RELEASE_PR_PATHS }),
-  Object.freeze({ kind: "sync", prefix: "flow-sync/", sentinel: SYNC_PR_SENTINEL, paths: SYNC_PR_PATHS }),
+  Object.freeze({ kind: "sync", prefix: "flow-sync/", sentinel: SYNC_PR_SENTINEL, paths: SYNC_PR_PATHS, retired: true }),
 ]);
 
 // Which kind of task-less PR this is, or null when the branch matches no prefix. PURE — the
@@ -552,13 +567,19 @@ export const PR_KINDS = Object.freeze([
 // A branch that DOES match a prefix but carries a path outside its list comes back
 // `classified: false` with the offending paths, so "why was this not a release PR?" has an answer
 // instead of a shrug.
-export function classifyPr({ headRef = "", changedFiles = [] } = {}) {
+//
+// `deletedFiles` (flow-0184) is the subset of `changedFiles` the PR deletes (`git diff
+// --diff-filter=D`). On a sync PR only, a deleted retired path counts as inside the surface.
+// Omitted, nothing is deleted, so the answer is the pre-0184 one.
+export function classifyPr({ headRef = "", changedFiles = [], deletedFiles = [] } = {}) {
   const branch = String(headRef ?? "");
   const spec = PR_KINDS.find((k) => branch.startsWith(k.prefix));
   if (!spec) return null;
   const files = changedFiles.filter(Boolean);
   const res = spec.paths.map(globToRegExp);
-  const outside = files.filter((f) => !res.some((r) => r.test(f)));
+  const deleted = new Set(deletedFiles);
+  const outside = files.filter((f) => !res.some((r) => r.test(f)) &&
+    !(spec.retired && deleted.has(f) && isRetiredPath(f)));
   return {
     kind: spec.kind,
     sentinel: spec.sentinel,
@@ -1540,7 +1561,14 @@ export function runPlan({
   // so it follows `REVIEW_REPO_DIR` to the PR checkout rather than to the base worktree the
   // helper is executed from. It runs only for a classified release PR, which is why an ordinary
   // PR's git calls are still exactly the two diffs above.
-  const classified = classifyPr({ headRef, changedFiles });
+  let classified = classifyPr({ headRef, changedFiles });
+  if (classified?.kind === "sync" && !classified.classified) {
+    // flow-0184. Only a sync PR that strayed pays for the extra diff: ask which paths it deletes,
+    // so a removed retired path is not mistaken for a stray one.
+    const deletedFiles = git(["diff", "--name-only", "--diff-filter=D", "--no-renames", `${baseRef}...HEAD`])
+      .split("\n").map((s) => s.trim()).filter(Boolean);
+    classified = classifyPr({ headRef, changedFiles, deletedFiles });
+  }
   let prKind = classified;
   if (classified?.classified && classified.kind === "release") {
     prKind = { ...classified, report: releaseReport({ git }) };
