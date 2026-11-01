@@ -1,8 +1,10 @@
 name: _flow-unblock (reusable)
 
 # Reusable form of the blocked-task release sweep (flow-0041). Repos call it from a thin caller
-# that owns the triggers — `workflow_run` on flow-done completing, an hourly `schedule`, and
-# `workflow_dispatch`; this file is trigger-agnostic. See docs/flow-reusable-workflows.md.
+# that owns the triggers — `workflow_run` on flow-done completing, and `workflow_dispatch`; this
+# file is trigger-agnostic. There is no schedule (flow-0185): a `blocked_by` entry resolves only
+# when a task reaches `done` or a PR merges, and flow-done completing is that event. See
+# docs/flow-reusable-workflows.md.
 #
 # `blocked` was the one status with no automated exit: flow-status owns `in_review` and the return
 # to `ready`, flow-done owns `done`, flow-recover heals a stranded `in_progress`, and a blocked task
@@ -17,6 +19,15 @@ name: _flow-unblock (reusable)
 # That is the whole job. It starts no worker (flow-0173): a released task is `ready`, and the next
 # worker run picks it — the worker routine's own schedule, which picks with pick-task.mjs. Until
 # flow-0173 this sweep also dispatched flow-queue-runner, retired fleet-wide in flow-0174.
+#
+# flow-0185: after a release is PUSHED, and only then, the last step sends one `repository_dispatch`
+# event of type `flow-task-state`, which flow-dispatch.yml listens for. That replaces flow-dispatch's
+# `workflow_run` trigger on this workflow, which started a runner after every sweep, including the
+# ones that changed nothing. The release commit itself cannot start flow-dispatch: it is pushed with
+# GITHUB_TOKEN, and GitHub starts no workflow from a GITHUB_TOKEN push — repository_dispatch and
+# workflow_dispatch are the two documented exceptions. repository_dispatch needs `contents: write`,
+# which this workflow already holds, so no grant is added. It names no workflow and starts no worker:
+# flow-dispatch decides, as it does for any push to `.flow/tasks/**`.
 #
 # A SWEEP, not a hook: each run re-reads the whole store, so a block written after its dependency
 # landed is still released, and a missed run loses nothing — the next one does the same work.
@@ -71,6 +82,7 @@ jobs:
           node-version: 22
 
       - name: Release blocked tasks whose every blocked_by entry has resolved
+        id: sweep
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -131,6 +143,8 @@ jobs:
             git commit -q -m "flow: unblock$released -> ready (every blocked_by entry resolved)"
             if git push origin HEAD:main; then
               echo "Released:$released"
+              # Read by the next step: a task file changed on main, so flow-dispatch has work to see.
+              echo "changed=true" >> "${GITHUB_OUTPUT:-/dev/null}"
               break
             fi
             if [ "$attempt" -ge "$MAX_PUSH_ATTEMPTS" ]; then
@@ -143,3 +157,16 @@ jobs:
             git reset --hard --quiet FETCH_HEAD
           done
 
+      # flow-0185. Runs only when the sweep pushed a release; on every other run it is skipped, and
+      # no flow-dispatch run starts. A failed signal warns and does not fail the sweep: the release is
+      # already on main, and flow-dispatch's daily schedule picks the task up at the latest.
+      - name: Start flow-dispatch, because a task file changed on main
+        if: ${{ steps.sweep.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api -X POST "repos/$GITHUB_REPOSITORY/dispatches" -f event_type=flow-task-state >/dev/null; then
+            echo "Sent repository_dispatch flow-task-state."
+          else
+            echo "::warning::Could not send repository_dispatch flow-task-state — flow-dispatch's daily run will pick up the released task."
+          fi

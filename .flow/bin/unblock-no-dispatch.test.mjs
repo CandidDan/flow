@@ -26,13 +26,27 @@ const src = readFileSync(WF, "utf8");
 const code = src.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
 const steps = () => Object.values(yamlMod.parse(src).jobs ?? {}).flatMap((j) => j.steps ?? []);
 
+// flow-0185 narrowed the second assertion. One step may now call `repos/<repo>/dispatches`: the
+// last, gated on a pushed release, sending the repository_dispatch event `flow-task-state` that
+// flow-dispatch listens for (pinned in flow-dispatch-workflow.test.mjs). That names no workflow and
+// starts no worker — flow-dispatch decides, as it does for any push to `.flow/tasks/**`. What stays
+// forbidden is what flow-0173 removed: dispatching a named workflow (`actions/workflows/…`), from
+// any step, and any other step calling a dispatches endpoint at all.
+const SIGNAL_STEP = "Start flow-dispatch, because a task file changed on main";
+
 test("_flow-unblock.yml: no step dispatches a workflow, and none is named \"Start the next worker\"", { skip }, () => {
   const all = steps();
   assert.ok(all.length > 0, "no steps parsed — a check that found nothing is a failure");
   for (const s of all) {
     assert.notEqual(s.name, "Start the next worker", "the dispatch step must stay removed");
     assert.doesNotMatch(String(s.run ?? ""), /actions\/workflows\//, `step "${s.name}" dispatches a workflow`);
-    assert.doesNotMatch(String(s.run ?? ""), /\/dispatches\b/, `step "${s.name}" dispatches a workflow`);
+    if (s.name === SIGNAL_STEP) {
+      assert.match(String(s.run), /"repos\/\$GITHUB_REPOSITORY\/dispatches" -f event_type=flow-task-state\b/,
+        "the signal step sends exactly the flow-task-state repository_dispatch event");
+      assert.equal(s.if, "${{ steps.sweep.outputs.changed == 'true' }}", "…and only after a pushed release");
+    } else {
+      assert.doesNotMatch(String(s.run ?? ""), /\/dispatches\b/, `step "${s.name}" dispatches a workflow`);
+    }
   }
   assert.doesNotMatch(code, /actions\/workflows\/[^\s"']*\/dispatches/, "no dispatch call anywhere outside comments");
 });

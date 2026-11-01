@@ -15,12 +15,17 @@ name: flow-recover
 # runnable on demand today. That is the right shape for canonical, whose store is currently
 # being restructured by hand.
 #
+# Once a day (flow-0185), not every 3 hours: a stranded claim waits up to a day to be reset, and an
+# idle repo bills 30 runs a month here instead of 240. The threshold is unchanged. A sweep that
+# pushes a task-file change sends repository_dispatch `flow-task-state`, which starts flow-dispatch;
+# a sweep that changes nothing starts nothing.
+#
 # The `threshold_minutes` input is forwarded with `with:` rather than left to the reusable's
 # default so a human can widen it for one run without editing shared infra.
 
 on:
   schedule:
-    - cron: "0 */3 * * *"      # every 3h; the threshold (in the reusable) is the real gate
+    - cron: "53 5 * * *"       # daily (flow-0185); the threshold (in the reusable) is the real gate
   workflow_dispatch:
     inputs:
       threshold_minutes:
