@@ -1,12 +1,12 @@
 ---
 id: "flow-0186"
 title: "The PR review runs qa, code-review and security in one runner job, each still its own model invocation and its own PR check, with the verdict read from a vendor-neutral file"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "session_01NfrcU8NxwWt137Ds3Lw2Ai"
 created: "2026-11-01"
-started: ""
+started: "2026-11-01T07:53:41Z"
 branch: ""
 pr: ""
 issue: ""
