@@ -34,10 +34,13 @@ labels: [cost, workflows, "4.0.3"]
 model: "opus"
 effort: "high"
 model_reason: "Changes the triggers of fleet-wide reusable workflows; a missed event strands tasks in every adopting repo"
-asks: []
+asks:
+  - "fyi: PR #274 also edits .flow/bin/adapters.test.mjs, which is outside touches — a 2-line inversion of the assertion that pinned the hourly unblock schedule this task removes; no in-flight task declares it"
+  - "follow-up: docs/flow-routines.md:97 still says flow-dispatch runs on workflow_run of flow-unblock/flow-recover; it is outside touches and needs a one-line task"
 notes:
   - "2026-11-01 orchestrator: phase 1 of the cost plan Dan approved on 2026-11-01 (options doc 'Flow Infra Options', https://claude.ai/artifact/KbQCQhjz2cMcPwXhxrCzXo). Measured: an idle repo bills about 1,800 minutes a month, almost all from the hourly flow-unblock cron, the flow-dispatch run chained after every unblock and recover, and recover every 3 hours."
   - "2026-11-01 orchestrator: the gate already cancels superseded runs and skips drafts (flow-0136), so that part of the options doc's phase 1 is done and is not in this task."
+  - "2026-11-01 worker: done, PR #274 (branch flow/flow-0185-bookkeeping-on-events) marked ready; gate green after rebase (2119 pass, coverage 97.8%). Decision a fresh session should not re-litigate: the spec's fallback (keep workflow_run on unblock/recover, skip the dispatch job without a runner) cannot be built — a job if: sees only the workflow_run payload, whose conclusion is success whether or not anything was pushed. So _flow-unblock.yml and _flow-recover.yml write changed=true to their sweep step output after a successful push and a last step, gated on it, sends repository_dispatch flow-task-state with GITHUB_TOKEN (contents: write already granted; GITHUB_TOKEN repository_dispatch does start workflows). flow-dispatch callers listen on repository_dispatch types [flow-task-state] and no longer on workflow_run. Idle total on template callers: 92 runs/month (35 with FLOW_AI off). Next action: none until review — address any kickback on the same branch."
 ---
 
 ## Context
