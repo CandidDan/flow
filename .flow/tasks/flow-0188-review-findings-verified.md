@@ -35,7 +35,7 @@ notes:
 
 ## Context
 
-After flow-0186, each review (qa, code-review, security) runs as its own model call in one runner
+After flow-0186, each review (qa, code-review, security) runs as its own model call in its own
 job and writes `$RUNNER_TEMP/flow-review/<check>.json` with `{ check, verdict, summary }`.
 Everything after the model step reads only that file. A `fail` verdict turns the check red
 immediately: no second look checks whether the finding is real.
