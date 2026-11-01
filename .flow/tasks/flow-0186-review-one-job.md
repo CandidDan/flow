@@ -20,7 +20,6 @@ touches:
   - "project-template/.flow/bin/flow-review.test.mjs"
   - ".flow/bin/flow-review-workflow.test.mjs"
   - ".flow/bin/review-one-job.test.mjs"
-  - "docs/flow-reusable-workflows.md"
   - "changes/flow-0186.md"
 labels: [cost, review, "4.0.3"]
 model: "opus"
