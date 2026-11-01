@@ -158,10 +158,13 @@ jobs:
           done
 
       # flow-0185. Runs only when the sweep pushed a release; on every other run it is skipped, and
-      # no flow-dispatch run starts. A failed signal warns and does not fail the sweep: the release is
+      # no flow-dispatch run starts.
+      # `!cancelled()`, not the implicit `success()`: a sweep that pushed one change and then failed on
+      # a later one has still changed main, and the old `workflow_run: completed` trigger fired on any
+      # conclusion — so a failed sweep with `changed=true` still signals. A failed signal warns and does not fail the sweep: the release is
       # already on main, and flow-dispatch's daily schedule picks the task up at the latest.
       - name: Start flow-dispatch, because a task file changed on main
-        if: ${{ steps.sweep.outputs.changed == 'true' }}
+        if: ${{ !cancelled() && steps.sweep.outputs.changed == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

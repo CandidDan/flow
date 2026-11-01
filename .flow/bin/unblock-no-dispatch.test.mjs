@@ -32,7 +32,11 @@ const steps = () => Object.values(yamlMod.parse(src).jobs ?? {}).flatMap((j) => 
 // starts no worker — flow-dispatch decides, as it does for any push to `.flow/tasks/**`. What stays
 // forbidden is what flow-0173 removed: dispatching a named workflow (`actions/workflows/…`), from
 // any step, and any other step calling a dispatches endpoint at all.
+// Literal on purpose, not imported from flow-dispatch-workflow.test.mjs: importing a test file
+// registers and runs all of its tests a second time in this process. That file pins the same strings.
 const SIGNAL_STEP = "Start flow-dispatch, because a task file changed on main";
+const SIGNAL_IF = "${{ !cancelled() && steps.sweep.outputs.changed == 'true' }}";
+const TASK_STATE_EVENT = "flow-task-state";
 
 test("_flow-unblock.yml: no step dispatches a workflow, and none is named \"Start the next worker\"", { skip }, () => {
   const all = steps();
@@ -41,9 +45,9 @@ test("_flow-unblock.yml: no step dispatches a workflow, and none is named \"Star
     assert.notEqual(s.name, "Start the next worker", "the dispatch step must stay removed");
     assert.doesNotMatch(String(s.run ?? ""), /actions\/workflows\//, `step "${s.name}" dispatches a workflow`);
     if (s.name === SIGNAL_STEP) {
-      assert.match(String(s.run), /"repos\/\$GITHUB_REPOSITORY\/dispatches" -f event_type=flow-task-state\b/,
+      assert.ok(String(s.run).includes(`"repos/$GITHUB_REPOSITORY/dispatches" -f event_type=${TASK_STATE_EVENT}`),
         "the signal step sends exactly the flow-task-state repository_dispatch event");
-      assert.equal(s.if, "${{ steps.sweep.outputs.changed == 'true' }}", "…and only after a pushed release");
+      assert.equal(s.if, SIGNAL_IF, "…and only after a pushed release");
     } else {
       assert.doesNotMatch(String(s.run ?? ""), /\/dispatches\b/, `step "${s.name}" dispatches a workflow`);
     }

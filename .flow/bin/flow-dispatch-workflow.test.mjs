@@ -238,8 +238,10 @@ test("a repo whose sync runs at this release gets .github/workflows/flow-dispatc
 // `flow-task-state` — the event flow-dispatch's callers listen for. A sweep that changed nothing
 // skips the step, so no event is sent and no flow-dispatch run, and no runner, starts.
 
-const SIGNAL_STEP = "Start flow-dispatch, because a task file changed on main";
-const SIGNAL_IF = "${{ steps.sweep.outputs.changed == 'true' }}";
+/** The name of the signal step, and its exact condition — shared with unblock-no-dispatch.test.mjs. */
+export const SIGNAL_STEP = "Start flow-dispatch, because a task file changed on main";
+// `!cancelled()` so a sweep that pushed one change and then failed on a later one still signals.
+export const SIGNAL_IF = "${{ !cancelled() && steps.sweep.outputs.changed == 'true' }}";
 const sweepSteps = (file) => yamlMod.parse(read(join(REPO, ".github/workflows", file))).jobs.sweep.steps;
 
 /**
@@ -293,7 +295,8 @@ test("the signal check fails on each mutation it exists to catch", { skip }, () 
   const unblock = read(join(REPO, ".github/workflows/_flow-unblock.yml"));
   const recover = read(join(REPO, ".github/workflows/_flow-recover.yml"));
   const mutations = [
-    [unblock, "if: ${{ steps.sweep.outputs.changed == 'true' }}", "if: ${{ always() }}", /if must be exactly/],
+    [unblock, "if: ${{ !cancelled() && steps.sweep.outputs.changed == 'true' }}", "if: ${{ always() }}", /if must be exactly/],
+    [recover, "if: ${{ !cancelled() && steps.sweep.outputs.changed == 'true' }}", "if: ${{ steps.sweep.outputs.changed == 'true' }}", /if must be exactly/],
     [unblock, "event_type=flow-task-state", "event_type=flow-task", /must POST event_type=flow-task-state/],
     [unblock, "        id: sweep\n", "", /no step has id: sweep/],
     [unblock, 'echo "changed=true" >> "${GITHUB_OUTPUT:-/dev/null}"', ":", /never writes changed=true/],
@@ -361,8 +364,9 @@ function unblockSandbox(t) {
   return { root, run, outputs, ghLog };
 }
 
-// GitHub's evaluation of the one condition the signal step carries, on the outputs the sweep wrote.
-const signalRuns = (outputs) => outputs.changed === "true";
+// GitHub's evaluation of the one condition the signal step carries, on the outputs the sweep wrote
+// and the run's state (`cancelled`), so the partial-failure case below is the condition, not a guess.
+const signalRuns = (outputs, { cancelled = false } = {}) => !cancelled && outputs.changed === "true";
 
 test("a flow-done-triggered unblock that releases a task sends flow-task-state in the same run", { skip }, (t) => {
   const steps = sweepSteps("_flow-unblock.yml");
@@ -403,5 +407,17 @@ test("a failed signal warns and leaves the run green — the release is already 
   const r = sb.run({ ...signal, env_extra: { GH_DISPATCH_FAIL: "1" } });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /::warning::Could not send repository_dispatch flow-task-state/);
+});
+
+test("a sweep that pushed a change and then failed still signals; a cancelled run does not", { skip }, (t) => {
+  const steps = sweepSteps("_flow-unblock.yml");
+  const sweep = steps.find((s) => s.id === "sweep");
+  const sb = unblockSandbox(t);
+  // Push the release, then fail the step after it — the shape of recover pushing task 1 and failing on task 2.
+  const r = sb.run({ ...sweep, run: `${sweep.run}\nexit 1\n` });
+  assert.notEqual(r.status, 0, "the step must have failed for this case to mean anything");
+  assert.deepEqual(sb.outputs(), { changed: "true" }, "the push before the failure is recorded");
+  assert.ok(signalRuns(sb.outputs()), "a failed sweep that changed main still starts flow-dispatch");
+  assert.equal(signalRuns(sb.outputs(), { cancelled: true }), false, "a cancelled run sends nothing");
 });
 
