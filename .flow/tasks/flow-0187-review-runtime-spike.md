@@ -22,9 +22,12 @@ labels: [cost, review, spike]
 model: "opus"
 effort: "high"
 model_reason: "A design decision with vendor limits and cost on the line; the result decides phase 2 for the whole fleet"
-asks: []
+asks:
+  - "fyi: later's load is estimated from git history (this session was refused its Actions API); it moves the fleet peak by about 2 runs"
+  - "follow-up: if B is accepted, a task to add a per-review vendor key (claude|codex) to review: config and a codex-action model step writing the flow-0186 verdict file"
 notes:
   - "2026-11-01 orchestrator: phase 2 of the cost plan Dan approved on 2026-11-01 starts with this measurement. Dan's condition: Flow stays agent-agnostic, and any single review must be switchable between Claude and Codex at any time. So the spike measures both vendors' off-runner options, not only Claude routines."
+  - "2026-11-01 worker: PR #272 open and marked ready (REST ccr/ready_for_review; gh pr ready hit the GraphQL 403). Doc docs/research/review-runtime.md recommends staying on the one runner job (flow-0186). Two measured findings drive it: (1) from a routine session, the commit-status and check-run endpoints both return HTTP 403 from the session proxy, so a routine cannot post qa/code-review/security; (2) Codex has no off-runner path that returns a verdict and sets a check. Load: peak 18 review runs/hour, 78/day (6 repos measured from Actions; later estimated from git history because API access was refused). Routine caps are quoted from code.claude.com/docs/en/routines, not fired. No routine created, no secret added. Next action: none for a worker; the human reviews and merges."
 ---
 
 ## Context
