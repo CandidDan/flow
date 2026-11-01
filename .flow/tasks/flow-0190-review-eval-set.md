@@ -53,7 +53,7 @@ merge that the reviewers passed.
    flow-0188 verifier exactly as `_flow-review.yml` would (same prompt text, same model, read
    from the files above, not copied), and scores the case: a `green` case passes when no
    blocking finding survives verification; a `red` case passes when a surviving blocking
-   finding names the expected `file`. It writes `evals/review/results.json` (gitignored) and
+   finding names the expected `file`. It writes its results to the path given by `--out` (default: a file in the OS temp directory, never inside the repo) and
    prints per-check and total pass rates.
 3. **Workflow.** `.github/workflows/flow-review-eval.yml` (canonical-only, not shipped to
    adopters) runs the runner on `workflow_dispatch` and on canonical pull requests whose diff
