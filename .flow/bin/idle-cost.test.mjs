@@ -110,25 +110,31 @@ export function idleRunsPerMonth(files, yaml) {
       const n = crons.reduce((sum, c) => sum + countCronRuns(c, start), 0);
       if (n > 0) { runs.set(w.name, n); lines.push(`${w.file}: ${n} scheduled run(s) [${crons.join(" | ")}]`); }
     }
-    // workflow_run chains: each run of a named workflow starts one run of every workflow listening
-    // for it, and every job in that chained run starts a runner. Followed to a fixed point so a
-    // chain of chains is counted too; a cycle would never settle, so it is cut off and reported.
+    // workflow_run chains: each RUN of a named workflow starts one run of every workflow listening
+    // for it, and every job in that chained run starts a runner. Runs and billed jobs are kept apart:
+    // a chain of chains propagates runs (one per upstream run, whatever its job count), and only the
+    // bill multiplies by jobs. Followed to a fixed point so a chain of chains is counted too; a cycle
+    // would never settle, so it is cut off and reported.
     let changed = true, rounds = 0;
-    const chained = new Map();
+    const chainedRuns = new Map();
     while (changed) {
       changed = false;
       if (++rounds > wfs.length + 1) throw new Error("workflow_run chain does not settle — a cycle");
       for (const w of wfs) {
         const listens = w.on.workflow_run?.workflows ?? [];
-        const n = listens.reduce((sum, src) => sum + (runs.get(src) ?? 0) + (chained.get(src) ?? 0), 0) * Math.max(w.jobs, 1);
-        if (n !== (chained.get(w.name) ?? 0)) { chained.set(w.name, n); changed = true; }
+        const n = listens.reduce((sum, src) => sum + (runs.get(src) ?? 0) + (chainedRuns.get(src) ?? 0), 0);
+        if (n !== (chainedRuns.get(w.name) ?? 0)) { chainedRuns.set(w.name, n); changed = true; }
       }
     }
+    let chainedBilled = 0;
     for (const w of wfs) {
-      const n = chained.get(w.name) ?? 0;
-      if (n > 0) lines.push(`${w.file}: ${n} run(s) chained by workflow_run on [${w.on.workflow_run.workflows.join(", ")}]`);
+      const n = chainedRuns.get(w.name) ?? 0;
+      if (n === 0) continue;
+      const billed = n * Math.max(w.jobs, 1);
+      chainedBilled += billed;
+      lines.push(`${w.file}: ${n} run(s) × ${Math.max(w.jobs, 1)} job(s) = ${billed}, chained by workflow_run on [${w.on.workflow_run.workflows.join(", ")}]`);
     }
-    const total = [...runs.values(), ...chained.values()].reduce((a, b) => a + b, 0);
+    const total = [...runs.values()].reduce((a, b) => a + b, 0) + chainedBilled;
     if (total > worst.total) worst = { total, lines, start: start.toISOString().slice(0, 10) };
   }
   return worst;
@@ -190,14 +196,15 @@ test("the budget fails if a bookkeeping schedule or a workflow_run chain comes b
   }
 });
 
-test("a workflow_run chain is counted once per run of the workflow it listens to, per job", { skip }, () => {
+test("a workflow_run chain starts one run per upstream run, and bills each of its jobs", { skip }, () => {
   const files = {
     "a.yml": 'name: a\non:\n  schedule:\n    - cron: "0 0 * * *"\njobs:\n  x: {}\n',
     "b.yml": "name: b\non:\n  workflow_run:\n    workflows: [a]\n    types: [completed]\njobs:\n  x: {}\n  y: {}\n",
     "c.yml": "name: c\non:\n  workflow_run:\n    workflows: [b]\n    types: [completed]\njobs:\n  x: {}\n",
   };
-  // a: 30. b: 30 runs × 2 jobs = 60. c: chained on b's 60 = 60. Total 150.
-  assert.equal(idleRunsPerMonth(files, yamlMod).total, 150);
+  // a: 30 runs. b: 30 runs (one per run of a) × 2 jobs = 60 billed. c: 30 runs (one per RUN of b,
+  // not per job) × 1 job = 30. Total 120.
+  assert.equal(idleRunsPerMonth(files, yamlMod).total, 120);
   const cycle = { ...files, "a.yml": files["a.yml"].replace("  schedule:", "  workflow_run:\n    workflows: [c]\n  schedule:") };
   assert.throws(() => idleRunsPerMonth(cycle, yamlMod), /does not settle/);
 });
