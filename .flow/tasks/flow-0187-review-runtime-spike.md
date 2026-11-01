@@ -1,12 +1,12 @@
 ---
 id: "flow-0187"
 title: "Spike: measure whether the PR review can run off GitHub runners on the Claude routine allowance and on Codex's equivalent, and recommend phase 2 with the numbers"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_01NfrcU98Nsg3UDL8pX9rF9U"
 created: "2026-11-01"
-started: ""
+started: "2026-11-01T07:53:45Z"
 branch: ""
 pr: ""
 issue: ""
