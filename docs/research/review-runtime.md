@@ -4,15 +4,15 @@
 its verdict file. Two reasons. First, Claude routines can carry the fleet's peak load: 18 review
 runs an hour against a cap of 30 an hour per routine. But Codex has no off-runner path that both
 returns a verdict and sets a check, so routines would break Dan's condition that any single review
-can be switched between Claude and Codex at any time. Second, a routine can only set the
-`qa`/`code-review`/`security` result as a commit status posted under the same GitHub identity the
-worker uses.
+can be switched between Claude and Codex at any time. Second, a routine cannot set the
+`qa`/`code-review`/`security` result at all: from a routine session, both the commit-status and the
+check-run endpoints return HTTP 403 (measured).
 
 Measured on 2026-11-01 from a Claude Code cloud session started by a routine. The window is
 2026-10-02 to 2026-11-01 (30 days). All times are UTC.
 
 ```
-PR push ─► option A  routine per review   ─► commit status (user identity)   Claude only
+PR push ─► option A  routine per review   ─► no check: proxy refuses (403)    Claude only
         ─► option B  one runner job       ─► check run (github-actions)      Claude or Codex  ◄ recommended
         ─► option C  webhook relay        ─► check run (own GitHub App)      Claude or Codex  (phase 3)
 ```
@@ -67,7 +67,7 @@ they are "in research preview. Behavior, limits, and the API surface may change"
 **Quoted, not fired.** Finding a cap by firing means running past it: at least 31 fires of one
 routine in an hour. Each fire is a full cloud session drawn from the plan, and the overflow fires
 fail by design. The spike's rules allow quoting where firing is not possible, so these limits are
-quoted. The status-write row in the second table was measured.
+quoted. The status and check-run probes in the second table were measured.
 
 | Limit (from "Usage and limits") | Value | Counted for | Over the limit |
 |---|---:|---|---|
@@ -97,14 +97,23 @@ spike's own PR head commit:
 
 | Write | Endpoint | Result |
 |---|---|---|
-| Commit status | `POST /repos/CandidDan/flow/statuses/{sha}` | PROBE_STATUS |
-| Check run | `POST /repos/CandidDan/flow/check-runs` | PROBE_CHECK |
+| Commit status | `POST /repos/{owner}/{repo}/statuses/{sha}` (canonical) | **HTTP 403**: "Write access to this GitHub API path is not permitted through this proxy." |
+| Check run | `POST /repos/{owner}/{repo}/check-runs` (canonical) | **HTTP 403**, same message |
 
-What this means. A routine can satisfy a required `qa` check only as a commit status named `qa`,
-and only where branch protection does not pin that check to the GitHub Actions app. That status is
-posted by **the same user identity the worker routine pushes with**. So anything holding that
-identity, the worker included, can post `qa: success`. Today the check comes from the
-`github-actions` app, which a worker session cannot impersonate.
+What this means. **A routine as configured today cannot set the `qa`, `code-review` or `security`
+result at all.** Its GitHub traffic goes through Anthropic's proxy, and the proxy refuses both
+endpoints. The same session can push, open a PR and mark it ready, so this is a per-path allowlist,
+not a missing permission. A routine could only post a result by holding its own GitHub token. That
+would be a new secret, which this spike may not add. Even then, the token would be a user token, and:
+
+- **Check runs are out.** GitHub's [check-runs API](https://docs.github.com/en/rest/checks/runs) accepts only a GitHub App's token, so a user
+  token cannot create one either way.
+- **A commit status would carry the worker's identity.** The worker routine pushes as that same
+  user. Anything holding that identity, the worker included, could post `qa: success`. Today the
+  check comes from the `github-actions` app, which a worker session cannot impersonate.
+
+The other way to get a result onto the PR is a PR comment, which the routine can post. A comment is
+not a check, so nothing in branch protection can require it.
 
 ## 3. Codex
 
@@ -138,10 +147,10 @@ writes the file.
 
 | Moving one review (qa, code-review or security) Claude → Codex | A: routines | B: one runner job (flow-0186) | C: webhook relay (phase 3) |
 |---|---|---|---|
-| What changes | The review leaves the routine. It needs a runner job again (`codex-action`), or Codex's GitHub review, which has no verdict and no check | That review's model step: `anthropics/claude-code-action` → `openai/codex-action`, same prompt, writing the same verdict file | The relay's call for that check: Anthropic API → OpenAI API, writing the same verdict |
+| What changes | The review leaves the routine. It needs a runner job again (`codex-action`), or Codex's GitHub review, which has no verdict and no check. Note that the Claude side has no check either until the proxy allows one | That review's model step: `anthropics/claude-code-action` → `openai/codex-action`, same prompt, writing the same verdict file | The relay's call for that check: Anthropic API → OpenAI API, writing the same verdict |
 | Where the switch lives | Two systems: a routine in claude.ai plus a workflow | One per-review key in `.flow/config.yml` `review:` | Relay config |
 | New credential in the repo | `OPENAI_API_KEY` (runner path) | `OPENAI_API_KEY` | None in the repo; held by the relay |
-| Check-name continuity (`qa`, `code-review`, `security`) | Lost while that review moves between a status (routine) and a check (runner) | Kept: same job, same check names | Kept: the relay owns the checks |
+| Check-name continuity (`qa`, `code-review`, `security`) | None on the routine side: it cannot post the check (403) | Kept: same job, same check names | Kept: the relay owns the checks |
 | Moving it back | Rebuild the routine and its trigger | Flip the key | Flip the config |
 
 The same table read Codex → Claude has the same cells. Only option B is symmetric with nothing
@@ -158,7 +167,7 @@ minutes wall-clock per run at today's 27.7 runs a day. That is the price of keep
 switch a one-line change.
 
 **What would change it:** Codex documenting a headless, API-fired task that can write a commit
-status or check run, *and* Anthropic publishing GitHub-trigger caps or letting a routine post a
-check run as an app rather than as the user. With both, reviews as routines become symmetric
+status or check run, *and* Anthropic letting a routine post a check run as an app (today the
+proxy refuses both statuses and check runs) and publishing GitHub-trigger caps. With both, reviews as routines become symmetric
 across vendors and worth the move. Without them, the next step is the webhook relay (phase 3), not
 routines.
