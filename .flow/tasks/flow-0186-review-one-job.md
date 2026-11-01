@@ -29,6 +29,7 @@ asks: []
 notes:
   - "2026-11-01 orchestrator: phase 1 (review half) of the cost plan Dan approved on 2026-11-01. Option B2 in the options doc, with one change Dan required when approving: Flow stays agent-agnostic, so any single review must be switchable between Claude and Codex at any time. That rules out B2's 'one session, three verdicts': three checks sharing one model session cannot have one of them moved to a different vendor. Each check keeps its own invocation; the saving comes from one runner instead of four, not from one session."
   - "2026-11-01 orchestrator: the Codex invocation itself is NOT in this task. Adding a second vendor is product work that needs its own approved intent (Dan was asked on 2026-11-01). This task only removes the Claude-specific coupling in how a verdict is read, so that adding Codex later changes one step per check and nothing else."
+  - "2026-11-01 orchestrator: Dan, on why the reviews must not share a session: \"We just need to ensure every review is as impartial and accurate as possible, a shared session for 3 reviews feels like we're opening the door for slopiness to be introduced\". So separate invocations are a requirement for review independence, not only for vendor switching. Do not merge the three reviews into one model session to save time or tokens, even if a later measurement says it would be cheaper; that is a decision for Dan."
 ---
 
 ## Context
