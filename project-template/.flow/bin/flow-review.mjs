@@ -1360,8 +1360,71 @@ export function verdictOutcome(parsed, {
   return { ok: !failed, code: failed ? 1 : 0, lines, summary: parsed.summary };
 }
 
+// ── the verdict file contract (flow-0186) ─────────────────────────────────────────────────
+// The shape a reviewer's verdict file must have, defined here in code rather than only inside a
+// Claude prompt, so that any vendor's model step can be held to it. Each review job deletes
+// `$RUNNER_TEMP/flow-review/<check>.json` before its model step runs and enforces it with
+// `enforce` straight after, so a stale file can never pass.
+//
+//   { "check": "<qa|code-review|security>", "verdict": "pass" | "fail", "summary": "<one line>" }
+//
+// plus, optionally, `unproven` (qa) and `blocking` (code-review, security) as arrays. Stricter
+// than `parseVerdict` on purpose: no code fence, no upper case, and `check` must name the check
+// being enforced, so a verdict written for one check cannot clear another. Every rejection is
+// returned as a FAILING verdict with a reason, never thrown past the caller and never a pass.
+export const VERDICT_FILE_VALUES = Object.freeze(["pass", "fail"]);
+
+export function validateVerdictFile(file, {
+  check,
+  exists = existsSync,
+  read = (p) => readFileSync(p, "utf8"),
+} = {}) {
+  const reject = (reason) => ({
+    valid: false, check: check ?? null, verdict: "fail", summary: "", unproven: [], blocking: [], reason,
+  });
+  if (!check) return reject("no check name was given to validate the verdict file against");
+  if (!file || !exists(file)) {
+    return reject(`no verdict file at ${file || "(no path)"} — the ${check} reviewer wrote none, ` +
+      `and a reviewer that did not report has not approved`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(read(file));
+  } catch (e) {
+    return reject(`the ${check} verdict file is not valid JSON (${e.message})`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return reject(`the ${check} verdict file must hold one JSON object`);
+  }
+  if (parsed.check !== check) {
+    return reject(`the verdict file names check ${JSON.stringify(parsed.check ?? null)}, ` +
+      `but this is the ${check} check`);
+  }
+  if (!VERDICT_FILE_VALUES.includes(parsed.verdict)) {
+    return reject(`the ${check} verdict must be exactly "pass" or "fail", got ` +
+      `${JSON.stringify(parsed.verdict ?? null)}`);
+  }
+  if (typeof parsed.summary !== "string") {
+    return reject(`the ${check} verdict file must carry a "summary" string`);
+  }
+  for (const key of ["unproven", "blocking"]) {
+    if (parsed[key] !== undefined && !Array.isArray(parsed[key])) {
+      return reject(`the ${check} verdict file's "${key}" must be an array when present`);
+    }
+  }
+  return {
+    valid: true,
+    check,
+    verdict: parsed.verdict,
+    summary: parsed.summary,
+    unproven: (parsed.unproven ?? []).filter(Boolean).map(String),
+    blocking: (parsed.blocking ?? []).filter(Boolean),
+    reason: "",
+  };
+}
+
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────
-const emit = (file, text) => { if (file) appendFileSync(file, text.endsWith("\n") ? text : `${text}\n`); };
+const emit =(file, text) => { if (file) appendFileSync(file, text.endsWith("\n") ? text : `${text}\n`); };
 
 // Every flag `verdict` takes a VALUE for. The set exists so the positional argument — the verdict
 // file — is found by skipping flag values rather than by taking the first thing that does not
@@ -1492,6 +1555,31 @@ export function runReviewCli(argv, {
       emit(env.GITHUB_STEP_SUMMARY, md);
       for (const l of outcome.lines) console.error(`::error::${l}`);
       console.log(`${check}: ${outcome.ok ? "PASS" : "FAIL"}${parsed.summary ? ` — ${parsed.summary}` : ""}`);
+      return outcome.code;
+    }
+
+    // flow-0186. The vendor-neutral verdict: `validateVerdictFile`, then the same outcome rules
+    // `verdict` applies (truncation fact, findings overrule a pass). `verdict` stays for an
+    // adopter whose pinned `_flow-review.yml` predates this command and still writes the older,
+    // looser `.flow-review/<check>.json`.
+    if (cmd === "enforce") {
+      const { file, check, diffTruncated, diffBytes, diffFullBytes } = parseVerdictArgs(rest);
+      if (!rest.includes("--check")) {
+        throw new ReviewError(
+          `usage: flow-review.mjs enforce <file> --check <name> ${TRUNCATION_FLAG} true|false`);
+      }
+      const v = validateVerdictFile(file, { check });
+      const outcome = verdictOutcome(
+        { verdict: v.verdict.toUpperCase(), unproven: v.unproven, blocking: v.blocking, summary: v.summary },
+        { check, diffTruncated, diffBytes, diffFullBytes });
+      const lines = v.valid ? outcome.lines : [`${check}: ${v.reason}`, ...outcome.lines];
+      const md = [`### ${check} review — ${outcome.ok ? "PASS" : "FAIL"}`, ""]
+        .concat(v.summary ? [v.summary, ""] : [])
+        .concat(lines.map((l) => `- ${l}`))
+        .join("\n");
+      emit(env.GITHUB_STEP_SUMMARY, md);
+      for (const l of lines) console.error(`::error::${l}`);
+      console.log(`${check}: ${outcome.ok ? "PASS" : "FAIL"}${v.summary ? ` — ${v.summary}` : ""}`);
       return outcome.code;
     }
 
@@ -1674,6 +1762,10 @@ export function planSummary({
     for (const l of provenance.lines) out.push(`  - ${l}`);
   }
   for (const w of cfg.warnings) out.push(`- :warning: ${w}`);
+  // flow-0186. A skipped security review starts no runner: the `security` job carries a job-level
+  // `if:` on `security_run`. The skip and its reason are recorded HERE, in the plan job's summary,
+  // in the same form the security job used to print, so the skip stays on the record.
+  if (!security.run) out.push("", "### Security review — SKIPPED", "", security.reason, "");
   // The bootstrap warning is last so it is the line a reader ends on, and it is phrased as a
   // warning rather than an error because the case is legitimate exactly once. What must never
   // happen is that it passes silently: the gate that decided this run came from the diff it was
