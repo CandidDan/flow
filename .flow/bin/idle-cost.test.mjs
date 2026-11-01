@@ -221,3 +221,47 @@ test("docs/running-flow-cheaply.md exists, covers idle, PR, public repos and FLO
   const index = readFileSync(join(REPO, "docs", "flow-reusable-workflows.md"), "utf8");
   assert.match(index, /\]\(running-flow-cheaply\.md\)/, "flow-reusable-workflows.md must link the page");
 });
+
+// ── flow-recover: at most once a day, in both callers ─────────────────────────────────────────
+// The budget above only bounds recover indirectly (a twice-daily cron would still fit under 100),
+// and it reads only the template. This pins the criterion itself, for canonical's caller too.
+
+const RECOVER_CALLERS = [
+  join(REPO, "project-template", ".github", "workflows", "flow-recover.yml"),
+  join(REPO, ".github", "workflows", "flow-recover.yml"),
+];
+
+/** Problems with one flow-recover caller's schedule: none means it runs, and at most once a day. */
+export function recoverScheduleProblems(text, yaml) {
+  const wf = yaml.parse(text);
+  const crons = ((wf.on ?? wf[true] ?? {}).schedule ?? []).map((s) => s.cron);
+  if (crons.length === 0) return ["no schedule — a stranded claim would never be reset unattended"];
+  const problems = [];
+  for (const start of STARTS) {
+    const perDay = Array.from({ length: DAYS }, (_, d) =>
+      crons.reduce((sum, c) => sum + countCronRuns(c, new Date(start.getTime() + d * 86_400_000), 1), 0));
+    const worst = Math.max(...perDay);
+    if (worst > 1) { problems.push(`runs ${worst} times on one day (crons ${JSON.stringify(crons)}) — at most once a day`); break; }
+  }
+  return problems;
+}
+
+test("flow-recover runs at most once a day, in the template caller and in canonical's own", { skip }, () => {
+  for (const f of RECOVER_CALLERS) assert.deepEqual(recoverScheduleProblems(readFileSync(f, "utf8"), yamlMod), [], f);
+});
+
+test("the recover schedule check fails on each mutation it exists to catch", { skip }, () => {
+  const base = readFileSync(RECOVER_CALLERS[0], "utf8");
+  const mutations = [
+    [/cron: "[^"]+"/, 'cron: "0 */3 * * *"', /runs 8 times on one day/],
+    [/cron: "[^"]+"/, 'cron: "53 5,17 * * *"', /runs 2 times on one day/],
+    [/(    - cron: "[^"]+".*\n)/, '$1    - cron: "7 12 * * *"\n', /runs 2 times on one day/],
+    [/  schedule:\n    - cron: .*\n/, "", /no schedule/],
+  ];
+  for (const [from, to, expect] of mutations) {
+    const mutated = base.replace(from, to);
+    assert.notEqual(mutated, base, `mutation did not apply: ${from}`);
+    const problems = recoverScheduleProblems(mutated, yamlMod);
+    assert.ok(problems.some((p) => expect.test(p)), `${from} -> ${to}: expected ${expect}, got ${JSON.stringify(problems)}`);
+  }
+});
