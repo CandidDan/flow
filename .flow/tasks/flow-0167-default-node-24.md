@@ -23,7 +23,6 @@ touches:
   - ".github/workflows/_flow-gates.yml"
   - ".github/workflows/_flow-kickback.yml"
   - ".github/workflows/_flow-open-pr.yml"
-  - ".github/workflows/_flow-queue-runner.yml"
   - ".github/workflows/_flow-recover.yml"
   - ".github/workflows/_flow-review.yml"
   - ".github/workflows/_flow-status.yml"
