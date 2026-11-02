@@ -1,7 +1,7 @@
 ---
 id: "flow-0193"
 title: "Flow goes to v5: qa, code-review and security run in one review job that posts three check runs, and the auto-fix round reads those check runs instead of job names"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
 owner: ""
@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits on flow-0186, which adds the per-check verdict file and the deleted-before/validated-after steps this task moves into one job."
-blocked_by: ["flow-0186"]
+blocked_reason: ""
+blocked_by: []
 serves: ["G9", "G10"]
 intent: "model-work-off-github-actions"
 touches:
