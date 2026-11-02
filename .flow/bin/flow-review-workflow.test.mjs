@@ -45,7 +45,11 @@ const HELPER_JOBS = ["plan", ...REVIEW_JOBS, GUIDE_JOB, INTENT_JOB];
 // written to $GITHUB_ENV by the materialise step and points at the BASE branch's copy — so these
 // are what "a plan invocation" and "a verdict invocation" now look like.
 const PLAN_RUN = /node "\$FLOW_REVIEW_DIR"\/flow-review\.mjs plan\b/;
-const VERDICT_RUN = /node "\$FLOW_REVIEW_DIR"\/flow-review\.mjs verdict\b/;
+// flow-0186: the review jobs enforce through `enforce`, which validates the vendor-neutral
+// verdict file in $RUNNER_TEMP. The older `verdict` command stays in the helper for adopters
+// pinned to an older workflow, but nothing in this workflow calls it any more.
+const VERDICT_RUN = /node "\$FLOW_REVIEW_DIR"\/flow-review\.mjs enforce\b/;
+const SECURITY_IF = "${{ needs.plan.outputs.security_run == 'true' }}";
 const stepsOf = (job) => wf.jobs[job]?.steps ?? [];
 const allSteps = () => Object.values(wf.jobs ?? {}).flatMap((j) => j.steps ?? []);
 const materialiseStep = (job) =>
@@ -109,6 +113,24 @@ test("the caller is a thin, pinned reference that passes the token by name", { s
   assert.equal(job.permissions["id-token"], "write", "claude-code-action mints an OIDC token");
 });
 
+// ── flow-0186 criterion 5: the check names and the permissions do not move ────────────────
+
+test("flow-0186: the jobs qa, code-review and security, and every permissions block, are unchanged", { skip }, () => {
+  for (const job of REVIEW_JOBS) assert.ok(wf.jobs[job], `the PR check is \`flow-review / ${job}\` — renaming the job renames it`);
+  assert.deepEqual(Object.keys(wf.jobs), ["plan", "qa", "code-review", "security", "intent-review", "guide"],
+    "no review job was merged, renamed or added");
+  assert.deepEqual(wf.permissions,
+    { contents: "read", "pull-requests": "write", issues: "read", "id-token": "write" },
+    "the reusable's permissions block is exactly what it was before flow-0186");
+  for (const [name, job] of Object.entries(wf.jobs)) {
+    assert.equal(job.permissions, undefined, `${name} gained a permissions block`);
+  }
+  const caller = yamlMod.parse(readFileSync(CALLER, "utf8")).jobs["flow-review"];
+  assert.deepEqual(caller.permissions,
+    { contents: "read", "pull-requests": "write", issues: "read", "id-token": "write" },
+    "the template caller's permissions block is exactly what it was before flow-0186");
+});
+
 // ── criterion 2 + fail-closed: the verdict, not the model call, decides the check ──────────
 
 test("each reviewer's verdict is enforced by the helper, and enforced even if it died", { skip }, () => {
@@ -141,16 +163,18 @@ test("the qa prompt demands the unproven criteria be named verbatim", { skip }, 
 
 // ── criterion 3: the security review is conditional, and its skip is visible ───────────────
 
-test("the security job always runs, so the check is never silently absent", { skip }, () => {
+test("flow-0186: a skipped security review starts no runner, and the plan job records the skip", { skip }, () => {
   const job = wf.jobs.security;
-  assert.equal(job.if, undefined,
-    "a job-level `if` would make the check VANISH from the PR when it is skipped — " +
-    "indistinguishable from a gate that broke. Gate the steps, not the job.");
-  const report = (job.steps ?? [])[0];
-  assert.equal(report.if, undefined, "the applicability report must run unconditionally");
-  assert.match(String(report.run), /GITHUB_STEP_SUMMARY/, "the decision must reach the run summary");
-  assert.match(String(report.run), /SECURITY_REASON/,
-    "and it must carry the reason, not just the verdict (through env — see the injection test)");
+  assert.equal(job.if, SECURITY_IF,
+    "the job-level `if` on the plan's decision is what keeps a skipped review from billing a " +
+    "runner; GitHub reports a job skipped by `if:` as a successful required check");
+  assert.ok(!JSON.stringify(job.steps ?? []).includes("SKIPPED"),
+    "the security job must not print the skip itself: it never starts when the review is skipped");
+  const planRuns = stepsOf("plan").filter((s) => PLAN_RUN.test(String(s.run ?? "")));
+  assert.equal(planRuns.length, 1,
+    "the plan job runs `flow-review.mjs plan`, whose summary carries `### Security review — " +
+    "SKIPPED` and the reason (proved in flow-review.test.mjs)");
+  assert.equal(wf.jobs.plan.outputs?.security_reason, "${{ steps.plan.outputs.security_reason }}");
 });
 
 test("the security reviewer itself is gated on the config-driven decision", { skip }, () => {
@@ -200,8 +224,8 @@ test("attacker-controlled review text never reaches a shell through ${{ }}", { s
     assert.doesNotMatch(block, /\$\{\{[^}]*security_reason[^}]*\}\}/,
       "security_reason must reach the shell through `env:`, where it is data, not script");
   }
-  const report = (wf.jobs.security.steps ?? [])[0];
-  assert.equal(report.env?.SECURITY_REASON, "${{ needs.plan.outputs.security_reason }}",
+  const render = stepsOf(GUIDE_JOB).find((s) => /review-guide\.mjs comment\b/.test(String(s.run ?? "")));
+  assert.equal(render?.env?.SECURITY_REASON, "${{ needs.plan.outputs.security_reason }}",
     "…and it must still actually be reported — passing it safely is not the same as dropping it");
 });
 
@@ -243,7 +267,9 @@ test("the fork fence sits on `plan` and nowhere else — so it suppresses all fo
     "three jobs run claude-code-action with --permission-mode bypassPermissions; the head they " +
     "check out must be one this repo owns, and `plan` is the single gate the other three need");
   for (const job of REVIEW_JOBS) {
-    assert.equal(wf.jobs[job].if, undefined,
+    // flow-0186: `security` carries a job-level `if`, but it is the plan's review decision, not
+    // the fence — which still lives on `plan` alone.
+    assert.equal(wf.jobs[job].if, job === "security" ? SECURITY_IF : undefined,
       `${job} must not carry its own copy of the fence — \`needs: plan\` already suppresses it, ` +
       `and a second copy is the one that gets forgotten when the rule changes`);
   }
@@ -324,7 +350,7 @@ test("every reviewer is handed a materialised, bounded context", { skip }, () =>
 test("no reviewer is allowed to write anything but its own verdict", { skip }, () => {
   for (const p of prompts()) {
     assert.match(p, /Never push commits, never edit source files/);
-    assert.match(p, /The only file you write is \.flow-review\//);
+    assert.match(p, /The only file you write is \$\{\{ runner\.temp \}\}\/flow-review\//);
   }
 });
 
@@ -1017,7 +1043,8 @@ test("flow-0084: the guide's prompt bounds the model to the facts file and forbi
 
 test("flow-0084: the three existing checks are untouched — the guide is additive", { skip }, () => {
   for (const job of REVIEW_JOBS) {
-    assert.equal(wf.jobs[job].if, undefined, `${job} must still carry no job-level if`);
+    assert.equal(wf.jobs[job].if, job === "security" ? SECURITY_IF : undefined,
+      `${job} must carry no job-level if other than security's review decision (flow-0186)`);
     assert.equal(wf.jobs[job]["continue-on-error"], undefined,
       `${job} must still be able to fail the PR — only the guide is advisory`);
     assert.deepEqual(wf.jobs[job].needs, "plan", `${job}'s needs must not have gained the guide`);
@@ -1123,7 +1150,7 @@ test("flow-0178 criterion 3: on an intent PR, qa and code-review skip the model 
     const pass = intentPassStep(job);
     assert.ok(pass, `${job}: no fixed-PASS step`);
     assert.equal(pass.if, INTENT_IF, `${job}: the fixed line is for an intent PR only`);
-    assert.equal(pass.env?.VERDICT_FILE, `.flow-review/${job}.json`);
+    assert.equal(pass.env?.VERDICT_FILE, `\${{ runner.temp }}/flow-review/${job}.json`);
     const steps = stepsOf(job);
     const verdict = steps.find((s) => VERDICT_RUN.test(String(s.run ?? "")));
     assert.ok(steps.indexOf(pass) < steps.indexOf(verdict), `${job}: the verdict step reads what the pass step wrote`);
@@ -1150,7 +1177,10 @@ test("flow-0178 criterion 3: the pinned PASS line in the workflow is the helper'
       encoding: "utf8", env: { ...process.env, PASS_LINE: pass.env.PASS_LINE, VERDICT_FILE: file },
     });
     assert.equal(r.status, 0, r.stderr);
-    const parsed = helperMod.parseVerdict(readFileSync(file, "utf8"));
+    // flow-0186: graded by the vendor-neutral validator the enforce step runs.
+    const v = helperMod.validateVerdictFile(file, { check: job });
+    assert.equal(v.valid, true, v.reason);
+    const parsed = { verdict: v.verdict.toUpperCase(), unproven: v.unproven, blocking: v.blocking, summary: v.summary };
     assert.equal(parsed.summary, helperMod.INTENT_PR_PASS_LINE);
     assert.equal(helperMod.verdictOutcome(parsed, { check: job }).ok, true);
     assert.equal(helperMod.verdictOutcome(parsed, { check: job, diffTruncated: true }).ok, false,
