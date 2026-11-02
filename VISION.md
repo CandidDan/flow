@@ -74,11 +74,11 @@ look. No mechanism currently exists that would catch a gate that lied.
 
 ### G11 — Work traces to a stated intent
 Every piece of built work points back to something a human said they wanted, written down before
-it was scoped. Issues are the capture inbox — things that are wrong, and ideas anyone has sent
-(2026-11-02) — and nothing in an issue is wanted until it becomes an intent. Intents are things we
-want, and they live in the repo, because that is what makes the accountability visible. The one
-exception is a trivial fix from a submitter the operator trusts, which becomes a `maintenance`
-task without an intent (ADR-0010); the merge stays the operator's.
+it was scoped. Issues are the capture inbox — things that are wrong, and ideas anyone has sent —
+and nothing in an issue is wanted until it becomes an intent. Intents are things we want, and
+they live in the repo, because that is what makes the accountability visible. The one exception
+is a trivial fix from a submitter the operator trusts, which becomes a `maintenance` task without
+an intent (ADR-0010); the merge stays the operator's.
 **Progress looks like:** you can pick any merged PR and read, in the repo, the intent it came
 from and who approved it (or, for an intake-lane `maintenance` fix, the issue it came from and
 who vouched for the submitter); and an approved intent survives contact with the tasks derived
@@ -135,7 +135,6 @@ pointing at them surface as warnings, which is the intended signal.
 - **Whose words an intent's Problem section holds.** The intent template assumes one person. Now
   that ideas arrive as issues from submitters (ADR-0010), an intent can come from several people's
   issues, merged as duplicates. Undecided.
-
 - **The shape of the cross-project view.** Wanted, genuinely unexplored. Deliberately not written
   as a prohibition: "we might one day" is not a non-goal, and a fake one rejects nothing.
 - **Whether readers stay readers.** Today they read and feed back, which is what the audience

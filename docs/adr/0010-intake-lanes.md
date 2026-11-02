@@ -80,7 +80,10 @@ A new job classifies each issue into exactly one of `trivial | normal | spam`.
 - It reads the issue as data. A prompt-injected issue can, at worst, choose the wrong one of three
   values.
 - Its output is validated against the three values by a script. Anything else is `normal`.
-- A separate step that runs no model applies the `flow:size/<value>` label.
+- A separate **job** that runs no model, and is the only one holding `issues: write`, applies the
+  `flow:size/<value>` label from the validated output. GitHub Actions grants permissions per job,
+  not per step, so the label write cannot live in the classifier's job. That job allow-lists the
+  label name itself (`flow:size/(trivial|normal|spam)`) and receives it only through `env:`.
 
 It runs on public issues too, so the operator sees a size on everything, but for a public issue
 the size changes nothing except the label. `spam` is a label and nothing more: nothing closes,
@@ -125,9 +128,9 @@ The thin caller gains an `issues: [opened, labeled]` trigger alongside its cron.
 repo through a repository variable, so a repo that has not adopted intake spends no extra CI
 minutes (VISION G9). This trigger puts public issue titles and bodies into the event payload of a
 workflow that has write permissions elsewhere, so issue fields reach a step only through `env:`,
-never as `${{ github.event.issue.* }}` inside `run:`, and the classifier job's `permissions:` stay
-at `contents: read` and `issues: read`. The daily sweep stays as the backstop for anything a missed event left
-behind.
+never as `${{ github.event.issue.* }}` inside `run:`. The classifier job's `permissions:` stay at
+`contents: read` and `issues: read`; only the separate labelling job (§3) holds `issues: write`.
+The daily sweep stays as the backstop for anything a missed event left behind.
 
 ### 6. Configuration
 
@@ -175,10 +178,12 @@ intake:
   2. Admit a public issue (intake-App or filed directly) only when vouched for (inbox filter).
   3. Classifier job and `flow:size/*` labels.
   4. The automatic lane (task shape, `intake: auto`) and the diff-size check.
-  5. The `issues` trigger in the thin caller, opt-in per repo, running on `labeled` only for the
-     lane labels (`approved`, `auto-ok`, `flow:trusted`) and in one `concurrency:` group per issue; `intake:` in the config template,
-     with `trusted_labelers` left empty there. The `inflight-flow[bot]` login in §6 is a
-     placeholder, and a consuming repo sets its App's real login.
+  5. The `issues` trigger in the thin caller, opt-in per repo. A job-level `if:` lets `labeled`
+     events through only for the lane labels (`approved`, `auto-ok`, `flow:trusted`), and runs
+     share one `concurrency:` group per issue.
+  6. `intake:` in the config template, with `trusted_labelers` left empty there. The
+     `inflight-flow[bot]` login in §6 is a placeholder, and a consuming repo sets its App's real
+     login.
 
 ## What would void this decision
 
