@@ -1,12 +1,12 @@
 ---
 id: "flow-0193"
 title: "Flow goes to v5: qa, code-review and security run in one review job that posts three check runs, and the auto-fix round reads those check runs instead of job names"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "session_01NfrcU7yWZDFZdaHVPYRkVi"
 created: "2026-11-02"
-started: ""
+started: "2026-11-02T03:41:39Z"
 branch: ""
 pr: ""
 issue: ""
