@@ -57,13 +57,16 @@ reader's feedback lands" is closed by it.
 
 Provenance is a fact about identity. A form vouches for a submitter by applying `flow:trusted`
 after verifying their invite link; triage believes that label only when the issue's event history
-(`GET /repos/{o}/{r}/issues/{n}/events`) shows the `labeled` event's actor is one of the logins
-listed in `.flow/config.yml` under `intake.trusted_labelers` (for inflight, its App's
-`<slug>[bot]` login). An empty or absent list trusts no labeler, so the restrictive posture is the
+(`GET /repos/{o}/{r}/issues/{n}/events`) shows that the **most recent** `labeled` event for it,
+after its last `unlabeled` event, was made by one of the logins listed in `.flow/config.yml` under
+`intake.trusted_labelers` (for inflight, its App's `<slug>[bot]` login). An earlier trusted
+`labeled` event does not count once the label has been removed and re-applied. An empty or absent list trusts no labeler, so the restrictive posture is the
 default, as it is for `FLOW_TRIAGE_TRUSTED_ASSOCIATIONS`.
 
-The same check closes gap 2: `approved` and `auto-ok` count only when their `labeled` event was
-made by a user (not a bot) whose association is in the trusted set. An App can vouch for **who**
+The same check closes gap 2: `approved` and `auto-ok` count only when their most recent `labeled`
+event was made by an actor whose `type` is `User`, never `Bot`, and who holds write access or above
+to the repo. The events payload carries the actor's login but not their association, so the
+permission is read from `GET /repos/{o}/{r}/collaborators/{login}/permission`. An App can vouch for **who**
 sent something. It can never approve **what** was sent.
 
 ### 3. Size is classified by a model with no tools and no write access
@@ -93,8 +96,9 @@ issue opened
  │     → today's path: spec drafted as a comment, label `proposed`, wait for `approved`
  └─ provenance = public (any size)
        → stays an issue. The write-capable triage agent never reads it.
-         Dan decides it (in inflight); his `approved` label, verified per §2, admits it
-         to the trusted path above.
+         Dan decides it (in inflight). His `approved` label, verified per §2, admits it
+         and creates the task, as `approved` does today. It never enters the automatic
+         lane: a public issue reaches a task only through Dan's decision.
 ```
 
 - **Neither signal alone opens the lane.** A trusted submitter's large request waits for a
@@ -114,7 +118,10 @@ issue opened
 
 The thin caller gains an `issues: [opened, labeled]` trigger alongside its cron. It is opt-in per
 repo through a repository variable, so a repo that has not adopted intake spends no extra CI
-minutes (VISION G9). The daily sweep stays as the backstop for anything a missed event left
+minutes (VISION G9). This trigger puts public issue titles and bodies into the event payload of a
+workflow that has write permissions elsewhere, so issue fields reach a step only through `env:`,
+never as `${{ github.event.issue.* }}` inside `run:`, and the classifier job's `permissions:` stay
+at `contents: read` and `issues: read`. The daily sweep stays as the backstop for anything a missed event left
 behind.
 
 ### 6. Configuration
@@ -161,7 +168,9 @@ intake:
   2. Admit intake-App issues only when vouched for (inbox filter).
   3. Classifier job and `flow:size/*` labels.
   4. The automatic lane (task shape, `intake: auto`) and the diff-size check.
-  5. The `issues` trigger in the thin caller, opt-in per repo; `intake:` in the config template.
+  5. The `issues` trigger in the thin caller, opt-in per repo; `intake:` in the config template,
+     with `trusted_labelers` left empty there. The `inflight-flow[bot]` login in §6 is a
+     placeholder, and a consuming repo sets its App's real login.
 
 ## What would void this decision
 

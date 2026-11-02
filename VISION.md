@@ -80,7 +80,8 @@ want, and they live in the repo, because that is what makes the accountability v
 exception is a trivial fix from a submitter the operator trusts, which becomes a `maintenance`
 task without an intent (ADR-0010); the merge stays the operator's.
 **Progress looks like:** you can pick any merged PR and read, in the repo, the intent it came
-from and who approved it; and an approved intent survives contact with the tasks derived from it,
+from and who approved it (or, for an intake-lane `maintenance` fix, the issue it came from and
+who vouched for the submitter); and an approved intent survives contact with the tasks derived from it,
 rather than being rewritten once the work starts. *Failing today* — planned work enters as
 `status: ready` with no record of who asked for it or why.
 
@@ -131,6 +132,10 @@ pointing at them surface as warnings, which is the intended signal.
 
 ## Open — recorded, not decided
 
+- **Whose words an intent's Problem section holds.** The intent template assumes one person. Now
+  that ideas arrive as issues from submitters (ADR-0010), an intent can come from several people's
+  issues, merged as duplicates. Undecided.
+
 - **The shape of the cross-project view.** Wanted, genuinely unexplored. Deliberately not written
   as a prohibition: "we might one day" is not a non-goal, and a fake one rejects nothing.
 - **Whether readers stay readers.** Today they read and feed back, which is what the audience
@@ -142,7 +147,7 @@ pointing at them surface as warnings, which is the intended signal.
 
 | Date | Change | Why |
 |---|---|---|
-| 2026-11-02 | G11 amended: issues are the capture inbox for ideas as well as things that are wrong, and a trusted submitter's trivial fix may become a `maintenance` task without an intent. Open item "where a reader's feedback lands" closed: in a GitHub issue, sent through a form that needs no account (inflight). | Dan: "if something is submitted, it should always go into issues on GitHub … if it's really simple … it can be triaged, turned into a task, and fixed automatically. If it's a bigger job, then it stays an issue"; "I don't want J&S to have to have GitHub logins". ADR-0010 records the lanes; inflight intent `send-to-an-agent` supplies the form. |
+| 2026-11-02 | G11 amended: issues are the capture inbox for ideas as well as things that are wrong, and a trusted submitter's trivial fix may become a `maintenance` task without an intent. Open item "where a reader's feedback lands" closed: in a GitHub issue, sent through a form that needs no account (inflight). Its other half, whose words an intent's Problem section holds, stays Open as its own item. | Dan: "if something is submitted, it should always go into issues on GitHub … if it's really simple … it can be triaged, turned into a task, and fixed automatically. If it's a bigger job, then it stays an issue"; "I don't want J&S to have to have GitHub logins". ADR-0010 records the lanes; inflight intent `send-to-an-agent` supplies the form. |
 | 2026-09-23 | G12 declared: anything Flow needs from the operator is one decision with a recommendation, answerable in under a minute from a phone. | Sessions end with about a dozen questions and options the operator cannot process, so they get left open as bookmarks and the two-touchpoint model quietly becomes many touchpoints. No live goal named that failure. Declaring it gives the clean-exit work (the decide-or-ask rule, decision cards, length budgets, a session-exit check) a goal to serve instead of `maintenance` (decision D2 in the operating-model spec). |
 | 2026-09-21 | G9 widened from tokens alone to tokens **and** CI minutes, naming scheduled sweeps explicitly. | The account's GitHub Actions allowance was exhausted on 2026-09-21, stopping every scheduled workflow in every private repo for hours. The cause was two adopting repos running `flow-recover` on a 30-minute cron: ~12 seconds of real work per run, but GitHub bills per job rounded UP to a whole minute, so the pair spent ~2,920 of the 3,000 monthly private-repo minutes finding nothing. G9 as written could not name that failure — it spoke only of tokens — so the fleet's largest running cost sat outside the vision while a goal titled "not materially expensive to run" was on the page. Widening the goal is what lets a cost guard be written as serving it rather than as `maintenance`. |
 | 2026-09-07 | Audience amended: one operator, plus readers who are not the operator, in adopting repos only. Two Open items recorded — whether readers stay readers, and where their feedback lands. | Intents in project repos will be read and commented on by clients and contracted teams. That makes "nothing is built to serve a second user" false as written, since a projection is built to serve exactly that. The narrow fix separates operator from reader: the solo-operator position is untouched, and the trajectory beyond reading is recorded as undecided rather than designed for. |
