@@ -1,7 +1,7 @@
 ---
 id: "flow-0186"
 title: "Each review check reads its verdict from a vendor-neutral file, and the security job starts no runner when the plan skips it"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "session_01NfrcUBzD5XdFYPdjBTniNs"
