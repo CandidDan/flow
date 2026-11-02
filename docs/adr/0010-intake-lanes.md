@@ -165,10 +165,13 @@ intake:
 - CI cost grows by one cheap-model call per opened issue, in repos that opt in.
 - Tasks that follow from this ADR, written separately:
   1. Verify the actor of `approved`, `auto-ok` and `flow:trusted` labels from the issue events.
+     Write access is read when triage runs, not when the label was applied; the task's acceptance
+     criteria say so.
   2. Admit intake-App issues only when vouched for (inbox filter).
   3. Classifier job and `flow:size/*` labels.
   4. The automatic lane (task shape, `intake: auto`) and the diff-size check.
-  5. The `issues` trigger in the thin caller, opt-in per repo; `intake:` in the config template,
+  5. The `issues` trigger in the thin caller, opt-in per repo, running on `labeled` only for the
+     lane labels (`approved`, `auto-ok`, `flow:trusted`) and in one `concurrency:` group per issue; `intake:` in the config template,
      with `trusted_labelers` left empty there. The `inflight-flow[bot]` login in §6 is a
      placeholder, and a consuming repo sets its App's real login.
 
