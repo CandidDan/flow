@@ -27,7 +27,7 @@ model_reason: "Extends the measurement the vendor switch is judged by; a compari
 asks: []
 notes:
   - "2026-11-01 orchestrator: derived from the approved intent review-runs-on-any-agent, outcome 'every review stays as impartial and accurate as it can be, whichever vendor runs it'. It answers the intent's open question on calibration with data, not a gate: the vendor switch is never blocked by this score (see flow-0191's notes). Dan may overrule and make it a gate; that would be a follow-up task."
-  - "2026-11-01 orchestrator: the eval workflow is canonical-only (flow-0190), so running the Codex half needs the FLOW_CODEX_AUTH secret in CandidDan/flow. Without it, the Codex column reports 'not run: FLOW_CODEX_AUTH not set' and the Claude half runs as before; it never fails the check on that alone."
+  - "2026-11-01 orchestrator: the eval workflow is canonical-only (flow-0190), so running the Codex half needs the FLOW_CODEX_API_KEY secret in CandidDan/flow. Without it, the Codex column reports 'not run: FLOW_CODEX_API_KEY not set' and the Claude half runs as before; it never fails the check on that alone."
 ---
 
 ## Context
@@ -53,7 +53,7 @@ whether Codex would review a check as well as Claude before switching it.
 4. **What blocks.** Unchanged from flow-0190 for the vendor each check is currently set to. The
    other vendor's score is information only: it never fails the check.
 5. `docs/review-eval.md`: a section `## Comparing vendors` saying what the two columns mean, that
-   the comparison never blocks, and that the Codex column needs the `FLOW_CODEX_AUTH` secret.
+   the comparison never blocks, and that the Codex column needs the `FLOW_CODEX_API_KEY` secret.
 6. Fragment `changes/flow-0192.md`: `**No caller action.**` (canonical-only).
 
 **Does not:** change any reviewer prompt, model, default vendor or the 20-case rule; add or
@@ -66,12 +66,12 @@ change eval cases; ship anything in `project-template/`.
 - [ ] `review-eval.test.mjs`: for one case, the Claude run and the Codex run receive byte-identical
       prompt text and diff, and each receives its own vendor's model as `plan` would resolve it.
 - [ ] `review-eval.test.mjs`: with no Codex credential, every Codex result is
-      `not run: FLOW_CODEX_AUTH not set`, the Claude results are unchanged, and the check
+      `not run: FLOW_CODEX_API_KEY not set`, the Claude results are unchanged, and the check
       decision is the same as with Claude alone.
 - [ ] `review-eval.test.mjs`: with 20 or more cases, a Codex score lower than `main`'s does not
       fail the check when the checks are set to Claude.
 - [ ] `.github/workflows/flow-review-eval.yml` parses (proved by `npm run build`) and passes
-      `FLOW_CODEX_AUTH` to the runner only through `env:`.
+      `FLOW_CODEX_API_KEY` to the runner only through `env:`.
 - [ ] `changes/flow-0192.md` exists and states the caller action, proved by
       `.flow/bin/changelog-fragments.test.mjs :: every claimed task that declares a changelog fragment has an entry stating its caller action`.
 - [ ] The gate passes: `npm ci`, `build`, `lint`, `test`, `coverage`.
