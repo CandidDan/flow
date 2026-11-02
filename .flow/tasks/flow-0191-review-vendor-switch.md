@@ -40,14 +40,14 @@ notes:
   - "2026-11-01 orchestrator: intent open question 'are intent-review and the guide in scope' is decided here as NO: only the three verdict-giving checks Dan named. intent-review and the guide stay on Claude. Dan may overrule; it would be a follow-up task, not a change to this one."
   - "2026-11-01 orchestrator: intent open question 'calibrate Codex before its verdict blocks' is decided here as: switching is never gated (Dan: 'switch any review to codex and vice-versa at anytime'), and a Codex review blocks from the first run, exactly like a Claude one. Calibration is measurement, not a gate: flow-0192 scores both vendors on the eval set so the switch is an informed one. Dan may overrule."
   - "2026-11-01 orchestrator: billing. Dan rejected moving reviews to per-token API billing. So this task never wires an OpenAI API key. The Codex step takes the credential that flow-0187's research doc (docs/research/review-runtime.md, section 3) identifies as billing the ChatGPT plan. If that doc says Codex in CI can only bill API tokens, the worker blocks (see Scope step 0) rather than building. SUPERSEDED 2026-11-02 by Dan's decision below."
-  - "2026-11-01 orchestrator: if flow-0187 recommends moving reviews off GitHub runners (Claude routines), that is a separate phase-2 task. This task builds on the review job as it exists when claimed (one runner job, from flow-0193). Whichever task moves the reviews later must carry both vendors."
+  - "2026-11-01 orchestrator: if flow-0187 recommends moving reviews off GitHub runners (Claude routines), that is a separate phase-2 task. This task builds on the review job as it exists when claimed (three separate jobs; flow-0193, which would have merged them, was cancelled on 2026-11-02). Whichever task moves the reviews later must carry both vendors."
   - "2026-11-02 orchestrator: Dan decided Codex is OPT-IN on API-token billing. flow-0187 (PR #272) found the only Codex path that returns a verdict in CI is openai/codex-action with an API key; Codex's plan-billed GitHub review gives no pass/fail and sets no check. So: secret FLOW_CODEX_API_KEY, every default stays claude, and no repo pays tokens unless it switches a check. Dan has set a $50 spending cap as the ceiling. Codex access tokens (plan-billed automation) exist only for ChatGPT Enterprise workspaces and are documented for private CI runners; they are out of scope here and would be a follow-up task if Dan moves to Enterprise."
 ---
 
 ## Context
 
 After flow-0186 and flow-0188, `.github/workflows/_flow-review.yml` runs qa, code-review and
-security in one runner job (flow-0193), which posts the three check runs. Each check has its own model step (`anthropics/claude-code-action`),
+security as three separate jobs. Each check has its own model step (`anthropics/claude-code-action`),
 which writes `$RUNNER_TEMP/flow-review/<check>.json`; flow-0188 adds one verifier model call per
 blocking finding, which writes `$RUNNER_TEMP/flow-review/<check>.verify/<id>.json`. Everything
 after the model steps reads only those files. Every model step is Claude. Nothing in canonical
