@@ -5,12 +5,13 @@
 // defined by `validateVerdictFile` in the template's flow-review.mjs (its tests are in
 // flow-review.test.mjs). These tests hold the workflow to the other half of the contract:
 //
-//   · qa, code-review and security stay three jobs, each with exactly one model step;
+//   · qa, code-review and security each make exactly one model call (since flow-0193 they are
+//     sections of ONE `review` job, not three jobs: review-one-job.test.mjs proves that layout);
 //   · each model step is preceded by a step that deletes that check's verdict file, so a stale
 //     file can never pass;
 //   · the steps that decide a check read that file and no output of the model step, so a
 //     different vendor's model step can be dropped in without touching them;
-//   · a skipped security review starts no runner.
+//   · a skipped security review makes no model call.
 //
 // DEPENDENCY NOTE — same as flow-review-workflow.test.mjs: these need `yaml`, so they skip
 // visibly in the no-install `flow-tooling` job and run for real after `npm ci`.
@@ -32,7 +33,15 @@ const wf = yamlMod ? yamlMod.parse(src) : { jobs: {} };
 
 const CHECKS = ["qa", "code-review", "security"];
 const MODEL_ACTION = "anthropics/claude-code-action";
-const stepsOf = (job) => wf.jobs[job]?.steps ?? [];
+// flow-0193: a review is a SECTION of the `review` job — from the step that clears its verdict
+// file to the step that creates its check run, inclusive. Any other name is a job.
+const sectionOf = (check) => {
+  const steps = wf.jobs.review?.steps ?? [];
+  const start = steps.findIndex((s) => s.name === `Clear the ${check} verdict file`);
+  const end = steps.findIndex((s) => s.id === `${check.replace(/-/g, "_")}_check`);
+  return start >= 0 && end > start ? steps.slice(start, end + 1) : [];
+};
+const stepsOf = (job) => (CHECKS.includes(job) ? sectionOf(job) : wf.jobs[job]?.steps ?? []);
 const isModelStep = (s) => String(s.uses ?? "").startsWith(MODEL_ACTION);
 const verdictPath = (check) => `$RUNNER_TEMP/flow-review/${check}.json`;
 // A step that only REPORTS which model answered (flow-0140). The orchestrator's note on
@@ -40,16 +49,16 @@ const verdictPath = (check) => `$RUNNER_TEMP/flow-review/${check}.json`;
 const isModelReport = (s) => s.name === "Report the model that answered";
 const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// Every step that can decide a check: the enforce step, and anything that posts a comment or
+// Every step that can decide a check: the check-run step, and anything that posts a comment or
 // triggers a fix. Found by what the step does, not by a fixed list of names.
 const isDecidingStep = (s) =>
   !isModelStep(s) && !isModelReport(s) &&
-  /flow-review\.mjs (enforce|verdict)\b|gh (api|pr)\b|issues\/[^\s]*comments|dispatches|kickback/
+  /flow-review\.mjs (check-run|enforce|verdict)\b|gh (api|pr)\b|issues\/[^\s]*comments|dispatches|kickback/
     .test(String(s.run ?? ""));
 
-test("criterion 1: qa, code-review and security are still three jobs, each with exactly one model step", { skip }, () => {
+test("criterion 1: qa, code-review and security each make exactly one model call of their own", { skip }, () => {
   for (const check of CHECKS) {
-    assert.ok(wf.jobs[check], `${check} must still be its own job — the PR check is flow-review / ${check}`);
+    assert.ok(stepsOf(check).length, `the review job has no ${check} section`);
     const models = stepsOf(check).filter(isModelStep);
     assert.equal(models.length, 1,
       `${check} must make exactly one model call of its own — reviews never share a session`);
@@ -108,21 +117,20 @@ test("criterion 2: the deciding steps read only $RUNNER_TEMP/flow-review/<check>
     const deciding = stepsOf(check).filter(isDecidingStep);
     assert.equal(deciding.length, 1, `${check}: exactly one step decides the check`);
     const run = String(deciding[0].run);
-    assert.match(run, new RegExp(`flow-review\\.mjs enforce "${escape(verdictPath(check))}" --check ${escape(check)}\\b`));
+    assert.match(run, new RegExp(`flow-review\\.mjs check-run "${escape(verdictPath(check))}" --check ${escape(check)}\\b`));
     assert.doesNotMatch(run, /\.flow-review\//,
       "the workspace is where the reviewer works; the verdict is not read from it");
-    assert.match(String(deciding[0].if ?? ""), /always\(\)/,
-      "a reviewer that crashed must still fail the check, not skip its enforcement");
+    assert.equal(String(deciding[0].if ?? ""), "${{ !cancelled() }}",
+      "a reviewer that crashed must still fail the check, not skip its check run");
   }
 });
 
-test("criterion 4: when plan skips security, the security job does not start", { skip }, () => {
-  assert.equal(wf.jobs.security.if, "${{ needs.plan.outputs.security_run == 'true' }}",
-    "a job-level `if` on the plan's decision — the step-level gating it replaces still started a runner");
-  assert.deepEqual(wf.jobs.security.needs, "plan");
-  // The skip moves to the plan job: its summary is written by `flow-review.mjs plan`.
+test("criterion 4 (as of flow-0193): when plan skips security, no security model call is made", { skip }, () => {
+  const model = stepsOf("security").find(isModelStep);
+  assert.equal(model.if, "${{ needs.plan.outputs.security_run == 'true' }}",
+    "the security model step runs only on the plan's decision; one runner serves all three reviews");
+  assert.deepEqual(wf.jobs.review.needs, "plan");
+  // The skip is recorded twice: the plan job's summary, and the security check run's summary.
   assert.ok(stepsOf("plan").some((s) => /flow-review\.mjs plan\b/.test(String(s.run ?? ""))),
     "the plan job's summary is where `### Security review — SKIPPED` is recorded");
-  assert.ok(!stepsOf("security").some((s) => /SKIPPED/.test(String(s.run ?? ""))),
-    "the security job must not be relied on to report a skip — it does not start");
 });

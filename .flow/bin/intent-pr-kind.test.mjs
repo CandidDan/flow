@@ -173,10 +173,17 @@ test("flow-0178 criterion 4: an intent-only PR still triggers the security revie
 
 test("flow-0178 criterion 4: the security job's trigger does not read the intent classification", { skip }, () => {
   const src = readFileSync(join(REPO, ".github/workflows/_flow-review.yml"), "utf8");
-  const sec = yamlMod.parse(src).jobs.security;
-  assert.equal(sec.if, "${{ needs.plan.outputs.security_run == 'true' }}", "the security job's only job-level if is the plan's review decision (flow-0186)");
+  // flow-0193: security is a section of the one `review` job — from the step that clears its
+  // verdict file to the step that creates its check run — not a job of its own.
+  const review = yamlMod.parse(src).jobs.review;
+  assert.equal(review.if, undefined, "the review job carries no job-level if, intent or otherwise");
+  const steps = review.steps ?? [];
+  const start = steps.findIndex((s) => s.name === "Clear the security verdict file");
+  const end = steps.findIndex((s) => s.id === "security_check");
+  assert.ok(start >= 0 && end > start, "the review job must carry a security section");
+  const sec = { steps: steps.slice(start, end + 1) };
   assert.doesNotMatch(JSON.stringify(sec), /intent_pr/,
-    "no step of the security job may be skipped, or reworded, for an intent PR");
+    "no step of the security review may be skipped, or reworded, for an intent PR");
   const gated = (sec.steps ?? []).filter((s) => s.uses?.startsWith("anthropics/claude-code-action"));
   assert.equal(gated.length, 1);
   assert.equal(gated[0].if, "${{ needs.plan.outputs.security_run == 'true' }}");

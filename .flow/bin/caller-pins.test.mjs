@@ -391,6 +391,13 @@ test("the repinning doc has a section for reaching the current major, and names 
       [/flow-sync/, "that the sync makes both edits, so the reader knows the easy path"],
       [/startup/, "the symptom of a caller left pointing at a reusable that no longer exists"],
     ],
+    v5: [
+      [/checks: write/, "flow-0193's grant on flow-review.yml: the review job creates the check runs"],
+      [/checks: read/, "flow-0193's grant on flow-kickback.yml: the round reads the check runs"],
+      [/flow-review \/ qa/, "the old required check names branch protection must drop"],
+      [/branch protection/, "the repo setting the sync cannot change"],
+      [/startup/, "the symptom of a caller that does not grant checks: write"],
+    ],
   };
   assert.ok(STEPS[want], `no caller steps recorded for ${want} — add them to this test`);
   for (const [re, why] of STEPS[want]) assert.match(section, re, `the ${want} section must name ${why}`);

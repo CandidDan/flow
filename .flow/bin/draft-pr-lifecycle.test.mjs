@@ -409,14 +409,15 @@ test("flow-recover opens its recovery PR as a draft, with the same fallback", { 
   });
 });
 
-// ── _flow-review.yml: one condition suppresses all four jobs ─────────────────────────────────
+// ── _flow-review.yml: one condition suppresses every job ─────────────────────────────────────
 test("flow-review's plan job is gated on the PR not being a draft", { skip }, () => {
   const jobs = parse(join(WF, "_flow-review.yml")).jobs;
   assert.match(String(jobs.plan.if), /github\.event\.pull_request\.draft/,
     "the draft condition belongs on `plan` — it is the one job the others depend on");
-  // The suppression only reaches qa/code-review/security through `needs`. If that link were ever
-  // broken, the three reviewers would run on drafts again with `plan` skipped, so pin it here.
-  for (const name of ["qa", "code-review", "security"]) {
+  // The suppression only reaches the reviewers through `needs`. If that link were ever broken,
+  // they would run on drafts again with `plan` skipped, so pin it here. Since flow-0193 qa,
+  // code-review and security are one job, `review`.
+  for (const name of ["review", "intent-review", "guide"]) {
     const needs = [].concat(jobs[name].needs ?? []);
     assert.ok(needs.includes("plan"),
       `${name} must declare needs: plan, or the draft gate does not reach it`);

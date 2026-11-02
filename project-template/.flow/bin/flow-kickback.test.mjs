@@ -1100,3 +1100,69 @@ test("the hand-back location is one named constant, so the prompt and the workfl
   assert.equal(OUTCOME_FILE, "outcome.json");
   assert.equal(MESSAGE_SEPARATOR, "\0");
 });
+
+// ═════════════════════════════════════════════════════════════════════════════════════════
+// flow-0193: which reviews failed, read from the head SHA's check runs
+// ═════════════════════════════════════════════════════════════════════════════════════════
+
+const { failedReviewChecks, REVIEW_CHECK_NAMES } = await import("./flow-kickback.mjs");
+
+const run = (id, name, conclusion, app = "github-actions") =>
+  ({ id, name, status: "completed", conclusion, app: { slug: app } });
+// What `gh api --paginate --slurp .../commits/<sha>/check-runs` writes: an array of pages.
+const pages = (...runs) => [{ total_count: runs.length, check_runs: runs }];
+// The `review` job's own check run, as GitHub names a reusable workflow's job.
+const reviewJob = (conclusion) => run(1, "flow-review / review", conclusion);
+
+test("flow-0193: only qa failed — the round addresses qa", () => {
+  const checks = pages(reviewJob("failure"), run(2, "qa", "failure"), run(3, "code-review", "success"), run(4, "security", "skipped"));
+  assert.deepEqual(failedReviewChecks(checks), ["qa"]);
+  const v = decide(facts({ failedChecks: failedReviewChecks(checks) }));
+  assert.equal(v.action, DISPATCH, v.reason);
+  assert.match(v.reason, /^qa failed/);
+});
+
+test("flow-0193: security failed — it escalates and is never auto-fixed", () => {
+  const checks = pages(reviewJob("failure"), run(2, "qa", "failure"), run(3, "code-review", "success"), run(4, "security", "failure"));
+  assert.deepEqual(failedReviewChecks(checks), ["qa", "security"]);
+  const v = decide(facts({ failedChecks: failedReviewChecks(checks) }));
+  assert.equal(v.action, ESCALATE);
+  assert.match(v.reason, /never auto-fixed/);
+});
+
+test("flow-0193: only the review job failed and all three check runs passed — no round", () => {
+  const checks = pages(reviewJob("failure"), run(2, "qa", "success"), run(3, "code-review", "success"), run(4, "security", "success"));
+  assert.deepEqual(failedReviewChecks(checks), [], "the review job's own failure is not a signal");
+  const v = decide(facts({ failedChecks: failedReviewChecks(checks) }));
+  assert.equal(v.action, SKIP);
+  assert.match(v.reason, /no auto-fixable check failed/);
+});
+
+test("flow-0193: the newest check run per name wins, and another app's same-named run is ignored", () => {
+  // A re-run creates a second `qa` check run; the later one (higher id) is the current verdict.
+  assert.deepEqual(failedReviewChecks(pages(run(5, "qa", "success"), run(2, "qa", "failure"))), []);
+  assert.deepEqual(failedReviewChecks(pages(run(2, "qa", "success"), run(5, "qa", "failure"))), ["qa"]);
+  assert.deepEqual(failedReviewChecks(pages(run(2, "qa", "failure", "some-other-app"))), []);
+  // Every shape the API or gh hands back: one page, several pages, a bare array of runs.
+  assert.deepEqual(failedReviewChecks({ check_runs: [run(1, "code-review", "failure")] }), ["code-review"]);
+  assert.deepEqual(failedReviewChecks([...pages(run(1, "qa", "failure")), ...pages(run(2, "security", "failure"))]), ["qa", "security"]);
+  assert.deepEqual(failedReviewChecks([run(1, "code-review", "failure")]), ["code-review"]);
+  assert.deepEqual(failedReviewChecks([]), []);
+  assert.deepEqual(REVIEW_CHECK_NAMES, ["qa", "code-review", "security"]);
+});
+
+test("flow-0193: the failed-checks CLI emits the names, and refuses an unreadable file", () => {
+  const dir = withTmp();
+  const file = join(dir, "check-runs.json");
+  const out = join(dir, "out.txt");
+  writeFileSync(file, JSON.stringify(pages(run(1, "qa", "failure"), run(2, "code-review", "failure"))));
+  const lines = [];
+  assert.equal(runKickbackCli(["failed-checks", file], {
+    env: { GITHUB_OUTPUT: out }, stdout: (s) => lines.push(s),
+  }), 0);
+  assert.match(readFileSync(out, "utf8"), /checks<<FLOW_EOF\nqa code-review\nFLOW_EOF/);
+  assert.match(lines.join(""), /failed review checks: qa code-review/);
+  writeFileSync(file, "not json");
+  assert.throws(() => runKickbackCli(["failed-checks", file], { env: {}, stdout: () => {} }), SyntaxError,
+    "a round is never decided on a file it could not read");
+});

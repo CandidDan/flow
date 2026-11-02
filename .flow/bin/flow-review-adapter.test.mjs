@@ -170,6 +170,6 @@ test("a clean verdict clears the check, and an unknown command never exits 0", (
 
     const bad = run(["definitely-not-a-command"]);
     assert.equal(bad.status, 1, "exit 0 having done nothing is the fail-open shape every guard here refuses");
-    assert.match(bad.stderr, /expected "plan" or "verdict"/);
+    assert.match(bad.stderr, /expected "plan", "check-run", "enforce" or "verdict"/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

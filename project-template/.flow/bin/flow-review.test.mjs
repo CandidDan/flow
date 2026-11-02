@@ -1053,7 +1053,7 @@ test("CLI `verdict` FAILS CLOSED when the reviewer wrote no verdict file at all"
 test("CLI rejects an unknown subcommand instead of exiting 0 having done nothing", () => {
   const r = run(["definitely-not-a-command"]);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /expected "plan" or "verdict"/);
+  assert.match(r.stderr, /expected "plan", "check-run", "enforce" or "verdict"/);
 });
 
 // ── flow-0103: a PASS cannot clear a check on a diff the plan clipped ──────────────────────
@@ -2636,5 +2636,137 @@ test("flow-0186: a skipped security review is recorded in the plan summary with 
       env: { GITHUB_STEP_SUMMARY: runSummary }, configPath: join(dir, "config.yml"), outDir: join(dir, "o2"), git: touchesAuth,
     }), 0);
     assert.doesNotMatch(readFileSync(runSummary, "utf8"), /Security review — SKIPPED/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── flow-0193: the check-run payload ──────────────────────────────────────────────────────
+// One `review` job runs all three reviews, and each review's result reaches the PR as a check
+// run named exactly qa / code-review / security. `checkRunPayload` is the body of that POST.
+
+const { checkRunPayload, codeSpan, CHECK_RUN_SUMMARY_MAX } = await import("./flow-review.mjs");
+
+test("flow-0193: a valid pass verdict file gives a `success` check run under the check's name", () => {
+  const dir = tmp("cr-pass");
+  try {
+    for (const check of CHECKS) {
+      const f = writeVerdict(dir, `${check}.json`, { check, verdict: "pass", summary: "all criteria proven" });
+      const p = checkRunPayload(f, { check, headSha: "abc123" });
+      assert.equal(p.name, check);
+      assert.equal(p.head_sha, "abc123");
+      assert.equal(p.status, "completed");
+      assert.equal(p.conclusion, "success");
+      assert.match(p.output.title, new RegExp(`^${check} review — PASS$`));
+      assert.match(p.output.summary, /all criteria proven/);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0193: a valid fail verdict file gives `failure`, with the findings in the summary", () => {
+  const dir = tmp("cr-fail");
+  try {
+    const f = writeVerdict(dir, "qa.json",
+      { check: "qa", verdict: "fail", summary: "one unproven", unproven: ["criterion 2"] });
+    const p = checkRunPayload(f, { check: "qa" });
+    assert.equal(p.name, "qa");
+    assert.equal(p.conclusion, "failure");
+    assert.match(p.output.summary, /unproven criterion: criterion 2/);
+    // A pass that names a blocking finding contradicts itself, and fails — as `enforce` rules.
+    const contra = writeVerdict(dir, "cr.json",
+      { check: "code-review", verdict: "pass", summary: "x", blocking: [{ file: "a.mjs", issue: "b" }] });
+    assert.equal(checkRunPayload(contra, { check: "code-review" }).conclusion, "failure");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0193: a missing or invalid verdict file gives `failure`, never a pass", () => {
+  const dir = tmp("cr-bad");
+  try {
+    const missing = checkRunPayload(join(dir, "none.json"), { check: "security" });
+    assert.equal(missing.name, "security");
+    assert.equal(missing.conclusion, "failure");
+    assert.match(missing.output.summary, /no verdict file/);
+    for (const [name, body] of [
+      ["junk.json", "not json"],
+      ["upper.json", { check: "qa", verdict: "PASS", summary: "x" }],
+      ["wrong-check.json", { check: "code-review", verdict: "pass", summary: "x" }],
+      ["no-summary.json", { check: "qa", verdict: "pass" }],
+    ]) {
+      const p = checkRunPayload(writeVerdict(dir, name, body), { check: "qa" });
+      assert.equal(p.name, "qa", name);
+      assert.equal(p.conclusion, "failure", `${name} must fail closed`);
+    }
+    // A truncated diff fails whatever the file says (flow-0103).
+    const ok = writeVerdict(dir, "ok.json", { check: "qa", verdict: "pass", summary: "x" });
+    assert.equal(checkRunPayload(ok, { check: "qa", diffTruncated: true, diffBytes: "10", diffFullBytes: "20" }).conclusion, "failure");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0193: a skipped security review gives `skipped`, with the reason in a code span", () => {
+  const reason = "SKIPPED — none of the 1 changed file(s) match `src/**`";
+  const p = checkRunPayload("/nonexistent", { check: "security", skipped: true, skipReason: reason, headSha: "s" });
+  assert.equal(p.name, "security");
+  assert.equal(p.conclusion, "skipped");
+  assert.ok(p.output.summary.includes(codeSpan(reason)), "the reason is in the summary, as a code span");
+  // An empty reason still says the review was skipped rather than rendering nothing.
+  assert.match(checkRunPayload("", { check: "security", skipped: true }).output.summary, /gave no reason/);
+  // Only security is ever skipped: any other check asked to skip is a bug, and the bug throws.
+  assert.throws(() => checkRunPayload("", { check: "qa", skipped: true }), ReviewError);
+});
+
+test("flow-0193: the name is always one of qa, code-review, security", () => {
+  assert.deepEqual(CHECKS, ["qa", "code-review", "security"]);
+  for (const bad of ["review", "flow-review / qa", "", undefined, "QA"]) {
+    assert.throws(() => checkRunPayload("/x", { check: bad }), ReviewError, String(bad));
+  }
+});
+
+test("flow-0193: the summary is cut to GitHub's limit", () => {
+  const dir = tmp("cr-long");
+  try {
+    const f = writeVerdict(dir, "qa.json", { check: "qa", verdict: "fail", summary: "x".repeat(CHECK_RUN_SUMMARY_MAX + 10) });
+    const p = checkRunPayload(f, { check: "qa" });
+    assert.ok(p.output.summary.length <= CHECK_RUN_SUMMARY_MAX);
+    assert.match(p.output.summary, /cut to fit/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0193: codeSpan holds any text on one line, backticks included", () => {
+  assert.equal(codeSpan("a.mjs"), "`a.mjs`");
+  assert.equal(codeSpan("x `y` z"), "`` x `y` z ``");
+  assert.equal(codeSpan("a ``b`` c"), "``` a ``b`` c ```");
+  assert.equal(codeSpan("one\ntwo\r\nthree"), "`one two three`");
+  assert.equal(codeSpan(null), "``");
+});
+
+test("flow-0193: the check-run CLI writes the payload, reports the conclusion, and exits 0 either way", () => {
+  const dir = tmp("cr-cli");
+  try {
+    const flag = ["--diff-truncated", "false"];
+    const out = join(dir, "payload.json");
+    const gh = join(dir, "gh-out.txt");
+    const pass = writeVerdict(dir, "qa.json", { check: "qa", verdict: "pass", summary: "fine" });
+    assert.equal(runReviewCli(["check-run", pass, "--check", "qa", ...flag, "--out", out],
+      { env: { GITHUB_OUTPUT: gh, HEAD_SHA: "deadbeef" } }), 0);
+    const p = JSON.parse(readFileSync(out, "utf8"));
+    assert.deepEqual([p.name, p.conclusion, p.head_sha], ["qa", "success", "deadbeef"]);
+    assert.match(readFileSync(gh, "utf8"), /^conclusion=success$/m);
+
+    const fail = writeVerdict(dir, "cr.json", { check: "code-review", verdict: "fail", summary: "bad" });
+    assert.equal(runReviewCli(["check-run", fail, "--check", "code-review", ...flag, "--out", out], { env: {} }), 0,
+      "a failing review still exits 0, so the workflow posts its check run");
+    assert.equal(JSON.parse(readFileSync(out, "utf8")).conclusion, "failure");
+
+    assert.equal(runReviewCli(["check-run", join(dir, "absent.json"), "--check", "security", ...flag, "--skipped", "--out", out],
+      { env: { REVIEW_SKIP_REASON: "SKIPPED — docs only" } }), 0);
+    const skipped = JSON.parse(readFileSync(out, "utf8"));
+    assert.equal(skipped.conclusion, "skipped");
+    assert.match(skipped.output.summary, /SKIPPED — docs only/);
+
+    // Usage errors exit 1 and write nothing: no payload, so no check run is created.
+    const none = join(dir, "none.json");
+    assert.equal(runReviewCli(["check-run", pass, "--check", "qa", ...flag], { env: {} }), 1, "no --out");
+    assert.equal(runReviewCli(["check-run", pass, ...flag, "--out", none], { env: {} }), 1, "no --check");
+    assert.equal(runReviewCli(["check-run", pass, "--check", "qa", "--out", none], { env: {} }), 1, "no truncation flag");
+    assert.equal(runReviewCli(["check-run", pass, "--check", "review", ...flag, "--out", none], { env: {} }), 1, "not a check name");
+    assert.equal(existsSync(none), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

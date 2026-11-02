@@ -75,7 +75,7 @@ on:
 #
 #   job              writes        model   why
 #   ───────────────────────────────────────────────────────────────────────────────────────────
-#   plan             none          no      reads the run's jobs, the PR and the task's status
+#   plan             none          no      reads the head's check runs, the PR and the task's status
 #   fix              NONE          YES     the round: commit-only; its commits leave as a bundle
 #   push             FLOW_PAT      no      fresh checkout, the guards, then the one push
 #   round-card       NONE          YES     writes the card for a round that handed nothing back
@@ -83,9 +83,9 @@ on:
 #   card             NONE          YES     writes the card's four fields, read-only
 #   escalate         PRs, issues   no      posts that card and the label
 #
-# `actions: read` is `plan`'s alone — the jobs API is how it learns WHICH review job failed —
-# and it is job-scoped because a top-level entry would demand the scope from every caller,
-# including the jobs that never touch it.
+# `checks: read` is `plan`'s alone — the check-runs API is how it learns WHICH review failed
+# (flow-0193) — and it is job-scoped because a top-level entry would demand the scope from every
+# caller, including the jobs that never touch it. No job here uses the Actions API any more.
 #
 # WHERE FLOW_PAT GOES — THE INVARIANT IS A JOB ONE (flow-0135). No job that runs a model
 # references `secrets.FLOW_PAT`, and the one job that does (`push`) runs no model. On a runner
@@ -122,14 +122,14 @@ jobs:
   plan:
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ${{ inputs.runner }}
-    # Reads, and only reads. `actions: read` is the jobs API (`.../actions/runs/<id>/jobs`),
-    # which is the only way to learn WHICH review job failed — the event payload carries the
-    # run's conclusion and not its jobs. It is job-scoped, so no other job here can reach the
-    # Actions API at all.
+    # Reads, and only reads. `checks: read` is the check-runs API
+    # (`.../commits/<sha>/check-runs`), which is how `plan` learns WHICH review failed since
+    # flow-0193 — the event payload carries the run's conclusion and not its checks. It is
+    # job-scoped, so no other job here can read check runs at all.
     permissions:
       contents: read          # the default-branch checkout: the helper, the config, the store
       pull-requests: read     # `gh pr list` / `gh pr view` / the PR's commits
-      actions: read           # the jobs API: which review job concluded `failure`
+      checks: read            # the check-runs API: which of qa, code-review, security failed
     outputs:
       action: ${{ steps.decide.outputs.action }}
       reason: ${{ steps.decide.outputs.reason }}
@@ -197,27 +197,28 @@ jobs:
             echo "guard_sha=$(git rev-parse HEAD)"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Which review jobs failed
+      - name: Which review checks failed
         id: failed
         if: ${{ steps.pr.outputs.number != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
+          # flow-0193. The commit the review run reviewed: its check runs are the verdicts.
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
         run: |
           set -eu
-          # A reusable workflow's jobs are named `<caller job> / <job>`, so take the last segment:
-          # `flow-review / code-review` is the `code-review` check.
-          checks="$(gh api --paginate "repos/{owner}/{repo}/actions/runs/$RUN_ID/jobs" \
-            --jq '.jobs[] | select(.conclusion == "failure") | .name | split(" / ") | last' \
-            | sort -u | tr '\n' ' ')"
-          {
-            echo "checks=$checks"
-            # The card's one link. The run page is where each reviewer's full verdict is, which
-            # is what the card points at instead of quoting it.
-            echo "link=$RUN_URL"
-          } >> "$GITHUB_OUTPUT"
+          # flow-0193. From 5.0.0 the three reviews run in ONE `review` job and each posts a check
+          # run named exactly `qa`, `code-review` or `security` on the head SHA. Which of them
+          # failed is read from those check runs by the helper (`failedReviewChecks`), never from
+          # job names: the `review` job fails whenever any of the three does, so its own failure
+          # does not say which. `--slurp` merges the pages; the helper flattens either shape.
+          gh api --paginate --slurp "repos/{owner}/{repo}/commits/$HEAD_SHA/check-runs" \
+            > "$RUNNER_TEMP/check-runs.json"
+          node .flow/bin/flow-kickback.mjs failed-checks "$RUNNER_TEMP/check-runs.json"
+          # The card's one link. The run page is where each reviewer's full verdict is, which
+          # is what the card points at instead of quoting it.
+          echo "link=$RUN_URL" >> "$GITHUB_OUTPUT"
 
       - name: The task, and the rounds already used
         id: facts

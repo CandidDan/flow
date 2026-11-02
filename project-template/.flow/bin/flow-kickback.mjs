@@ -422,6 +422,34 @@ export function disclosureComment(trips = [], { round = "", cap = "" } = {}) {
   ].join("\n");
 }
 
+// ── which reviews failed (flow-0193) ─────────────────────────────────────────────────────
+// From 5.0.0 the three reviews run in ONE `review` job and report as CHECK RUNS named exactly
+// `qa`, `code-review` and `security` on the PR head. A round is decided from those check runs,
+// never from job names: the `review` job fails whenever any of the three fails, so its own
+// failure says nothing about WHICH review failed, and is ignored as a signal.
+export const REVIEW_CHECK_NAMES = Object.freeze(["qa", "code-review", "security"]);
+
+// The app that creates them: the review job posts with its GITHUB_TOKEN. A check run of the same
+// name from another app is not Flow's review and does not count.
+export const REVIEW_CHECK_APP = "github-actions";
+
+// `checkRuns` is the body of `GET /repos/{owner}/{repo}/commits/{sha}/check-runs`, as one page
+// (`{check_runs: [...]}`), as `gh api --paginate --slurp` pages, or as a bare array of runs. A
+// re-run creates a new check run under the same name, so only the newest per name (the highest
+// id) counts. Returns the names that concluded `failure`, in REVIEW_CHECK_NAMES order.
+export function failedReviewChecks(checkRuns) {
+  const pages = Array.isArray(checkRuns) ? checkRuns : [checkRuns];
+  const runs = pages.flatMap((p) => (p && Array.isArray(p.check_runs) ? p.check_runs : [p]))
+    .filter((r) => r && typeof r === "object" && REVIEW_CHECK_NAMES.includes(r.name))
+    .filter((r) => !r.app?.slug || r.app.slug === REVIEW_CHECK_APP);
+  const latest = new Map();
+  for (const r of runs) {
+    const seen = latest.get(r.name);
+    if (!seen || Number(r.id ?? 0) > Number(seen.id ?? 0)) latest.set(r.name, r);
+  }
+  return REVIEW_CHECK_NAMES.filter((n) => latest.get(n)?.conclusion === "failure");
+}
+
 // ── decide ───────────────────────────────────────────────────────────────────────────────
 
 export const DISPATCH = "dispatch";
@@ -438,7 +466,7 @@ const list = (v) =>
 // trusts.
 //
 // facts:
-//   failedChecks  which review jobs failed (`qa`, `code-review`, `security`)
+//   failedChecks  which review check runs failed (`qa`, `code-review`, `security`)
 //   draft         is the PR a draft?
 //   fork          is the PR from a fork?
 //   labels        the PR's labels
@@ -774,6 +802,15 @@ export function runKickbackCli(argv, opts = {}) {
     return 0;
   }
 
+  if (cmd === "failed-checks") {
+    // The file `plan` fetched from the check-runs API for the reviewed head SHA. An unreadable or
+    // malformed file throws, which fails the step: a round must never be decided on a guess.
+    const failed = failedReviewChecks(JSON.parse(read(rest[0])));
+    emit({ checks: failed.join(" ") });
+    out(`failed review checks: ${failed.join(" ") || "none"}\n`);
+    return 0;
+  }
+
   if (cmd === "rounds") {
     out(`${countRounds(read(rest[0]).split(MESSAGE_SEPARATOR))}\n`);
     return 0;
@@ -826,7 +863,7 @@ export function runKickbackCli(argv, opts = {}) {
     return 0;
   }
 
-  err("usage: flow-kickback.mjs <decide|rounds|amended|weakens|card> [file...]\n");
+  err("usage: flow-kickback.mjs <decide|failed-checks|rounds|amended|weakens|card> [file...]\n");
   return 2;
 }
 

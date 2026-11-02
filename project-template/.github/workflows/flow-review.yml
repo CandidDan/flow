@@ -37,12 +37,16 @@ jobs:
     # id-token: write must be granted on the caller — OIDC is never in the default GITHUB_TOKEN,
     # and a reusable workflow can't raise it above the caller's grant. A permissions block is
     # exhaustive, so contents/pull-requests/issues are re-listed. See docs/flow-reusable-workflows.md.
+    # `checks: write` is flow-0193 (5.0.0): the reusable's `review` job creates the `qa`,
+    # `code-review` and `security` CHECK RUNS on the PR head, and only that job holds the scope.
+    # Those three check runs, not the job names, are what branch protection requires from @v5.
     permissions:
       contents: read
       pull-requests: write
       issues: read
       id-token: write
-    uses: CandidDan/flow/.github/workflows/_flow-review.yml@v4
+      checks: write
+    uses: CandidDan/flow/.github/workflows/_flow-review.yml@v5
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
     secrets:

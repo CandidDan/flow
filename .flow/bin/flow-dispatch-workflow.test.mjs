@@ -129,8 +129,8 @@ export function checkDispatchWorkflows({ reusable, caller, wantRef }, yaml) {
 
 const realInput = (caller, wantRef) => ({ reusable: read(REUSABLE), caller: read(caller), wantRef });
 
-test("the template caller and the reusable: every trigger, queued concurrency, tokens via secrets/env only, pinned @v4", { skip }, () => {
-  assert.equal(majorRef(), "v4", "this release is v4; the template caller is pinned to it");
+test("the template caller and the reusable: every trigger, queued concurrency, tokens via secrets/env only, pinned to VERSION's major", { skip }, () => {
+  assert.match(majorRef(), /^v\d+$/, "the major the template caller is pinned to comes from root VERSION");
   assert.deepEqual(checkDispatchWorkflows(realInput(TEMPLATE_CALLER, majorRef()), yamlMod), []);
 });
 
@@ -139,7 +139,9 @@ test("canonical's own caller is the same, pinned @main", { skip }, () => {
 });
 
 test("the check fails on each mutation it exists to catch", { skip }, () => {
-  const base = realInput(TEMPLATE_CALLER, "v4");
+  const major = majorRef();
+  const previous = `v${Number(major.slice(1)) - 1}`;
+  const base = realInput(TEMPLATE_CALLER, major);
   const mutations = [
     ["caller", /  push:\n    branches: \[main\]\n    paths: \[".flow\/tasks\/\*\*"\]\n/, "", /push to main/],
     ["caller", "types: [flow-task-state]", "types: [flow-task-changed]", /repository_dispatch of type flow-task-state/],
@@ -148,8 +150,8 @@ test("the check fails on each mutation it exists to catch", { skip }, () => {
     ["caller", '"41 6 * * *"', '"0 * * * *"', /daily schedule/],
     ["caller", "  workflow_dispatch:\n", "", /workflow_dispatch/],
     ["caller", "cancel-in-progress: false", "cancel-in-progress: true", /cancel-in-progress must be false/],
-    ["caller", "_flow-dispatch.yml@v4", "_flow-dispatch.yml@v3", /pin: caller must use/],
-    ["caller", "_flow-dispatch.yml@v4", "_flow-dispatch.yml@main", /pin: caller must use/],
+    ["caller", `_flow-dispatch.yml@${major}`, `_flow-dispatch.yml@${previous}`, /pin: caller must use/],
+    ["caller", `_flow-dispatch.yml@${major}`, "_flow-dispatch.yml@main", /pin: caller must use/],
     ["caller", /    secrets:\n(      .*\n)+/, "    secrets: inherit\n", /secrets: inherit/],
     ["caller", "FLOW_ROUTINE_OPUS_TOKEN: ${{ secrets.FLOW_ROUTINE_OPUS_TOKEN }}", "FLOW_ROUTINE_OPUS_TOKEN: ${{ secrets.FLOW_PAT }}", /FLOW_ROUTINE_OPUS_TOKEN must be forwarded/],
     ["caller", "contents: read ", "contents: write ", /caller: permissions/],

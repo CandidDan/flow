@@ -599,12 +599,16 @@ test("every job declares its own permissions, and the file's default is read-onl
     assert.notEqual(job.permissions.actions, "write",
       `${name}: nothing here re-runs or cancels a workflow`);
   }
-  // `actions: read` is one job's, for one API call, and no other job can reach the Actions API.
-  const withActions = Object.entries(wf.jobs).filter(([, j]) => j.permissions.actions).map(([n]) => n);
-  assert.deepEqual(withActions, ["plan"],
-    "the jobs API (`.../actions/runs/<id>/jobs`) is how `plan` learns WHICH review job failed, and it is the only step in the file that needs the Actions API at all");
-  assert.match(steps(wf, "plan").find((st) => st.id === "failed").run, /actions\/runs\/\$RUN_ID\/jobs/,
+  // flow-0193: `checks: read` is one job's, for one API call. No job reaches the Actions API any
+  // more: which review failed is read from the head SHA's check runs, not the run's jobs.
+  const withChecks = Object.entries(wf.jobs).filter(([, j]) => j.permissions.checks).map(([n]) => n);
+  assert.deepEqual(withChecks, ["plan"],
+    "the check-runs API (`.../commits/<sha>/check-runs`) is how `plan` learns WHICH review failed, and it is the only step in the file that reads check runs");
+  assert.equal(wf.jobs.plan.permissions.checks, "read");
+  assert.match(steps(wf, "plan").find((st) => st.id === "failed").run, /commits\/\$HEAD_SHA\/check-runs/,
     "the grant has to be justified by a call that actually exists, or it is an over-grant with a comment");
+  const withActions = Object.entries(wf.jobs).filter(([, j]) => j.permissions.actions).map(([n]) => n);
+  assert.deepEqual(withActions, [], "nothing here reads or writes the Actions API");
 });
 
 test("both callers grant exactly the UNION of the reusable's job permissions", { skip }, () => {

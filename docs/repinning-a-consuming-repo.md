@@ -78,12 +78,84 @@ Three things follow:
   longer carries one.
 - **Two callers pinned at different refs fail the sync**, with an error naming each file and its ref.
   That is the state a half-finished repin leaves behind, and it is now loud instead of silent.
-- **No flow-sync caller at all** falls back to the current major — `v4` — with a warning saying
+- **No flow-sync caller at all** falls back to the current major — `v5` — with a warning saying
   so. The fallback is the only hard-coded ref left in `_flow-sync.yml`, and `caller-pins.test.mjs`
   derives the expected value from root `VERSION`, so cutting a major moves it there and nowhere else.
 
 A `workflow_dispatch` run with the input filled in still overrides everything above — that is how you
 adopt from a canary ref once without repinning.
+
+---
+
+## Moving from `@v4` to `@v5` (the steps the `sed` does not cover)
+
+The 5.0.0 major is flow-0193. qa, code-review and security now run one after another in **one**
+review job, on one runner, each in its own model session. Each review's result reaches the PR as a
+**check run** named exactly `qa`, `code-review` or `security`, instead of as a job named
+`flow-review / qa`, `flow-review / code-review` or `flow-review / security`. The auto-fix round
+(`flow-kickback`) reads those three check runs to decide which review failed.
+
+That changes two caller files and one repo setting. The `sed` over the `uses:` lines makes none of
+the three.
+
+### The steps
+
+1. **Repin, then run flow-sync.** The sync PR carries the two caller changes:
+   - `flow-review.yml` grants **`checks: write`**. The review job creates the three check runs,
+     and a reusable cannot hold a scope its caller does not grant: without it, GitHub refuses the
+     run at startup, before any step executes.
+   - `flow-kickback.yml` grants **`checks: read`**, and drops `actions: read`. It now reads the
+     check runs of the reviewed commit instead of the review run's jobs, and no job in the v5
+     reusable uses the Actions API.
+2. **Merge the sync PR.** Its own review cannot post the three check runs: the review gate runs
+   the helper from the base branch, and the base branch's helper predates the `check-run`
+   command until this PR merges. Expect the `review` job to fail on the sync PR with an
+   "unknown command" error. Merge it as the adoption step, the way a bootstrap PR is merged.
+3. **Change branch protection's required checks**, after the sync PR has merged. Remove
+   `flow-review / qa`, `flow-review / code-review` and `flow-review / security`, and require `qa`,
+   `code-review` and `security` instead. Until you do, every PR waits on three checks that no
+   longer exist. The old `flow-review / security` was a skipped job on a diff the plan did not send
+   to security; the new `security` check run concludes `skipped`, which branch protection also
+   accepts as passing.
+
+### Doing it
+
+Run the sync in the same two-step order as the earlier majors: repin the `flow-sync` caller first,
+then dispatch it.
+
+The order matters because `canonical_ref` picks the files the sync copies, not the reusable that
+copies them: the `@v4` pin in your caller still runs the v4 reusable, whose callers and skills tree
+are v4's. A sync dispatched from the old pin copies v5 files with a v4 reusable. If you already
+dispatched from the old pin, merge that PR, repin, and run the sync a second time.
+
+```bash
+sed -i "s|\(_flow-sync\.yml\)@v4$|\1@v5|" .github/workflows/flow-sync.yml
+gh workflow run flow-sync.yml -R <owner>/<repo> -f canonical_ref=v5
+```
+
+By hand, it is the ordinary `sed`, then the two permission edits:
+
+```bash
+FROM="v4"; TO="v5"
+sed -i "s|\(_flow-[a-z-]*\.yml\)@$FROM$|\1@$TO|" .github/workflows/flow-*.yml
+# flow-review.yml: add `checks: write` to the flow-review job's permissions.
+# flow-kickback.yml: replace `actions: read` with `checks: read` in the flow-kickback job's permissions.
+grep -h "uses:" .github/workflows/flow-*.yml | sort -u  # every line must show @v5
+```
+
+Then the required checks, once the sync PR has merged (`main` here is your protected branch). In
+the GitHub UI: Settings → Branches → the rule for `main` → required status checks. With `gh`, for a
+classic branch protection rule:
+
+```bash
+gh api -X DELETE repos/<owner>/<repo>/branches/main/protection/required_status_checks/contexts \
+  --input - <<<'["flow-review / qa","flow-review / code-review","flow-review / security"]'
+gh api -X POST repos/<owner>/<repo>/branches/main/protection/required_status_checks/contexts \
+  --input - <<<'["qa","code-review","security"]'
+```
+
+A repo that protects `main` with a ruleset makes the same change in the ruleset's required status
+checks.
 
 ---
 

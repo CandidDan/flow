@@ -1423,14 +1423,96 @@ export function validateVerdictFile(file, {
   };
 }
 
+// ── the check runs (flow-0193) ────────────────────────────────────────────────────────────
+// From 5.0.0 qa, code-review and security run one after another in ONE `review` job, and each
+// review's result reaches the PR as a CHECK RUN named exactly `qa`, `code-review` or `security`,
+// not as a job. The check run is created straight after its own model step, by a non-model step,
+// so a later model call in the same job cannot change an earlier verdict.
+//
+// `checkRunPayload` is that step's decision: the body of `POST /repos/{owner}/{repo}/check-runs`.
+//   · a valid `pass` verdict file      → `success`
+//   · a valid `fail` verdict file      → `failure`
+//   · a missing or invalid file        → `failure` (fail-closed, the same rule `enforce` keeps)
+//   · a truncated diff                 → `failure`, whatever the file says (flow-0103)
+//   · `skipped` (security only)        → `skipped`, with the plan's skip reason in the summary
+// The name is always one of CHECKS: branch protection requires those three names, so a payload
+// under any other name would be a check nobody requires.
+export const CHECK_RUN_CONCLUSIONS = Object.freeze(["success", "failure", "skipped"]);
+
+// GitHub refuses a check-run `output.summary` over 65535 characters.
+export const CHECK_RUN_SUMMARY_MAX = 65535;
+
+// A one-line markdown code span that holds any text: the fence is one backtick longer than the
+// longest backtick run inside, so the text cannot close it early.
+export function codeSpan(value) {
+  const text = String(value ?? "").replace(/[\n\r\u2028\u2029]+/g, " ");
+  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+  const fence = "`".repeat(longest + 1);
+  const pad = longest > 0 ? " " : "";
+  return `${fence}${pad}${text}${pad}${fence}`;
+}
+
+const capSummary = (text) =>
+  text.length <= CHECK_RUN_SUMMARY_MAX ? text
+    : `${text.slice(0, CHECK_RUN_SUMMARY_MAX - 40)}\n\n…(cut to fit GitHub's summary limit)`;
+
+export function checkRunPayload(file, {
+  check,
+  headSha = "",
+  diffTruncated = false,
+  diffBytes = null,
+  diffFullBytes = null,
+  skipped = false,
+  skipReason = "",
+  exists = existsSync,
+  read = (p) => readFileSync(p, "utf8"),
+} = {}) {
+  if (!CHECKS.includes(check)) {
+    throw new ReviewError(`a check run must be named one of ${CHECKS.join(", ")}, got ${JSON.stringify(check ?? null)}`);
+  }
+  const base = { name: check, head_sha: String(headSha), status: "completed" };
+  if (skipped) {
+    // Only security is ever skipped, and only by the plan's decision. Any other check asked to
+    // skip is a workflow bug, and a bug in the gate fails the check rather than passing it.
+    if (check !== "security") {
+      throw new ReviewError(`only the security check can be skipped, not ${check}`);
+    }
+    const reason = String(skipReason ?? "").trim() || "the plan skipped the security review and gave no reason";
+    return {
+      ...base,
+      conclusion: "skipped",
+      output: {
+        title: "security review skipped — not a security-triggering diff",
+        summary: capSummary(`The plan decided this diff does not need a security review.\n\nReason: ${codeSpan(reason)}`),
+      },
+    };
+  }
+  const v = validateVerdictFile(file, { check, exists, read });
+  const outcome = verdictOutcome(
+    { verdict: v.verdict.toUpperCase(), unproven: v.unproven, blocking: v.blocking, summary: v.summary },
+    { check, diffTruncated, diffBytes, diffFullBytes });
+  const lines = v.valid ? outcome.lines : [`${check}: ${v.reason}`, ...outcome.lines];
+  const conclusion = outcome.ok ? "success" : "failure";
+  const summary = [v.summary || (v.valid ? "" : "no valid verdict was written"), "", ...lines.map((l) => `- ${l}`)]
+    .join("\n").trim();
+  return {
+    ...base,
+    conclusion,
+    output: {
+      title: `${check} review — ${outcome.ok ? "PASS" : "FAIL"}`,
+      summary: capSummary(summary || `${check}: ${outcome.ok ? "PASS" : "FAIL"}`),
+    },
+  };
+}
+
 // ── CLI ───────────────────────────────────────────────────────────────────────────────────
-const emit =(file, text) => { if (file) appendFileSync(file, text.endsWith("\n") ? text : `${text}\n`); };
+const emit = (file, text) => { if (file) appendFileSync(file, text.endsWith("\n") ? text : `${text}\n`); };
 
 // Every flag `verdict` takes a VALUE for. The set exists so the positional argument — the verdict
 // file — is found by skipping flag values rather than by taking the first thing that does not
 // start with `--`. That older rule read `--check qa report.json` as the file `qa`, and flow-0103
 // adds three more values it could have swallowed the same way.
-const VERDICT_VALUE_FLAGS = new Set(["--check", TRUNCATION_FLAG, "--diff-bytes", "--diff-full-bytes"]);
+const VERDICT_VALUE_FLAGS = new Set(["--check", TRUNCATION_FLAG, "--diff-bytes", "--diff-full-bytes", "--out"]);
 
 export function parseVerdictArgs(argv) {
   const flags = new Map();
@@ -1449,6 +1531,8 @@ export function parseVerdictArgs(argv) {
     diffTruncated: parseDiffTruncated(flags.get(TRUNCATION_FLAG)),
     diffBytes: flags.get("--diff-bytes") ?? null,
     diffFullBytes: flags.get("--diff-full-bytes") ?? null,
+    out: flags.get("--out") ?? null,
+    skipped: argv.includes("--skipped"),
   };
 }
 
@@ -1583,6 +1667,35 @@ export function runReviewCli(argv, {
       return outcome.code;
     }
 
+    // flow-0193. Validate one review's verdict file and write the check-run payload for it. The
+    // workflow POSTs the payload with `gh api --input`. This command exits 0 whatever the
+    // conclusion, so the POST always runs: the check run is the gate, and the `review` job's last
+    // step fails the job when any of the three concluded `failure`. A usage error exits 1, and
+    // no payload is written, so no check run is created and the required check stays missing.
+    // The skip reason arrives through REVIEW_SKIP_REASON, never argv: it is text the plan built
+    // from names a PR author chose.
+    if (cmd === "check-run") {
+      const { file, check, diffTruncated, diffBytes, diffFullBytes, out, skipped } = parseVerdictArgs(rest);
+      if (!rest.includes("--check") || !out) {
+        throw new ReviewError(
+          `usage: flow-review.mjs check-run <file> --check <name> ${TRUNCATION_FLAG} true|false --out <payload.json> [--skipped]`);
+      }
+      const payload = checkRunPayload(file, {
+        check, headSha: env.HEAD_SHA || "", diffTruncated, diffBytes, diffFullBytes,
+        skipped, skipReason: env.REVIEW_SKIP_REASON || "",
+      });
+      writeFileSync(out, JSON.stringify(payload) + "\n");
+      emit(env.GITHUB_OUTPUT, `conclusion=${payload.conclusion}`);
+      emit(env.GITHUB_STEP_SUMMARY, `### ${check} — ${payload.conclusion}\n\n${payload.output.summary}\n`);
+      if (payload.conclusion === "failure") {
+        for (const l of payload.output.summary.split("\n").filter((l) => l.startsWith("- "))) {
+          console.error(`::error::${l.slice(2)}`);
+        }
+      }
+      console.log(`${check}: ${payload.conclusion} — ${payload.output.title}`);
+      return 0;
+    }
+
     // flow-0178. The gate's half of the intent classification: `_flow-gates.yml` runs this from
     // canonical's copy of the helper, never the PR's, and skips install/build/lint/test/coverage
     // on `intent_pr=true`. A git failure throws, which fails the step: an unclassified PR must
@@ -1600,7 +1713,7 @@ export function runReviewCli(argv, {
       return 0;
     }
 
-    throw new ReviewError(`unknown command ${JSON.stringify(cmd ?? "")} — expected "plan" or "verdict" (or "classify", for the gate)`);
+    throw new ReviewError(`unknown command ${JSON.stringify(cmd ?? "")} — expected "plan", "check-run", "enforce" or "verdict" (or "classify", for the gate)`);
   } catch (e) {
     console.error(`::error::flow-review: ${e.message}`);
     return 1;
@@ -1765,7 +1878,9 @@ export function planSummary({
   // flow-0186. A skipped security review starts no runner: the `security` job carries a job-level
   // `if:` on `security_run`. The skip and its reason are recorded HERE, in the plan job's summary,
   // in the same form the security job used to print, so the skip stays on the record.
-  if (!security.run) out.push("", "### Security review — SKIPPED", "", security.reason, "");
+  // flow-0193: the reason is rendered inside a code span, because it can carry names a PR author
+  // chose (file names, globs), and a code span renders them as text rather than as markdown.
+  if (!security.run) out.push("", "### Security review — SKIPPED", "", codeSpan(security.reason), "");
   // The bootstrap warning is last so it is the line a reader ends on, and it is phrased as a
   // warning rather than an error because the case is legitimate exactly once. What must never
   // happen is that it passes silently: the gate that decided this run came from the diff it was

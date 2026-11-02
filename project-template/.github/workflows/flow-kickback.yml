@@ -75,17 +75,19 @@ jobs:
     # There is deliberately no `contents: write`: this workflow never commits to the default
     # branch, and the only branch it pushes to is the PR's own, as FLOW_PAT. `issues: write` is
     # the `flow:needs-human` label — GitHub's label endpoints live under `issues`, so labelling
-    # a PR needs that grant rather than the `pull-requests` one. `actions: read` is the jobs API
-    # (`.../actions/runs/<id>/jobs`), the only way to learn WHICH review job failed, and it is
-    # used by the reusable's `plan` job alone. `id-token: write` is OIDC, which is never in the
+    # a PR needs that grant rather than the `pull-requests` one. `checks: read` is flow-0193
+    # (5.0.0): the check-runs API (`.../commits/<sha>/check-runs`) is how the reusable's `plan`
+    # job, alone, learns WHICH of the `qa`, `code-review` and `security` check runs failed.
+    # It replaces `actions: read`, the jobs API that did this before 5.0.0: no reusable job uses
+    # the Actions API any more, and a caller grants exactly the union of the reusable's jobs. `id-token: write` is OIDC, which is never in the
     # default GITHUB_TOKEN and so has to be granted here.
     permissions:
       contents: read
       pull-requests: write
       issues: write
-      actions: read
+      checks: read
       id-token: write
-    uses: CandidDan/flow/.github/workflows/_flow-kickback.yml@v4
+    uses: CandidDan/flow/.github/workflows/_flow-kickback.yml@v5
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
     secrets:
