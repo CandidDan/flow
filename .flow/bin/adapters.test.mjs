@@ -1058,13 +1058,13 @@ test("flow-0173: the reusable has no dispatch step, and the release step dispatc
   } finally { rmSync(repo.root, { recursive: true, force: true }); }
 });
 
-test("both flow-unblock callers: three triggers, exactly contents+actions write + pull-requests read, no secrets", { skip }, () => {
+test("both flow-unblock callers: flow-done + dispatch triggers and no schedule (flow-0185), exactly contents write + pull-requests read, no secrets", { skip }, () => {
   const major = `v${readFileSync(join(REPO, "VERSION"), "utf8").trim().split(".")[0]}`;
   for (const [file, ref] of [[join(WORKFLOWS, "flow-unblock.yml"), "main"],
                              [join(REPO, "project-template", ".github", "workflows", "flow-unblock.yml"), major]]) {
     const wf = yamlMod.parse(readFileSync(file, "utf8"));
     assert.deepEqual(wf.on.workflow_run, { workflows: ["flow-done"], types: ["completed"] }, file);
-    assert.ok(Array.isArray(wf.on.schedule) && wf.on.schedule.length === 1 && wf.on.schedule[0].cron, file);
+    assert.equal(wf.on.schedule, undefined, `${file}: no schedule — flow-done completing is the only event that resolves a blocked_by entry (flow-0185)`);
     assert.ok("workflow_dispatch" in wf.on, `${file} must be dispatchable`);
     const jobs = Object.values(wf.jobs);
     assert.equal(jobs.length, 1, `${file} is a thin caller`);

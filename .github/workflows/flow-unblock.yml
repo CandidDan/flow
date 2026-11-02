@@ -8,12 +8,14 @@ name: flow-unblock
 # starts no worker (flow-0173) — the next worker run picks the released task. No model in the
 # loop: it costs seconds.
 #
-# Three triggers, one job — the reusable is trigger-agnostic:
+# Two triggers, one job — the reusable is trigger-agnostic:
 #   · workflow_run on flow-done completing, so a dependent is released about a minute after its
 #     dependency merges;
-#   · hourly, the self-correcting backstop: it catches a block written after the dependency landed
-#     and any flow-done run that was missed;
-#   · workflow_dispatch, on demand.
+#   · workflow_dispatch, on demand — for a block written after its dependency already landed, or a
+#     missed flow-done run.
+# No schedule (flow-0185): a `blocked_by` entry resolves only when flow-done runs, and the hourly
+# backstop cost about 720 billed Actions minutes a month in an idle repo. After a release is pushed,
+# the reusable sends repository_dispatch `flow-task-state`, which starts flow-dispatch.
 #
 # NOT gated on FLOW_AI (see the reusable's header). A permissions block is exhaustive:
 # `contents: write` for the release commit and `pull-requests: read` for the blocked_by PR lookup,
@@ -24,8 +26,6 @@ on:
   workflow_run:
     workflows: [flow-done]
     types: [completed]
-  schedule:
-    - cron: "17 * * * *"       # hourly; off the top of the hour, where scheduled runs queue
   workflow_dispatch:
 
 concurrency:

@@ -9,7 +9,7 @@
 // nothing.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,8 @@ const TEMPLATE_CALLER = join(REPO, "project-template/.github/workflows/flow-disp
 const CANON_CALLER = join(REPO, ".github/workflows/flow-dispatch.yml");
 const TIERS = ["HAIKU", "SONNET", "OPUS", "FABLE"];
 const TOKENS = TIERS.map((t) => `FLOW_ROUTINE_${t}_TOKEN`);
+/** The repository_dispatch event type flow-unblock and flow-recover send, and flow-dispatch listens for. */
+export const TASK_STATE_EVENT = "flow-task-state";
 
 const read = (f) => readFileSync(f, "utf8");
 const majorRef = () => `v${read(join(REPO, "VERSION")).trim().split(".")[0]}`;
@@ -48,11 +50,16 @@ export function checkDispatchWorkflows({ reusable, caller, wantRef }, yaml) {
   if (!(push.branches ?? []).includes("main") || !(push.paths ?? []).includes(".flow/tasks/**")) {
     problems.push("trigger: push to main with paths `.flow/tasks/**` is missing");
   }
-  const wr = on.workflow_run ?? {};
-  for (const w of ["flow-unblock", "flow-recover"]) {
-    if (!(wr.workflows ?? []).includes(w)) problems.push(`trigger: workflow_run of ${w} is missing`);
+  // flow-0185: flow-unblock and flow-recover start this workflow with repository_dispatch
+  // `flow-task-state`, sent only after they push a task-file change. `workflow_run` on them started a
+  // runner after every one of their runs, including the ones that changed nothing.
+  const rd = on.repository_dispatch ?? {};
+  if (!(rd.types ?? []).includes(TASK_STATE_EVENT)) {
+    problems.push(`trigger: repository_dispatch of type ${TASK_STATE_EVENT} is missing`);
   }
-  if (!(wr.types ?? []).includes("completed")) problems.push("trigger: workflow_run must fire on types [completed]");
+  if ("workflow_run" in on) {
+    problems.push("trigger: workflow_run must be absent — it starts a runner after every unblock/recover run, changed or not");
+  }
   const crons = (on.schedule ?? []).map((s) => s.cron);
   const daily = crons.length === 1 && /^\d{1,2} \d{1,2} \* \* \*$/.test(crons[0]);
   if (!daily) problems.push(`trigger: exactly one daily schedule expected, got ${JSON.stringify(crons)}`);
@@ -135,8 +142,8 @@ test("the check fails on each mutation it exists to catch", { skip }, () => {
   const base = realInput(TEMPLATE_CALLER, "v4");
   const mutations = [
     ["caller", /  push:\n    branches: \[main\]\n    paths: \[".flow\/tasks\/\*\*"\]\n/, "", /push to main/],
-    ["caller", "workflows: [flow-unblock, flow-recover]", "workflows: [flow-unblock]", /workflow_run of flow-recover/],
-    ["caller", "workflows: [flow-unblock, flow-recover]", "workflows: [flow-recover]", /workflow_run of flow-unblock/],
+    ["caller", "types: [flow-task-state]", "types: [flow-task-changed]", /repository_dispatch of type flow-task-state/],
+    ["caller", "  repository_dispatch:\n", "  workflow_run:\n    workflows: [flow-unblock, flow-recover]\n    types: [completed]\n  repository_dispatch:\n", /workflow_run must be absent/],
     ["caller", /  schedule:\n.*\n/, "", /daily schedule/],
     ["caller", '"41 6 * * *"', '"0 * * * *"', /daily schedule/],
     ["caller", "  workflow_dispatch:\n", "", /workflow_dispatch/],
@@ -221,3 +228,196 @@ test("a repo whose sync runs at this release gets .github/workflows/flow-dispatc
   assert.ok(added, body);
   assert.match(added[1], /^- `\.github\/workflows\/flow-dispatch\.yml`$/m, body);
 });
+
+// ── flow-0185: the task-state signal from flow-unblock and flow-recover ──────────────────────
+//
+// The chain this replaces: flow-dispatch ran on `workflow_run` of flow-unblock and flow-recover,
+// so every one of their runs started a dispatch runner, including the ones that changed nothing.
+// Now each reusable's sweep step writes `changed=true` to its step outputs only after it PUSHED a
+// task-file commit, and a last step, gated on that output, sends repository_dispatch
+// `flow-task-state` — the event flow-dispatch's callers listen for. A sweep that changed nothing
+// skips the step, so no event is sent and no flow-dispatch run, and no runner, starts.
+
+/** The name of the signal step, and its exact condition — shared with unblock-no-dispatch.test.mjs. */
+export const SIGNAL_STEP = "Start flow-dispatch, because a task file changed on main";
+// `!cancelled()` so a sweep that pushed one change and then failed on a later one still signals.
+export const SIGNAL_IF = "${{ !cancelled() && steps.sweep.outputs.changed == 'true' }}";
+const sweepSteps = (file) => yamlMod.parse(read(join(REPO, ".github/workflows", file))).jobs.sweep.steps;
+
+/**
+ * Problems with one sweep reusable's signal, as strings. Empty means: the sweep step has `id:
+ * sweep`; the signal step is the last step, is gated on exactly `steps.sweep.outputs.changed ==
+ * 'true'`, posts `event_type=<TASK_STATE_EVENT>` to this repo's dispatches endpoint with
+ * GITHUB_TOKEN, and never fails the job; and in the sweep script every `changed=true` follows a push
+ * to main, and every push to main is followed by one.
+ */
+export function checkTaskStateSignal(text, yaml) {
+  const problems = [];
+  const steps = yaml.parse(text).jobs?.sweep?.steps ?? [];
+  const sweep = steps.find((s) => s.id === "sweep");
+  if (!sweep) problems.push("no step has id: sweep — the signal's condition reads steps.sweep.outputs");
+  const signal = steps.find((s) => s.name === SIGNAL_STEP);
+  if (!signal) return [...problems, `no step named "${SIGNAL_STEP}"`];
+  if (steps.at(-1) !== signal) problems.push("the signal step must be the last step: it reports what the sweep pushed");
+  if (signal.if !== SIGNAL_IF) problems.push(`signal: if must be exactly ${SIGNAL_IF}, got ${JSON.stringify(signal.if)}`);
+  if (signal.env?.GH_TOKEN !== "${{ github.token }}") problems.push("signal: GH_TOKEN must be github.token — never FLOW_PAT, whose scopes are the repo's");
+  const run = String(signal.run ?? "");
+  if (!run.includes(`"repos/$GITHUB_REPOSITORY/dispatches" -f event_type=${TASK_STATE_EVENT}`)) {
+    problems.push(`signal: must POST event_type=${TASK_STATE_EVENT} to repos/$GITHUB_REPOSITORY/dispatches`);
+  }
+  if (/actions\/workflows\//.test(run)) problems.push("signal: must not dispatch a named workflow — it sends an event, flow-dispatch decides");
+  if (!/^\s*if gh api /m.test(run) || !/::warning::/.test(run)) {
+    problems.push("signal: a failed send must warn, not fail the job — the change is already on main");
+  }
+
+  // Inside the sweep script: `changed=true` only after a push to main, and after every one.
+  const lines = String(sweep?.run ?? "").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+  const isPush = (l) => /^(if )?git push origin (HEAD:)?main\b/.test(l);
+  const isMark = (l) => /^echo "changed=true" >> "\$\{GITHUB_OUTPUT:-\/dev\/null\}"$/.test(l);
+  const pushes = lines.filter(isPush).length, marks = lines.filter(isMark).length;
+  if (marks === 0) problems.push("sweep: never writes changed=true");
+  if (pushes !== marks) problems.push(`sweep: ${pushes} push(es) to main but ${marks} changed=true line(s) — each push must be marked once`);
+  lines.forEach((l, i) => {
+    if (isMark(l) && !lines.slice(Math.max(0, i - 3), i).some(isPush)) {
+      problems.push(`sweep: changed=true at script line ${i + 1} does not follow a push to main`);
+    }
+  });
+  return problems;
+}
+
+test("both sweep reusables send flow-task-state after a pushed change, and only then", { skip }, () => {
+  for (const f of ["_flow-unblock.yml", "_flow-recover.yml"]) {
+    assert.deepEqual(checkTaskStateSignal(read(join(REPO, ".github/workflows", f)), yamlMod), [], f);
+  }
+});
+
+test("the signal check fails on each mutation it exists to catch", { skip }, () => {
+  const unblock = read(join(REPO, ".github/workflows/_flow-unblock.yml"));
+  const recover = read(join(REPO, ".github/workflows/_flow-recover.yml"));
+  const mutations = [
+    [unblock, "if: ${{ !cancelled() && steps.sweep.outputs.changed == 'true' }}", "if: ${{ always() }}", /if must be exactly/],
+    [recover, "if: ${{ !cancelled() && steps.sweep.outputs.changed == 'true' }}", "if: ${{ steps.sweep.outputs.changed == 'true' }}", /if must be exactly/],
+    [unblock, "event_type=flow-task-state", "event_type=flow-task", /must POST event_type=flow-task-state/],
+    [unblock, "        id: sweep\n", "", /no step has id: sweep/],
+    [unblock, 'echo "changed=true" >> "${GITHUB_OUTPUT:-/dev/null}"', ":", /never writes changed=true/],
+    [unblock, "            if git push origin HEAD:main; then\n", "            echo \"changed=true\" >> \"${GITHUB_OUTPUT:-/dev/null}\"\n            if git push origin HEAD:main; then\n", /does not follow a push|push\(es\) to main but/],
+    [recover, /\n *echo "changed=true" >> "\$\{GITHUB_OUTPUT:-\/dev\/null\}"\n( *fi\n *;;\n *\*\))/, "\n$1", /1 push\(es\)|2 push\(es\) to main but 1/],
+    [recover, "GH_TOKEN: ${{ github.token }}\n        run: |\n          if gh api", "GH_TOKEN: ${{ secrets.FLOW_PAT }}\n        run: |\n          if gh api", /GH_TOKEN must be github.token/],
+    [recover, /\n      # flow-0185\. Runs only[\s\S]*$/, "\n", /no step named/],
+  ];
+  for (const [text, from, to, expect] of mutations) {
+    const mutated = text.replace(from, to);
+    assert.notEqual(mutated, text, `mutation did not apply: ${from}`);
+    const problems = checkTaskStateSignal(mutated, yamlMod);
+    assert.ok(problems.some((p) => expect.test(p)), `${from} -> ${to}: expected ${expect}, got ${JSON.stringify(problems)}`);
+  }
+});
+
+test("the event type the sweeps send is the one both flow-dispatch callers listen for", { skip }, () => {
+  for (const caller of [TEMPLATE_CALLER, CANON_CALLER]) {
+    const on = yamlMod.parse(read(caller)).on;
+    assert.deepEqual(on.repository_dispatch, { types: [TASK_STATE_EVENT] }, caller);
+    assert.equal(on.workflow_run, undefined, `${caller}: an unblock/recover run that changed nothing must start no dispatch run`);
+  }
+});
+
+// A sandbox repo with a bare origin, canonical's adapters, and a fake `gh` that logs every call and
+// answers the one PR lookup as merged. The release step and the signal step run as GitHub runs them.
+function unblockSandbox(t) {
+  const root = mkdtempSync(join(tmpdir(), "flow-0185-unblock-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const work = join(root, "work");
+  cpSync(join(REPO, "project-template/.flow/bin"), join(work, "project-template/.flow/bin"), { recursive: true });
+  mkdirSync(join(work, ".flow/tasks"), { recursive: true });
+  for (const f of ["flow-unblock.mjs", "apply-board-edits.mjs"]) cpSync(join(BIN, f), join(work, ".flow/bin", f));
+  const task = (name, body) => writeFileSync(join(work, ".flow/tasks", name), body);
+  task("9001-dep.md", '---\nid: "flow-9001"\nstatus: "done"\n---\n');
+  task("9002-rel.md", '---\nid: "flow-9002"\nstatus: "blocked"\nblocked_reason: "waits on 9001 and #7"\n' +
+    'blocked_by:\n  - "flow-9001"\n  - "https://github.com/o/r/pull/7"\ntouches: ["a/**"]\n---\nbody\n');
+  const git = (...a) => execFileSync("git", a, { cwd: work, encoding: "utf8" });
+  execFileSync("git", ["init", "-q", "--bare", "-b", "main", join(root, "origin.git")]);
+  git("init", "-q", "-b", "main");
+  git("config", "user.name", "t"); git("config", "user.email", "t@t");
+  git("add", "-A"); git("commit", "-qm", "seed");
+  git("remote", "add", "origin", join(root, "origin.git"));
+  git("push", "-q", "origin", "main");
+  mkdirSync(join(root, "bin"));
+  writeFileSync(join(root, "bin", "gh"), [
+    "#!/bin/sh", 'echo "$*" >> "$GH_LOG"',
+    'case "$1 $2" in',
+    '  "api repos/o/r/pulls/7") printf "closed\\ttrue\\n" ;;',
+    '  "api -X") [ -z "$GH_DISPATCH_FAIL" ] || exit 1 ;;',
+    "  *) exit 1 ;;", "esac", ""].join("\n"));
+  chmodSync(join(root, "bin", "gh"), 0o755);
+
+  const output = join(root, "github_output");
+  const run = (step) => {
+    writeFileSync(output, "");
+    return spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run], {
+      cwd: work, encoding: "utf8",
+      env: { ...process.env, PATH: `${join(root, "bin")}:${process.env.PATH}`, RUNNER_TEMP: root,
+             GH_LOG: join(root, "gh.log"), GITHUB_REPOSITORY: "o/r", GITHUB_OUTPUT: output, ...(step.env_extra ?? {}) },
+    });
+  };
+  const outputs = () => Object.fromEntries(read(output).split("\n").filter(Boolean).map((l) => l.split("=")));
+  const ghLog = () => (existsSync(join(root, "gh.log")) ? read(join(root, "gh.log")) : "");
+  return { root, run, outputs, ghLog };
+}
+
+// GitHub's evaluation of the one condition the signal step carries, on the outputs the sweep wrote
+// and the run's state (`cancelled`), so the partial-failure case below is the condition, not a guess.
+const signalRuns = (outputs, { cancelled = false } = {}) => !cancelled && outputs.changed === "true";
+
+test("a flow-done-triggered unblock that releases a task sends flow-task-state in the same run", { skip }, (t) => {
+  const steps = sweepSteps("_flow-unblock.yml");
+  const sweep = steps.find((s) => s.id === "sweep");
+  const signal = steps.find((s) => s.name === SIGNAL_STEP);
+  assert.equal(signal.if, SIGNAL_IF, "the condition evaluated below must be the one in the file");
+  const sb = unblockSandbox(t);
+
+  const r = sb.run(sweep);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /Released: flow-9002/);
+  assert.deepEqual(sb.outputs(), { changed: "true" });
+  assert.ok(signalRuns(sb.outputs()), "the signal step runs after a pushed release");
+
+  const s = sb.run(signal);
+  assert.equal(s.status, 0, s.stdout + s.stderr);
+  assert.match(sb.ghLog(), new RegExp(`^api -X POST repos/o/r/dispatches -f event_type=${TASK_STATE_EVENT}$`, "m"));
+  // …and that is the event both flow-dispatch callers start on (previous test), so the released task
+  // is dispatched in this chain, not at the next daily sweep.
+});
+
+test("an unblock run that changes no task file writes no output, so the signal step and flow-dispatch never start", { skip }, (t) => {
+  const steps = sweepSteps("_flow-unblock.yml");
+  const sweep = steps.find((s) => s.id === "sweep");
+  const sb = unblockSandbox(t);
+  assert.equal(sb.run(sweep).status, 0);            // releases flow-9002
+  const again = sb.run(sweep);                       // nothing left to release
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /Nothing to release\./);
+  assert.deepEqual(sb.outputs(), {}, "no changed=true when nothing was pushed");
+  assert.equal(signalRuns(sb.outputs()), false, "the signal step is skipped — no event, no flow-dispatch run, no runner");
+  assert.doesNotMatch(sb.ghLog(), /dispatches/, "neither sweep run sent anything");
+});
+
+test("a failed signal warns and leaves the run green — the release is already on main", { skip }, (t) => {
+  const signal = sweepSteps("_flow-unblock.yml").find((s) => s.name === SIGNAL_STEP);
+  const sb = unblockSandbox(t);
+  const r = sb.run({ ...signal, env_extra: { GH_DISPATCH_FAIL: "1" } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /::warning::Could not send repository_dispatch flow-task-state/);
+});
+
+test("a sweep that pushed a change and then failed still signals; a cancelled run does not", { skip }, (t) => {
+  const steps = sweepSteps("_flow-unblock.yml");
+  const sweep = steps.find((s) => s.id === "sweep");
+  const sb = unblockSandbox(t);
+  // Push the release, then fail the step after it — the shape of recover pushing task 1 and failing on task 2.
+  const r = sb.run({ ...sweep, run: `${sweep.run}\nexit 1\n` });
+  assert.notEqual(r.status, 0, "the step must have failed for this case to mean anything");
+  assert.deepEqual(sb.outputs(), { changed: "true" }, "the push before the failure is recorded");
+  assert.ok(signalRuns(sb.outputs()), "a failed sweep that changed main still starts flow-dispatch");
+  assert.equal(signalRuns(sb.outputs(), { cancelled: true }), false, "a cancelled run sends nothing");
+});
+

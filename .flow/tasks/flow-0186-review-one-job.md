@@ -4,11 +4,11 @@ title: "Each review check reads its verdict from a vendor-neutral file, and the 
 status: "in_progress"
 priority: 1
 project: "flow"
-owner: "session_01NfrcU8R7fYHGfpL83V3xWR"
+owner: "session_01NfrcUBzD5XdFYPdjBTniNs"
 created: "2026-11-01"
-started: "2026-11-01T12:04:04Z"
-branch: ""
-pr: ""
+started: "2026-11-02T01:16:27Z"
+branch: "flow/flow-0186-review-verdict-file"
+pr: "https://github.com/CandidDan/flow/pull/275"
 issue: ""
 blocked_reason: ""
 blocked_by: []
@@ -20,6 +20,8 @@ touches:
   - "project-template/.flow/bin/flow-review.test.mjs"
   - ".flow/bin/flow-review-workflow.test.mjs"
   - ".flow/bin/review-verdict-file.test.mjs"
+  - ".flow/bin/intent-pr-kind.test.mjs"
+  - "project-template/.flow/bin/review-guide.mjs"
   - "changes/flow-0186.md"
 labels: [cost, review, "4.0.3"]
 model: "opus"
@@ -34,6 +36,8 @@ notes:
   - "2026-11-01 orchestrator: Dan answered the worker's decision ask: keep the three review jobs separate for now (the narrower scope). Reason: one job needs checks: write on every caller and renames the required checks (flow-review / qa etc.), a breaking release for every adopter; and phase 2 (flow-0187, PR #272) may move reviews off runners, which would force that same breaking change again. Doing it once, in phase 2, costs adopters once. The one-job consolidation is therefore OUT of this task and goes to phase 2. Scope rewritten below; touches unchanged except the new test file name."
   - "2026-11-01 orchestrator: the worker's two fyi asks are resolved in the rewritten scope. (1) intent-review advisory assertion: no permission changes in this task, so the existing assertion stands unchanged. (2) the Report-the-model steps may keep reading the action's execution file: they report, they do not decide the check. Criterion 2 now forbids only the steps that decide the check (verdict enforcement, PR comment, auto-fix trigger) from reading model-step outputs."
   - "2026-11-01 orchestrator: the worker's design notes above still apply where they fit three jobs: delete $RUNNER_TEMP/flow-review/<check>.json before the model step, validate it in a non-model step straight after, fail closed; prompts change only their output-file lines."
+  - "2026-11-01 worker session_01NfrcU8R7fYHGfpL83V3xWR: BLOCKED with the work done. Branch flow/flow-0186-review-verdict-file (commit 3ef26ed) carries every criterion: validateVerdictFile + an `enforce` CLI command in flow-review.mjs (the old lenient `verdict` command is kept, because an adopter's synced helper can be newer than its pinned workflow tag); _flow-review.yml deletes $RUNNER_TEMP/flow-review/<check>.json before each model step, prompts write that path with a check field and lowercase verdict, enforce reads it; the security job has a job-level if and planSummary writes '### Security review — SKIPPED' + reason; new .flow/bin/review-verdict-file.test.mjs; flow-review-workflow.test.mjs and flow-review.test.mjs updated; changes/flow-0186.md. Local gate: build, lint green; test 2117 pass, 1 fail; coverage 97.82% (exits 1 only because of that failure). The one failure is .flow/bin/intent-pr-kind.test.mjs:177 `assert.equal(sec.if, undefined, ...)`, outside touches. Two choices made on the branch: (1) the security model step keeps a redundant `if:` on security_run, so intent-pr-kind.test.mjs:182 still holds and only line 177 conflicts; (2) the three blocking reviewers get `--add-dir ${{ runner.temp }}/flow-review` in claude_args, so the model can write outside the workspace. NEXT (once touches is widened): check out the branch, rebase on main, change intent-pr-kind.test.mjs:177 to `assert.equal(sec.if, \"${{ needs.plan.outputs.security_run == 'true' }}\", \"the security job's only job-level if is the plan's review decision (flow-0186)\")`, run the five gate commands, open the PR titled [flow-0186] <title> (REST fallback if GraphQL is blocked), and hand off. fyi for the PR: review-guide.mjs line ~298 has a comment saying the security job always runs; now stale, outside touches, not a test."
+  - "2026-11-02 orchestrator: decision ask answered YES. touches widened by .flow/bin/intent-pr-kind.test.mjs and project-template/.flow/bin/review-guide.mjs. Why it is safe: the flow-0178 assertion exists so that security is never skipped or reworded BECAUSE a PR is intent-only. A job-level if on needs.plan.outputs.security_run keeps that: the plan still forces security on for .flow/** (the security floor), and the test's other assertion (no intent_pr anywhere in the security job) stays. Change line 177 exactly as the worker's note says. Also fix the stale review-guide.mjs comment (~line 298) that says the security job always runs. NEXT: follow the worker's NEXT above, on the existing branch flow/flow-0186-review-verdict-file and PR #275; do not open a second PR."
 ---
 
 ## Context

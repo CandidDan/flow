@@ -31,6 +31,15 @@ name: _flow-recover (reusable)
 # reset escalates; reopen-pr and promote-in-review mean work was pushed. The rule is
 # `escalatesOnRecover` in flow-recover.mjs, which the step passes its decision to.
 #
+# flow-0185: after the sweep PUSHES a task-file commit (a reset to `ready`, or a promotion to
+# `in_review`, which frees a `dispatch.max_in_progress` slot), the last step sends one
+# `repository_dispatch` event of type `flow-task-state`, which flow-dispatch.yml listens for. It
+# replaces flow-dispatch's `workflow_run` trigger on this workflow, which started a runner after
+# every sweep, including the ones that changed nothing. The reset commit itself cannot start
+# flow-dispatch: it is pushed with GITHUB_TOKEN, and GitHub starts no workflow from a GITHUB_TOKEN
+# push — repository_dispatch and workflow_dispatch are the documented exceptions. The signal uses
+# GITHUB_TOKEN (`contents: write`, already granted), never FLOW_PAT, whose scopes are the repo's.
+#
 # Reopened PRs use FLOW_PAT (CAN-58) so flow-gates fires on them too; falls back to GITHUB_TOKEN
 # when the secret is unset (recovery still works, just ungated). The thin caller passes the
 # secret by name, not `secrets: inherit`. See _flow-open-pr.yml for FLOW_PAT setup.
@@ -73,6 +82,7 @@ jobs:
           node-version: 22
 
       - name: Sweep stranded in_progress tasks
+        id: sweep
         env:
           # Only `gh` calls use this; the reset-to-ready `git push` uses the checkout credential.
           GH_TOKEN: ${{ secrets.FLOW_PAT || github.token }}
@@ -138,7 +148,7 @@ jobs:
             # fell back to `[]`, which reads as "this task has no PR" — and on a task whose branch
             # also could not be found, that is what produces `reset-to-ready`. A bad minute at
             # GitHub was enough to clear a live claim. `--pr-state-known 0` makes the sweep leave
-            # the task alone instead; the next run, three hours later, asks again.
+            # the task alone instead; the next run, a day later, asks again.
             # `headRefName`, `isDraft` and `url` ride along on this same call — no extra request
             # per task. They answer the one question `promote-in-review` turns on, below.
             #
@@ -260,6 +270,8 @@ jobs:
                   git commit -m "flow: recover $id -> in_review (PR #$open_pr_number open and ready, status was stuck in_progress)"
                   git pull --rebase origin main
                   git push origin main
+                  # A file, not a variable: this loop runs in a pipeline subshell. Read by the next step.
+                  echo "changed=true" >> "${GITHUB_OUTPUT:-/dev/null}"
                 fi
                 ;;
               reset-to-ready)
@@ -278,6 +290,7 @@ jobs:
                   # rejected because the first push moved main.
                   git pull --rebase origin main
                   git push origin main
+                  echo "changed=true" >> "${GITHUB_OUTPUT:-/dev/null}"
                 fi
                 ;;
               *)
@@ -286,3 +299,20 @@ jobs:
             esac
             echo "::endgroup::"
           done
+
+      # flow-0185. Runs only when the sweep pushed a task-file change; on every other run it is
+      # skipped, and no flow-dispatch run starts.
+      # `!cancelled()`, not the implicit `success()`: a sweep that pushed one change and then failed on
+      # a later one has still changed main, and the old `workflow_run: completed` trigger fired on any
+      # conclusion — so a failed sweep with `changed=true` still signals. A failed signal warns and does not fail the sweep:
+      # the commit is already on main, and flow-dispatch's daily schedule picks the task up at the latest.
+      - name: Start flow-dispatch, because a task file changed on main
+        if: ${{ !cancelled() && steps.sweep.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api -X POST "repos/$GITHUB_REPOSITORY/dispatches" -f event_type=flow-task-state >/dev/null; then
+            echo "Sent repository_dispatch flow-task-state."
+          else
+            echo "::warning::Could not send repository_dispatch flow-task-state — flow-dispatch's daily run will pick up the changed task."
+          fi

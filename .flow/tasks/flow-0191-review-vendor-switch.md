@@ -10,7 +10,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits on three tasks. flow-0186 creates the per-check verdict file the Codex step must write. flow-0187 measures how Codex is billed in CI; this task must not ship a Codex step that bills per API token. flow-0188 adds the verifier model call, which must also follow the check's vendor, so this task is specified against the workflow after it lands."
+blocked_reason: "Waits on three tasks. flow-0186 creates the per-check verdict file the Codex step must write. flow-0187's research doc names the Codex model and action inputs this task uses. flow-0188 adds the verifier model call, which must also follow the check's vendor, so this task is specified against the workflow after it lands."
 blocked_by: ["flow-0186", "flow-0187", "flow-0188"]
 serves: ["G10", "G9"]
 intent: "review-runs-on-any-agent"
@@ -39,14 +39,15 @@ notes:
   - "2026-11-01 orchestrator: intent open question 'who chooses the vendor' is decided here as BOTH, following the flow-0144 precedent for models: canonical holds the default per check (DEFAULT_VENDORS in flow-review.mjs, all `claude`), so one reviewed canonical PR switches the fleet; a repo can override one check with `review.<check>_vendor` in its .flow/config.yml, and the plan summary warns naming the override, as it does for a set model key. Dan may overrule."
   - "2026-11-01 orchestrator: intent open question 'are intent-review and the guide in scope' is decided here as NO: only the three verdict-giving checks Dan named. intent-review and the guide stay on Claude. Dan may overrule; it would be a follow-up task, not a change to this one."
   - "2026-11-01 orchestrator: intent open question 'calibrate Codex before its verdict blocks' is decided here as: switching is never gated (Dan: 'switch any review to codex and vice-versa at anytime'), and a Codex review blocks from the first run, exactly like a Claude one. Calibration is measurement, not a gate: flow-0192 scores both vendors on the eval set so the switch is an informed one. Dan may overrule."
-  - "2026-11-01 orchestrator: billing. Dan rejected moving reviews to per-token API billing. So this task never wires an OpenAI API key. The Codex step takes the credential that flow-0187's research doc (docs/research/review-runtime.md, section 3) identifies as billing the ChatGPT plan. If that doc says Codex in CI can only bill API tokens, the worker blocks (see Scope step 0) rather than building."
-  - "2026-11-01 orchestrator: if flow-0187 recommends moving reviews off GitHub runners (Claude routines), that is a separate phase-2 task. This task builds on the review job as it exists when claimed (three separate jobs; flow-0186 kept them separate on 2026-11-01 and moved one-job consolidation to phase 2). Whichever task moves the reviews later must carry both vendors."
+  - "2026-11-01 orchestrator: billing. Dan rejected moving reviews to per-token API billing. So this task never wires an OpenAI API key. The Codex step takes the credential that flow-0187's research doc (docs/research/review-runtime.md, section 3) identifies as billing the ChatGPT plan. If that doc says Codex in CI can only bill API tokens, the worker blocks (see Scope step 0) rather than building. SUPERSEDED 2026-11-02 by Dan's decision below."
+  - "2026-11-01 orchestrator: if flow-0187 recommends moving reviews off GitHub runners (Claude routines), that is a separate phase-2 task. This task builds on the review job as it exists when claimed (one runner job, from flow-0193). Whichever task moves the reviews later must carry both vendors."
+  - "2026-11-02 orchestrator: Dan decided Codex is OPT-IN on API-token billing. flow-0187 (PR #272) found the only Codex path that returns a verdict in CI is openai/codex-action with an API key; Codex's plan-billed GitHub review gives no pass/fail and sets no check. So: secret FLOW_CODEX_API_KEY, every default stays claude, and no repo pays tokens unless it switches a check. Dan has set a $50 spending cap as the ceiling. Codex access tokens (plan-billed automation) exist only for ChatGPT Enterprise workspaces and are documented for private CI runners; they are out of scope here and would be a follow-up task if Dan moves to Enterprise."
 ---
 
 ## Context
 
 After flow-0186 and flow-0188, `.github/workflows/_flow-review.yml` runs qa, code-review and
-security as three separate jobs. Each check has its own model step (`anthropics/claude-code-action`),
+security in one runner job (flow-0193), which posts the three check runs. Each check has its own model step (`anthropics/claude-code-action`),
 which writes `$RUNNER_TEMP/flow-review/<check>.json`; flow-0188 adds one verifier model call per
 blocking finding, which writes `$RUNNER_TEMP/flow-review/<check>.verify/<id>.json`. Everything
 after the model steps reads only those files. Every model step is Claude. Nothing in canonical
@@ -57,11 +58,9 @@ vendor-neutral reviewer". After this task that sentence is false and must change
 
 ## Scope
 
-0. **Read first.** Read `docs/research/review-runtime.md` (flow-0187), sections 3 and 5. If
-   section 3 says a Codex review in GitHub Actions can only be billed as API tokens, do not build:
-   set this task `blocked` with the ask
-   `decision: Codex in CI bills API tokens only, which the 2026-11-01 no-API-cost decision rules out. Ship it anyway as opt-in, or wait? Recommend: wait, and re-check when Codex adds plan-billed CI auth`.
-   Otherwise use the credential and the Codex model that section 3 names.
+0. **Read first.** Read `docs/research/review-runtime.md` (flow-0187), sections 3 and 5, for the
+   Codex model to default to and the `openai/codex-action` inputs. Codex in CI bills API tokens
+   (decided 2026-11-02, see notes): build it, opt-in only.
 1. **The vendor setting.** In `project-template/.flow/bin/flow-review.mjs`:
    - Export `DEFAULT_VENDORS = { qa: "claude", "code-review": "claude", security: "claude" }`
      and `CODEX_DEFAULT_MODELS` (one Codex model per check, from section 3 of the research doc).
@@ -89,12 +88,13 @@ vendor-neutral reviewer". After this task that sentence is false and must change
    enforces) or the Codex CLI installed at an exact version. Never run Codex with its sandbox
    switched off.
 3. **The credential.** The reusable workflow declares one new optional secret,
-   `FLOW_CODEX_AUTH`. Canonical's caller (`.github/workflows/flow-review.yml`) and the template
+   `FLOW_CODEX_API_KEY` (an OpenAI API key, billed per token). Canonical's caller (`.github/workflows/flow-review.yml`) and the template
    caller (`project-template/.github/workflows/flow-review.yml`) pass it by name, never with
-   `secrets: inherit`. Never interpolate it into a `run:` string; pass it through `env:`. No
-   `OPENAI_API_KEY` input or secret is added anywhere.
-4. **No silent fallback.** When a check's vendor is `codex` and `FLOW_CODEX_AUTH` is empty, that
-   check fails, and its summary says `vendor is codex but the FLOW_CODEX_AUTH secret is not set`.
+   `secrets: inherit`. Never interpolate it into a `run:` string; pass it through `env:`, set on the
+   Codex step only (never job-wide), because the job runs repository-controlled code. It is the
+   only OpenAI credential any workflow declares.
+4. **No silent fallback.** When a check's vendor is `codex` and `FLOW_CODEX_API_KEY` is empty, that
+   check fails, and its summary says `vendor is codex but the FLOW_CODEX_API_KEY secret is not set`.
    It never runs on Claude instead. The same rule the other way: a check set to `claude` with no
    `CLAUDE_CODE_OAUTH_TOKEN` fails rather than running on Codex.
 5. **What does not change.** The PR check names stay exactly `qa`, `code-review` and `security`
@@ -107,12 +107,12 @@ vendor-neutral reviewer". After this task that sentence is false and must change
    change the others. Document the three keys as comments in the `review:` block of
    `project-template/.flow/config.yml`, unset, in the same style as the model keys.
 7. Fragment `changes/flow-0191.md`: a top-level bullet stating the caller action. Expected:
-   **No caller action** to stay on Claude; to run a check on Codex, add the `FLOW_CODEX_AUTH`
+   **No caller action** to stay on Claude; to run a check on Codex, add the `FLOW_CODEX_API_KEY`
    secret and set that check's `review.<check>_vendor: codex`.
 
 **Does not:** change any review prompt's content; change `DEFAULT_MODELS` or any Claude default;
 move intent-review, the guide, or the auto-fix worker (`_flow-kickback.yml`) to Codex; switch any
-check in canonical or the template to Codex (all defaults stay `claude`); add an API-key secret;
+check in canonical or the template to Codex (all defaults stay `claude`);
 change how the review is triggered or where it runs.
 
 ## Acceptance criteria
@@ -133,11 +133,11 @@ change how the review is triggered or where it runs.
       reads no other check's files or outputs.
 - [ ] The same test asserts no Codex step is resumed or reuses a session, and that every Codex
       invocation keeps its sandbox on.
-- [ ] The same test asserts that a `codex` check with an empty `FLOW_CODEX_AUTH` fails with the
+- [ ] The same test asserts that a `codex` check with an empty `FLOW_CODEX_API_KEY` fails with the
       message in Scope step 4 and runs no Claude step for that check.
-- [ ] `secrets-scope.test.mjs`: the reusable declares `FLOW_CODEX_AUTH` as optional, both callers
-      pass it by name, it reaches the Codex steps only through `env:`, and no file under
-      `.github/workflows/` or `project-template/.github/workflows/` names `OPENAI_API_KEY`.
+- [ ] `secrets-scope.test.mjs`: the reusable declares `FLOW_CODEX_API_KEY` as optional, both callers
+      pass it by name, it reaches only the Codex steps, through step-level `env:`, and no workflow
+      declares any other OpenAI credential secret.
 - [ ] `flow-review-workflow.test.mjs`: the PR checks are still named `qa`, `code-review` and
       `security`.
 - [ ] `review-vendor-workflow.test.mjs` asserts `project-template/.flow/PROTOCOL.md` no longer contains "not a vendor-neutral

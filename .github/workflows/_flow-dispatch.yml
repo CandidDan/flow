@@ -1,8 +1,9 @@
 name: _flow-dispatch (reusable)
 
 # Reusable form of the routine dispatcher (flow-0182). Repos call it from a thin caller that owns
-# the triggers — a push to `.flow/tasks/**` on main, `workflow_run` of flow-unblock and
-# flow-recover, a daily `schedule` (the sweep) and `workflow_dispatch`; this file is
+# the triggers — a push to `.flow/tasks/**` on main, `repository_dispatch` of type
+# `flow-task-state` (sent by flow-unblock and flow-recover after they push a task-file change,
+# flow-0185), a daily `schedule` (the sweep) and `workflow_dispatch`; this file is
 # trigger-agnostic. See docs/flow-reusable-workflows.md and docs/flow-routines.md.
 #
 # A Flow worker runs as a Claude Code cloud routine: one routine per model tier per repo, started by
