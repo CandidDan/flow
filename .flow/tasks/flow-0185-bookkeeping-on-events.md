@@ -1,7 +1,7 @@
 ---
 id: "flow-0185"
 title: "An idle Flow repo bills at most 100 Actions minutes a month, because bookkeeping workflows run on events instead of hourly and 3-hourly schedules"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "session_01NfrcUAVxgG4o48Hb15rz8U"
