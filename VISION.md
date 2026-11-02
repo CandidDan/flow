@@ -81,8 +81,8 @@ exception is a trivial fix from a submitter the operator trusts, which becomes a
 task without an intent (ADR-0010); the merge stays the operator's.
 **Progress looks like:** you can pick any merged PR and read, in the repo, the intent it came
 from and who approved it (or, for an intake-lane `maintenance` fix, the issue it came from and
-who vouched for the submitter); and an approved intent survives contact with the tasks derived from it,
-rather than being rewritten once the work starts. *Failing today* — planned work enters as
+who vouched for the submitter); and an approved intent survives contact with the tasks derived
+from it, rather than being rewritten once the work starts. *Failing today* — planned work enters as
 `status: ready` with no record of who asked for it or why.
 
 ### G12 — Anything Flow needs from me is one decision

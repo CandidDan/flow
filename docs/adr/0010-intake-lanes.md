@@ -60,8 +60,8 @@ after verifying their invite link; triage believes that label only when the issu
 (`GET /repos/{o}/{r}/issues/{n}/events`) shows that the **most recent** `labeled` event for it,
 after its last `unlabeled` event, was made by one of the logins listed in `.flow/config.yml` under
 `intake.trusted_labelers` (for inflight, its App's `<slug>[bot]` login). An earlier trusted
-`labeled` event does not count once the label has been removed and re-applied. An empty or absent list trusts no labeler, so the restrictive posture is the
-default, as it is for `FLOW_TRIAGE_TRUSTED_ASSOCIATIONS`.
+`labeled` event does not count once the label has been removed and re-applied. An empty or absent
+list trusts no labeler, so the restrictive posture is the default, as it is for `FLOW_TRIAGE_TRUSTED_ASSOCIATIONS`.
 
 The same check closes gap 2: `approved` and `auto-ok` count only when their most recent `labeled`
 event was made by an actor whose `type` is `User`, never `Bot`, and who holds write access or above
@@ -75,14 +75,16 @@ A new job classifies each issue into exactly one of `trivial | normal | spam`.
 
 - It runs on a cheap model, configured as `intake.classifier_model` and defaulting to the `haiku`
   tier in `task-model.mjs`.
-- It has no tools, `contents: read` only, and no token that can write.
+- It has no tools and no token that can write: its job's `permissions:` are `contents: read` and
+  `issues: read`, and nothing else.
 - It reads the issue as data. A prompt-injected issue can, at worst, choose the wrong one of three
   values.
 - Its output is validated against the three values by a script. Anything else is `normal`.
 - A separate step that runs no model applies the `flow:size/<value>` label.
 
 It runs on public issues too, so the operator sees a size on everything, but for a public issue
-the size changes nothing except the label.
+the size changes nothing except the label. `spam` is a label and nothing more: nothing closes,
+hides or deletes an issue because of it. Closing one stays the operator's call.
 
 ### 4. The automatic lane needs both signals, opens a PR, and never merges
 
@@ -109,9 +111,12 @@ issue opened
   enforced by `touches-guard`. A task created by this lane also carries `intake: auto`, and a PR
   for such a task fails a check if its diff exceeds `intake.trivial.max_changed_lines` (default 20;
   Dan sets the number). A failed check is a kickback Dan sees, never a merge.
-- **Public text never reaches the write-capable agent un-vouched.** The inbox filter admits an
-  issue authored by an intake App only when it carries a verified `flow:trusted` label or a
-  verified human `approved` label. That keeps the property flow-0027 and flow-0036 built: a step
+- **Public text never reaches the write-capable agent un-vouched.** "Public" means any issue
+  whose author's `author_association` is outside the trusted set: one an intake App created, or
+  one a stranger filed directly on GitHub. The inbox filter admits a public issue only when it
+  carries a verified `flow:trusted` label (intake App issues only) or a verified human `approved`
+  label. Today's filter excludes every public issue, approved or not, so this widens it by exactly
+  those two cases. That keeps the property flow-0027 and flow-0036 built: a step
   that never hands over the text is the boundary, and prompt wording is not.
 
 ### 5. Triage runs when an issue opens, as well as on the schedule
@@ -167,7 +172,7 @@ intake:
   1. Verify the actor of `approved`, `auto-ok` and `flow:trusted` labels from the issue events.
      Write access is read when triage runs, not when the label was applied; the task's acceptance
      criteria say so.
-  2. Admit intake-App issues only when vouched for (inbox filter).
+  2. Admit a public issue (intake-App or filed directly) only when vouched for (inbox filter).
   3. Classifier job and `flow:size/*` labels.
   4. The automatic lane (task shape, `intake: auto`) and the diff-size check.
   5. The `issues` trigger in the thin caller, opt-in per repo, running on `labeled` only for the
