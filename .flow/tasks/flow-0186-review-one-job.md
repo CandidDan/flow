@@ -1,12 +1,12 @@
 ---
 id: "flow-0186"
 title: "Each review check reads its verdict from a vendor-neutral file, and the security job starts no runner when the plan skips it"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "session_01NfrcUBzD5XdFYPdjBTniNs"
 created: "2026-11-01"
-started: ""
+started: "2026-11-02T01:16:27Z"
 branch: "flow/flow-0186-review-verdict-file"
 pr: "https://github.com/CandidDan/flow/pull/275"
 issue: ""
