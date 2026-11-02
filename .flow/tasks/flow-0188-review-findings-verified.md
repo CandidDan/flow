@@ -10,8 +10,8 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits on flow-0186, which introduces the per-review verdict file this task extends. Built before it, the verifier would read claude-code-action's output directly, which is the vendor coupling flow-0186 removes."
-blocked_by: ["flow-0186"]
+blocked_reason: "Waits on flow-0186, which introduces the per-review verdict file this task extends. Built before it, the verifier would read claude-code-action's output directly, which is the vendor coupling flow-0186 removes. Also waits on flow-0193, which moves the three reviews into one job; the verifier is built inside that job."
+blocked_by: ["flow-0186", "flow-0193"]
 serves: ["G10"]
 intent: "review-findings-converge"
 touches:
@@ -31,12 +31,13 @@ notes:
   - "2026-11-01 orchestrator: Dan asked whether Flow follows Anthropic's review process. Anthropic's Code Review (code.claude.com/docs/en/code-review) runs four stages: Find (parallel agents), Verify ('checks the candidate findings against the code and filters out false positives'), Rank (deduplicate, order by severity), Post. Flow has Find and Post. This task adds Verify, the first outcome of the approved intent review-findings-converge. Its other two outcomes (re-review of the new diff only, and the eval set) are NOT in this task."
   - "2026-11-01 orchestrator: the intent's open question 'what verified means' is decided here as: one verifier model call per blocking finding, in a fresh session, run once. Not a vote, and not one sweep over all three reviews. Reason: Dan's rule from 2026-11-01 that reviews must not share context ('every review is as impartial and accurate as possible, a shared session for 3 reviews feels like we're opening the door for slopiness'). A single sweep reading all three reports would let one reviewer's framing shape the judgement of another's findings."
   - "2026-11-01 orchestrator: the verifier's model is the same model as the check that raised the finding (from parseReviewConfig), in a new session that does not see the reviewer's reasoning. A separate verifier-model setting, or a different vendor for verification, is left to the Codex intent Dan asked to be drafted on 2026-11-01."
+  - "2026-11-02 orchestrator: now also waits on flow-0193, which moves qa, code-review and security into one review job that posts three check runs. Build the verifier calls inside that job: each verifier is its own model invocation, run after its check's model step, and its outcome feeds that check's check run."
 ---
 
 ## Context
 
-After flow-0186, each review (qa, code-review, security) runs as its own model call in its own
-job and writes `$RUNNER_TEMP/flow-review/<check>.json` with `{ check, verdict, summary }`.
+After flow-0186 and flow-0193, each review (qa, code-review, security) runs as its own model call in one
+runner job (flow-0193) and writes `$RUNNER_TEMP/flow-review/<check>.json` with `{ check, verdict, summary }`.
 Everything after the model step reads only that file. A `fail` verdict turns the check red
 immediately: no second look checks whether the finding is real.
 
