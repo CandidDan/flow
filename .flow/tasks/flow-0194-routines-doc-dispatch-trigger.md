@@ -1,12 +1,12 @@
 ---
 id: "flow-0194"
 title: "docs/flow-routines.md says flow-dispatch starts on the flow-task-state event that unblock and recover send, not when they complete"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "session_01NfrcUAMXfoDX76ao4p12jJ"
 created: "2026-11-02"
-started: ""
+started: "2026-11-02T01:16:26Z"
 branch: ""
 pr: ""
 issue: ""
