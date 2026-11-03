@@ -403,9 +403,13 @@ jobs:
 
             .flow-review/task.md begins with one of two sentinels when it carries no task, and
             they ask you for OPPOSITE things — read which one it is before reacting:
-              · "NO TASK FILE RESOLVED" — the sources were checked and carry no task. Say so
-                plainly; there are no criteria to map, so do not report a criterion→test table
-                you were not in a position to build.
+              · "NO TASK FILE RESOLVED" — the sources were checked and carry no task. There are
+                no criteria to map, so do not report a criterion→test table you were not in a
+                position to build. The VERDICT IS DECIDED IN CODE from the changed files and is
+                stated at the end of task.md; follow it exactly, it is not a judgement call for
+                you. If every changed file is on the closed documentation list, PASS with
+                exactly: no task: documentation only, no executable behaviour to test. Otherwise
+                FAIL and name the changed files task.md lists as off that list.
               · "TASK CONTEXT UNAVAILABLE" — the sources were never supplied to the gate, so
                 nothing has been checked. Do NOT report a missing task. Locate it yourself from
                 the branch or the PR title; if you cannot, say the task CONTEXT was unavailable
