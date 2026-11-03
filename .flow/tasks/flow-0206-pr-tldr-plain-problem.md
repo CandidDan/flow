@@ -20,7 +20,7 @@ touches:
   - "project-template/.claude/skills/show-me/SKILL.md"
   - ".flow/bin/show-me.test.mjs"
   - ".flow/bin/protocol-portability.test.mjs"
-  - "changes/flow-0000.md"
+  - "changes/flow-0206.md"
 labels: [protocol, review]
 model: "sonnet"
 effort: "medium"
@@ -66,7 +66,7 @@ rule. A separate task adds the check that enforces it.
 - Record the new **Response style** digest in `INTENTIONAL_DIVERGENCES`
   (`.flow/bin/protocol-portability.test.mjs`) in the same commit as the edit, with a `why` that
   names this task.
-- Changelog fragment `changes/flow-0000.md`. Caller action: none.
+- Changelog fragment `changes/flow-0206.md`. Caller action: none.
 
 **Does not touch:** the check that enforces this (a separate task), the PR bodies that
 flow-sync generates in code, any adopter's own user-facing text, canonical's root `CLAUDE.md`.
@@ -87,7 +87,7 @@ flow-sync generates in code, any adopter's own user-facing text, canonical's roo
       `.flow/bin/show-me.test.mjs`.
 - [ ] Given the protocol-portability test, then the Response style digest matches the edited
       section, with a `why` naming this task. Proved by `.flow/bin/protocol-portability.test.mjs`.
-- [ ] `changes/flow-0000.md` exists and states its caller action. Proved by
+- [ ] `changes/flow-0206.md` exists and states its caller action. Proved by
       `.flow/bin/changelog-fragments.test.mjs :: every claimed task that declares a changelog fragment has an entry stating its caller action`.
 - [ ] This task's own PR description meets the new rule.
 
