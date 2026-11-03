@@ -1,6 +1,6 @@
 ---
 id: "pr-text-plain-english"
-title: "Anyone can read the top of a PR and know what problem it fixes and what changes for whom"
+title: "Dan can read the top of a PR and know what problem it fixes and what changes for whom"
 status: "proposed"
 created: "2026-11-04"
 source: "Dan, orchestrator chat 2026-11-04"
@@ -41,7 +41,7 @@ Evidence (not Dan's words):
 
 ## Cost of inaction
 
-Dan keeps approving merges on text he cannot read without asking for a rewrite, so the
+[assumption] Dan keeps approving merges on text he cannot read without asking for a rewrite, so the
 approve-the-merge touchpoint stays as weak as G10 records it. The plain-English rule stays a rule
 that nothing enforces.
 
