@@ -25,6 +25,8 @@ model: "opus"
 effort: "high"
 model_reason: "Changes what the fleet's sync writes into every adopter's workflow callers"
 asks:
+  - "fyi: carry-inputs cannot tell an input the repo chose from a canonical default the repo once copied, so if canonical ever CHANGES a with: value its template sets, adopters keep the old one (code-review on PR #285). Since January canonical has only added with: inputs, never changed one, so nothing is affected today; criterion 2 asks for this behaviour"
+  - "follow-up: carry a key canonical also sets only when the repo's value differs from the PREVIOUS canonical template (the one at the repo's .flow/VERSION), so changed canonical defaults still arrive"
   - "follow-up: in the sync PR's Kept inputs section, mark an input that overrides a value canonical also sets, separately from an input only the repo sets, so a stale override of a security default stands out (security review on PR #285, Low)"
 notes:
   - "2026-11-03 orchestrator: found on CandidDan/mapd#52 (4.1.0 sync). mapd's flow-gates.yml caller passed `setup_node_version: \"24.22.1\"` (a pin for the CVE-2026-111497 Node security release). The sync copied canonical's caller over it and dropped the input, which would have moved mapd's CI to Node 22. Restored by hand on the sync branch (commit 2a82e0d). The sync's existing KEPT rule only protects callers with extra JOBS, not callers with extra or changed `with:` inputs."
