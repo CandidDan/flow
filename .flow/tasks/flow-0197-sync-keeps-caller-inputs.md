@@ -24,7 +24,8 @@ labels: [bug, sync]
 model: "opus"
 effort: "high"
 model_reason: "Changes what the fleet's sync writes into every adopter's workflow callers"
-asks: []
+asks:
+  - "follow-up: in the sync PR's Kept inputs section, mark an input that overrides a value canonical also sets, separately from an input only the repo sets, so a stale override of a security default stands out (security review on PR #285, Low)"
 notes:
   - "2026-11-03 orchestrator: found on CandidDan/mapd#52 (4.1.0 sync). mapd's flow-gates.yml caller passed `setup_node_version: \"24.22.1\"` (a pin for the CVE-2026-111497 Node security release). The sync copied canonical's caller over it and dropped the input, which would have moved mapd's CI to Node 22. Restored by hand on the sync branch (commit 2a82e0d). The sync's existing KEPT rule only protects callers with extra JOBS, not callers with extra or changed `with:` inputs."
 ---
