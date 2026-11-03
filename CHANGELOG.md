@@ -6,6 +6,64 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 4.1.0 — 2026-11-02
+
+**MINOR: an idle Flow repo costs at most 100 Actions minutes a month, and each review verdict is
+read from a vendor-neutral file.** The bookkeeping workflows run on events instead of hourly and
+3-hourly schedules, so an idle repo drops from about 1,980 billed runs a month to at most 92
+(flow-0185). Each of qa, code-review and security now writes its verdict to a file that a
+non-model step validates and fails closed on, and a skipped security review starts no runner
+(flow-0186). Also: research on running reviews off runners (flow-0187) and a docs fix (flow-0194).
+**Caller action:** none for repos on stock callers; `flow-sync` brings the new triggers. A repo
+with a customised `flow-unblock.yml`, `flow-recover.yml` or `flow-dispatch.yml` edits them as the
+flow-0185 entry below says. Old callers keep working against the new reusables until they do.
+
+- **An idle Flow repo bills at most 100 Actions minutes a month: the bookkeeping workflows run on
+  events, not hourly and 3-hourly schedules** (`project-template/.github/workflows/flow-unblock.yml`,
+  `flow-recover.yml`, `flow-dispatch.yml`, `.github/workflows/_flow-unblock.yml`, `_flow-recover.yml`,
+  `docs/running-flow-cheaply.md`, flow-0185). **Caller action: adopting repos get the new triggers
+  through `flow-sync`. A repo with a customised caller, which `flow-sync` leaves alone, must edit it
+  itself:** remove the hourly `schedule` (`17 * * * *`) from `flow-unblock.yml`; change the 3-hourly
+  cron (`0 */3 * * *`) in `flow-recover.yml` to once a day; and in `flow-dispatch.yml` replace the
+  `workflow_run` trigger on `flow-unblock`/`flow-recover` with `repository_dispatch: types:
+  [flow-task-state]`.
+
+  Measured on the template callers, an idle repo went from about 1,980 billed runs a month to at most
+  92 (35 with `FLOW_AI` off). `flow-unblock` has no schedule and runs when `flow-done` completes;
+  `flow-recover` runs daily with its 75-minute threshold unchanged; and `flow-dispatch` no longer runs
+  after every unblock and recover run. Instead, those two reusables send `repository_dispatch`
+  `flow-task-state` after they push a task-file change, and only then — a `GITHUB_TOKEN` push starts
+  no workflow, a `GITHUB_TOKEN` repository_dispatch does, and it needs only the `contents: write` both
+  already hold. A task they return to `ready` is still dispatched in the same chain.
+  `.flow/bin/idle-cost.test.mjs` fails the gate if the idle bill goes over 100. Two behaviours change:
+  a block written after its dependency already merged waits for the next `flow-done` run or a manual
+  `gh workflow run flow-unblock`, and a stranded claim waits up to a day to be reset.
+
+- **Each review check reads its verdict from a vendor-neutral file, and a skipped security review
+  starts no runner** (`.github/workflows/_flow-review.yml`, `.flow/bin/flow-review.mjs`,
+  flow-0186). **No caller action** — the checks keep their names (`flow-review / qa`,
+  `flow-review / code-review`, `flow-review / security`), no `permissions:` block changes, and
+  branch protection is unaffected.
+
+  qa, code-review and security stay three separate jobs, each with its own model call. Each model
+  step now writes `$RUNNER_TEMP/flow-review/<check>.json` as
+  `{"check", "verdict": "pass" | "fail", "summary"}`; the file is deleted before the model step
+  runs, and a new `flow-review.mjs enforce` command validates it with the exported
+  `validateVerdictFile` and fails the check closed on a missing file, invalid JSON, a wrong
+  `check` or any other verdict value. The step that decides a check reads that file and no output
+  of the model step, so a different vendor's model step can replace claude-code-action without
+  touching it. The older `verdict` command is unchanged, for repos still pinned to an older
+  `_flow-review.yml`.
+
+  When `plan` skips the security review, the `security` job now has a job-level `if:` and does
+  not start, saving a billed runner minute on every such PR. `### Security review — SKIPPED` and
+  the reason are written to the `plan` job's run summary instead. GitHub reports a job skipped by
+  `if:` as a successful check.
+
+- **Research: can the PR review run off GitHub runners?** (`docs/research/review-runtime.md`, flow-0187). This measures the fleet's review load (peak 18 runs an hour, 78 a day) against Claude routine limits and Codex's options. It recommends keeping the one runner job from flow-0186, with a per-review vendor switch behind the verdict file. Documentation only. **No caller action.**
+
+- **`docs/flow-routines.md` names the `flow-task-state` dispatch event** (`docs/flow-routines.md`, flow-0194). The `flow-dispatch` trigger table now says `flow-unblock` or `flow-recover` starts it by sending a `repository_dispatch` event of type `flow-task-state` after pushing a task-file change, not by completing. Documentation only. **No caller action.**
+
 ## 4.0.2 — 2026-10-30
 
 **PATCH: a 3.x → 4.x sync PR is reviewed as a sync PR again.** The sync deletes retired paths

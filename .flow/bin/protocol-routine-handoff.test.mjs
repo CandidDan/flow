@@ -115,3 +115,9 @@ test("flow-routines.md names the auto-mode stall risk as untested on a task that
   assert.match(d, /classifier blocks can stop an unattended run/);
   assert.match(d, /untested on a task\s+that has to set itself `blocked`|untested on a task that has to set itself `blocked`/);
 });
+
+test("flow-routines.md names the flow-task-state dispatch event and no longer says flow-recover completes", () => {
+  const d = flat(ROUTINES);
+  assert.match(d, /flow-task-state/, "the dispatch table must name the flow-task-state event");
+  assert.ok(!d.includes("`flow-recover` completes"), "the dispatch table must not say flow-recover completes");
+});

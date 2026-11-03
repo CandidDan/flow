@@ -19,9 +19,16 @@ name: _flow-review (reusable)
 #   · `plan`    — reads `review:` from the CALLER's .flow/config.yml (model, security trigger
 #                 paths), decides whether the conditional security review applies to this diff,
 #                 and materialises the bounded context the reviewers may read.
-#   · `verdict` — turns each reviewer's written verdict into an exit code, FAIL-CLOSED: a
-#                 missing, empty or unparseable verdict fails the check. A reviewer that died
-#                 mid-run must never read as an approval.
+#   · `enforce` — turns each reviewer's verdict file into an exit code, FAIL-CLOSED: a missing
+#                 file, invalid JSON, a wrong `check` or a verdict other than pass/fail fails
+#                 the check. A reviewer that died mid-run must never read as an approval.
+#
+# THE VERDICT FILE IS THE CONTRACT, NOT THE MODEL STEP (flow-0186). Each reviewer writes
+# `$RUNNER_TEMP/flow-review/<check>.json` as `{"check", "verdict": "pass"|"fail", "summary"}`,
+# defined by `validateVerdictFile` in the helper rather than only inside a prompt. The file is
+# deleted before the model step runs, and the enforce step reads that file and no output of the
+# model step — so replacing claude-code-action with another vendor's step changes one step per
+# check and nothing else.
 #
 # NO MODEL IS NAMED IN THIS FILE. `review.model` / `review.code_review_model` /
 # `review.security_model` in the consuming repo's .flow/config.yml decide it — data the project
@@ -118,9 +125,9 @@ jobs:
     # it is empty, which is why this compares against 'true' rather than testing for false.
     #
     # The third clause is the fork fence (see the header). `plan` is the only place it belongs:
-    # the other three jobs declare `needs: plan`, so suppressing this suppresses all of them,
-    # and `security` keeps no job-level `if` of its own — one that vanished from the PR on a skip
-    # is indistinguishable from a gate that broke.
+    # the other three jobs declare `needs: plan`, so suppressing this suppresses all of them.
+    # `security`'s own job-level `if` (flow-0186) is the review decision, not a fence: it reads
+    # `security_run`, and `plan`'s summary records the skip and its reason.
     if: ${{ vars.FLOW_AI == 'true' && github.event.pull_request.draft != true && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ${{ inputs.runner }}
     outputs:
@@ -324,13 +331,19 @@ jobs:
       # the fixed PASS line as its verdict, and the verdict step below enforces it exactly as it
       # enforces a reviewer's, truncation fact included. The line is pinned in flow-review.mjs
       # (`INTENT_PR_PASS_LINE`) and `flow-review-workflow.test.mjs` holds the two copies in step.
+      # flow-0186. The verdict file lives outside the workspace and is deleted before anything can
+      # write it, so the enforce step below can only ever read a verdict written in THIS run.
+      - name: Clear the qa verdict file
+        run: |
+          rm -f "$RUNNER_TEMP/flow-review/qa.json"
+          mkdir -p "$RUNNER_TEMP/flow-review"
       - name: Intent PR — the fixed PASS line, no model call
         if: ${{ needs.plan.outputs.intent_pr == 'true' }}
         env:
           PASS_LINE: "intent PR: intent files only; read by the advisory intent reviewer"
-          VERDICT_FILE: .flow-review/qa.json
+          VERDICT_FILE: ${{ runner.temp }}/flow-review/qa.json
         run: |
-          node -e 'const fs = require("fs"); fs.writeFileSync(process.env.VERDICT_FILE, JSON.stringify({ verdict: "PASS", unproven: [], blocking: [], summary: process.env.PASS_LINE }) + "\n");'
+          node -e 'const fs = require("fs"); fs.writeFileSync(process.env.VERDICT_FILE, JSON.stringify({ check: "qa", verdict: "pass", summary: process.env.PASS_LINE }) + "\n");'
           printf '### qa — intent PR\n\n%s\n' "$PASS_LINE" >> "$GITHUB_STEP_SUMMARY"
       - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         id: claude
@@ -343,7 +356,7 @@ jobs:
           # This is also what makes criterion 6 true: the checks do not care who authored the PR.
           allowed_bots: "*"
           # The model comes from the repo's .flow/config.yml. Nothing here names one.
-          claude_args: "--max-turns 60 --model ${{ needs.plan.outputs.model }} --permission-mode bypassPermissions"
+          claude_args: "--max-turns 60 --model ${{ needs.plan.outputs.model }} --add-dir ${{ runner.temp }}/flow-review --permission-mode bypassPermissions"
           prompt: |
             You are the QA gate for this pull request. You did not write this code and owe it
             nothing. You do not write feature code; you decide pass/fail, and you are hard to fool.
@@ -402,14 +415,15 @@ jobs:
             THEN DO BOTH OF THESE:
             1. Post ONE pull-request comment: the verdict, the criterion→test table, and for a
                FAIL the smallest set of concrete things needed to pass. No boilerplate praise.
-            2. Write .flow-review/qa.json — this is what blocks or clears the check:
-               {"verdict":"PASS"|"FAIL",
+            2. Write ${{ runner.temp }}/flow-review/qa.json — this is what blocks or clears the check:
+               {"check":"qa",
+                "verdict":"pass"|"fail",
                 "unproven":["<the criterion text, verbatim, for each with no proving test>"],
                 "summary":"<one line>"}
                `unproven` must quote the criterion so the worker knows which one to fix.
 
             You review only. Never push commits, never edit source files, never change labels or
-            task state. The only file you write is .flow-review/qa.json.
+            task state. The only file you write is ${{ runner.temp }}/flow-review/qa.json.
       # flow-0140: name the model that actually answered, read from the action's own output,
       # so a pin whose CLI resolves to a different model can never again run unreported.
       - name: Report the model that answered
@@ -461,7 +475,7 @@ jobs:
           DIFF_BYTES: ${{ needs.plan.outputs.diff_bytes }}
           DIFF_FULL_BYTES: ${{ needs.plan.outputs.diff_full_bytes }}
         run: >-
-          node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/qa.json --check qa
+          node "$FLOW_REVIEW_DIR"/flow-review.mjs enforce "$RUNNER_TEMP/flow-review/qa.json" --check qa
           --diff-truncated "$DIFF_TRUNCATED"
           --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
 
@@ -552,13 +566,19 @@ jobs:
       # the fixed PASS line as its verdict, and the verdict step below enforces it exactly as it
       # enforces a reviewer's, truncation fact included. The line is pinned in flow-review.mjs
       # (`INTENT_PR_PASS_LINE`) and `flow-review-workflow.test.mjs` holds the two copies in step.
+      # flow-0186. The verdict file lives outside the workspace and is deleted before anything can
+      # write it, so the enforce step below can only ever read a verdict written in THIS run.
+      - name: Clear the code-review verdict file
+        run: |
+          rm -f "$RUNNER_TEMP/flow-review/code-review.json"
+          mkdir -p "$RUNNER_TEMP/flow-review"
       - name: Intent PR — the fixed PASS line, no model call
         if: ${{ needs.plan.outputs.intent_pr == 'true' }}
         env:
           PASS_LINE: "intent PR: intent files only; read by the advisory intent reviewer"
-          VERDICT_FILE: .flow-review/code-review.json
+          VERDICT_FILE: ${{ runner.temp }}/flow-review/code-review.json
         run: |
-          node -e 'const fs = require("fs"); fs.writeFileSync(process.env.VERDICT_FILE, JSON.stringify({ verdict: "PASS", unproven: [], blocking: [], summary: process.env.PASS_LINE }) + "\n");'
+          node -e 'const fs = require("fs"); fs.writeFileSync(process.env.VERDICT_FILE, JSON.stringify({ check: "code-review", verdict: "pass", summary: process.env.PASS_LINE }) + "\n");'
           printf '### code-review — intent PR\n\n%s\n' "$PASS_LINE" >> "$GITHUB_STEP_SUMMARY"
       - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         id: claude
@@ -570,7 +590,7 @@ jobs:
           allowed_bots: "*"
           # review.code_review_model, falling back to review.model (flow-0140). The `||` covers a
           # base-branch helper too old to emit the key: it then runs on `model`, exactly as before.
-          claude_args: "--max-turns 60 --model ${{ needs.plan.outputs.code_review_model || needs.plan.outputs.model }} --permission-mode bypassPermissions"
+          claude_args: "--max-turns 60 --model ${{ needs.plan.outputs.code_review_model || needs.plan.outputs.model }} --add-dir ${{ runner.temp }}/flow-review --permission-mode bypassPermissions"
           prompt: |
             You are the code-quality gate for this pull request. You did not write this code and
             owe it nothing. Separate findings into blocking (must fix) and non-blocking.
@@ -622,14 +642,15 @@ jobs:
             1. Post ONE pull-request comment: verdict, blocking findings (file:line · what is
                wrong · the fix), then non-blocking notes. If it passes, one line on what the
                change does well — calibration matters, do not only ever criticise.
-            2. Write .flow-review/code-review.json:
-               {"verdict":"PASS"|"FAIL",
+            2. Write ${{ runner.temp }}/flow-review/code-review.json:
+               {"check":"code-review",
+                "verdict":"pass"|"fail",
                 "blocking":[{"file":"…","line":0,"issue":"…","fix":"…"}],
                 "summary":"<one line>"}
                Non-blocking notes belong in the comment, not in `blocking`.
 
             You review only. Never push commits, never edit source files, never change labels or
-            task state. The only file you write is .flow-review/code-review.json.
+            task state. The only file you write is ${{ runner.temp }}/flow-review/code-review.json.
       # flow-0140: name the model that actually answered, read from the action's own output,
       # so a pin whose CLI resolves to a different model can never again run unreported.
       - name: Report the model that answered
@@ -681,44 +702,29 @@ jobs:
           DIFF_BYTES: ${{ needs.plan.outputs.diff_bytes }}
           DIFF_FULL_BYTES: ${{ needs.plan.outputs.diff_full_bytes }}
         run: >-
-          node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/code-review.json --check code-review
+          node "$FLOW_REVIEW_DIR"/flow-review.mjs enforce "$RUNNER_TEMP/flow-review/code-review.json" --check code-review
           --diff-truncated "$DIFF_TRUNCATED"
           --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
 
   # ── security ───────────────────────────────────────────────────────────────────────────
-  # CONDITIONAL, and the condition comes from the repo's `review.security_paths`. This job
-  # always RUNS so the check is always present on the PR: when the diff touches none of the
-  # configured trigger paths it reports the skip and why. A skip that leaves no trace is
-  # indistinguishable from a gate that broke.
+  # CONDITIONAL, and the condition comes from the repo's `review.security_paths`, decided once by
+  # `plan`. flow-0186: when `plan` skips the review this job does not start at all, so a skipped PR
+  # bills no runner. The skip stays on the record: `plan` writes `### Security review — SKIPPED`
+  # and the reason into its own run summary. GitHub reports a job skipped by its `if:` as a
+  # successful check, so a branch protection rule that requires `flow-review / security` still
+  # passes, and the check is still listed on the PR.
   security:
     needs: plan
+    if: ${{ needs.plan.outputs.security_run == 'true' }}
     runs-on: ${{ inputs.runner }}
     steps:
-      - name: Security review applicability
-        # `security_reason` names the changed files that did (or did not) match the trigger
-        # globs, and a PR author controls file names. Interpolating it into the shell with
-        # ${{ }} would splice attacker-chosen text into the script — the exact class
-        # .flow/config.yml calls out for these reusables. It goes through the environment,
-        # where it is data and never parsed as shell.
-        env:
-          SECURITY_RUN: ${{ needs.plan.outputs.security_run }}
-          SECURITY_REASON: ${{ needs.plan.outputs.security_reason }}
-        run: |
-          if [ "$SECURITY_RUN" = "true" ]; then verdict="RUNNING"; else verdict="SKIPPED"; fi
-          {
-            printf '### Security review — %s\n\n' "$verdict"
-            printf '%s\n' "$SECURITY_REASON"
-          } | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        if: ${{ needs.plan.outputs.security_run == 'true' }}
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        if: ${{ needs.plan.outputs.security_run == 'true' }}
         with:
           check-latest: true
           node-version: ${{ inputs.node_version }}
       - name: Materialise the review gate from the BASE branch
-        if: ${{ needs.plan.outputs.security_run == 'true' }}
         # flow-0079. Everything that DECIDES comes from base; everything that is DECIDED ABOUT
         # comes from the PR. The env vars written below are what keeps those two apart —
         # `FLOW_REVIEW_DIR` + `FLOW_CONFIG` + `REVIEW_TASKS_DIR` (the task file and its acceptance
@@ -777,7 +783,6 @@ jobs:
             echo "REVIEW_OUT_DIR=$GITHUB_WORKSPACE/.flow-review"
           } >> "$GITHUB_ENV"
       - name: Bounded context — the diff and the files it changes
-        if: ${{ needs.plan.outputs.security_run == 'true' }}
         env:
           BASE_REF: origin/${{ github.base_ref }}
           # CAN-52: the task id has two sources and the helper resolves both in code. The branch
@@ -791,8 +796,16 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: node "$FLOW_REVIEW_DIR"/flow-review.mjs plan
+      # flow-0186. See qa's step of the same name.
+      - name: Clear the security verdict file
+        run: |
+          rm -f "$RUNNER_TEMP/flow-review/security.json"
+          mkdir -p "$RUNNER_TEMP/flow-review"
       - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         id: claude
+        # The job's own `if:` already holds this. Repeated on the model step so the one step that
+        # spends a model call stays gated on the plan's decision even if the job-level `if:` is
+        # ever edited.
         if: ${{ needs.plan.outputs.security_run == 'true' }}
         continue-on-error: true
         with:
@@ -801,7 +814,7 @@ jobs:
           allowed_bots: "*"
           # A repo that wants a deeper model on security diffs sets review.security_model;
           # otherwise this is review.model. Either way it comes from config, not from here.
-          claude_args: "--max-turns 60 --model ${{ needs.plan.outputs.security_model }} --permission-mode bypassPermissions"
+          claude_args: "--max-turns 60 --model ${{ needs.plan.outputs.security_model }} --add-dir ${{ runner.temp }}/flow-review --permission-mode bypassPermissions"
           prompt: |
             You are the security gate for this pull request. Findings are rated, and the gate is
             binary on High/Critical.
@@ -858,8 +871,9 @@ jobs:
             1. Post ONE pull-request comment: verdict, then a findings table — severity
                (Critical/High/Medium/Low) · file:line · issue · fix. For each High/Critical give
                the concrete remediation, not "consider reviewing".
-            2. Write .flow-review/security.json:
-               {"verdict":"PASS"|"FAIL",
+            2. Write ${{ runner.temp }}/flow-review/security.json:
+               {"check":"security",
+                "verdict":"pass"|"fail",
                 "blocking":[{"file":"…","line":0,"issue":"…","fix":"…"}],
                 "summary":"<one line>"}
                FAIL iff there is a High or Critical finding, and `blocking` holds exactly those;
@@ -867,11 +881,11 @@ jobs:
                Medium/Low go in the comment; they do not block.
 
             You review only. Never push commits, never edit source files, never change labels or
-            task state. The only file you write is .flow-review/security.json.
+            task state. The only file you write is ${{ runner.temp }}/flow-review/security.json.
       # flow-0140: name the model that actually answered, read from the action's own output,
       # so a pin whose CLI resolves to a different model can never again run unreported.
       - name: Report the model that answered
-        if: ${{ always() && needs.plan.outputs.security_run == 'true' }}
+        if: ${{ always() }}
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
           REQUESTED_MODEL: ${{ needs.plan.outputs.security_model }}
@@ -909,7 +923,7 @@ jobs:
           if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
           FLOW_MODEL_REPORT
       - name: Enforce the security verdict
-        if: ${{ always() && needs.plan.outputs.security_run == 'true' }}
+        if: always()
         # flow-0103: the plan's truncation fact, from the plan job's output. Through `env:` rather
         # than `${{ }}` in the script, the same rule the PR title and `security_reason` follow —
         # cheaper to keep than to re-argue per value. The flag is REQUIRED by the helper, so an
@@ -919,7 +933,7 @@ jobs:
           DIFF_BYTES: ${{ needs.plan.outputs.diff_bytes }}
           DIFF_FULL_BYTES: ${{ needs.plan.outputs.diff_full_bytes }}
         run: >-
-          node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict .flow-review/security.json --check security
+          node "$FLOW_REVIEW_DIR"/flow-review.mjs enforce "$RUNNER_TEMP/flow-review/security.json" --check security
           --diff-truncated "$DIFF_TRUNCATED"
           --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
 
@@ -1318,10 +1332,9 @@ jobs:
         # prose arrived.
         #
         # The three results come from the JOBS, not from each reviewer's verdict file: those are
-        # written into each job's own workspace and nothing downstream can read them. SECURITY_RUN
-        # is what keeps the row honest — the security job always runs so the check is never
-        # silently absent, so a skipped REVIEW still reports a successful JOB, and rendering that
-        # as "pass" is the one wrong answer this row can give.
+        # written into each job's own runner and nothing downstream can read them. SECURITY_RUN
+        # is what keeps the row honest — a skipped security review leaves the job `skipped`
+        # (flow-0186), which must render as "did not need to run", never as "pass".
         if: always()
         env:
           QA_RESULT: ${{ needs.qa.result }}

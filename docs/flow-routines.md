@@ -94,7 +94,7 @@ delivers, `.github/workflows/flow-dispatch.yml`, and it runs:
 | When | Why |
 |---|---|
 | a push to `.flow/tasks/**` on `main` | a task allocated `ready`, a claim, a human's edit |
-| `flow-unblock` or `flow-recover` completes | they push with `GITHUB_TOKEN`, which starts no other workflow, so a task they release or reset would otherwise be missed |
+| `flow-unblock` or `flow-recover` pushed a task-file change | they push with `GITHUB_TOKEN`, which starts no other workflow, so they send a `repository_dispatch` event of type `flow-task-state`, and a run that changed nothing sends nothing |
 | once a day | the sweep, for a missed event |
 | `workflow_dispatch` | on demand |
 
