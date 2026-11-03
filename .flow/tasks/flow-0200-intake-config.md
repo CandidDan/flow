@@ -1,12 +1,12 @@
 ---
 id: "flow-0200"
 title: "Add an `intake:` block to the config template, read by one parser that trusts no labeler by default"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "session_01NfrcU8RK5GP8XRT3wkjgry"
 created: "2026-11-03"
-started: ""
+started: "2026-11-03T12:14:09Z"
 branch: ""
 pr: ""
 issue: ""
