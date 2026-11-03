@@ -89,6 +89,16 @@ options list, and I answer cards from GitHub mobile. *Failing today* — session
 dozen questions and options, get left open as bookmarks, and `blocked_reason` fields run to
 paragraphs.
 
+### G13 — A vision still says what we are building, months later
+A repo's VISION.md says what is being built and for whom, in plain English, so a person who has
+never seen the project can read it cold, explain it back, and use it to turn down a plausible
+feature that does not belong — a tax calculator in a salon platform. It holds the method and the
+lasting refusals, not this quarter's dates, so it stays true without edits until the direction
+itself changes; when it does, that is an amendment with a reason, not drift.
+**Progress looks like:** open any adopting repo's VISION.md months after it was written and find
+no expired dates, no milestone posing as a goal, and no internal id a reader cannot look up — and
+a reader new to the project can say what it is and what it is not.
+
 ## Non-goals
 
 ### NG6 — Flow becomes a tool
@@ -143,6 +153,7 @@ pointing at them surface as warnings, which is the intended signal.
 
 | Date | Change | Why |
 |---|---|---|
+| 2026-11-03 | G13 declared: a repo's VISION.md stays true for months and reads plainly to someone new to the project. | Dan: the information in a vision "become[s] stale almost immediately"; it should be "more of a method statement than a set of rules", to "ensure we don't start building a calculator for tax", and "writen in clear plain english so a human reader can just pick it up and think ah this makes sense". Evidence: on 2026-11-03 TanPlan's VISION.md held two goals whose dates had passed (a 15 October conference, a 29 October cutover), a non-goal whose reason had expired, and references to streams, phases and task numbers a reader cannot look up. Nothing in Flow names that failure; G3 ("Direction survives the work") was retired on 2026-09-01 for how it was written, not because the need went away. |
 | 2026-09-23 | G12 declared: anything Flow needs from the operator is one decision with a recommendation, answerable in under a minute from a phone. | Sessions end with about a dozen questions and options the operator cannot process, so they get left open as bookmarks and the two-touchpoint model quietly becomes many touchpoints. No live goal named that failure. Declaring it gives the clean-exit work (the decide-or-ask rule, decision cards, length budgets, a session-exit check) a goal to serve instead of `maintenance` (decision D2 in the operating-model spec). |
 | 2026-09-21 | G9 widened from tokens alone to tokens **and** CI minutes, naming scheduled sweeps explicitly. | The account's GitHub Actions allowance was exhausted on 2026-09-21, stopping every scheduled workflow in every private repo for hours. The cause was two adopting repos running `flow-recover` on a 30-minute cron: ~12 seconds of real work per run, but GitHub bills per job rounded UP to a whole minute, so the pair spent ~2,920 of the 3,000 monthly private-repo minutes finding nothing. G9 as written could not name that failure — it spoke only of tokens — so the fleet's largest running cost sat outside the vision while a goal titled "not materially expensive to run" was on the page. Widening the goal is what lets a cost guard be written as serving it rather than as `maintenance`. |
 | 2026-09-07 | Audience amended: one operator, plus readers who are not the operator, in adopting repos only. Two Open items recorded — whether readers stay readers, and where their feedback lands. | Intents in project repos will be read and commented on by clients and contracted teams. That makes "nothing is built to serve a second user" false as written, since a projection is built to serve exactly that. The narrow fix separates operator from reader: the solo-operator position is untouched, and the trajectory beyond reading is recorded as undecided rather than designed for. |
