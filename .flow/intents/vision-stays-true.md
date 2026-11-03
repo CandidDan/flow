@@ -42,10 +42,13 @@ tax-calculator feature gets built without anything objecting.
 
 ## Outcome
 
-Dan can open any adopting repo's VISION.md months after it was written and it still says what the
-project is, for whom, and what it deliberately does not do, with nothing in it that has expired. A
-person new to the project can read it cold, explain it back, and use it to turn down a plausible
-feature that does not belong.
+Dan can open any adopting repo's VISION.md three months after it was written and it still says what
+is being built, with nothing in it that has gone stale. A human reader can pick it up and think "ah,
+this makes sense". Work that does not belong, like a calculator for tax in a salon platform, does
+not get started.
+
+[assumption] The reader can also explain the project back and use the file to turn down a
+plausible feature that does not belong.
 
 ## Constraints
 
@@ -58,14 +61,17 @@ feature that does not belong.
   a year is a judgement; flow-doctor can flag the mechanical signs (a date, an internal id) and
   leave the call to the human. This keeps NG3's successor position: judgement reports, it does not
   block.
-- `project-template/` is published API; the change reaches every adopting repo at the next tag.
-- The goals in any repo's VISION.md stay the human's words. Nothing here rewrites an existing
+- [assumption] `project-template/` is published API (canonical's `CLAUDE.md`); the change reaches every adopting repo at the next tag.
+- [assumption] The goals in any repo's VISION.md stay the human's words (the `vision-writer` skill). Nothing here rewrites an existing
   vision; adopting repos amend their own through `vision-writer` and a `[vision]` PR.
 
 ## Open questions
 
-- Should the three-part test (still true in a year; readable cold; every refusal carries a
-  reason) live in the VISION.md template, in `vision-writer`, or both?
+[assumption] A three-part test for every line of a VISION.md: still true in a year; readable cold
+by someone new to the project; every non-goal carries a reason. Dan said "go" to all three in
+chat, but only the first two are in his own words above.
+
+- Should that test live in the VISION.md template, in `vision-writer`, or both?
 - What exactly counts as an internal id for a flow-doctor warning: task ids, `Q-` numbers, stream
   and phase labels, file paths? Too wide a net warns on every vision and gets ignored.
 - Should canonical's own VISION.md be brought into line in the same work? Its goals carry
