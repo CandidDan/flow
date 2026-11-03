@@ -1,7 +1,7 @@
 ---
 id: "flow-0199"
 title: "The qa check gives one fixed verdict on a PR with no task: PASS when every changed file is documentation, FAIL otherwise"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "session_01NfrcU87xJ2vFCYUebyk6mT"
