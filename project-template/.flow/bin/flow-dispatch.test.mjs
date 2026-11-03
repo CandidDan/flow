@@ -132,11 +132,13 @@ test("no variable or secret for the picked task's tier: nothing POSTed, skipped 
 
 test("no routine configured at all exits 0 through the CLI shell too", async (t) => {
   const { dir } = store(t, { "p-1.md": task("P-1") });
-  const r = spawnSync(process.execPath, [join(BIN, "flow-dispatch.mjs")], { encoding: "utf8", env: { PATH: process.env.PATH } });
-  // The template's own CLI reads the template's fixture store; what matters is exit 0 with a
-  // skipped line and no routine env. The fixture-store case is asserted through runDispatchCli.
+  // Always an explicit store (flow-0198): without FLOW_DISPATCH_FLOW_DIR the CLI reads the tasks
+  // of whatever repo this suite runs in, and one malformed task there turns this test red.
+  const r = spawnSync(process.execPath, [join(BIN, "flow-dispatch.mjs")],
+    { encoding: "utf8", env: { PATH: process.env.PATH, FLOW_DISPATCH_FLOW_DIR: dir } });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^flow-dispatch: decision=skipped reason=/m);
+  assert.equal(r.stdout.trim(), "flow-dispatch: decision=skipped reason=no-routine-for-sonnet task=P-1",
+    "the CLI read the fixture store, not the repo it ran in");
 
   const out = [];
   const code = await runDispatchCli([], { flowDir: dir, env: {}, log: (s) => out.push(s), error: () => {},
@@ -299,6 +301,28 @@ test("exactly one decision line per run, whatever the outcome", async (t) => {
     const lines = r.all.split("\n").filter((l) => /decision=/.test(l));
     assert.equal(lines.length, 1, lines.join("\n"));
   }
+});
+
+test("the CLI ignores a bad task in the surrounding repo's own store when given a fixture store", (t) => {
+  // A throwaway adopting repo: this bin copied into `.flow/bin/`, and in its own `.flow/tasks/` the
+  // task that broke inflight#95 — model set, model_reason empty — which fails the run if it is read.
+  const root = mkdtempSync(join(tmpdir(), "flow-dispatch-badstore-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, ".flow", "tasks"), { recursive: true });
+  cpSync(BIN, join(root, ".flow", "bin"), { recursive: true });
+  writeFileSync(join(root, ".flow", "tasks", "bad-1.md"),
+    task("BAD-1", { model: "sonnet" }).replace('model_reason: "because"', 'model_reason: ""'));
+  const { dir } = store(t, { "p-1.md": task("P-1") });
+  const cli = join(root, ".flow", "bin", "flow-dispatch.mjs");
+  const run = (extra) => spawnSync(process.execPath, [cli],
+    { cwd: root, encoding: "utf8", env: { PATH: process.env.PATH, ...extra } });
+
+  const isolated = run({ FLOW_DISPATCH_FLOW_DIR: dir });
+  assert.equal(isolated.status, 0, isolated.stderr);
+  assert.equal(isolated.stdout.trim(), "flow-dispatch: decision=skipped reason=no-routine-for-sonnet task=P-1");
+
+  const outcome = run({}); // no override: the default is still the repo's own `.flow/`
+  assert.match(outcome.stdout + outcome.stderr, /BAD-1/, "the default store is unchanged: it reads the repo's own tasks");
 });
 
 test("the decision line is also written to the step summary when there is one", async (t) => {
