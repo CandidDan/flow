@@ -1,12 +1,12 @@
 ---
 id: "flow-0197"
 title: "flow-sync keeps a caller's repo-owned with: inputs when it copies canonical's caller over it"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_01NfrcUBhaCrypn74UzzFPUZ"
 created: "2026-11-03"
-started: ""
+started: "2026-11-03T12:13:49Z"
 branch: ""
 pr: ""
 issue: ""
