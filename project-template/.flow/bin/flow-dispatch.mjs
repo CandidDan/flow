@@ -37,6 +37,11 @@
 //
 //   node .flow/bin/flow-dispatch.mjs
 //
+// STORE OVERRIDE. `FLOW_DISPATCH_FLOW_DIR=<dir>` makes the CLI read `<dir>/tasks/` and
+// `<dir>/config.yml` instead of the `.flow/` this file sits in. It exists so a test can run the
+// CLI against a fixture store and never read the real tasks of the repo it runs in (flow-0198).
+// Unset or empty: the default, this file's own `.flow/`.
+//
 // Pure core, thin CLI. Zero dependencies (Node >= 18, for the global fetch).
 
 import { execFileSync } from "node:child_process";
@@ -269,6 +274,9 @@ export async function runDispatchCli(argv, { flowDir, ...io } = {}) {
 // ── CLI ── In an adopting repo this file is copied to `.flow/bin/`, so the store is that repo's
 // `.flow/`. In canonical it would be the template's fixture store — canonical runs its adapter.
 if (__isMain) {
-  const flowDir = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
+  const override = (process.env.FLOW_DISPATCH_FLOW_DIR ?? "").trim();
+  const flowDir = override
+    ? resolvePath(override)
+    : resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
   process.exit(await runDispatchCli(process.argv.slice(2), { flowDir }));
 }
