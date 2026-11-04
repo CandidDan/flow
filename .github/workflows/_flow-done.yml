@@ -8,8 +8,9 @@ name: _flow-done (reusable)
 # task to `done` on main (the store's home) and commits it; the canonical state is correct
 # immediately.
 #
-# The same merge is also the approval event for any intent it makes `approved` (ADR-0007), so a
-# second step stamps those intents' `approved_by` / `approved_at` from it (flow-0127).
+# The same merge is also the approval event for any intent it ADDS (ADR-0007), so a second step
+# stamps those intents `approved` with `approved_by` / `approved_at` from it (flow-0127, flow-0209).
+# The same step repairs any intent still unstamped, from the merge of the PR that added it.
 
 on:
   workflow_call:
@@ -202,8 +203,19 @@ jobs:
           # <<< flow-0059 state-push-retry <<<
 
       # flow-0127 (ADR-0007 slice 4): the merge is the approval event, and an intent's
-      # `approved_by` / `approved_at` are its projection — written HERE, from the event, never by
-      # hand. Its own step so a task transition that no-ops (no task id) or fails cannot drop a stamp;
+      # `status: "approved"`, `approved_by` / `approved_at` are its projection — written HERE, from
+      # the event, never by hand. flow-0209: an intent this merge ADDS is stamped from this merge;
+      # any intent still unstamped is repaired from the merge of the PR that added it, which needs
+      # git history (the checkout's fetch-depth: 0, re-checked below) and the GitHub API.
+      #
+      # The API token is the job's own GITHUB_TOKEN. This job deliberately requests no
+      # `pull-requests: read`: a reusable workflow asking for more than its caller grants fails
+      # before any step runs, and every caller today grants `contents: write` only — so asking here
+      # would stop the task transition above, fleet-wide. On a public repo the PR reads need no
+      # grant. On a private repo whose caller does not grant `pull-requests: read`, each lookup
+      # answers 403/404, the log names every intent left unstamped, and the step still exits 0.
+      #
+      # Its own step so a task transition that no-ops (no task id) or fails cannot drop a stamp;
       # `!cancelled()` keeps it running after a failed transition, and the reset below makes sure it
       # never pushes that step's leftover commit.
       - name: Stamp intents this merge approved
@@ -213,10 +225,18 @@ jobs:
           MERGED_BY: ${{ github.event.pull_request.merged_by.login }}
           MERGED_AT: ${{ github.event.pull_request.merged_at }}
           MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Start from origin's `main`, whatever the transition step left behind on the runner.
           git fetch origin main --quiet
           git reset --hard --quiet FETCH_HEAD
+
+          # The repair asks git which commit added each intent. A shallow history cannot answer that
+          # (its oldest commit looks like it added everything), so make sure the history is whole.
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch --unshallow --quiet origin
+          fi
 
           # A repo that has not synced this helper yet must not fail its flow-done.
           if [ ! -f .flow/bin/stamp-intents.mjs ]; then
@@ -225,17 +245,24 @@ jobs:
           fi
 
           # The merge commit's FIRST PARENT is `main` before this PR landed: the diff against it is
-          # this PR's change and nothing else, and an intent already `approved` there is not re-stamped.
+          # this PR's change and nothing else: an intent absent there is one this PR added.
           BASE_SHA="$(git rev-parse "$MERGE_SHA^1")"
+
+          # A helper synced before flow-0209 rejects `--repo` as an unknown argument, which would
+          # fail this step; it gets the flags it knows, and simply does no repair.
+          REPO_ARGS=()
+          if grep -q -e '--repo' .flow/bin/stamp-intents.mjs; then
+            REPO_ARGS=(--repo "$REPO")
+          fi
           stamp() {
             node .flow/bin/stamp-intents.mjs --base "$BASE_SHA" --head "$MERGE_SHA" \
-              --merged-by "$MERGED_BY" --merged-at "$MERGED_AT"
+              --merged-by "$MERGED_BY" --merged-at "$MERGED_AT" "${REPO_ARGS[@]}"
           }
 
           # A throw exits non-zero, and `bash -e` fails the job with the error above it in the log.
           stamp
           if git diff --quiet -- .flow/intents/; then
-            echo "PR #$PR_NUM approved no intent — nothing to stamp."
+            echo "PR #$PR_NUM approved no intent and none needed repair — nothing to stamp."
             exit 0
           fi
 
