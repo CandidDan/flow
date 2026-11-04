@@ -1,7 +1,7 @@
 ---
 id: "flow-0206"
 title: "A PR description opens with the problem it fixes, in words a person who has not read the code understands"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "session_01NfrcUBaGfeb3brCMQpKrpt"
