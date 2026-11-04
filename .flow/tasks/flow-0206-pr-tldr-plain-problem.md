@@ -1,7 +1,7 @@
 ---
 id: "flow-0206"
 title: "A PR description opens with the problem it fixes, in words a person who has not read the code understands"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,9 +10,9 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waiting for the intent pr-text-plain-english to merge (Dan approves it by merging its PR). The unblock sweep returns this task to ready when that PR merges."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["https://github.com/CandidDan/flow/pull/287"]
+blocked_by: []
 serves: ["G10"]
 intent: "pr-text-plain-english"
 touches:
