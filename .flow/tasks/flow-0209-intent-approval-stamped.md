@@ -1,7 +1,7 @@
 ---
 id: "flow-0209"
 title: "Merging an intent's PR records who approved it and when, and the intents already merged get their record from their own merge"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "session_01NfrcU8JWZCB7yytkfK5CPk"
