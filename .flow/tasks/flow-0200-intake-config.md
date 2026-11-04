@@ -1,7 +1,7 @@
 ---
 id: "flow-0200"
 title: "Add an `intake:` block to the config template, read by one parser that trusts no labeler by default"
-status: "in_review"
+status: "done"
 priority: 3
 project: "flow"
 owner: "session_01NfrcU8RK5GP8XRT3wkjgry"
