@@ -215,6 +215,22 @@ dispatch:
 # intents:
 #   required_from: "YYYY-MM-DD"
 
+# OPTIONAL — the intake lanes (ADR-0010). Read by ONE parser, `.flow/bin/intake-config.mjs`, so the
+# defaults below are decided in one place. The whole block is optional, and every default is the
+# RESTRICTIVE one: with no `intake:` block, no labeler is trusted, the classifier tier is "haiku",
+# and an `intake: auto` PR may change at most 20 lines.
+#
+# `trusted_labelers` is EMPTY here on purpose, and empty trusts NO ONE. Set it to your own GitHub
+# App's bot login, `<slug>[bot]` (the `inflight-flow[bot]` in ADR-0010 §6 is a placeholder, not a
+# login to copy). A `flow:trusted` label applied by anyone not on this list is ignored. A list the
+# parser cannot read whole — an unterminated `[`, a `*`, an entry that is not a plain login — is
+# read as empty, never as a partial list.
+intake:
+  trusted_labelers: []          # logins whose `flow:trusted` label is believed; empty trusts none
+  classifier_model: "haiku"     # a tier name from task-model.mjs
+  trivial:
+    max_changed_lines: 20       # additions + deletions; above this an intake: auto PR fails a check
+
 # Branch + PR conventions (kept here so agents and CI agree).
 git:
   base_branch: "main"
