@@ -1,14 +1,14 @@
 ---
 id: "flow-0212"
 title: "flow-state --json writes its whole output when piped, instead of stopping at 64 KB"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "session_01NfrcU7vAPGkRmeRvQc1Fu3"
 created: "2026-11-04"
 started: "2026-11-04T23:00:32Z"
-branch: ""
-pr: ""
+branch: "claude/sweet-pascal-9v30x7"
+pr: "https://github.com/CandidDan/flow/pull/293"
 issue: ""
 blocked_reason: ""
 cancelled_reason: ""
