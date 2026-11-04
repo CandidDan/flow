@@ -1,7 +1,7 @@
 ---
 id: "flow-0207"
 title: "A low-cost check fails a task PR whose summary is not in plain English, and editing the description re-runs only that check"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,9 +10,9 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waits for flow-0206, which defines the rule this check enforces, and for the intent pr-text-plain-english to merge. The unblock sweep returns this task to ready when both have landed."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["flow-0206", "https://github.com/CandidDan/flow/pull/287"]
+blocked_by: []
 serves: ["G10"]
 intent: "pr-text-plain-english"
 touches:
