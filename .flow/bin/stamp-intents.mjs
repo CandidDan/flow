@@ -8,6 +8,7 @@
 // checkout it is run in — so there is no store path to supply.
 //
 //   node .flow/bin/stamp-intents.mjs --base <sha> --head <sha> --merged-by <login> --merged-at <iso>
+//                                    [--repo <owner/name>]
 
 import { realpathSync as __realpathSync } from "node:fs";
 import { fileURLToPath as __fileURLToPath } from "node:url";
@@ -24,7 +25,8 @@ const __isMain = (() => {
 // ---------------------------------------------------------------------------------------
 
 export {
-  INTENTS_DIR, isIntentPath, validateMerge, intentStatus, stampText, stampIntents, parseArgs, runStampCli,
+  INTENTS_DIR, isIntentPath, validateMerge, intentStatus, intentApprovedBy, stampText, approveText, stampIntents,
+  repairIntents, addingMergeFromGitHub, parseArgs, runStampCli,
 } from "../../project-template/.flow/bin/stamp-intents.mjs";
 
-if (__isMain) process.exit(runStampCli(process.argv.slice(2)));
+if (__isMain) process.exit(await runStampCli(process.argv.slice(2)));

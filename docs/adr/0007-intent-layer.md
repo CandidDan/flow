@@ -45,6 +45,13 @@ Adopt an intent layer in **four slices**, and build only the first.
 4. **CI stamping the approval record on merge** — writing `approved_by` and `approved_at` from
    the merge event.
    **Shipped in flow-0127:** `_flow-done.yml` runs `.flow/bin/stamp-intents.mjs` on every merge.
+   **Fixed in flow-0209.** The first version stamped only an intent whose PR had already set
+   `status: "approved"`. Every intent is written `proposed` and nothing changed that before the
+   merge, so it never stamped anything (PR #287 logged "nothing to stamp"). Now the merge of the
+   PR that **adds** an intent sets `status: "approved"` (a `superseded` one keeps its status) and
+   writes `approved_by` / `approved_at` from that merge. An intent that already has an
+   `approved_by` is never stamped again. The same step also repairs any intent still unstamped,
+   using the merge of the PR that added that file, looked up through the GitHub API.
 
 Slices 2 and 4 are *not written as tasks*, deliberately. Both depend on decisions this ADR
 settles, and queuing them now would be speculation dressed as a plan. Slice 3 exists as
