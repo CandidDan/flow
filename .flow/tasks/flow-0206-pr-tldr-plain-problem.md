@@ -1,14 +1,14 @@
 ---
 id: "flow-0206"
 title: "A PR description opens with the problem it fixes, in words a person who has not read the code understands"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "session_01NfrcUBaGfeb3brCMQpKrpt"
 created: "2026-11-04"
 started: "2026-11-04T00:56:36Z"
-branch: ""
-pr: ""
+branch: "flow/flow-0206-pr-tldr-plain-problem"
+pr: "https://github.com/CandidDan/flow/pull/290"
 issue: ""
 blocked_reason: ""
 cancelled_reason: ""
