@@ -832,6 +832,23 @@ test("flow-0089: the prompts and the helper name the same sentinels and the same
     /export const SYNC_PR_PASS_LINE = "sync PR: synced surface only; flow-tooling validates it";/);
 });
 
+test("flow-0199: the qa prompt follows the code-decided verdict for NO TASK FILE RESOLVED, with the helper's PASS line", { skip }, async () => {
+  // PR #277 got PASS on four runs and FAIL on three for the same docs-only diff, because this
+  // sentinel was the one place the prompt named no verdict. The prompt now defers to task.md, and
+  // the PASS line it quotes must be the one the helper writes there.
+  const helperMod = await import(join(TEMPLATE, ".flow/bin/flow-review.mjs"));
+  assert.equal(helperMod.NO_TASK_DOCS_PASS_LINE, "no task: documentation only, no executable behaviour to test");
+  const qa = String(reviewerSteps("qa")[0].with.prompt).replace(/\s+/g, " ");
+  const rule = qa.slice(qa.indexOf('· "NO TASK FILE RESOLVED"'), qa.indexOf('· "TASK CONTEXT UNAVAILABLE"'));
+  assert.ok(rule.length > 0, "the qa prompt still has a NO TASK FILE RESOLVED rule");
+  assert.match(rule, /VERDICT IS DECIDED IN CODE/, "the verdict is the helper's, not the model's");
+  assert.match(rule, /follow it exactly/);
+  assert.ok(rule.includes(`PASS with exactly: ${helperMod.NO_TASK_DOCS_PASS_LINE}.`),
+    "the prompt's PASS line and the helper's NO_TASK_DOCS_PASS_LINE drifted");
+  assert.match(rule, /Otherwise FAIL and name the changed files/);
+  assert.doesNotMatch(rule, /Say so plainly/, "the verdict-less instruction that let the model choose is gone");
+});
+
 test("flow-0089: the classification IMPORTS checkRelease — no release rule is restated in the gate", { skip: false }, () => {
   const helper = readFileSync(join(TEMPLATE, ".flow/bin/flow-review.mjs"), "utf8");
   assert.match(helper, /^import \{[\s\S]*?\bcheckRelease,[\s\S]*?\} from "\.\/release-guard\.mjs";$/m,
