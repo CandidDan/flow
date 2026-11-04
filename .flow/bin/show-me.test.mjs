@@ -132,3 +132,32 @@ test("task-writer requires a spec to name things literally, not by metaphor", ()
   assert.match(procedure, /\*\*Write the spec in plain, literal language\.\*\* Name things literally, not by metaphor/);
   assert.match(procedure, /rewrite any sentence that can be read two ways/);
 });
+
+// flow-0206: a PR description opens with the problem it fixes, in words a stranger understands.
+test("Response style defines the PR TL;DR as the first paragraph with four requirements", () => {
+  assert.match(flatStyle, /A PR description's \*\*TL;DR is its first paragraph\*\*/);
+  assert.match(flatStyle, /says what was wrong or missing, and what is different after the merge, and for whom/);
+  assert.match(flatStyle, /reads correctly to a person who has not read the code or the task/);
+  assert.match(flatStyle, /contains no backticks, no file paths, no task ids and no code names/);
+  assert.match(flatStyle, /is at most 60 words/);
+});
+
+test("the PR #285 bad/good row exists and its good text meets requirement 3 and the word limit", () => {
+  const row = responseStyle.split("\n").find((l) => l.includes("A Flow sync was deleting settings"));
+  assert.ok(row, "the PR #285 bad/good row is missing");
+  const cells = row.split(/\s\|\s/).map((c) => c.replace(/^\|\s*|\s*\|$/g, "").trim());
+  assert.equal(cells.length, 2, "row must have a bad cell and a good cell");
+  assert.match(cells[0], /carry-inputs/, "bad cell must be the original TL;DR");
+  const good = cells[1].replace(/^"|"$/g, "");
+  assert.doesNotMatch(good, /`/, "good text has a backtick");
+  assert.doesNotMatch(good, /\//, "good text has a file path");
+  assert.doesNotMatch(good, /\bflow-\d+\b/i, "good text has a task id");
+  assert.doesNotMatch(good, /\.m?js\b|\(\)|_|--/, "good text has a code name");
+  assert.ok(good.split(/\s+/).length <= 60, "good text exceeds 60 words");
+});
+
+test("show-me rule 6 points at the PR TL;DR requirements without copying them", () => {
+  const rule6 = read(SKILL_PATH).match(/^6\. \*\*Terse is not cryptic\.\*\*[\s\S]*?(?=\n\n)/m)[0].replace(/\s+/g, " ");
+  assert.match(rule6, /PR TL;DR requirements/);
+  assert.doesNotMatch(rule6, /60 words/);
+});
