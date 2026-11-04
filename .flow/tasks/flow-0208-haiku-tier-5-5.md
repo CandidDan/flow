@@ -1,12 +1,12 @@
 ---
 id: "flow-0208"
 title: "The haiku tier runs on Haiku 5.5, not Haiku 4.5, so it matches the other tiers' current models"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_01NfrcUBhLpiVaHLdtT7wJBf"
 created: "2026-11-04"
-started: ""
+started: "2026-11-04T00:03:33Z"
 branch: ""
 pr: ""
 issue: ""
