@@ -1,14 +1,14 @@
 ---
 id: "research-before-scoping"
 title: "A question can be researched as Flow work before anything is scoped, with the findings reviewed and decided in inflight"
-status: "proposed"
+status: "approved"
 created: "2026-10-28"
 source: "Dan, Claude Code chat, 2026-10-28"
 serves: ["G11", "G12"]
 workstream: ""
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-10-28T11:07:58Z"
 evidence: []
 ---
 

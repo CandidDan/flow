@@ -1,14 +1,14 @@
 ---
 id: "review-large-diffs-in-full"
 title: "The review checks read every line of a large PR, in chunks, and skip generated files"
-status: "proposed"
+status: "approved"
 created: "2026-10-27"
 source: "Dan, orchestrator chat, 2026-10-27 (TanPlan PR #200)"
 serves: ["G8", "G9", "G10"]
 workstream: ""
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-10-27T02:48:01Z"
 evidence: []
 ---
 

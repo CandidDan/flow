@@ -1,14 +1,14 @@
 ---
 id: "usability-review"
 title: "A change people will use is reviewed for whether it is actually usable, not only whether it is correct"
-status: "proposed"
+status: "approved"
 created: "2026-10-28"
 source: "Dan, Claude Code chat, 2026-10-28"
 serves: ["G10"]
 workstream: ""
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-10-28T11:06:30Z"
 evidence: []
 ---
 

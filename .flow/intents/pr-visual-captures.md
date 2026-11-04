@@ -1,13 +1,13 @@
 ---
 id: "pr-visual-captures"
 title: "Where it helps and is possible, PRs carry key screenshots and recordings"
-status: "proposed"
+status: "approved"
 created: "2026-10-09"
 source: "Dan, orchestrator chat 2026-10-09"
 serves: ["G10"]
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-10-08T23:27:15Z"
 evidence: []
 ---
 

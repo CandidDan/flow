@@ -1,13 +1,13 @@
 ---
 id: "pr-text-plain-english"
 title: "Dan can read the top of a PR and know what problem it fixes and what changes for whom"
-status: "proposed"
+status: "approved"
 created: "2026-11-04"
 source: "Dan, orchestrator chat 2026-11-04"
 serves: ["G10"]
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-11-04T00:03:31Z"
 evidence: []
 ---
 

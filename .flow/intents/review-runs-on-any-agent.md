@@ -1,14 +1,14 @@
 ---
 id: "review-runs-on-any-agent"
 title: "Any review can be moved between Claude and Codex at any time, and every review stays as impartial and accurate as possible"
-status: "proposed"
+status: "approved"
 created: "2026-11-01"
 source: "Dan, Claude Code chat, 2026-11-01"
 serves: ["G10", "G9"]
 workstream: ""
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-11-01T02:05:43Z"
 evidence: []
 ---
 

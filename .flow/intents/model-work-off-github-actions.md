@@ -1,14 +1,14 @@
 ---
 id: "model-work-off-github-actions"
 title: "Flow keeps building without GitHub Actions billing for the time Claude spends thinking"
-status: "proposed"
+status: "approved"
 created: "2026-10-28"
 source: "Dan, conversation 2026-10-28"
 serves: ["G9"]
 workstream: ""
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-10-28T02:12:30Z"
 evidence: []
 ---
 

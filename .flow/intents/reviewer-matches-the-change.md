@@ -1,14 +1,14 @@
 ---
 id: "reviewer-matches-the-change"
 title: "A PR is reviewed by the kind of reviewer its change needs, with effort matched to its risk"
-status: "proposed"
+status: "approved"
 created: "2026-10-28"
 source: "Dan, Claude Code chat, 2026-10-28"
 serves: ["G10", "G9"]
 workstream: ""
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-10-28T11:02:13Z"
 evidence: []
 ---
 

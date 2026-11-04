@@ -1,14 +1,14 @@
 ---
 id: "vision-stays-true"
 title: "A VISION.md stays true for months and reads plainly to someone new to the project"
-status: "proposed"
+status: "approved"
 created: "2026-11-03"
 source: "Dan, Claude Code chat, 2026-11-02 and 2026-11-03"
 serves: ["G13"]
 workstream: ""
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-11-03T01:28:33Z"
 evidence: []
 ---
 

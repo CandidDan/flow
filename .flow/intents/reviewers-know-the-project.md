@@ -1,14 +1,14 @@
 ---
 id: "reviewers-know-the-project"
 title: "Each PR reviewer works with the project's own conventions and risks in hand, and its prompt carries only its job"
-status: "proposed"
+status: "approved"
 created: "2026-10-28"
 source: "Dan, Claude Code chat, 2026-10-28"
 serves: ["G10", "G9"]
 workstream: ""
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-10-28T11:01:53Z"
 evidence: []
 ---
 

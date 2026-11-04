@@ -1,14 +1,14 @@
 ---
 id: "review-findings-converge"
 title: "Review findings are verified before they block, re-reviews read only the new diff, and reviewer changes are scored against past PRs"
-status: "proposed"
+status: "approved"
 created: "2026-10-28"
 source: "Dan, Claude Code chat, 2026-10-27"
 serves: ["G10", "G9"]
 workstream: ""
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-10-28T11:01:33Z"
 evidence: []
 ---
 
