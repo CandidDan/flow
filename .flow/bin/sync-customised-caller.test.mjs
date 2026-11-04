@@ -432,3 +432,66 @@ test("an unreadable caller stops the run rather than reading as 'no extra jobs'"
       return true;
     });
 });
+
+// ---------------------------------------------------------------------------------------------
+// flow-0197 — a caller that differs only in a `with:` input is copied, and the input is carried.
+// ---------------------------------------------------------------------------------------------
+
+// The incident's shape (CandidDan/mapd#52): a thin caller whose only difference from canonical is a
+// `setup_node_version` pin. It declares no extra job, so the guard above copies over it.
+const MAPD_GATES = `name: flow-gates
+on:
+  pull_request:
+
+jobs:
+  gate:
+    uses: OWNER/flow/.github/workflows/_flow-gates.yml@v1
+    with:
+      node_version: "22"
+      # Node security release pin (CVE-2026-111497)
+      setup_node_version: "24.22.1"
+`;
+
+/** Run the shipped loop, then the shipped `pr-body` with what the loop accumulated. */
+const runLoopAndBody = ({ repo, canonTpl }) => {
+  const region = extractLoopRegion(readReusable());
+  const out = execFileSync("bash", ["-euo", "pipefail", "-c",
+    `${region}\nprintf 'INPUTS_BEGIN\\n%s\\nINPUTS_END\\n' "$KEPT_INPUTS"`], {
+    cwd: repo, encoding: "utf8", env: { ...process.env, CANON_TPL: canonTpl },
+  });
+  const keptInputs = out.split("INPUTS_BEGIN\n")[1].split("\nINPUTS_END")[0];
+  const body = execFileSync("node", [SYNC_MJS, "pr-body", "--local", "1.0.0", "--canonical", "1.1.0",
+    "--files", "M\t.github/workflows/flow-gates.yml", "--kept", "", "--kept-inputs", keptInputs],
+  { encoding: "utf8" });
+  return { out, keptInputs, body };
+};
+
+test("flow-0197: the copy loop keeps a caller's own `with:` input and the PR body lists it under 'Kept inputs'", { skip }, (t) => {
+  const fx = fixture(t, { "flow-gates.yml": MAPD_GATES, "flow-doctor.yml": CANON_DOCTOR });
+
+  const { keptInputs, body } = runLoopAndBody(fx);
+
+  const synced = readFileSync(join(fx.repo, ".github/workflows/flow-gates.yml"), "utf8");
+  assert.match(synced, /\n      setup_node_version: "24\.22\.1"\n/,
+    "the repo's pin must survive the sync — losing it moved mapd's CI back to Node 22");
+  assert.match(synced, /# Node security release pin/, "…with the comment that says why it is there");
+  assert.match(synced, /_flow-gates\.yml@v2/, "the caller is still canonical's copy, not kept whole");
+  assert.equal(readFileSync(join(fx.repo, ".github/workflows/flow-doctor.yml"), "utf8"), CANON_DOCTOR,
+    "a caller with nothing to carry is copied byte for byte");
+
+  assert.equal(keptInputs, ".github/workflows/flow-gates.yml\tgate.setup_node_version",
+    "node_version is identical on both sides, so only the pin is listed");
+  assert.match(body, /### Kept inputs\n[\s\S]*- `\.github\/workflows\/flow-gates\.yml` — `gate\.setup_node_version`/);
+});
+
+test("flow-0197: the shipped pr-body call is handed the carried inputs", { skip }, () => {
+  assert.match(runScripts(yamlMod.parse(readReusable())), /pr-body[^\n]*--kept-inputs "\$KEPT_INPUTS"/,
+    "without the flag, the carried inputs reach the log and never the PR a reviewer reads");
+});
+
+test("flow-0197: a customised caller kept whole is not also run through carry-inputs", { skip }, (t) => {
+  const fx = fixture(t, { "flow-gates.yml": NUDGE_GATES });
+  const { keptInputs } = runLoopAndBody(fx);
+  assert.equal(readFileSync(join(fx.repo, ".github/workflows/flow-gates.yml"), "utf8"), NUDGE_GATES);
+  assert.equal(keptInputs, "", "the kept-jobs rule is unchanged: a kept caller is untouched and not listed");
+});

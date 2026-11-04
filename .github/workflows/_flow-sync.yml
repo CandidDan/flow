@@ -14,7 +14,9 @@ name: _flow-sync (reusable)
 #                            one that declares a job canonical's template does not: that caller is
 #                            kept whole and reported, never overwritten (flow-0076). Each copied
 #                            caller's reusable `uses:` is pinned to the ref the sync adopted from
-#                            (flow-0158), so its workflows run the release its tooling came from
+#                            (flow-0158), so its workflows run the release its tooling came from,
+#                            and keeps every `with:` input the repo's previous copy set on a
+#                            Flow-reusable job, with the repo's value (flow-0197)
 #   - .flow/PROTOCOL.md      the protocol itself (flow-0048) — identical in every Flow repo, so a
 #                            protocol fix reaches the fleet by sync instead of by hand-patch
 #   - .claude/skills/<name>/ every CANONICAL-NAMED skill directory (flow-0081) — the procedures
@@ -478,6 +480,9 @@ jobs:
           # newline inside a YAML block scalar without the closing quote's indentation joining the
           # string. `pr-body` renders it so a reviewer sees what did not sync, and why.
           KEPT_FILE="$(mktemp)"
+          # Inputs carried into a copied caller (flow-0197), one `<path>\t<job>.<input> …` line per
+          # caller, outside the worktree for the same reason as KEPT_FILE.
+          KEPT_INPUTS_FILE="$(mktemp)"
           for f in "$CANON_TPL"/.github/workflows/flow-*.yml; do
             [ -e "$f" ] || continue
             DEST=".github/workflows/$(basename "$f")"
@@ -496,6 +501,10 @@ jobs:
                 continue
               fi
             fi
+            # Keep the repo's previous copy, outside the worktree, so its `with:` inputs can be
+            # carried into canonical's copy below (flow-0197). Empty for a caller new to this repo.
+            PREV=""
+            if [ -f "$DEST" ]; then PREV="$(mktemp)"; cp "$DEST" "$PREV"; fi
             cp "$f" .github/workflows/
             # PIN THE COPY TO THE ADOPTED REF (flow-0158). The template pins its callers `@v4`, so a
             # sync at `v3.4.0` delivered 3.4.0's callers calling whatever `v3` pointed at — the
@@ -521,7 +530,29 @@ jobs:
                 echo "::warning title=Callers not pinned::canonical@${CANONICAL_REF} predates flow-0158 and its flow-sync.mjs has no pin-callers, so the copied callers keep the pins its template ships rather than @${CANONICAL_REF}. Check that they call reusables compatible with this release."
               fi
             fi
+            # KEEP THE REPO'S OWN `with:` INPUTS (flow-0197). The guard above keeps a caller only
+            # when it has an extra JOB; a caller that differs in a `with:` input was overwritten and
+            # lost it. CandidDan/mapd#52 (4.1.0) dropped mapd's `setup_node_version: "24.22.1"`, a
+            # pin to a Node security release, which would have moved its CI back to Node 22. So every
+            # `with:` input the previous copy set on a Flow-reusable job is carried into this copy of
+            # the same job with the repo's value; only `with:` moves. Runs after pin-callers, so the
+            # pin is canonical's and the inputs are the repo's. Probed like pin-callers: a release
+            # older than this subcommand would exit 2 and abort the whole sync.
+            # `${KEPT_INPUTS_FILE:-/dev/null}`: sync-permissions.test.mjs runs this loop without the
+            # lines above it, where the accumulator is unset.
+            if [ -n "$PREV" ]; then
+              if grep -q 'case "carry-inputs"' "$CANON_TPL/.flow/bin/flow-sync.mjs" 2>/dev/null; then
+                CARRIED="$(node "$CANON_TPL/.flow/bin/flow-sync.mjs" carry-inputs --local "$PREV" --file "$DEST")"
+                if [ -n "$CARRIED" ]; then
+                  CARRIED_LIST="$(printf '%s' "$CARRIED" | tr '\n' ' ' | sed 's/ *$//')"
+                  echo "Kept inputs in ${DEST}: ${CARRIED_LIST}"
+                  printf '%s\t%s\n' "$DEST" "$CARRIED_LIST" >> "${KEPT_INPUTS_FILE:-/dev/null}"
+                fi
+              fi
+              rm -f "$PREV"
+            fi
           done
+          KEPT_INPUTS="$(cat "$KEPT_INPUTS_FILE")"
           KEPT="$(cat "$KEPT_FILE")"
           # THE PROTOCOL (flow-0048). For four releases this surface was bin + callers + the stamp,
           # and `.flow/PROTOCOL.md` was copied ONCE, by flow-init, at adoption — then frozen for
@@ -707,7 +738,7 @@ jobs:
           case "$VERDICT" in
             create|rebuild)
               TITLE="$($SYNC pr-title --local "$LOCAL_VER" --canonical "$CANON_VER")"
-              BODY="$($SYNC pr-body --local "$LOCAL_VER" --canonical "$CANON_VER" --files "$CHANGED" --kept "$KEPT")"
+              BODY="$($SYNC pr-body --local "$LOCAL_VER" --canonical "$CANON_VER" --files "$CHANGED" --kept "$KEPT" --kept-inputs "$KEPT_INPUTS")"
               # flow-0129: name every canonical skill this sync overwrote in place, built above.
               if [ -n "$REPLACED" ]; then
                 BODY="${BODY}"$'\n\n'"### Replaced: skills edited in place"$'\n\n'"These differed from canonical and had no \`LOCAL.md\`. Canonical's copy replaced them; recover any repo-specific text from \`main\` into \`.claude/skills/<name>/LOCAL.md\`, which the sync never touches."$'\n\n'"${REPLACED}"
