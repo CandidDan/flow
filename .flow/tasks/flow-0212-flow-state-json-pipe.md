@@ -24,7 +24,8 @@ labels: [urgent, bug]
 model: ""
 effort: ""
 model_reason: ""
-notes: []
+notes:
+  - "2026-11-04 (worker): done and handed off. PR https://github.com/CandidDan/flow/pull/293 is open non-draft on branch claude/sweet-pascal-9v30x7. Both CLI blocks now set process.exitCode; the new flow-state-pipe.test.mjs fails with the fix reverted and passes with it. Local gate: build, lint ok; test 2181 pass, 15 fail, the same 15 flow-sync tests that fail on clean origin/main in this sandbox; coverage lines 97.9%. Criterion 3 note: runStateCli never returns non-zero, so an unknown flag exits 0 before and after; the test compares old and new exit codes for that and for a crash (exit 1). Next action: none for a worker; the human reviews and merges, then merges main into PR #292."
 asks: []
 ---
 
