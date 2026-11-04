@@ -1,12 +1,12 @@
 ---
 id: "flow-0206"
 title: "A PR description opens with the problem it fixes, in words a person who has not read the code understands"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_01NfrcUBaGfeb3brCMQpKrpt"
 created: "2026-11-04"
-started: ""
+started: "2026-11-04T00:56:36Z"
 branch: ""
 pr: ""
 issue: ""
