@@ -1,7 +1,7 @@
 ---
 id: "flow-0198"
 title: "flow-dispatch's CLI test runs against its own fixture store, never the adopting repo's real tasks"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude-session_01NfrcU8dZ2b3fAeTsHPM8Ms"
