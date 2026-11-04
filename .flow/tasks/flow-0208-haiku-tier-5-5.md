@@ -24,7 +24,8 @@ model: ""
 effort: ""
 model_reason: ""
 notes: []
-asks: []
+asks:
+  - "fyi: PR 288 code-review (non-blocking) - the old-id sweep test ships to adopters and scans their whole repo, so an adopter file naming the old haiku id turns their npm test red after sync. Left as the task specified; scope the sweep to Flow-owned paths if that bites."
 ---
 
 ## Context
