@@ -1,7 +1,7 @@
 ---
 id: "flow-0201"
 title: "Triage honours `approved`, `auto-ok` and `flow:trusted` only when the issue's events show a permitted actor applied them"
-status: "blocked"
+status: "ready"
 priority: 3
 project: "flow"
 owner: ""
@@ -10,9 +10,9 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Reads intake.trusted_labelers through the parser that flow-0200 adds; released when flow-0200 is done."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["flow-0200"]
+blocked_by: []
 serves: ["G11"]
 intent: ""
 touches:

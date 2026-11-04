@@ -1,7 +1,7 @@
 ---
 id: "flow-0203"
 title: "A tool-less cheap model sizes each new issue, and a separate model-free job is the only one that writes its `flow:size/*` label"
-status: "blocked"
+status: "ready"
 priority: 3
 project: "flow"
 owner: ""
@@ -10,9 +10,9 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Reads intake.classifier_model through the parser that flow-0200 adds; released when flow-0200 is done."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["flow-0200"]
+blocked_by: []
 serves: ["G11", "G9"]
 intent: ""
 touches:
