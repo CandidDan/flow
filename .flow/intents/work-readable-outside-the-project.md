@@ -1,10 +1,10 @@
 ---
 id: "work-readable-outside-the-project"
-title: "Dan can share planned work with someone outside the project, and a developer can read a task cold"
+title: "Dan can share tasks with people outside the project, and developers can read and understand them"
 status: "proposed"
 created: "2026-11-04"
 source: "Dan, orchestrator chat 2026-11-04"
-serves: ["G7"]
+serves: ["G7"]             # [assumption] G7 was chosen by the writer, not Dan; see the last open question
 workstream: ""
 supersedes: ""
 approved_by: ""
@@ -42,7 +42,7 @@ answered.
 
 ## Outcome
 
-[assumption] Dan can send someone outside the project a link or a page, and that person can say what is being
+[assumption] Dan can show someone outside the project what is planned, and that person can say what is being
 built, why, and how far along it is, without opening the repo or asking him.
 
 [assumption] A developer who has never seen the project can open any task and say in one sentence what it is
