@@ -27,8 +27,11 @@ labels: [intents, ci]
 model: "opus"
 effort: "high"
 model_reason: "CI that writes to main on every merge in every adopting repo, plus a one-time repair of existing records"
-notes: []
-asks: []
+notes:
+  - "2026-11-04 worker: PR #291 open and marked ready. Gate local: build, lint, coverage 97.87% green; test green except 15 flow-sync tests that need rsync, absent in the cloud container (they fail the same on main). Decision taken: _flow-done.yml requests no pull-requests: read, because callers grant contents: write only and a reusable asking for more fails the whole job; canonical is public so the repair works here without it."
+asks:
+  - "follow-up: grant pull-requests: read on the flow-done job in .github/workflows/flow-done.yml and project-template/.github/workflows/flow-done.yml, so the repair works on private adopting repos; only then can _flow-done.yml declare it"
+  - "fyi: the first merge after #291 should stamp the 11 existing intents in canonical; check that flow-done log, which names any intent it could not look up"
 ---
 
 ## Context
