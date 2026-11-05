@@ -69,6 +69,8 @@ export function canonicalTasksDir(root = canonicalRepoRoot()) {
 }
 
 // ── CLI ──
+// `process.exitCode`, not `process.exit()`: on a pipe, stdout writes are asynchronous, and
+// exiting at once cut the output off at the 64 KB pipe buffer (flow-0212).
 if (__isMain) {
-  process.exit(runStateCli({ repoRoot: canonicalRepoRoot(), argv: process.argv.slice(2) }));
+  process.exitCode = runStateCli({ repoRoot: canonicalRepoRoot(), argv: process.argv.slice(2) });
 }
