@@ -1,14 +1,14 @@
 ---
 id: "work-readable-outside-the-project"
 title: "Dan can share tasks with people outside the project, and developers can read and understand them"
-status: "proposed"
+status: "approved"
 created: "2026-11-04"
 source: "Dan, orchestrator chat 2026-11-04"
 serves: ["G7"]             # [assumption] G7 was chosen by the writer, not Dan; see the last open question
 workstream: ""
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-11-05T08:18:03Z"
 evidence: []
 ---
 
