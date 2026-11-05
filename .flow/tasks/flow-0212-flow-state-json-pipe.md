@@ -1,7 +1,7 @@
 ---
 id: "flow-0212"
 title: "flow-state --json writes its whole output when piped, instead of stopping at 64 KB"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "session_01NfrcU7vAPGkRmeRvQc1Fu3"
