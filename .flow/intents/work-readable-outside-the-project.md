@@ -66,12 +66,10 @@ intent was not met.
 
 ## Open questions
 
-- Who is "external": a client, a contractor, a new developer, or all three? The answer decides
-  whether the shared page shows tasks at all, or only intents and their progress.
-- Is the shared view of an intent a page in inflight, an export Dan sends, or both?
-- Should the plain summary on a task be checked mechanically by `flow-doctor`, by the PR-text judge
-  from `pr-text-plain-english`, or not checked at all?
-- In a repo that has not adopted intents, what is the shareable layer? Is this a reason to make
-  intents the default for every adopting repo?
+- Who counts as "external"? The answer decides whether what they see includes tasks at all, or
+  only intents and how far along they are.
+- How should someone outside the project receive what they are shown?
+- Does anything need to check that a task's plain summary is actually plain?
+- In a repo that has not adopted intents, what is the layer a person outside the project reads?
 - No VISION.md goal names "the work is readable by people outside it". Is that part of G7, or a
   goal the vision is missing?
