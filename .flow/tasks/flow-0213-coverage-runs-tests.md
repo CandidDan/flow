@@ -1,14 +1,14 @@
 ---
 id: "flow-0213"
 title: "A repo whose coverage command already runs every test can tell the gate not to run the tests a second time"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "session_01NfrcUA1iK1VWSMA6KY1Hmm"
 created: "2026-11-06"
 started: "2026-11-06T11:15:00Z"
-branch: ""
-pr: ""
+branch: "claude/project-thread-jxfa8r"
+pr: "https://github.com/CandidDan/flow/pull/299"
 issue: ""
 blocked_reason: ""
 cancelled_reason: ""
