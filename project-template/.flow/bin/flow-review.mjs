@@ -38,6 +38,7 @@ import { globToRegExp } from "./touches-guard.mjs";
 import { idFromBranch, parseTaskId } from "./parse-task-id.mjs";
 // One constant, for the one fact both files need: WHERE canonical is. See CANONICAL_REPO_URL.
 import { DEFAULT_CANONICAL_REPO } from "./flow-init.mjs";
+import { pinCallers } from "./flow-sync.mjs";
 import {
   FRAGMENT_DIR,
   ROOT_VERSION_PATH,
@@ -806,6 +807,53 @@ export function sameSyncedFile(path, here, there) {
   return path === ADOPTED_VERSION_PATH ? here.trim() === there.trim() : here === there;
 }
 
+// ── a synced caller is canonical's caller, repinned (flow-0195) ──────────────────────────
+//
+// `_flow-sync.yml` copies each `.github/workflows/flow-*.yml` caller out of canonical's template
+// and then runs `flow-sync.mjs pin-callers --ref <canonical_ref>` on the copy (flow-0158), so a
+// sync adopted from an explicit release (`v4.1.0`) leaves every reusable `uses:` reading
+// `@v4.1.0` where canonical's template reads `@v4`. A byte compare refused every such caller, the
+// PR lost its sync classification, and qa failed it as a task-less PR.
+//
+// So a caller is compared with canonical's copy AFTER the same rewrite, using the one ref the
+// repo's copy pins. The tolerance is exactly that rewrite and nothing more:
+//   - only paths matching SYNCED_CALLER get it; every other path is still byte-for-byte;
+//   - the ref is read only from live `uses:` lines naming THIS canonical's reusables. Zero such
+//     refs, or more than one distinct ref, is a mismatch, as before;
+//   - `pinCallers` is the sync's own function, imported rather than re-implemented, so the
+//     comparison cannot drift from what the sync actually wrote;
+//   - every other byte must match. A `uses:` naming another owner's reusable does not match the
+//     repinned canonical line, so it stays a mismatch.
+export const SYNCED_CALLER = /^\.github\/workflows\/flow-[^/]+\.ya?ml$/;
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const CANONICAL_USES_REF = new RegExp(
+  `^[ \\t]*(?:-[ \\t]+)?uses:[ \\t]*["']?${escapeRe(DEFAULT_CANONICAL_REPO)}` +
+  `\\/\\.github\\/workflows\\/_flow-[^\\s"'#@/]+\\.ya?ml@([^\\s"'#]+)`);
+
+/** The distinct refs `text` pins on its live `uses:` lines naming canonical's reusables. */
+export function canonicalPinRefs(text) {
+  const refs = new Set();
+  for (const line of String(text).split("\n")) {
+    const m = line.match(CANONICAL_USES_REF);
+    if (m) refs.add(m[1]);
+  }
+  return [...refs];
+}
+
+// Is this changed file canonical's file, allowing for the one rewrite the sync itself applies?
+export function sameSyncedCaller(path, here, there) {
+  if (sameSyncedFile(path, here, there)) return true;
+  if (!SYNCED_CALLER.test(path) || here === null || there === null) return false;
+  const refs = canonicalPinRefs(here);
+  if (refs.length !== 1) return false;
+  try {
+    return here === pinCallers(there, refs[0]);
+  } catch {
+    return false; // a ref pinCallers refuses (a leading `-`) is not a pin the sync could have written
+  }
+}
+
 // Every distinct `Canonical-SHA:` trailer on the commits this PR adds, read with git's own
 // trailer formatter — exactly as `_flow-sync.yml` reads it back, so nothing here parses a commit
 // message by hand. More than one is not an ambiguity to resolve by picking: a sync branch is
@@ -883,7 +931,7 @@ export function syncProvenance({
     const canonicalPath = canonicalPathFor(path);
     const here = blobAtRef(git, "HEAD", path);
     const there = blobAtRef(git, sha, canonicalPath);
-    if (sameSyncedFile(path, here, there)) continue;
+    if (sameSyncedCaller(path, here, there)) continue;
     mismatched.push({
       path,
       canonicalPath,
