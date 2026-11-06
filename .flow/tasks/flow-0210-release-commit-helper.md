@@ -1,14 +1,14 @@
 ---
 id: "flow-0210"
 title: "A repo can ask Flow which commit to release when the newest commit on main is a Flow state commit that was never built"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "session_01NfrcU9iRVh8RVpDF6wsSzV"
 created: "2026-11-04"
 started: "2026-11-06T02:36:41Z"
-branch: ""
-pr: ""
+branch: "claude/project-thread-f0zs28"
+pr: "https://github.com/CandidDan/flow/pull/295"
 issue: "https://github.com/CandidDan/flow/issues/286"
 blocked_reason: ""
 cancelled_reason: ""
