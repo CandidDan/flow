@@ -1,14 +1,14 @@
 ---
 id: "flow-0211"
 title: "When a ready task cannot be started because its model tier has no routine, the owner is told once, in an issue, instead of every run skipping green"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "session_01NfrcU9iRVh8RVpDF6wsSzV"
 created: "2026-11-04"
 started: "2026-11-06T10:26:47Z"
-branch: ""
-pr: ""
+branch: "claude/project-thread-f0zs28"
+pr: "https://github.com/CandidDan/flow/pull/297"
 issue: "https://github.com/CandidDan/flow/issues/289"
 blocked_reason: ""
 cancelled_reason: ""
