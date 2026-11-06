@@ -25,7 +25,7 @@ touches:
   - "project-template/.github/workflows/flow-review.yml"
   - "project-template/.github/workflows/flow-kickback.yml"
   - ".flow/bin/gate-cost.test.mjs"
-  - "changes/flow-0214.md"
+  - "changes/flow-0217.md"
 labels: [cost]
 model: "opus"
 effort: "high"
@@ -58,7 +58,7 @@ estimated saving is about 150 billed minutes a day in that repo alone.
   job, or in the gate; guide runs as the last step of one reviewer job. qa, code-review and security
   stay separate jobs so their checks keep reporting separately.
 - Kickback still sees which review jobs failed.
-- `changes/flow-0214.md`, stating what each adopting repo must change in branch protection.
+- `changes/flow-0217.md`, stating what each adopting repo must change in branch protection.
 
 Not in scope: the review prompts, models or verdict rules.
 
