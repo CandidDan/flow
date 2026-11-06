@@ -99,12 +99,14 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0139",
   }],
   ["The store", {
-    digest: "7ebadd928700ca4a4ae8c71a062cb6a4bd150feb483e6810b0c8f9421b196995",
+    digest: "6cf5ae302332bdb9767643c0bc64fabd0a0fb3366b86cdf97ef6c0c0843fb173",
     why: "a paragraph was added stating that a repo may skip deploys for task-state commits only " +
          "through `.flow/bin/only-flow-changed.mjs`, and that any doubt builds (flow-0122). " +
          "flow-0164 then retired the board: the paragraph naming it as the human's view now says " +
-         "state is viewed in inflight, and describes `apply-board-edits.mjs` as the store writer.",
-    task: "flow-0164",
+         "state is viewed in inflight, and describes `apply-board-edits.mjs` as the store writer. " +
+         "flow-0210 then added that a Flow state commit is never a release target, and that a " +
+         "release takes the commit `deployable-sha.mjs` prints for the gated commit.",
+    task: "flow-0210",
   }],
   ["Response style — show, don't tell", {
     digest: "f3fc986c9390b92c553262033e09b8b2e82c3c0b61d0f28080a3f64ba179180a",
@@ -901,4 +903,12 @@ test("the protocol's `blocked` bullet documents blocked_by, alongside blocked", 
   assert.match(bullet, /\bclear/i,
     "the bullet must say the field is cleared when the block clears — flow-doctor reports a " +
     "populated blocked_by on a live non-blocked task as stale data");
+});
+
+test("The store says a Flow state commit is never a release target, and names deployable-sha (flow-0210)", () => {
+  const section = new Map(sectionsOf(protocol)).get("The store");
+  assert.ok(section, "PROTOCOL.md has a section named The store");
+  assert.match(section, /\*\*A Flow state commit is\s+never a release target\.\*\*/);
+  assert.match(section, /`node \.flow\/bin\/deployable-sha\.mjs --head <that commit>`/);
+  assert.match(section, /exits 1 with nothing printed when it is not sure, and then you do not release/);
 });
