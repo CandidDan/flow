@@ -38,6 +38,7 @@ import { globToRegExp } from "./touches-guard.mjs";
 import { idFromBranch, parseTaskId } from "./parse-task-id.mjs";
 // One constant, for the one fact both files need: WHERE canonical is. See CANONICAL_REPO_URL.
 import { DEFAULT_CANONICAL_REPO } from "./flow-init.mjs";
+import { pinCallers } from "./flow-sync.mjs";
 import {
   FRAGMENT_DIR,
   ROOT_VERSION_PATH,
@@ -806,6 +807,85 @@ export function sameSyncedFile(path, here, there) {
   return path === ADOPTED_VERSION_PATH ? here.trim() === there.trim() : here === there;
 }
 
+// ── a synced caller is canonical's caller, repinned (flow-0195) ──────────────────────────
+//
+// `_flow-sync.yml` copies each `.github/workflows/flow-*.yml` caller out of canonical's template
+// and then runs `flow-sync.mjs pin-callers --ref <canonical_ref>` on the copy (flow-0158), so a
+// sync adopted from an explicit release (`v4.1.0`) leaves every reusable `uses:` reading
+// `@v4.1.0` where canonical's template reads `@v4`. A byte compare refused every such caller, the
+// PR lost its sync classification, and qa failed it as a task-less PR.
+//
+// So a caller is compared with canonical's copy AFTER the same rewrite, using the one ref the
+// repo's copy pins. The tolerance is exactly that rewrite, and the ref must be PROVEN, because it
+// is read from the PR's own file and a forged `flow-sync/` branch would otherwise repin every
+// reusable to a ref of its choosing (a branch, a moved tag, a fork commit) and still be granted
+// the fixed-PASS review:
+//   - only paths matching SYNCED_CALLER get it; every other path is still byte-for-byte;
+//   - the ref is read only from live `uses:` lines naming the canonical repo that was fetched.
+//     Zero such refs, or more than one distinct ref, is a mismatch, as before;
+//   - the ref must have a release-tag shape (RELEASE_TAG_REF), which rules out a commit sha and
+//     a branch name, AND `refMatches(ref)` must confirm that canonical's tag of that name peels to
+//     exactly the `Canonical-SHA:` commit this PR was compared against. Any failure is a mismatch;
+//   - `pinCallers` is the sync's own function, imported rather than re-implemented, so the
+//     comparison cannot drift from what the sync actually wrote, and every other byte must match.
+export const SYNCED_CALLER = /^\.github\/workflows\/flow-[^/]+\.ya?ml$/;
+export const RELEASE_TAG_REF = /^v\d+(?:\.\d+){0,2}$/;
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const usesRefPattern = (ownerRepo) => new RegExp(
+  `^[ \\t]*(?:-[ \\t]+)?uses:[ \\t]*["']?${escapeRe(ownerRepo)}` +
+  `\\/\\.github\\/workflows\\/_flow-[^\\s"'#@/]+\\.ya?ml@([^\\s"'#]+)`);
+
+/** `owner/repo` of a `https://github.com/<owner>/<repo>(.git)` url, or null. */
+export function ownerRepoOf(repoUrl) {
+  const m = String(repoUrl).match(/^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+?)(?:\.git)?$/);
+  return m ? m[1] : null;
+}
+
+/** The distinct refs `text` pins on its live `uses:` lines naming `ownerRepo`'s reusables. */
+export function canonicalPinRefs(text, ownerRepo = DEFAULT_CANONICAL_REPO) {
+  const pattern = usesRefPattern(ownerRepo);
+  const refs = new Set();
+  for (const line of String(text).split("\n")) {
+    const m = line.match(pattern);
+    if (m) refs.add(m[1]);
+  }
+  return [...refs];
+}
+
+/**
+ * Does canonical's tag `ref` peel to `sha`? `git ls-remote` against the same url the trailer's
+ * commit was fetched from. A peeled `^{}` line (an annotated tag) wins over the tag object's own
+ * line. Any failure, or no such tag, is `false`.
+ */
+export function tagPeelsTo(git, repoUrl, ref, sha) {
+  if (!RELEASE_TAG_REF.test(ref)) return false;
+  let out;
+  try { out = git(["ls-remote", "--tags", repoUrl, `refs/tags/${ref}`, `refs/tags/${ref}^{}`]); }
+  catch { return false; }
+  const byName = new Map();
+  for (const line of String(out ?? "").split("\n")) {
+    const [obj, name] = line.trim().split(/\s+/);
+    if (obj && name) byName.set(name, obj);
+  }
+  const target = byName.get(`refs/tags/${ref}^{}`) ?? byName.get(`refs/tags/${ref}`);
+  return target === sha;
+}
+
+// Is this changed file canonical's file, allowing for the one rewrite the sync itself applies?
+// `refMatches(ref)` is the proof that `ref` is the release the sync adopted from; without it, no
+// rewrite is tolerated.
+export function sameSyncedCaller(path, here, there,
+  { ownerRepo = DEFAULT_CANONICAL_REPO, refMatches = () => false } = {}) {
+  if (sameSyncedFile(path, here, there)) return true;
+  if (!ownerRepo || !SYNCED_CALLER.test(path) || here === null || there === null) return false;
+  const refs = canonicalPinRefs(here, ownerRepo);
+  if (refs.length !== 1 || !RELEASE_TAG_REF.test(refs[0])) return false;
+  let repinned;
+  try { repinned = pinCallers(there, refs[0]); } catch { return false; }
+  return here === repinned && refMatches(refs[0]) === true;
+}
+
 // Every distinct `Canonical-SHA:` trailer on the commits this PR adds, read with git's own
 // trailer formatter — exactly as `_flow-sync.yml` reads it back, so nothing here parses a commit
 // message by hand. More than one is not an ambiguity to resolve by picking: a sync branch is
@@ -815,8 +895,9 @@ export function canonicalShaTrailers(git, baseRef = "origin/main", head = "HEAD"
   return [...new Set(String(out ?? "").split("\n").map((s) => s.trim()).filter(Boolean))];
 }
 
-// THE ONLY NETWORK CALL IN THIS FILE, and it is reached only from a `flow-sync/` branch whose
-// paths have already passed `classifyPr`. Every other PR — ordinary, or `release/*` — plans with
+// THE ONLY NETWORK CALLS IN THIS FILE (the fetch below, and flow-0195's `git ls-remote` for a
+// repinned caller), reached only from a `flow-sync/` branch whose paths have already passed
+// `classifyPr`. Every other PR — ordinary, or `release/*` — plans with
 // exactly the two diffs it always did. That bound is worth keeping deliberately: this gate runs
 // on every PR in every adopting repo, so a fetch on the ordinary path would be a per-PR cost and
 // a per-PR dependency on github.com being reachable.
@@ -878,12 +959,21 @@ export function syncProvenance({
       sha);
   }
 
+  // flow-0195: a repinned caller is accepted only when its ref is canonical's release tag for the
+  // very commit the trailer names. Asked at most once per ref, and only when a caller needs it.
+  const ownerRepo = ownerRepoOf(repoUrl);
+  const tagChecks = new Map();
+  const refMatches = (ref) => {
+    if (!tagChecks.has(ref)) tagChecks.set(ref, tagPeelsTo(git, repoUrl, ref, sha));
+    return tagChecks.get(ref);
+  };
+
   const mismatched = [];
   for (const path of files) {
     const canonicalPath = canonicalPathFor(path);
     const here = blobAtRef(git, "HEAD", path);
     const there = blobAtRef(git, sha, canonicalPath);
-    if (sameSyncedFile(path, here, there)) continue;
+    if (sameSyncedCaller(path, here, there, { ownerRepo, refMatches })) continue;
     mismatched.push({
       path,
       canonicalPath,
