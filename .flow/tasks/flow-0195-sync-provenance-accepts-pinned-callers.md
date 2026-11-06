@@ -1,7 +1,7 @@
 ---
 id: "flow-0195"
 title: "A flow-sync PR adopted from an explicit release tag is still recognised as a sync PR: provenance accepts the caller pins flow-0158 rewrites"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "session_01NfrcU9iRVh8RVpDF6wsSzV"
