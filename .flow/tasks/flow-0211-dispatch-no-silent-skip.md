@@ -1,21 +1,23 @@
 ---
 id: "flow-0211"
 title: "When a ready task cannot be started because its model tier has no routine, the owner is told once, in an issue, instead of every run skipping green"
-status: "blocked"
+status: "in_progress"
 priority: 1
 project: "flow"
 owner: "session_01NfrcU9iRVh8RVpDF6wsSzV"
 created: "2026-11-04"
-started: "2026-11-06T02:36:41Z"
+started: "2026-11-06T10:26:47Z"
 branch: ""
 pr: ""
 issue: "https://github.com/CandidDan/flow/issues/289"
-blocked_reason: "Out of touches: _flow-dispatch.yml can only use issues: write if the CALLER grants it, and both callers (.github/workflows/flow-dispatch.yml, project-template/.github/workflows/flow-dispatch.yml) grant contents: read only and are not in touches. flow-dispatch-workflow.test.mjs also pins both callers and the reusable to exactly contents: read. Waiting on a human decision to widen touches - not machine-checkable."
+blocked_reason: ""
 cancelled_reason: ""
 blocked_by: []
 serves: ["G10"]
 intent: "model-work-off-github-actions"
 touches:
+  - ".github/workflows/flow-dispatch.yml"
+  - "project-template/.github/workflows/flow-dispatch.yml"
   - "project-template/.flow/bin/flow-dispatch.mjs"
   - "project-template/.flow/bin/flow-dispatch.test.mjs"
   - ".github/workflows/_flow-dispatch.yml"
@@ -28,9 +30,9 @@ model: "opus"
 effort: "high"
 model_reason: "Changes a reusable workflow every adopter runs hourly, and gives it write access to issues"
 notes:
+  - "2026-11-06 (Dan, decision card): CALLERS GRANT, REUSABLE INHERITS. Both flow-dispatch callers are now in touches and grant issues: write (beside contents: read) on their flow-dispatch job. _flow-dispatch.yml drops its top-level permissions block and inherits the caller's grant; it never requests issues: write itself, because that would fail the whole run in any repo whose caller has not synced. Issue calls that get a 403 degrade to a job-summary line, exit 0. Criterion 7 is restated in the body to match."
   - "2026-11-06 (worker session_01NfrcU9iRVh8RVpDF6wsSzV): BLOCKED before branching, no code pushed. Same hazard as flow-0120: a called workflow cannot exceed its caller's grant, and a reusable that REQUESTS issues: write from a caller granting only contents: read is a startup failure of the whole run. Design notes for the next worker once unblocked: issue calls go through fetchImpl with GITHUB_TOKEN + GITHUB_REPOSITORY; find the tier's issue by label flow-dispatch plus a hidden body marker naming the tier; list ready tasks per tier with resolveModel over readTasks; a 403 or any issue-call failure writes a line to GITHUB_STEP_SUMMARY and keeps exit 0."
-asks:
-  - "decision: widen touches to both flow-dispatch callers, and should the reusable REQUEST issues: write or INHERIT it? Requesting it breaks every repo on @v4 that has not synced its caller, at the next alias move (canonical, pinned @main, the moment this merges unless its caller changes in the same PR). Recommend: add both callers to touches and grant issues: write on their flow-dispatch job; drop the reusable's top-level permissions block so it inherits the caller's grant (a top-level contents: read there would downgrade issues to none); the issue calls degrade to a job-summary line on 403. Un-synced repos then lose only the issue, never the dispatch. Decide together with flow-0120, which asks the same question."
+asks: []
 ---
 
 ## Context
@@ -93,9 +95,10 @@ which cannot see secrets, so it cannot tell whether a routine is configured).
       appear in any request.
 - [ ] If the GitHub issue calls fail, then dispatch still exits 0 for this skip, and the job
       summary says the issue could not be written. Proved by `flow-dispatch.test.mjs`.
-- [ ] Given `_flow-dispatch.yml`, then it grants `issues: write` and no other new permission.
-      Proved by `.flow/bin/flow-dispatch-workflow.test.mjs` and
-      `.flow/bin/actions-write-scope.test.mjs`.
+- [ ] Given both `flow-dispatch` callers, then each grants exactly `contents: read` and
+      `issues: write` at job scope, and `_flow-dispatch.yml` declares no `permissions:` of its own
+      (it inherits the caller's grant). Proved by `.flow/bin/flow-dispatch-workflow.test.mjs` and
+      `.flow/bin/actions-write-scope.test.mjs`. (Restated 2026-11-06 by Dan's decision.)
 - [ ] `changes/flow-0211.md` exists and states its caller action. Proved by
       `.flow/bin/changelog-fragments.test.mjs :: every claimed task that declares a changelog fragment has an entry stating its caller action`.
 
