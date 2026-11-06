@@ -244,7 +244,8 @@ function githubIssues(env, fetchImpl) {
     return res.status === 204 ? null : res.json();
   };
   return {
-    listOpen: () => call("GET", `/issues?state=open&labels=${ISSUE_LABEL}&per_page=100`),
+    listLabelled: () => call("GET", `/issues?state=open&labels=${ISSUE_LABEL}&per_page=100`),
+    listRecent: () => call("GET", "/issues?state=open&sort=created&direction=desc&per_page=100"),
     create: (title, body) => call("POST", "/issues", { title, body, labels: [ISSUE_LABEL] }),
     update: (number, title, body) => call("PATCH", `/issues/${number}`, { title, body }),
     comment: (number, body) => call("POST", `/issues/${number}/comments`, { body }),
@@ -252,11 +253,15 @@ function githubIssues(env, fetchImpl) {
   };
 }
 
+// The body marker, not the label, is what identifies a tier's issue. The label query comes first
+// because it is the cheap, exact one; the newest open issues are read as well when it finds
+// nothing, because GitHub silently drops labels a token may not set, and an issue that lost its
+// label must still be found, or every run would open another one.
 async function findTierIssue(github, tier) {
-  const open = await github.listOpen();
-  return (Array.isArray(open) ? open : [])
+  const pick = (list) => (Array.isArray(list) ? list : [])
     .filter((i) => !i.pull_request && String(i.body ?? "").includes(issueMarker(tier)))
     .sort((a, b) => a.number - b.number)[0] ?? null;
+  return pick(await github.listLabelled()) ?? pick(await github.listRecent());
 }
 
 /** Make sure exactly one open issue names this tier, carrying the current ids. */

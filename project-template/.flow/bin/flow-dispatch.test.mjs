@@ -447,8 +447,11 @@ function fakeGitHub({ fail = false, issues = [] } = {}) {
     state.requests.push({ url, method: init.method, headers: init.headers, body });
     if (fail) return json(403, { message: "Resource not accessible by integration" });
     const path = url.replace(`https://api.github.com/repos/${GH_REPO}`, "");
-    if (init.method === "GET" && path.startsWith("/issues?")) {
+    if (init.method === "GET" && path.startsWith("/issues?state=open&labels=flow-dispatch")) {
       return json(200, state.issues.filter((i) => i.state === "open" && i.labels.includes("flow-dispatch")));
+    }
+    if (init.method === "GET" && path.startsWith("/issues?state=open&sort=created")) {
+      return json(200, state.issues.filter((i) => i.state === "open").reverse());
     }
     if (init.method === "POST" && path === "/issues") {
       const issue = { number: state.next++, state: "open", title: body.title, body: body.body,
@@ -554,12 +557,12 @@ test("flow-0211: an open sonnet issue is closed with a comment when a run fires 
   assert.equal(gh.state.issues.find((i) => i.number === 9).state, "open", "a pull request is never touched");
   assert.match(readFileSync(summaryFile, "utf8"), /Closed the sonnet no-routine issue/);
 
-  // Firing with no issue open makes no write at all.
+  // Firing with no issue open makes no write at all: two reads, nothing else.
   const before = gh.state.requests.length;
   writeFileSync(join(tasksDir, "p-1.md"), task("P-1", { status: "in_progress" }));
   writeFileSync(join(tasksDir, "p-2.md"), task("P-2"));
   await runWithGitHub(tasksDir, gh, { tiers: { sonnet: "trig_sonnet" } });
-  assert.deepEqual(gh.state.requests.slice(before).map((q) => q.method), ["GET"]);
+  assert.deepEqual(gh.state.requests.slice(before).map((q) => q.method), ["GET", "GET"]);
 });
 
 test("flow-0211: at-capacity, nothing-ready and no-longer-ready skips open or change no issue", async (t) => {
@@ -652,6 +655,23 @@ test("flow-0211: GITHUB_API_URL is honoured, for GitHub Enterprise", async (t) =
   });
   assert.deepEqual(urls, [
     `GET https://ghe.example.com/api/v3/repos/${GH_REPO}/issues?state=open&labels=flow-dispatch&per_page=100`,
+    `GET https://ghe.example.com/api/v3/repos/${GH_REPO}/issues?state=open&sort=created&direction=desc&per_page=100`,
     `POST https://ghe.example.com/api/v3/repos/${GH_REPO}/issues`,
   ]);
+});
+
+test("flow-0211: an issue whose label was dropped is still found by its marker, so no second issue is opened", async (t) => {
+  const { tasksDir } = store(t, { "p-1.md": task("P-1") });
+  // GitHub drops labels a token may not set: the issue exists, unlabelled.
+  const gh = fakeGitHub({ issues: [
+    { number: 5, state: "open", title: "old", body: "<!-- flow-dispatch:no-routine:sonnet -->\nold", labels: [], comments: [] },
+  ] });
+  await runWithGitHub(tasksDir, gh);
+  assert.equal(gh.state.issues.length, 1, "found by marker, not re-opened");
+  assert.match(gh.state.issues[0].body, /`P-1`/, "and updated in place");
+  assert.deepEqual(gh.state.requests.map((q) => q.method), ["GET", "GET", "PATCH"]);
+
+  // Firing then closes it the same way.
+  await runWithGitHub(tasksDir, gh, { tiers: { sonnet: "trig_sonnet" } });
+  assert.equal(gh.state.issues[0].state, "closed");
 });
