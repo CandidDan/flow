@@ -100,3 +100,26 @@ test("actions: read and unrelated writes do not fail", { skip }, () => {
   const y = "name: x\non: push\npermissions:\n  contents: write\njobs:\n  a:\n    permissions:\n      actions: read\n";
   assert.deepEqual(checkFiles({ "_flow-x.yml": y }), []);
 });
+
+// ── flow-0211: the flow-dispatch callers grant issues: write, and the reusable inherits it ──
+//
+// `issues: write` is not `actions: write`, so it does not belong in ALLOWLIST. What this pins is the
+// other half of flow-0211's decision: the grant lives on the CALLERS (canonical's and the
+// template's), and `_flow-dispatch.yml` asks for nothing, because a reusable that requests more than
+// its caller grants fails the whole run in every repo whose caller has not been synced.
+const TEMPLATE_WORKFLOWS = join(ROOT, "project-template", ".github", "workflows");
+
+test("flow-0211: both flow-dispatch callers grant issues: write and no actions: write; the reusable declares no permissions", { skip }, () => {
+  for (const file of [join(WORKFLOWS, "flow-dispatch.yml"), join(TEMPLATE_WORKFLOWS, "flow-dispatch.yml")]) {
+    const doc = parseYaml(readFileSync(file, "utf8"));
+    const job = doc.jobs?.["flow-dispatch"];
+    assert.ok(job, `${file}: no flow-dispatch job`);
+    assert.deepEqual(job.permissions, { contents: "read", issues: "write" }, file);
+    assert.deepEqual(findGrants(doc), [], `${file} must not grant actions: write`);
+  }
+  const reusable = parseYaml(readFileSync(join(WORKFLOWS, "_flow-dispatch.yml"), "utf8"));
+  assert.equal(reusable.permissions, undefined, "_flow-dispatch.yml must inherit, not request");
+  for (const [id, job] of Object.entries(reusable.jobs ?? {})) {
+    assert.equal(job.permissions, undefined, `_flow-dispatch.yml job ${id} must inherit, not request`);
+  }
+});
