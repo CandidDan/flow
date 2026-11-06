@@ -55,6 +55,8 @@ import {
   sameSyncedFile,
   sameSyncedCaller,
   canonicalPinRefs,
+  ownerRepoOf,
+  RELEASE_TAG_REF,
   SYNCED_CALLER,
   syncProvenance,
   classifyPr,
@@ -1942,7 +1944,7 @@ const CANON_SHA = "a".repeat(39) + "7";
 // and `canon` is canonical's tree at CANON_SHA, keyed by canonical path. `calls` is handed in by
 // a test that needs to assert what git was asked to do — specifically, that no fetch happened.
 function fakeGit({ files = [], deleted = [], diff = "", tree = {}, trailers = null, canon = {},
-                   fetchFails = false, calls = [] } = {}) {
+                   fetchFails = false, calls = [], tags = null } = {}) {
   const TRAILER_LOG = `log --format=%(trailers:key=${CANONICAL_SHA_TRAILER},valueonly) origin/main..HEAD`;
   return (args) => {
     const cmd = args.join(" ");
@@ -1959,6 +1961,21 @@ function fakeGit({ files = [], deleted = [], diff = "", tree = {}, trailers = nu
     if (args[0] === "fetch") {
       if (fetchFails) throw new Error("fatal: could not read from remote repository");
       return "";
+    }
+    if (args[0] === "ls-remote") {
+      // `tags` maps a tag name to the commit it peels to, or to { tag, commit } for an annotated
+      // tag. null: the remote cannot be reached.
+      if (tags === null) throw new Error("fatal: unable to access remote");
+      const out = [];
+      for (const want of args.slice(3)) {
+        const peeled = want.endsWith("^{}");
+        const name = want.replace(/^refs\/tags\//, "").replace(/\^\{\}$/, "");
+        const t = tags[name];
+        if (t === undefined) continue;
+        if (typeof t === "string" && !peeled) out.push(`${t}\trefs/tags/${name}`);
+        if (typeof t === "object") out.push(peeled ? `${t.commit}\t${want}` : `${t.tag}\trefs/tags/${name}`);
+      }
+      return out.join("\n");
     }
     if (args[0] === "show" && String(args[1]).startsWith(`${CANON_SHA}:`)) {
       const path = String(args[1]).slice(CANON_SHA.length + 1);
@@ -2342,12 +2359,16 @@ const CANON_CALLER = [
 ].join("\n");
 const repin = (text, ref) => text.split("@v4").join(`@${ref}`);
 
-function callerProvenance(here, path = CALLER_PATH, there = CANON_CALLER) {
+// By default canonical's v4.1.0 tag peels to exactly the commit the trailer names.
+function callerProvenance(here, path = CALLER_PATH, there = CANON_CALLER,
+                          { tags = { "v4.1.0": CANON_SHA }, calls = [] } = {}) {
   return syncProvenance({
     git: fakeGit({
       tree: { [path]: here },
       canon: { [canonicalPathFor(path)]: there },
       trailers: [CANON_SHA],
+      tags,
+      calls,
     }),
     files: [path],
   });
@@ -2394,9 +2415,60 @@ test("flow-0195: two different pins, no pin, or another owner's reusable is a mi
   assert.equal(callerProvenance(allForeign).ok, false);
 
   // A ref pin-callers itself refuses is not one the sync could have written.
-  assert.equal(sameSyncedCaller(CALLER_PATH, repin(CANON_CALLER, "-x"), CANON_CALLER), false);
+  assert.equal(sameSyncedCaller(CALLER_PATH, repin(CANON_CALLER, "-x"), CANON_CALLER,
+    { refMatches: () => true }), false);
   // A commented-out `uses:` is not a pin.
   assert.deepEqual(canonicalPinRefs(`# uses: ${DEFAULT_CANONICAL_REPO}/.github/workflows/_flow-a.yml@v9`), []);
+});
+
+test("flow-0195: the repinned ref must be canonical's release tag for the trailer's commit", () => {
+  // The ref is read from the PR's own file, so on its own it proves nothing: a forged flow-sync/
+  // branch could repin every reusable to a ref it chose. It is accepted only when canonical's tag
+  // of that name peels to the Canonical-SHA commit the files were compared against.
+  const calls = [];
+  assert.equal(callerProvenance(repin(CANON_CALLER, "v4.1.0"), CALLER_PATH, CANON_CALLER, { calls }).ok, true);
+  assert.deepEqual(calls.filter((c) => c.startsWith("ls-remote")),
+    [`ls-remote --tags ${CANONICAL_REPO_URL} refs/tags/v4.1.0 refs/tags/v4.1.0^{}`],
+    "asked once, of the canonical url the trailer's commit came from");
+
+  // An annotated tag: the peeled line is the commit, and it is the one compared.
+  assert.equal(callerProvenance(repin(CANON_CALLER, "v4.1.0"), CALLER_PATH, CANON_CALLER,
+    { tags: { "v4.1.0": { tag: "c".repeat(40), commit: CANON_SHA } } }).ok, true);
+  assert.equal(callerProvenance(repin(CANON_CALLER, "v4.1.0"), CALLER_PATH, CANON_CALLER,
+    { tags: { "v4.1.0": { tag: CANON_SHA, commit: "c".repeat(40) } } }).ok, false,
+    "the tag object's own id matching is not enough; the commit it peels to must");
+
+  // A tag-shaped ref that resolves to another commit.
+  assert.equal(callerProvenance(repin(CANON_CALLER, "v4.1.0"), CALLER_PATH, CANON_CALLER,
+    { tags: { "v4.1.0": "b".repeat(40) } }).ok, false);
+  // A tag canonical does not have, and a remote that cannot be asked.
+  assert.equal(callerProvenance(repin(CANON_CALLER, "v4.1.0"), CALLER_PATH, CANON_CALLER, { tags: {} }).ok, false);
+  assert.equal(callerProvenance(repin(CANON_CALLER, "v4.1.0"), CALLER_PATH, CANON_CALLER, { tags: null }).ok, false);
+
+  // A 40-hex commit (which GitHub would resolve even from a fork) and a branch name are never
+  // release tags, so they are refused without asking the remote at all.
+  for (const ref of [CANON_SHA, "main", "flow-sync/v4.1.0", "v4.1.0-rc1", "refs/tags/v4.1.0"]) {
+    const forged = [];
+    const res = callerProvenance(repin(CANON_CALLER, ref), CALLER_PATH, CANON_CALLER,
+      { tags: { [ref]: CANON_SHA }, calls: forged });
+    assert.equal(res.ok, false, `${ref} must not be accepted as a repin`);
+    assert.deepEqual(forged.filter((c) => c.startsWith("ls-remote")), [], `${ref}: no remote call`);
+  }
+  assert.equal(RELEASE_TAG_REF.test("v4"), true);
+  assert.equal(RELEASE_TAG_REF.test("v4.1"), true);
+  assert.equal(RELEASE_TAG_REF.test("v4.1.0"), true);
+
+  // Without a proof function, sameSyncedCaller tolerates no rewrite at all.
+  assert.equal(sameSyncedCaller(CALLER_PATH, repin(CANON_CALLER, "v4.1.0"), CANON_CALLER), false);
+  assert.equal(sameSyncedCaller(CALLER_PATH, repin(CANON_CALLER, "v4.1.0"), CANON_CALLER,
+    { refMatches: () => true }), true);
+
+  // The owner the tolerance accepts is the one the fetch used, and an unparseable url gets none.
+  assert.equal(ownerRepoOf(CANONICAL_REPO_URL), DEFAULT_CANONICAL_REPO);
+  assert.equal(ownerRepoOf("https://github.com/acme/flow-release"), "acme/flow-release");
+  assert.equal(ownerRepoOf("file:///tmp/canon"), null);
+  assert.equal(sameSyncedCaller(CALLER_PATH, repin(CANON_CALLER, "v4.1.0"), CANON_CALLER,
+    { ownerRepo: null, refMatches: () => true }), false);
 });
 
 test("flow-0195: outside `.github/workflows/flow-*.yml` there is no pin tolerance", () => {
