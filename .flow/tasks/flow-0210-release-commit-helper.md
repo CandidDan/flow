@@ -1,7 +1,7 @@
 ---
 id: "flow-0210"
 title: "A repo can ask Flow which commit to release when the newest commit on main is a Flow state commit that was never built"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "session_01NfrcU9iRVh8RVpDF6wsSzV"
