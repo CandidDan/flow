@@ -132,7 +132,10 @@ directly from an issue — if it isn't a `ready` task in `.flow/tasks/`, it isn'
 `.flow/bin/only-flow-changed.mjs` (or an equivalent that keeps its contract: exit 0 skips, exit 1
 builds, diff from the last deployed commit, never exit 0 on an error). Any doubt builds. Hand-written
 skip commands in a host dashboard are discouraged: they live outside git and drift. Wiring the hook
-is the adopting repo's, not Flow's; the recipe is in the helper's header.
+is the adopting repo's, not Flow's; the recipe is in the helper's header. **A Flow state commit is
+never a release target.** To release, take the commit that passed the gate and release the commit
+`node .flow/bin/deployable-sha.mjs --head <that commit>` prints: the nearest commit that was built,
+and the same code. It exits 1 with nothing printed when it is not sure, and then you do not release.
 
 ## Status lifecycle
 
