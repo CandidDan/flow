@@ -118,11 +118,24 @@ export function checkDispatchWorkflows({ reusable, caller, wantRef }, yaml) {
     }
   }
 
-  // Least privilege: the job reads the repo and nothing else.
-  const perms = JSON.stringify(r.permissions ?? {});
-  if (perms !== JSON.stringify({ contents: "read" })) problems.push(`reusable: permissions must be exactly contents: read, got ${perms}`);
-  if (JSON.stringify(job.permissions ?? {}) !== JSON.stringify({ contents: "read" })) {
-    problems.push("caller: permissions must be exactly contents: read");
+  // Least privilege (flow-0211): the CALLER grants exactly contents: read + issues: write at job
+  // scope, and the reusable declares no permissions at all, so it inherits that grant. A reusable
+  // that REQUESTED issues: write would fail the whole run in every repo whose caller is older.
+  if (r.permissions !== undefined) {
+    problems.push(`reusable: must declare no top-level permissions (it inherits the caller's), got ${JSON.stringify(r.permissions)}`);
+  }
+  for (const [id, j] of Object.entries(r.jobs ?? {})) {
+    if (j.permissions !== undefined) problems.push(`reusable: job ${id} must declare no permissions, got ${JSON.stringify(j.permissions)}`);
+  }
+  if (JSON.stringify(job.permissions ?? {}) !== JSON.stringify({ contents: "read", issues: "write" })) {
+    problems.push(`caller: permissions must be exactly contents: read and issues: write, got ${JSON.stringify(job.permissions ?? {})}`);
+  }
+  if (c.permissions !== undefined) {
+    problems.push("caller: grant permissions at job scope only");
+  }
+  // The issue calls authenticate with the job's own token, passed through env, never a routine token.
+  if (fire?.env?.GITHUB_TOKEN !== "${{ github.token }}") {
+    problems.push("reusable: the dispatch step's env must map GITHUB_TOKEN from github.token");
   }
   return problems;
 }
@@ -153,11 +166,15 @@ test("the check fails on each mutation it exists to catch", { skip }, () => {
     ["caller", /    secrets:\n(      .*\n)+/, "    secrets: inherit\n", /secrets: inherit/],
     ["caller", "FLOW_ROUTINE_OPUS_TOKEN: ${{ secrets.FLOW_ROUTINE_OPUS_TOKEN }}", "FLOW_ROUTINE_OPUS_TOKEN: ${{ secrets.FLOW_PAT }}", /FLOW_ROUTINE_OPUS_TOKEN must be forwarded/],
     ["caller", "contents: read ", "contents: write ", /caller: permissions/],
+    ["caller", "      issues: write ", "      pull-requests: write ", /caller: permissions/],
+    ["caller", /      issues: write .*\n/, "", /caller: permissions/],
     ["reusable", "node .flow/bin/flow-dispatch.mjs\n",
       'curl -H "Authorization: Bearer ${{ secrets.FLOW_ROUTINE_SONNET_TOKEN }}" x\n          node .flow/bin/flow-dispatch.mjs\n', /interpolates a secret into run/],
     ["reusable", "FLOW_ROUTINE_FABLE_TOKEN: ${{ secrets.FLOW_ROUTINE_FABLE_TOKEN }}", "FLOW_ROUTINE_FABLE_TOKEN: ${{ inputs.fable_routine_id }}", /must map FLOW_ROUTINE_FABLE_TOKEN/],
     ["reusable", "      FLOW_ROUTINE_HAIKU_TOKEN:\n        required: false\n", "", /does not declare FLOW_ROUTINE_HAIKU_TOKEN/],
-    ["reusable", "contents: read           # the checkout", "contents: write          # the checkout", /reusable: permissions/],
+    ["reusable", "\njobs:\n", "\npermissions:\n  contents: read\n  issues: write\n\njobs:\n", /must declare no top-level permissions/],
+    ["reusable", "    runs-on: ${{ inputs.runner }}\n", "    runs-on: ${{ inputs.runner }}\n    permissions:\n      issues: write\n", /job dispatch must declare no permissions/],
+    ["reusable", "GITHUB_TOKEN: ${{ github.token }}", "GITHUB_TOKEN: ${{ secrets.FLOW_ROUTINE_SONNET_TOKEN }}", /GITHUB_TOKEN from github.token/],
   ];
   for (const [which, from, to, expect] of mutations) {
     const mutated = { ...base, [which]: base[which].replace(from, to) };

@@ -24,8 +24,15 @@ name: _flow-dispatch (reusable)
 # Credentials. The four routine tokens arrive as named secrets and reach the helper only through
 # the step's `env:` — never interpolated into `run:`, where they would be part of the script text.
 # The trigger ids are not secret and arrive as inputs (the caller reads them from repo variables).
-# GITHUB_TOKEN needs `contents: read` only: the checkout, and the `git fetch` that re-reads the task
-# from main just before firing.
+#
+# Permissions (flow-0211). This file declares NO `permissions:` block: it inherits whatever the
+# caller grants. The caller grants `contents: read` (the checkout, and the `git fetch` that re-reads
+# the task from main before firing) and `issues: write` (the one open issue per tier that says a
+# ready task is waiting on a routine nobody set up). It must not REQUEST `issues: write` itself: a
+# called workflow that asks for more than its caller grants fails the whole run before any step
+# starts, and every repo whose caller has not been synced would lose dispatch entirely at the next
+# alias move. Inheriting means such a repo gets a 403 on the issue call, a job-summary line, and a
+# green run. A top-level `contents: read` here would also be wrong: it would cut `issues` to none.
 
 on:
   workflow_call:
@@ -65,9 +72,6 @@ on:
       FLOW_ROUTINE_FABLE_TOKEN:
         required: false
 
-permissions:
-  contents: read           # the checkout, and the re-read of the task from main
-
 jobs:
   dispatch:
     runs-on: ${{ inputs.runner }}
@@ -85,6 +89,8 @@ jobs:
 
       - name: Fire the worker routine for the next ready task
         env:
+          # The job's own token, for the no-routine issue (flow-0211). Never a routine token.
+          GITHUB_TOKEN: ${{ github.token }}
           FLOW_ROUTINE_HAIKU_ID: ${{ inputs.haiku_routine_id }}
           FLOW_ROUTINE_HAIKU_TOKEN: ${{ secrets.FLOW_ROUTINE_HAIKU_TOKEN }}
           FLOW_ROUTINE_SONNET_ID: ${{ inputs.sonnet_routine_id }}

@@ -106,7 +106,7 @@ count in_progress ─► at cap? ─yes─► skipped reason=at-capacity
       │ no
 pick-task ─► nothing? ─yes─► skipped reason=nothing-ready
       │
-task-model tier ─► routine set? ─no─► skipped reason=no-routine-for-<tier>   (exit 0)
+task-model tier ─► routine set? ─no─► skipped reason=no-routine-for-<tier>   (exit 0, one issue per tier)
       │
 re-read task on main ─► still ready? ─no─► skipped reason=no-longer-ready
       │
@@ -128,6 +128,20 @@ fans out, and the cap is what ends it. The run's log has exactly one
 `<TIER>` is `HAIKU`, `SONNET`, `OPUS` or `FABLE`. A tier with no variable or no secret is skipped
 with a visible line and a green run, so set up only the tiers your tasks use. The token reaches the
 job only through `secrets:` and a step's `env:`, and the helper never prints it.
+
+**The "Flow cannot start … tasks" issue** (flow-0211). When a run skips with
+`no-routine-for-<tier>`, it also makes sure one open issue, labelled `flow-dispatch`, says so. Its
+title names the tier, for example "Flow cannot start sonnet tasks: no routine is configured for the
+sonnet tier". Its body lists the ready tasks on that tier and the two settings that are missing, by
+name only. Later runs update that issue instead of opening another, so there is one per tier. The
+issue means: a ready task is waiting, and nothing will start it until you set up that tier's
+routine as above. You do not need to close it. The first run that fires that tier's routine closes
+it with a comment.
+
+The caller grants `issues: write` for this, and `_flow-dispatch.yml` inherits it rather than asking
+for it, so a repo whose caller has not been synced yet still dispatches. Its issue call gets a 403,
+the run stays green, and the job summary says the issue could not be written. The other skips
+(`at-capacity`, `nothing-ready`, `no-longer-ready`) are normal and write no issue.
 
 The task's `model:` only chooses which trigger is fired. The model that runs is the one that tier's
 routine was created with, so create each routine on its own tier's model.
