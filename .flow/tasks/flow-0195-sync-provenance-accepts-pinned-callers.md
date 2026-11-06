@@ -1,14 +1,14 @@
 ---
 id: "flow-0195"
 title: "A flow-sync PR adopted from an explicit release tag is still recognised as a sync PR: provenance accepts the caller pins flow-0158 rewrites"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "session_01NfrcU9iRVh8RVpDF6wsSzV"
 created: "2026-11-03"
 started: "2026-11-06T02:36:41Z"
-branch: ""
-pr: ""
+branch: "claude/project-thread-f0zs28"
+pr: "https://github.com/CandidDan/flow/pull/294"
 issue: ""
 blocked_reason: ""
 blocked_by: []
