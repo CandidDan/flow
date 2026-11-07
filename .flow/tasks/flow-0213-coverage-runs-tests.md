@@ -1,7 +1,7 @@
 ---
 id: "flow-0213"
 title: "A repo whose coverage command already runs every test can tell the gate not to run the tests a second time"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "session_01NfrcUA1iK1VWSMA6KY1Hmm"
