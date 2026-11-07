@@ -6,6 +6,165 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 4.2.0 — 2026-11-07
+
+**MINOR: a repo whose coverage command already runs every test can stop the gate running them
+twice, plus eleven other fixes and additions since 4.1.0.** Set `coverage_runs_tests: true` in
+`.flow/config.yml` and the gate skips its separate Test step (flow-0213); in mapd that saves about
+16 billed minutes per gate run. Also: sync PRs from an explicit tag are recognised again
+(flow-0195), flow-sync keeps a caller's own `with:` inputs (flow-0197), flow-dispatch's CLI test uses its own fixture store (flow-0198), a fixed qa verdict on
+task-less PRs (flow-0199), the optional `intake:` config block (flow-0200), plain-English PR
+openings (flow-0206), the `haiku` tier on Haiku 5.5 (flow-0208), intents approved by their own
+merge (flow-0209), `deployable-sha.mjs` (flow-0210), an issue when ready tasks wait on a tier with
+no routine (flow-0211), and full `flow-state --json` output when piped (flow-0212).
+**Caller action:** none. Every entry below says no caller action is required.
+
+- **A sync PR adopted from an explicit release tag is recognised as a sync PR again**
+  (`project-template/.flow/bin/flow-review.mjs`, flow-0195). **No caller action.**
+
+  Since flow-0158 a sync dispatched with `canonical_ref=v4.1.0` repins every copied caller's
+  reusable `uses:` lines to `@v4.1.0`, while canonical's template reads `@v4`. The review gate's
+  provenance check compared callers byte for byte, so it refused those PRs the sync
+  classification, reviewed them in full as task-less PRs, and qa failed them (the 4.1.0 rollout
+  PRs in five repos). The check now compares a changed `.github/workflows/flow-*.yml` with
+  canonical's copy after applying the same `pin-callers` rewrite, using the one ref the repo's copy
+  pins on canonical's reusables. That ref must be a release tag (`v4`, `v4.1`, `v4.1.0`) and
+  canonical's tag of that name must point at the exact commit the PR's `Canonical-SHA:` trailer
+  names, checked with `git ls-remote`; a commit sha or branch name is never accepted. A copy that
+  pins two refs or none, names another owner's reusable, or differs in any other byte is still a
+  mismatch. Every other path is still compared
+  byte for byte. The comment in `flow-sync.yml` now says that a dispatched ref also repins the
+  copied callers, so later scheduled syncs follow that ref until it is changed back.
+
+- **flow-sync keeps a caller's own `with:` inputs when it copies canonical's caller over it**
+  (`.github/workflows/_flow-sync.yml`, `project-template/.flow/bin/flow-sync.mjs`, flow-0197).
+  **No caller action.**
+
+  A caller was kept untouched only when it declared a job canonical's template does not; a caller
+  that differed in a `with:` input was overwritten and lost the input. CandidDan/mapd#52 (the 4.1.0
+  sync) dropped mapd's `setup_node_version: "24.22.1"`, a pin to a Node security release. The copy
+  loop now runs the new `flow-sync.mjs carry-inputs` on every copied caller, after `pin-callers`:
+  every `with:` key the repo's previous copy set on a Flow-reusable job is carried into the new copy
+  of the same job with the repo's value, together with its trailing comment and the comment lines
+  directly above it. A key only canonical sets is kept from canonical. The sync PR body lists each
+  carried input under **Kept inputs**. Nothing outside `with:` is carried, and the kept-jobs rule
+  is unchanged.
+
+- **flow-dispatch's CLI test runs against its own fixture store** (`project-template/.flow/bin/flow-dispatch.mjs`, `project-template/.flow/bin/flow-dispatch.test.mjs`, flow-0198). **No caller action** — the CLI gains an optional `FLOW_DISPATCH_FLOW_DIR` override, used by the test so a malformed task in an adopting repo's own `.flow/tasks/` can no longer fail it. Without the variable the CLI reads `.flow/` exactly as before.
+
+- **The qa check gives one fixed verdict on a PR with no task** (`project-template/.flow/bin/flow-review.mjs`,
+  `.github/workflows/_flow-review.yml`, flow-0199). **No caller action** — it arrives with the next
+  tag through the reusable workflow, and through flow-sync for the copied helper.
+
+  When `task.md` begins `NO TASK FILE RESOLVED`, it now ends with the qa verdict decided in code from
+  the changed files. Every file on a closed documentation list (`VISION.md`, `docs/**/*.md`,
+  `.flow/intents/*.md`, `.flow/workstreams/*.md`, excluding `_`-prefixed files) → PASS with exactly
+  `no task: documentation only, no executable behaviour to test`; any other file, or an empty diff →
+  FAIL naming the files off the list. The qa prompt now tells the reviewer to follow that verdict.
+  Before, the prompt named no verdict for this sentinel and the model chose: canonical PR #277
+  passed qa on four commits and failed it on three.
+
+- **An optional `intake:` block in the config template, read by one parser that trusts no labeler
+  by default** (`project-template/.flow/config.yml`, `.flow/bin/intake-config.mjs`, flow-0200).
+  **No caller action** — the block is optional and every default is the restrictive one.
+
+  ADR-0010 §6's settings for the intake lanes: `trusted_labelers` (whose `flow:trusted` label is
+  believed), `classifier_model` (the size classifier's tier) and `trivial.max_changed_lines` (the
+  diff-size ceiling for an `intake: auto` PR, counted as additions plus deletions). The later
+  intake checks all import `readIntakeConfig`, so the defaults live in one place: no block, an
+  empty list or any list the parser cannot read whole means **no labeler is trusted**;
+  `classifier_model` defaults to `"haiku"` and is returned as written; `max_changed_lines` is 20
+  unless set to a positive whole number. The template ships `trusted_labelers: []` — a repo that
+  adopts the intake lanes sets its own App's `<slug>[bot]` login. Nothing reads the block yet.
+
+- **A PR description now opens with the problem it fixes, in plain words**
+  (`project-template/.flow/PROTOCOL.md`, `project-template/.claude/skills/show-me/SKILL.md`,
+  flow-0206). **No caller action.**
+
+  The protocol already asked for plain English in PR descriptions, but workers still opened PRs
+  with internal names instead of the problem (flow-0197's PR is the example). **Response style**
+  now makes the TL;DR the description's first paragraph and requires that it says what was wrong
+  and what changes for whom, reads correctly without the code, has no backticks, file paths, task
+  ids or code names, and is at most 60 words. A second bad/good example shows the case. The show-me
+  skill's rule 6 points at it. A separate task adds the check that enforces it.
+
+- **The `haiku` tier now resolves to Haiku 5.5** (`project-template/.flow/bin/task-model.mjs`, flow-0208). `TIERS.haiku` was `claude-haiku-4-5-20251001` (Haiku 4.5) and is now `claude-haiku-5-5`, matching the other three tiers, which already name current models. **No caller action** is required to receive it: the next flow-sync delivers it. A task with `model: "haiku"` builds on Haiku 5.5 from then on. A routine an adopter created for the haiku tier names its model itself, so its owner should switch that routine to Haiku 5.5 by hand.
+
+- **Merging the PR that adds an intent now approves it, and intents already merged get their
+  approval from their own merge** (`project-template/.flow/bin/stamp-intents.mjs`,
+  `.github/workflows/_flow-done.yml`, flow-0209). **No caller action.**
+
+  flow-0127's stamp only fired for an intent whose PR had already set `status: "approved"`, and
+  every intent is written `proposed`, so it never stamped anything. Now, when a PR merges, each
+  intent file it **adds** gets `status: "approved"` (a `superseded` one keeps its status),
+  `approved_by` (the login that merged the PR) and `approved_at` (the merge time). Values the PR
+  typed into those fields are overwritten. An intent that already has an `approved_by` is never
+  stamped again.
+
+  **The first merge after syncing stamps every intent in the repo that is still unstamped,** using
+  the merge of the PR that added that file — its `merged_by` and `merged_at`, read from the GitHub
+  API — never the merge that happens to be running. An intent whose adding PR cannot be found (for
+  example, one committed straight to `main`) is left unstamped, and the flow-done log names it.
+
+  On a private repo, the PR lookup needs the caller's `flow-done` job to grant
+  `pull-requests: read` next to `contents: write`. Without it, the normal stamp still works and
+  every intent the repair could not look up is named in the log. `_flow-done.yml` does not ask for
+  that permission itself, because a reusable workflow that asks for more than its caller grants
+  fails before any step runs.
+
+- **New helper `deployable-sha.mjs` names the commit to release when the newest commit on `main`
+  is a Flow state commit that was never built** (`project-template/.flow/bin/deployable-sha.mjs`,
+  `project-template/.flow/bin/only-flow-changed.mjs`, `.flow/PROTOCOL.md`, flow-0210).
+  **No caller action.**
+
+  After each merge Flow writes a commit that changes only `.flow/` files, and `only-flow-changed.mjs`
+  tells the host not to build it. So the newest gated commit on `main` was usually never built, and a
+  release script that requires "the gated commit is the built commit" cannot release (issue #286).
+  `node .flow/bin/deployable-sha.mjs --head <gated sha>` walks back along first parents, at most
+  `--max` commits (default 20), to the nearest commit that is not Flow-only, and prints its full sha
+  only if every commit it stepped over was Flow-only, so the printed commit runs the same code. On any
+  doubt (nothing found within `--max`, a shallow clone, a git error, a bad argument) it exits 1 and
+  prints nothing. It uses the same Flow-only list as the deploy hook, now also exported as
+  `isFlowOnlyPath`. The protocol's **The store** section now says a Flow state commit is never a
+  release target. A repo whose release script pairs "gated" with "built" can switch to this helper;
+  it replaces TanPlan's local workaround in `tanplan-0271`.
+
+- **When ready tasks wait on a model tier that has no routine, the owner is told once, in an
+  issue** (`project-template/.flow/bin/flow-dispatch.mjs`, `.github/workflows/_flow-dispatch.yml`,
+  `.github/workflows/flow-dispatch.yml`, flow-0211). **No caller action required.** Once the
+  sync delivers the new `flow-dispatch.yml` caller, the issue appears on the next dispatch run in
+  any repo with ready tasks on a tier that has no routine.
+
+  Before, dispatch skipped such a task with `no-routine-for-<tier>` and a green run on every run,
+  and nobody heard about it. Now it also keeps one open issue per tier, labelled `flow-dispatch`. The
+  issue lists the waiting task ids and the two missing settings, by name only, and points to
+  `docs/flow-routines.md`. A later run updates that issue instead of opening another, and the first
+  run that fires the tier's routine closes it with a comment. The caller now grants
+  `issues: write` beside `contents: read`. `_flow-dispatch.yml` no longer declares `permissions:`
+  and inherits the caller's grant, so a repo whose caller has not been synced keeps dispatching:
+  its issue call gets a 403, the run stays green, and the job summary says the issue could not be
+  written. The other skips write no issue.
+
+- **`flow-state --json` now writes its whole report when its output is piped to another
+  program** (`project-template/.flow/bin/flow-state.mjs`, `.flow/bin/flow-state.mjs`, flow-0212).
+  **No caller action.**
+
+  Before, a reader of a piped run got only the first 64 KB, so a report larger than that did not
+  parse as JSON. Canonical's own report had grown to about 143 KB. The CLI now sets its exit code
+  instead of exiting at once, so Node finishes writing before the process ends. The exit codes do
+  not change.
+
+- **The gate can skip its separate Test step when the coverage command already runs every
+  test** (`.github/workflows/_flow-gates.yml`, `project-template/.flow/config.yml`, flow-0213).
+  **No caller action** is required. To use it, add `coverage_runs_tests: true` to
+  `.flow/config.yml`, but only if your `coverage` command runs every test your `test` command
+  runs and exits non-zero when a test fails.
+
+  Most coverage commands rerun the whole suite, so the gate ran and billed it twice. In mapd that
+  was 16 minutes of Test followed by 18.5 minutes of Coverage on every gate run. With the key
+  set, Coverage still runs and still fails the gate on a failing test. Without it, nothing
+  changes.
+
 ## 4.1.0 — 2026-11-02
 
 **MINOR: an idle Flow repo costs at most 100 Actions minutes a month, and each review verdict is
