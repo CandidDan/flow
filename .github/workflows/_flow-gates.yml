@@ -131,6 +131,7 @@ jobs:
             echo "test=$(yq -r '.commands.test' .flow/config.yml)"
             echo "coverage=$(yq -r '.commands.coverage' .flow/config.yml)"
             echo "covmin=$(yq -r '.coverage_min' .flow/config.yml)"
+            echo "coverage_runs_tests=$(yq -r '.coverage_runs_tests // false' .flow/config.yml)"
           } >> "$GITHUB_OUTPUT"
 
       # ── The CLAUDE.md ceiling (flow-0050) ──
@@ -271,8 +272,11 @@ jobs:
         if: steps.kind.outputs.intent_pr != 'true'
         run: ${{ steps.cfg.outputs.lint }}
 
+      # flow-0213: a repo whose `coverage` command already runs every test (and fails on a failing
+      # one) sets `coverage_runs_tests: true`, and the suite is not run and billed twice. Measured
+      # in mapd: Test 16 min, then Coverage 18.5 min running the same suite. Coverage still runs.
       - name: Test
-        if: steps.kind.outputs.intent_pr != 'true'
+        if: steps.kind.outputs.intent_pr != 'true' && steps.cfg.outputs.coverage_runs_tests != 'true'
         run: ${{ steps.cfg.outputs.test }}
 
       - name: Coverage (fails under coverage_min)

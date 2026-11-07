@@ -231,11 +231,12 @@ const CLASSIFY = (s) => s.id === "kind";
 
 // Evaluate a STEP condition for one value of the classification. Only the shapes these steps use
 // are understood; anything else fails the assertion inside, rather than guessing.
-function stepRuns(cond, { intentPr, event = "pull_request" }) {
+function stepRuns(cond, { intentPr, event = "pull_request", coverageRunsTests = "false" }) {
   if (cond == null) return true;
   let expr = String(cond).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
   expr = expr
     .replaceAll("steps.kind.outputs.intent_pr", JSON.stringify(intentPr))
+    .replaceAll("steps.cfg.outputs.coverage_runs_tests", JSON.stringify(coverageRunsTests))
     .replaceAll("github.event_name", JSON.stringify(event))
     .replace(/'([^']*)'/g, (_, s) => JSON.stringify(s))
     .replace(/(?<![=!])==(?!=)/g, "===").replace(/!=(?!=)/g, "!==");
@@ -302,4 +303,31 @@ test("flow-0178: an intent-only PR runs no source-root matrix", { skip }, () => 
   assert.equal(evalCount("false", "3"), "3", "any other PR keeps the planned count");
   assert.equal(evalCount("", "2"), "2", "a manual run keeps the planned count");
   assert.match(String(jobs["source-root"].if), /needs\.source-roots-plan\.outputs\.count != '0'/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// flow-0213: `coverage_runs_tests: true` skips the separate Test step, because the coverage
+// command already runs the same suite. Measured in mapd: Test 16 min, then Coverage 18.5 min.
+// ─────────────────────────────────────────────────────────────────────────────────────────
+
+const CFG_STEP = (s) => s.id === "cfg";
+
+test("flow-0213 criterion 2: with coverage_runs_tests true, a non-intent PR skips Test and still runs Coverage", { skip }, () => {
+  for (const event of ["pull_request", "workflow_dispatch"]) {
+    const ctx = { intentPr: event === "pull_request" ? "false" : "", event, coverageRunsTests: "true" };
+    assert.deepEqual(gateRuns(WF(REUSABLE_GATES), ctx), { ran: ["install", "build", "lint", "coverage"], doctor: false }, event);
+  }
+});
+
+test("flow-0213 criterion 3 (mutation): the Test step that ignores coverage_runs_tests is caught, and the key defaults to false", { skip }, () => {
+  const text = WF(REUSABLE_GATES);
+  const cfg = findStep(jobsOf(text).gate, CFG_STEP, "id: cfg");
+  assert.match(cfg.run, /echo "coverage_runs_tests=\$\(yq -r '\.coverage_runs_tests \/\/ false' \.flow\/config\.yml\)"/,
+    "the config step must read coverage_runs_tests with a false default");
+  const doc = parse(text);
+  doc.jobs.gate.steps.find(configStep("test")).if = "steps.kind.outputs.intent_pr != 'true'";
+  assert.ok(gateRuns(yamlMod.stringify(doc), { intentPr: "false", coverageRunsTests: "true" }).ran.includes("test"),
+    "a Test step without the coverage_runs_tests clause runs the suite twice");
+  // And the default: the key unset reads as "false", so every command still runs.
+  assert.ok(gateRuns(text, { intentPr: "false", coverageRunsTests: "false" }).ran.includes("test"));
 });

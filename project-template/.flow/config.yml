@@ -39,6 +39,12 @@ commands:
 # raise it over time, never lower it silently. Sitting exactly at the floor proves nothing.
 coverage_min: 80
 
+# Set this to true ONLY when the `coverage` command above runs every test the `test` command runs,
+# and exits non-zero when a test fails (true of `vitest run --coverage`, `c8 node --test`,
+# `pytest --cov`). The gate then skips its separate Test step, so the suite is not run, and billed,
+# twice. Coverage still runs and still fails the gate on a failing test. Absent means false.
+# coverage_runs_tests: true
+
 # The CLAUDE.md ceiling, in BYTES — and what it measures is the point of it. `CLAUDE.md` auto-loads
 # into EVERY session in this repo, so every byte of it is always-on context. The ceiling applies to
 # the RESOLVED IMPORT SET: `CLAUDE.md` plus every file Claude Code loads from it by `@`-import
