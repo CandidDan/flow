@@ -26,6 +26,25 @@ touches:
   - "project-template/.github/workflows/flow-kickback.yml"
   - ".flow/bin/gate-cost.test.mjs"
   - "changes/flow-0217.md"
+  - ".github/workflows/_flow-kickback.yml"
+  - ".github/workflows/_flow-sync.yml"
+  - ".github/workflows/flow-compass.yml"
+  - "project-template/.flow/bin/flow-review.mjs"
+  - "project-template/.flow/PROTOCOL.md"
+  - "project-template/.flow/config.yml"
+  - "project-template/README.md"
+  - "project-template/FLOW-handoff.html"
+  - "docs/adr/0005-split-authoring-from-release.md"
+  - ".flow/bin/adapters.test.mjs"
+  - ".flow/bin/board-retired.test.mjs"
+  - ".flow/bin/caller-pins.test.mjs"
+  - ".flow/bin/draft-pr-lifecycle.test.mjs"
+  - ".flow/bin/flow-kickback-workflow.test.mjs"
+  - ".flow/bin/flow-review-workflow.test.mjs"
+  - ".flow/bin/intent-pr-kind.test.mjs"
+  - ".flow/bin/protocol-portability.test.mjs"
+  - ".flow/bin/review-verdict-file.test.mjs"
+  - ".flow/bin/secrets-scope.test.mjs"
 labels: [cost]
 model: "opus"
 effort: "high"
@@ -33,6 +52,8 @@ model_reason: "Changes the reusable review and gate workflows, check names and t
 notes:
   - "2026-11-06 (orchestrator, on Dan's direction in the cost thread): written blocked, not ready, because the design choice below is Dan's."
   - "2026-11-09: Dan chose option (a) on the decision card: the gate caller runs review as a job with needs: gate, check names become 'flow-gates / review / ...', kickback moves to workflow_run on flow-gates. List, per adopting repo, the branch-protection required-check names that must change, in the PR description and the changelog fragment's caller action (this makes it a MAJOR bump)."
+  - "2026-11-09 (worker): touches widened on main before the PR, recorded here rather than drifted into silently. Folding review into the gate caller cannot be done inside the original list: the kickback reusable must filter failed jobs to the flow-review caller job (scope bullet 3), flow-sync must retire the old flow-review.yml caller (a copy left behind would run the review twice), its retired-paths list is mirrored in flow-review.mjs, eleven existing tests pin the old five-job layout, and five docs (PROTOCOL.md, config.yml comment, template README, FLOW-handoff.html, ADR-0005 counts) name the deleted caller. No behaviour outside this task's scope changed."
+  - "2026-11-09 (worker): design choice a fresh session should not re-litigate: the caller job is named `flow-review`, not `review`, so the check names stay `flow-review / qa|code-review|security` and no adopter has to edit branch protection. It is still MAJOR because the callers change (versioning policy: a caller edit is MAJOR). The guide moved into `security` (which now needs qa and code-review), the intent reviewer into `code-review`; security therefore always starts and skips its model and verdict steps when the plan says so."
 asks: []
 ---
 
