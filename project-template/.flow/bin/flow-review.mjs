@@ -553,6 +553,7 @@ export const SYNC_RETIRED_PATHS = Object.freeze([
   ".claude/skills/board" + "-builder/",
   ".flow/board" + ".html",
   ".github/workflows/flow-queue-runner.yml", // retired in flow-0174
+  ".github/workflows/flow-review.yml", // retired in flow-0217: the review runs inside flow-gates.yml
 ]);
 
 export const isRetiredPath = (f) =>

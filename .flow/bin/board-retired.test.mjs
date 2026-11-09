@@ -33,7 +33,8 @@ const REUSABLE = join(REPO, ".github/workflows/_flow-sync.yml");
 // thing it pins moves with it and pins nothing. flow-0174 appended the retired queue-runner's
 // caller to the same list — one mechanism, not two; its own tests are in flow-sync.test.mjs.
 const BOARD = [".claude/skills/board-builder/", ".flow/board.html"];
-const RETIRED = [...BOARD, ".github/workflows/flow-queue-runner.yml"];
+// flow-0217 retired the review's own caller: the review checks run inside flow-gates.yml from 5.0.
+const RETIRED = [...BOARD, ".github/workflows/flow-queue-runner.yml", ".github/workflows/flow-review.yml"];
 
 // Built from parts so this file's own source is not a match for the strings it forbids.
 const FORBIDDEN = new RegExp(["board" + "-builder", "board\\." + "html", "regenerate the " + "board"].join("|"), "i");
@@ -100,7 +101,7 @@ export const parseRetired = (region) => {
   return m[1].trim().split(/\s+/);
 };
 
-test("the retired-paths list holds exactly the board skill, the board and the queue-runner caller", () => {
+test("the retired-paths list holds exactly the board skill, the board, the queue-runner caller and the review caller", () => {
   const tokens = parseRetired(extractRegion());
   assert.ok(tokens, "the step must iterate a literal `for RETIRED in … ; do` list");
   for (const t of tokens)

@@ -33,7 +33,11 @@ const wf = yamlMod ? yamlMod.parse(src) : { jobs: {} };
 const CHECKS = ["qa", "code-review", "security"];
 const MODEL_ACTION = "anthropics/claude-code-action";
 const stepsOf = (job) => wf.jobs[job]?.steps ?? [];
-const isModelStep = (s) => String(s.uses ?? "").startsWith(MODEL_ACTION);
+// The reviewer's own model step carries `id: claude`. flow-0217 put two ADVISORY model steps in
+// the same jobs (the guide's in security, the intent reviewer's in code-review); each has an id
+// of its own and `continue-on-error: true` on every step, so neither can decide a check.
+const isModelStep = (s) => String(s.uses ?? "").startsWith(MODEL_ACTION) && s.id === "claude";
+const isAdvisory = (s) => s["continue-on-error"] === true && !isModelStep(s);
 const verdictPath = (check) => `$RUNNER_TEMP/flow-review/${check}.json`;
 // A step that only REPORTS which model answered (flow-0140). The orchestrator's note on
 // flow-0186 allows it to read the action's execution file: it reports, it does not decide.
@@ -43,7 +47,7 @@ const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // Every step that can decide a check: the enforce step, and anything that posts a comment or
 // triggers a fix. Found by what the step does, not by a fixed list of names.
 const isDecidingStep = (s) =>
-  !isModelStep(s) && !isModelReport(s) &&
+  !isModelStep(s) && !isModelReport(s) && !isAdvisory(s) &&
   /flow-review\.mjs (enforce|verdict)\b|gh (api|pr)\b|issues\/[^\s]*comments|dispatches|kickback/
     .test(String(s.run ?? ""));
 
@@ -69,7 +73,7 @@ test("criterion 1: each model step is preceded by a step that deletes that check
     // for a reviewer that has not run: only the intent-PR fixed line may, and only on that kind.
     for (const s of steps.slice(deletes + 1, model)) {
       if (!String(s.run ?? "").includes("VERDICT_FILE") && !JSON.stringify(s.env ?? {}).includes("flow-review/")) continue;
-      assert.equal(s.if, "${{ needs.plan.outputs.intent_pr == 'true' }}",
+      assert.equal(s.if, "${{ steps.plan.outputs.intent_pr == 'true' }}",
         `${check}: "${s.name}" writes the verdict file and is not limited to an intent PR`);
     }
   }
@@ -93,7 +97,7 @@ test("criterion 2: no step that decides a check reads a model step's outputs", {
     assert.ok(modelIds.length, `${check}: the model step needs an id for this test to mean anything`);
     const deciding = steps.filter(isDecidingStep);
     assert.ok(deciding.length >= 1, `${check}: no deciding step found — an empty scan proves nothing`);
-    for (const s of steps.filter((x) => !isModelStep(x) && !isModelReport(x))) {
+    for (const s of steps.filter((x) => !isModelStep(x) && !isModelReport(x) && !isAdvisory(x))) {
       for (const id of modelIds) {
         assert.ok(!JSON.stringify(s).includes(`steps.${id}.`),
           `${check}: "${s.name ?? s.run}" reads the model step's outputs (steps.${id}.…). Only ` +
@@ -116,13 +120,17 @@ test("criterion 2: the deciding steps read only $RUNNER_TEMP/flow-review/<check>
   }
 });
 
-test("criterion 4: when plan skips security, the security job does not start", { skip }, () => {
-  assert.equal(wf.jobs.security.if, "${{ needs.plan.outputs.security_run == 'true' }}",
-    "a job-level `if` on the plan's decision — the step-level gating it replaces still started a runner");
-  assert.deepEqual(wf.jobs.security.needs, "plan");
-  // The skip moves to the plan job: its summary is written by `flow-review.mjs plan`.
-  assert.ok(stepsOf("plan").some((s) => /flow-review\.mjs plan\b/.test(String(s.run ?? ""))),
-    "the plan job's summary is where `### Security review — SKIPPED` is recorded");
-  assert.ok(!stepsOf("security").some((s) => /SKIPPED/.test(String(s.run ?? ""))),
-    "the security job must not be relied on to report a skip — it does not start");
+test("criterion 4: when plan skips security, the security job runs no model and no verdict", { skip }, () => {
+  // flow-0186 kept the job from starting at all. flow-0217 starts it anyway, because it hosts the
+  // guide that used to be a job of its own, so the skip is now on the two steps that cost or decide.
+  assert.doesNotMatch(String(wf.jobs.security.if), /security_run/);
+  assert.deepEqual(wf.jobs.security.needs, ["qa", "code-review"]);
+  const steps = stepsOf("security");
+  assert.equal(steps.find(isModelStep).if, "${{ steps.plan.outputs.security_run == 'true' }}");
+  assert.equal(steps.find(isDecidingStep).if, "${{ always() && steps.plan.outputs.security_run == 'true' }}");
+  // The skip is recorded by the job's own plan step: its summary is written by `flow-review.mjs plan`.
+  assert.ok(steps.some((s) => s.id === "plan" && /flow-review\.mjs plan\b/.test(String(s.run ?? ""))),
+    "the security job's plan step summary is where `### Security review — SKIPPED` is recorded");
+  assert.ok(!steps.some((s) => /SKIPPED/.test(String(s.run ?? ""))),
+    "the skip is the plan's to report, in one place");
 });

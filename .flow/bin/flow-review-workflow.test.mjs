@@ -26,20 +26,23 @@ const yamlMod = await import("yaml").then((m) => m, () => null);
 const skip = yamlMod ? false : "needs `npm ci` (yaml) — runs in the per-stack gate job";
 
 const REUSABLE = join(REPO, ".github/workflows/_flow-review.yml");
-const CALLER = join(TEMPLATE, ".github/workflows/flow-review.yml");
+// flow-0217: the review is a job of the gate's caller, named `flow-review`, not a workflow of its own.
+const CALLER = join(TEMPLATE, ".github/workflows/flow-gates.yml");
 
 const reusableSrc = readFileSync(REUSABLE, "utf8");
 const wf = yamlMod ? yamlMod.parse(reusableSrc) : { jobs: {} };
 const REVIEW_JOBS = ["qa", "code-review", "security"];
-// flow-0084 added a fifth job, `guide`. It is NOT a review job — it blocks nothing and posts no
-// verdict — but it does materialise the base gate and run `plan`, so it belongs in HELPER_JOBS and
-// in every assertion about where the helper comes from. The distinction is load-bearing: a `guide`
-// that crept into REVIEW_JOBS would be asserted to carry a verdict step and to block the PR.
-const GUIDE_JOB = "guide";
-// flow-0178 added a sixth, `intent-review`: advisory like the guide, so it is NOT in REVIEW_JOBS
-// (it carries no verdict and blocks nothing), but it materialises the base gate and runs `plan`.
-const INTENT_JOB = "intent-review";
-const HELPER_JOBS = ["plan", ...REVIEW_JOBS, GUIDE_JOB, INTENT_JOB];
+// flow-0217: three jobs and no others. The guide (flow-0084) is now the last steps of `security`,
+// and the advisory intent reviewer (flow-0178) the last steps of `code-review`; neither is a job
+// of its own, and `plan` is a step inside each reviewer rather than a job they all wait for.
+const GUIDE_HOST = "security";
+const INTENT_HOST = "code-review";
+const HELPER_JOBS = [...REVIEW_JOBS];
+// The three-clause fence every job carries now that there is no `plan` job to carry it once.
+const FENCE_IF = "${{ vars.FLOW_AI == 'true' && github.event.pull_request.draft != true" +
+  " && github.event.pull_request.head.repo.full_name == github.repository }}";
+const SECURITY_JOB_IF = "${{ !cancelled() && vars.FLOW_AI == 'true' && github.event.pull_request.draft != true" +
+  " && github.event.pull_request.head.repo.full_name == github.repository }}";
 
 // flow-0079: the helper is no longer invoked by its path in the checkout. `$FLOW_REVIEW_DIR` is
 // written to $GITHUB_ENV by the materialise step and points at the BASE branch's copy — so these
@@ -49,7 +52,7 @@ const PLAN_RUN = /node "\$FLOW_REVIEW_DIR"\/flow-review\.mjs plan\b/;
 // verdict file in $RUNNER_TEMP. The older `verdict` command stays in the helper for adopters
 // pinned to an older workflow, but nothing in this workflow calls it any more.
 const VERDICT_RUN = /node "\$FLOW_REVIEW_DIR"\/flow-review\.mjs enforce\b/;
-const SECURITY_IF = "${{ needs.plan.outputs.security_run == 'true' }}";
+const SECURITY_IF = "${{ steps.plan.outputs.security_run == 'true' }}";
 const stepsOf = (job) => wf.jobs[job]?.steps ?? [];
 const allSteps = () => Object.values(wf.jobs ?? {}).flatMap((j) => j.steps ?? []);
 const materialiseStep = (job) =>
@@ -69,9 +72,23 @@ const finalBlock = (run) => {
 // without the base-side task directory fails the base-branch test below instead of escaping it.
 const materialisingJobs = () => Object.keys(wf.jobs ?? {}).filter((job) => materialiseStep(job));
 
-// Every `uses: anthropics/claude-code-action@…` step in a job — the reviewer invocation itself.
-const reviewerSteps = (job) =>
-  (wf.jobs[job]?.steps ?? []).filter((s) => String(s.uses ?? "").startsWith("anthropics/claude-code-action"));
+// The `uses: anthropics/claude-code-action@…` step with `id: claude` in a job — the reviewer
+// invocation itself. The advisory model steps the jobs also host (the guide's and the intent
+// reviewer's) carry ids of their own, so they are never mistaken for a reviewer.
+const isModelStep = (s) => String(s.uses ?? "").startsWith("anthropics/claude-code-action");
+const reviewerSteps = (job) => (wf.jobs[job]?.steps ?? []).filter((s) => isModelStep(s) && s.id === "claude");
+// The advisory steps, cut out of their host job: the guide is everything from its facts step to
+// the end of `security`; the intent reviewer is its model step and the report step after it.
+const guideSteps = () => {
+  const steps = stepsOf(GUIDE_HOST);
+  const at = steps.findIndex((s) => /review-guide\.mjs facts\b/.test(String(s.run ?? "")));
+  return at < 0 ? [] : steps.slice(at);
+};
+const intentSteps = () => {
+  const steps = stepsOf(INTENT_HOST);
+  const at = steps.findIndex((s) => s.id === "intent_review");
+  return at < 0 ? [] : steps.slice(at, at + 2);
+};
 // Prompts are block scalars, so a sentence wraps across lines. Collapse whitespace before
 // matching — the assertions are about what the prompt SAYS, not how it is wrapped.
 const prompts = () =>
@@ -79,14 +96,14 @@ const prompts = () =>
 
 // ── criterion 1: the checks exist on the PR, and their verdicts land in the conversation ──
 
-test("the reusable defines a qa and a code-review job, plus the plan they share", { skip }, () => {
-  for (const job of ["plan", ...REVIEW_JOBS]) {
-    assert.ok(wf.jobs[job], `_flow-review.yml must define a "${job}" job — it is the check on the PR`);
-  }
+test("the reusable defines the qa, code-review and security jobs, each planning its own review", { skip }, () => {
   for (const job of REVIEW_JOBS) {
-    assert.deepEqual(wf.jobs[job].needs, "plan",
-      `${job} must read its model and its security decision from the shared plan job`);
+    assert.ok(wf.jobs[job], `_flow-review.yml must define a "${job}" job — it is the check on the PR`);
+    const plan = stepsOf(job).find((s) => PLAN_RUN.test(String(s.run ?? "")));
+    assert.equal(plan?.id, "plan",
+      `${job} must read its model and its security decision from its own \`plan\` step (flow-0217)`);
   }
+  assert.equal(wf.jobs.plan, undefined, "flow-0217: `plan` is no longer a job of its own");
 });
 
 test("every reviewer is told to post its verdict as a PR comment, not only to a file", { skip }, () => {
@@ -101,6 +118,7 @@ test("every reviewer is told to post its verdict as a PR comment, not only to a 
 test("the caller is a thin, pinned reference that passes the token by name", { skip }, () => {
   const caller = yamlMod.parse(readFileSync(CALLER, "utf8"));
   const job = caller.jobs["flow-review"];
+  assert.equal(job.needs, "flow-gates", "flow-0217: the review starts only once the gate job has passed");
   assert.match(job.uses, /^CandidDan\/flow\/\.github\/workflows\/_flow-review\.yml@/,
     "repos adopt the logic by reference; a copy is the drift surface this replaced");
   assert.deepEqual(job.secrets, { CLAUDE_CODE_OAUTH_TOKEN: "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}" },
@@ -117,8 +135,8 @@ test("the caller is a thin, pinned reference that passes the token by name", { s
 
 test("flow-0186: the jobs qa, code-review and security, and every permissions block, are unchanged", { skip }, () => {
   for (const job of REVIEW_JOBS) assert.ok(wf.jobs[job], `the PR check is \`flow-review / ${job}\` — renaming the job renames it`);
-  assert.deepEqual(Object.keys(wf.jobs), ["plan", "qa", "code-review", "security", "intent-review", "guide"],
-    "no review job was merged, renamed or added");
+  assert.deepEqual(Object.keys(wf.jobs), ["qa", "code-review", "security"],
+    "flow-0217: plan, intent-review and guide were folded into these three; no job was renamed or added");
   assert.deepEqual(wf.permissions,
     { contents: "read", "pull-requests": "write", issues: "read", "id-token": "write" },
     "the reusable's permissions block is exactly what it was before flow-0186");
@@ -163,42 +181,42 @@ test("the qa prompt demands the unproven criteria be named verbatim", { skip }, 
 
 // ── criterion 3: the security review is conditional, and its skip is visible ───────────────
 
-test("flow-0186: a skipped security review starts no runner, and the plan job records the skip", { skip }, () => {
+test("flow-0217: a skipped security review runs no model and no verdict, and the plan step records the skip", { skip }, () => {
   const job = wf.jobs.security;
-  assert.equal(job.if, SECURITY_IF,
-    "the job-level `if` on the plan's decision is what keeps a skipped review from billing a " +
-    "runner; GitHub reports a job skipped by `if:` as a successful required check");
+  // flow-0186 kept the job from starting at all on a skip. flow-0217 starts it anyway, because it
+  // hosts the guide that replaced a job of its own, so the skip moves from the job to its steps.
+  assert.equal(job.if, SECURITY_JOB_IF);
   assert.ok(!JSON.stringify(job.steps ?? []).includes("SKIPPED"),
-    "the security job must not print the skip itself: it never starts when the review is skipped");
-  const planRuns = stepsOf("plan").filter((s) => PLAN_RUN.test(String(s.run ?? "")));
+    "the security job must not print the skip itself: its plan step's summary already does");
+  const planRuns = stepsOf("security").filter((s) => PLAN_RUN.test(String(s.run ?? "")));
   assert.equal(planRuns.length, 1,
-    "the plan job runs `flow-review.mjs plan`, whose summary carries `### Security review — " +
-    "SKIPPED` and the reason (proved in flow-review.test.mjs)");
-  assert.equal(wf.jobs.plan.outputs?.security_reason, "${{ steps.plan.outputs.security_reason }}");
+    "the security job's own plan step runs `flow-review.mjs plan`, whose summary carries " +
+    "`### Security review — SKIPPED` and the reason (proved in flow-review.test.mjs)");
+  const enforce = stepsOf("security").find((s) => VERDICT_RUN.test(String(s.run ?? "")));
+  assert.equal(enforce.if, "${{ always() && steps.plan.outputs.security_run == 'true' }}",
+    "a skipped review has no verdict file, so its verdict step must be skipped, not failed");
 });
 
 test("the security reviewer itself is gated on the config-driven decision", { skip }, () => {
   for (const s of reviewerSteps("security")) {
-    assert.match(String(s.if), /needs\.plan\.outputs\.security_run == 'true'/,
+    assert.equal(s.if, SECURITY_IF,
       "the trigger comes from review.security_paths in the repo's config, not from this file");
   }
-  assert.match(String(reusableSrc), /security_run: \$\{\{ steps\.plan\.outputs\.security_run \}\}/,
-    "the plan job must publish the decision for the security job to read");
 });
 
 // ── criterion 5: no model is hardcoded in the reusable workflow ────────────────────────────
 
-test("no reviewer names a model — every one reads it from the plan job", { skip }, () => {
+test("no reviewer names a model — every one reads it from its plan step", { skip }, () => {
   // The value is an expression containing spaces, so match the whole `${{ … }}` rather than \S+.
   const modelFlags = [...reusableSrc.matchAll(/--model\s+(\$\{\{[^}]*\}\}|\S+)/g)].map((m) => m[1]);
   assert.equal(modelFlags.length, REVIEW_JOBS.length + 2,
     "one --model per reviewer, plus the guide's (flow-0084) and the intent reviewer's (flow-0178). The guide reads `review.model` like " +
-    "everything else here: it cannot have a knob of its own without a `guide_model` output on the " +
-    "plan job, and the point stands either way — no model is named in this file.");
+    "everything else here: it cannot have a knob of its own without a `guide_model` output from the " +
+    "plan step, and the point stands either way — no model is named in this file.");
   for (const flag of modelFlags) {
     // flow-0140: code-review reads `code_review_model`, falling back to `model` with `||` for an
     // adopter whose base-branch helper predates the key. Still a plan output either way.
-    assert.match(flag, /^\$\{\{\s*needs\.plan\.outputs\.((security_)?model|code_review_model\s*\|\|\s*needs\.plan\.outputs\.model)\s*\}\}$/,
+    assert.match(flag, /^\$\{\{\s*steps\.plan\.outputs\.((security_)?model|code_review_model\s*\|\|\s*steps\.plan\.outputs\.model)\s*\}\}$/,
       `"${flag}" hardcodes a model. It belongs in the consuming repo's .flow/config.yml under ` +
       `review.model, so a project tunes its reviewers as data instead of patching shared infra.`);
   }
@@ -224,8 +242,8 @@ test("attacker-controlled review text never reaches a shell through ${{ }}", { s
     assert.doesNotMatch(block, /\$\{\{[^}]*security_reason[^}]*\}\}/,
       "security_reason must reach the shell through `env:`, where it is data, not script");
   }
-  const render = stepsOf(GUIDE_JOB).find((s) => /review-guide\.mjs comment\b/.test(String(s.run ?? "")));
-  assert.equal(render?.env?.SECURITY_REASON, "${{ needs.plan.outputs.security_reason }}",
+  const render = guideSteps().find((s) => /review-guide\.mjs comment\b/.test(String(s.run ?? "")));
+  assert.equal(render?.env?.SECURITY_REASON, "${{ steps.plan.outputs.security_reason }}",
     "…and it must still actually be reported — passing it safely is not the same as dropping it");
 });
 
@@ -254,24 +272,21 @@ test("no reviewer is fenced on the branch name or the PR author", { skip }, () =
   // Pinned as an exact string rather than a substring match so a future `head.ref`/`actor` clause
   // smuggled into the same expression fails here instead of silently re-fencing the reviewers.
   // Changing this line is a deliberate act; widening it to a substring match is not a fix.
-  assert.equal(wf.jobs.plan.if.trim(),
-    "${{ vars.FLOW_AI == 'true' && github.event.pull_request.draft != true" +
-    " && github.event.pull_request.head.repo.full_name == github.repository }}");
+  // flow-0217: there is no `plan` job, so each job carries it; security adds only `!cancelled()`.
+  assert.equal(wf.jobs.qa.if.trim(), FENCE_IF);
+  assert.equal(wf.jobs["code-review"].if.trim(), FENCE_IF);
+  assert.equal(wf.jobs.security.if.trim(), SECURITY_JOB_IF);
 });
 
 // ── flow-0068: the fork boundary, and the task the reviewers are handed ───────────────────
 
-test("the fork fence sits on `plan` and nowhere else — so it suppresses all four jobs at once", { skip }, () => {
+test("the fork fence sits on every job — there is no `plan` job left to carry it once", { skip }, () => {
   const FENCE = "github.event.pull_request.head.repo.full_name == github.repository";
-  assert.ok(wf.jobs.plan.if.includes(FENCE),
-    "three jobs run claude-code-action with --permission-mode bypassPermissions; the head they " +
-    "check out must be one this repo owns, and `plan` is the single gate the other three need");
-  for (const job of REVIEW_JOBS) {
-    // flow-0186: `security` carries a job-level `if`, but it is the plan's review decision, not
-    // the fence — which still lives on `plan` alone.
-    assert.equal(wf.jobs[job].if, job === "security" ? SECURITY_IF : undefined,
-      `${job} must not carry its own copy of the fence — \`needs: plan\` already suppresses it, ` +
-      `and a second copy is the one that gets forgotten when the rule changes`);
+  for (const job of Object.keys(wf.jobs)) {
+    // flow-0217: three jobs run claude-code-action with --permission-mode bypassPermissions, and
+    // with `plan` folded into them each must refuse a head this repo does not own by itself.
+    assert.ok(String(wf.jobs[job].if ?? "").includes(FENCE),
+      `${job} must carry the fork fence — no job before it suppresses it any more`);
   }
   // Stated as a test rather than a comment: the fence is worthless if the trigger it assumes is
   // ever widened HERE. The caller owns `pull_request`; this reusable takes workflow_call only.
@@ -282,10 +297,9 @@ test("the fork fence sits on `plan` and nowhere else — so it suppresses all fo
 
 test("every `plan` invocation is handed BOTH id sources, as env, never as shell text", { skip }, () => {
   const planSteps = allSteps().filter((s) => PLAN_RUN.test(String(s.run ?? "")));
-  assert.equal(planSteps.length, 6,
-    "the plan job, one bounded-context step per reviewer, the guide's (flow-0084) and the intent "
-    + "reviewer's (flow-0178) — each " +
-    "materialises its own context rather than passing an artifact around");
+  assert.equal(planSteps.length, 3,
+    "one plan step per reviewer job (flow-0217); the guide and the intent reviewer read their " +
+    "host job's — each job materialises its own context rather than passing an artifact around");
   for (const s of planSteps) {
     assert.equal(s.env?.HEAD_REF, "${{ github.head_ref }}",
       "`github.head_ref`, not `github.event.pull_request.head.ref`: the branch is an ID SOURCE " +
@@ -300,8 +314,9 @@ test("every `plan` invocation is handed BOTH id sources, as env, never as shell 
     assert.doesNotMatch(block, /\$\{\{[^}]*pull_request\.title[^}]*\}\}/,
       "a PR title spliced into a shell script is the injection class .flow/config.yml lists");
   }
-  assert.equal(wf.jobs.plan.outputs?.task_id, "${{ steps.plan.outputs.task_id }}",
-    "the resolved id is published, so the run page says which task was graded");
+  const facts = guideSteps().find((s) => /review-guide\.mjs facts\b/.test(String(s.run ?? "")));
+  assert.equal(facts?.env?.TASK_ID, "${{ steps.plan.outputs.task_id }}",
+    "the resolved id reaches the guide from the plan step");
 });
 
 test("every reviewer reads the MATERIALISED task, not a prose instruction to go and find it", { skip }, () => {
@@ -406,9 +421,7 @@ test("no step invokes the helper from the PR checkout — every call goes throug
   }
   const invocations = allSteps().filter((s) =>
     PLAN_RUN.test(String(s.run ?? "")) || VERDICT_RUN.test(String(s.run ?? "")));
-  assert.equal(invocations.length, 9,
-    "six plans (the plan job, one bounded context per reviewer, the guide's and the intent "
-    + "reviewer's) and three verdicts");
+  assert.equal(invocations.length, 6, "flow-0217: three plans, one per reviewer job, and three verdicts");
 });
 
 test("every job that runs the helper materialises the BASE branch first", { skip }, () => {
@@ -552,9 +565,12 @@ test("the summarised-deletion line names the marker the helper actually writes",
     "the marker must not contain the truncation token, or the truncation rule would fire on it");
 });
 
-test("the plan job publishes diff_summarised_deletions", { skip }, () => {
-  assert.equal(wf.jobs.plan.outputs?.diff_summarised_deletions,
-    "${{ steps.plan.outputs.diff_summarised_deletions }}");
+test("each reviewer's plan step is the one that publishes diff_summarised_deletions", { skip }, () => {
+  // flow-0217: no plan job publishes it any more. The helper writes it to the plan step's outputs.
+  for (const job of REVIEW_JOBS) {
+    assert.equal(stepsOf(job).find((s) => PLAN_RUN.test(String(s.run ?? "")))?.id, "plan", job);
+  }
+  assert.match(readFileSync(join(TEMPLATE, ".flow/bin/flow-review.mjs"), "utf8"), /diff_summarised_deletions/);
 });
 
 // ── flow-0103: the truncation fact reaches all three verdict steps, from the plan's output ──
@@ -564,13 +580,14 @@ test("the plan job publishes diff_summarised_deletions", { skip }, () => {
 // is not a fact), and all THREE steps must pass it — the failure mode this whole pair of tasks
 // exists for is two checks going green on a diff nobody fully read.
 
-test("the plan job publishes diff_truncated, so the verdict steps read one shared fact", { skip }, () => {
-  assert.equal(wf.jobs.plan.outputs?.diff_truncated, "${{ steps.plan.outputs.diff_truncated }}",
-    "without the job output there is nothing for the three verdict steps to read, and each would " +
-    "have to trust its own workspace");
-  for (const key of ["diff_bytes", "diff_full_bytes"]) {
-    assert.equal(wf.jobs.plan.outputs?.[key], `\${{ steps.plan.outputs.${key} }}`,
-      `${key} is what makes the failure message name a number instead of just "too big"`);
+test("each verdict step reads the truncation fact from its own job's plan step, which ran before the model", { skip }, () => {
+  // flow-0217: a step output is fixed when its step ends, so the reviewer that runs after the plan
+  // step cannot rewrite it — the property the plan JOB's output used to give.
+  for (const job of REVIEW_JOBS) {
+    const steps = stepsOf(job);
+    const plan = steps.findIndex((s) => s.id === "plan");
+    const model = steps.findIndex((s) => s.id === "claude");
+    assert.ok(plan >= 0 && plan < model, `${job}: the plan step must run before the reviewer`);
   }
 });
 
@@ -588,12 +605,12 @@ test("all three verdict steps pass --diff-truncated from the plan's output, neve
       `${job}'s verdict step does not pass the truncation fact. The helper requires the flag, so ` +
       `this would fail the check for the wrong reason — and a gate that fails opaquely gets ` +
       `merged past as noise.`);
-    assert.equal(step.env?.DIFF_TRUNCATED, "${{ needs.plan.outputs.diff_truncated }}",
-      `${job} must take the fact from the PLAN JOB's output. \`.flow-review/\` is written by the ` +
+    assert.equal(step.env?.DIFF_TRUNCATED, "${{ steps.plan.outputs.diff_truncated }}",
+      `${job} must take the fact from the PLAN step's output. \`.flow-review/\` is written by the ` +
       `reviewer itself, so a truncation fact read from the workspace is one the reviewer can edit.`);
     // Reporting only, but the message is the whole reason a red check is actionable.
-    assert.equal(step.env?.DIFF_BYTES, "${{ needs.plan.outputs.diff_bytes }}");
-    assert.equal(step.env?.DIFF_FULL_BYTES, "${{ needs.plan.outputs.diff_full_bytes }}");
+    assert.equal(step.env?.DIFF_BYTES, "${{ steps.plan.outputs.diff_bytes }}");
+    assert.equal(step.env?.DIFF_FULL_BYTES, "${{ steps.plan.outputs.diff_full_bytes }}");
     assert.match(run, /--diff-bytes "\$DIFF_BYTES" --diff-full-bytes "\$DIFF_FULL_BYTES"/);
   }
 });
@@ -906,31 +923,38 @@ test("flow-0089: changes/flow-0089.md exists and says the caller does nothing", 
 const GUIDE_FACTS_RUN = /node "\$FLOW_REVIEW_DIR"\/review-guide\.mjs facts\b/;
 const GUIDE_COMMENT_RUN = /node "\$FLOW_REVIEW_DIR"\/review-guide\.mjs comment(?!-)\b/;
 const GUIDE_ID_RUN = /node "\$FLOW_REVIEW_DIR"\/review-guide\.mjs comment-id\b/;
-const guideSteps = () => stepsOf(GUIDE_JOB);
 const guideStep = (re) => guideSteps().find((s) => re.test(String(s.run ?? "")));
 
 test("flow-0084: the guide runs after all three checks, whatever each of them concluded", { skip }, () => {
-  const job = wf.jobs[GUIDE_JOB];
-  assert.ok(job, "_flow-review.yml must define a `guide` job — it is the human's merge touchpoint");
-  assert.deepEqual(job.needs, ["plan", "qa", "code-review", "security"],
-    "the guide combines the three verdicts, so it must wait for all three AND for the plan it " +
-    "reads the security decision from");
-  assert.match(String(job.if), /always\(\)/,
-    "without always(), a FAILED reviewer suppresses the guide — which is exactly the PR a human " +
+  const job = wf.jobs[GUIDE_HOST];
+  assert.ok(guideSteps().length > 0, "the guide must be the last steps of `security` (flow-0217)");
+  assert.deepEqual(job.needs, ["qa", "code-review"],
+    "the guide combines the three verdicts, so its host job waits for the other two");
+  assert.match(String(job.if), /!cancelled\(\)/,
+    "without !cancelled(), a FAILED reviewer suppresses the guide — which is exactly the PR a human " +
     "most needs told where to look");
+  const steps = stepsOf(GUIDE_HOST);
+  const enforce = steps.findIndex((s) => VERDICT_RUN.test(String(s.run ?? "")));
+  assert.ok(enforce >= 0 && enforce < steps.indexOf(guideSteps()[0]),
+    "the guide runs after the security verdict, whose outcome it reports");
+  for (const s of guideSteps()) {
+    // The report step uses always(), the rule model-ids.test.mjs holds every report step to.
+    assert.match(String(s.if ?? ""), /!cancelled\(\)|always\(\)/, `${s.name ?? s.id}: must run after a failed verdict`);
+  }
 });
 
 test("flow-0084: the guide never runs on a draft or a fork, and does not recopy either fence", { skip }, () => {
-  const guard = String(wf.jobs[GUIDE_JOB].if).trim();
-  assert.match(guard, /needs\.plan\.result == 'success'/,
-    "`plan` carries the opt-in, the draft clause and the head-repo comparison, so gating on its " +
-    "RESULT inherits all three. always() would otherwise defeat them: a skipped `needs` does not " +
-    "suppress a job that runs always().");
-  // The fences stay in exactly one place. A second copy here is the one that gets forgotten when
-  // the rule changes — the same reasoning the three review jobs carry no `if` at all.
-  assert.ok(!guard.includes("draft"), "the draft clause must not be recopied into the guide's if");
-  assert.ok(!guard.includes("head.repo"), "nor the fork fence");
-  assert.ok(!guard.includes("vars.FLOW_AI"), "nor the opt-in");
+  // flow-0217: the host job's `if` carries the three fences next to `!cancelled()`, so a draft or
+  // a fork PR never starts the job, and the guide's steps need no copy of them.
+  assert.equal(wf.jobs[GUIDE_HOST].if, SECURITY_JOB_IF);
+  for (const s of guideSteps()) {
+    const guard = String(s.if ?? "");
+    assert.match(guard, /steps\.plan\.outcome == 'success'/,
+      "the guide's facts come from the plan step; without it there is nothing true to render");
+    assert.ok(!guard.includes("draft"), "the draft clause must not be recopied into the guide's steps");
+    assert.ok(!guard.includes("head.repo"), "nor the fork fence");
+    assert.ok(!guard.includes("vars.FLOW_AI"), "nor the opt-in");
+  }
   // And the whole-file bans still hold with the job added — reasserted because `guide` is the
   // first job here that needed an `if` of its own.
   assert.doesNotMatch(reusableSrc, /head\.ref/);
@@ -938,17 +962,16 @@ test("flow-0084: the guide never runs on a draft or a fork, and does not recopy 
 });
 
 test("flow-0084: the guide can never fail this PR — asserted, not assumed", { skip }, () => {
-  assert.equal(wf.jobs[GUIDE_JOB]["continue-on-error"], true,
-    "job-level continue-on-error is what makes `the guide never blocks` structural: a broken " +
-    "advisory comment must not fail the workflow run, and a required check that turns red on a " +
-    "guide bug is the thing this must never become");
-  for (const [name, job] of Object.entries(wf.jobs ?? {})) {
-    if (name === GUIDE_JOB) continue;
-    const needs = Array.isArray(job.needs) ? job.needs : [job.needs].filter(Boolean);
-    assert.ok(!needs.includes(GUIDE_JOB),
-      `${name} declares \`needs: guide\` — the guide would then be able to hold up, or fail, a ` +
-      `check that blocks the PR`);
+  // flow-0217: the guide shares a job with the security check, so continue-on-error sits on every
+  // guide step. That is what makes `the guide never blocks` structural: a broken advisory comment
+  // must not turn the security check red.
+  assert.ok(guideSteps().length >= 5, "the facts, model, report, render and post steps");
+  for (const s of guideSteps()) {
+    assert.equal(s["continue-on-error"], true, `${s.name ?? s.id} could fail the security check`);
   }
+  const steps = stepsOf(GUIDE_HOST);
+  assert.equal(steps.indexOf(guideSteps()[0]) + guideSteps().length, steps.length,
+    "the guide must be the LAST steps of its host, so no deciding step runs after it");
   // The model call is the half most likely to fail, and it must not even fail the guide job.
   const model = guideSteps().filter((s) => String(s.uses ?? "").startsWith("anthropics/claude-code-action"));
   assert.equal(model.length, 1, "exactly one model call in the guide");
@@ -961,8 +984,8 @@ test("flow-0084: the facts come from BASE's gate and BASE's config, like every o
   // $FLOW_REVIEW_DIR is the base worktree's bin/ (see the materialise tests above), so this is the
   // same fence the three checks sit behind: a PR cannot edit the code that computes its own
   // hotspots, nor the `security_paths` those hotspots are matched against.
-  const steps = guideSteps();
-  assert.ok(steps.indexOf(facts) > steps.indexOf(materialiseStep(GUIDE_JOB)),
+  const steps = stepsOf(GUIDE_HOST);
+  assert.ok(steps.indexOf(facts) > steps.indexOf(materialiseStep(GUIDE_HOST)),
     "the facts step uses $FLOW_REVIEW_DIR before the step that sets it");
   assert.ok(steps.indexOf(facts) > steps.findIndex((s) => PLAN_RUN.test(String(s.run ?? ""))),
     "and it reads .flow-review/, so `plan` must have materialised it first");
@@ -988,7 +1011,7 @@ test("flow-0084: the PR body reaches the helper as env data, never as shell scri
 test("flow-0084: the verdicts row is built from the three JOB results, plus the plan's skip fact", { skip }, () => {
   const render = guideStep(GUIDE_COMMENT_RUN);
   assert.ok(render, "the guide must render its comment with review-guide.mjs");
-  assert.match(String(render.if ?? ""), /always\(\)/,
+  assert.match(String(render.if ?? ""), /!cancelled\(\)/,
     "the render step is what makes the fail-open real — it must run even though the model step " +
     "before it is continue-on-error");
   assert.deepEqual(
@@ -996,12 +1019,13 @@ test("flow-0084: the verdicts row is built from the three JOB results, plus the 
     {
       QA_RESULT: "${{ needs.qa.result }}",
       CODE_REVIEW_RESULT: "${{ needs['code-review'].result }}",
-      SECURITY_RESULT: "${{ needs.security.result }}",
-      // The security job ALWAYS runs so its check is never silently absent, so a skipped REVIEW
-      // still reports a successful JOB. `security_run` is the only thing that can tell those apart,
-      // and rendering a skip as a pass is the one wrong answer this row can give.
-      SECURITY_RUN: "${{ needs.plan.outputs.security_run }}",
-      SECURITY_REASON: "${{ needs.plan.outputs.security_reason }}",
+      // flow-0217: the guide runs inside the security job, so security's result is the outcome of
+      // that job's own verdict step.
+      SECURITY_RESULT: "${{ steps.enforce.outcome }}",
+      // A skipped REVIEW leaves that step `skipped`. `security_run` is the only thing that says
+      // why, and rendering a skip as a pass is the one wrong answer this row can give.
+      SECURITY_RUN: "${{ steps.plan.outputs.security_run }}",
+      SECURITY_REASON: "${{ steps.plan.outputs.security_reason }}",
     },
     "each reviewer writes its verdict JSON into its own job's workspace, so the guide reads the " +
     "job results — the same fact the human sees on the checks list");
@@ -1011,7 +1035,7 @@ test("flow-0084: one comment per PR, upserted through the helper's marker lookup
   const post = guideSteps().find((s) => GUIDE_ID_RUN.test(String(s.run ?? "")));
   assert.ok(post, "the upsert must resolve the existing comment with `review-guide.mjs comment-id`");
   const run = String(post.run);
-  assert.match(String(post.if ?? ""), /always\(\)/);
+  assert.match(String(post.if ?? ""), /!cancelled\(\)/);
   assert.match(run, /gh api --paginate --slurp "repos\/\$GITHUB_REPOSITORY\/issues\/\$PR_NUMBER\/comments"/,
     "the whole comment list has to be fetched, or a guide comment past the first page reads as absent");
   assert.match(run, /gh api -X PATCH "repos\/\$GITHUB_REPOSITORY\/issues\/comments\/\$id"/,
@@ -1037,7 +1061,7 @@ test("flow-0084: the marker the workflow upserts on is the helper's, and it is h
 });
 
 test("flow-0084: the guide's prompt bounds the model to the facts file and forbids a second comment", { skip }, () => {
-  const p = String(guideSteps().find((s) => String(s.uses ?? "").startsWith("anthropics/claude-code-action"))
+  const p = String(guideSteps().find(isModelStep)
     .with.prompt).replace(/\s+/g, " ");
   assert.match(p, /\.flow-review\/guide-facts\.md/, "one file in");
   assert.match(p, /\.flow-review\/guide-prose\.json/, "one file out");
@@ -1052,7 +1076,7 @@ test("flow-0084: the guide's prompt bounds the model to the facts file and forbi
     "this job exists to remove");
   assert.match(p, /never edit source files/);
   // The guide is advisory and must stay cheap: it reads one file and writes one small JSON object.
-  const args = String(guideSteps().find((s) => String(s.uses ?? "").startsWith("anthropics/claude-code-action")).with.claude_args);
+  const args = String(guideSteps().find(isModelStep).with.claude_args);
   assert.match(args, /--max-turns 6\b/,
     "the turn budget is the effort bound — a guide needing more turns than this has misunderstood " +
     "the job, and the three reviewers are already the expensive part of this workflow");
@@ -1060,11 +1084,13 @@ test("flow-0084: the guide's prompt bounds the model to the facts file and forbi
 
 test("flow-0084: the three existing checks are untouched — the guide is additive", { skip }, () => {
   for (const job of REVIEW_JOBS) {
-    assert.equal(wf.jobs[job].if, job === "security" ? SECURITY_IF : undefined,
-      `${job} must carry no job-level if other than security's review decision (flow-0186)`);
+    assert.equal(wf.jobs[job].if, job === "security" ? SECURITY_JOB_IF : FENCE_IF,
+      `${job} must carry no job-level if other than the fences (flow-0217)`);
     assert.equal(wf.jobs[job]["continue-on-error"], undefined,
       `${job} must still be able to fail the PR — only the guide is advisory`);
-    assert.deepEqual(wf.jobs[job].needs, "plan", `${job}'s needs must not have gained the guide`);
+    // The verdict step is the one that decides each check, and it is never continue-on-error.
+    const enforce = stepsOf(job).find((s) => VERDICT_RUN.test(String(s.run ?? "")));
+    assert.equal(enforce["continue-on-error"], undefined, `${job}'s verdict step must be able to fail`);
   }
 });
 
@@ -1146,14 +1172,15 @@ test("flow-0084: the adapter's CLI block actually runs — silence is the symlin
 // is the helper's, and the intent reviewer can neither block, approve nor set a check status.
 
 const helperMod = await import("../../project-template/.flow/bin/flow-review.mjs");
-const INTENT_JOB_NAME = "intent-review";
-const INTENT_IF = "${{ needs.plan.outputs.intent_pr == 'true' }}";
-const NOT_INTENT_IF = "${{ needs.plan.outputs.intent_pr != 'true' }}";
+const INTENT_IF = "${{ steps.plan.outputs.intent_pr == 'true' }}";
+const NOT_INTENT_IF = "${{ steps.plan.outputs.intent_pr != 'true' }}";
 const intentPassStep = (job) =>
   stepsOf(job).find((s) => String(s.name ?? "").startsWith("Intent PR — the fixed PASS line"));
 
-test("flow-0178 criterion 3: the plan job publishes intent_pr from the helper's output", { skip }, () => {
-  assert.equal(wf.jobs.plan.outputs?.intent_pr, "${{ steps.plan.outputs.intent_pr }}");
+test("flow-0178 criterion 3: every reviewer reads intent_pr from its own plan step", { skip }, () => {
+  for (const job of ["qa", "code-review"]) {
+    assert.equal(intentPassStep(job)?.if, INTENT_IF, job);
+  }
 });
 
 test("flow-0178 criterion 3: on an intent PR, qa and code-review skip the model call and still enforce a verdict", { skip }, () => {
@@ -1162,7 +1189,7 @@ test("flow-0178 criterion 3: on an intent PR, qa and code-review skip the model 
     assert.equal(reviewers.length, 1, job);
     assert.equal(reviewers[0].if, NOT_INTENT_IF, `${job}: the Claude step must not run on an intent PR`);
     const report = stepsOf(job).find((s) => s.name === "Report the model that answered");
-    assert.equal(report.if, "${{ always() && needs.plan.outputs.intent_pr != 'true' }}",
+    assert.equal(report.if, "${{ always() && steps.plan.outputs.intent_pr != 'true' }}",
       `${job}: no model ran, so there is no model to report`);
     const pass = intentPassStep(job);
     assert.ok(pass, `${job}: no fixed-PASS step`);
@@ -1206,35 +1233,38 @@ test("flow-0178 criterion 3: the pinned PASS line in the workflow is the helper'
 });
 
 test("flow-0178 criterion 5: the intent reviewer runs only for the intent kind, at --max-turns 15 or fewer", { skip }, () => {
-  const job = wf.jobs[INTENT_JOB_NAME];
-  assert.ok(job, "_flow-review.yml must define the intent-review job");
-  assert.equal(job.if, INTENT_IF);
-  assert.deepEqual(job.needs, "plan", "it inherits the draft and fork fences from plan");
-  const reviewers = reviewerSteps(INTENT_JOB_NAME);
-  assert.equal(reviewers.length, 1);
+  // flow-0217: the intent reviewer is the last steps of code-review, which carries the fences.
+  const reviewers = intentSteps().filter(isModelStep);
+  assert.equal(reviewers.length, 1, "code-review must host the intent reviewer's one model step");
+  for (const s of intentSteps()) {
+    assert.equal(s.if, "${{ always() && steps.plan.outputs.intent_pr == 'true' }}", String(s.name ?? s.id));
+  }
+  assert.equal(wf.jobs[INTENT_HOST].if, FENCE_IF, "it inherits the draft and fork fences from its host job");
   const args = String(reviewers[0].with?.claude_args ?? "");
   const turns = Number(args.match(/--max-turns (\d+)/)?.[1]);
   assert.ok(turns > 0 && turns <= 15, `--max-turns is ${turns}; the intent reviewer is low effort`);
   assert.equal(turns, helperMod.INTENT_REVIEW_MAX_TURNS, "the run summary must report the budget that runs");
-  assert.match(args, /--model \$\{\{ needs\.plan\.outputs\.model \}\}/, "the configured review model");
+  assert.match(args, /--model \$\{\{ steps\.plan\.outputs\.model \}\}/, "the configured review model");
   const blocking = ["qa", "code-review"].map((j) => Number(String(reviewerSteps(j)[0].with.claude_args).match(/--max-turns (\d+)/)[1]));
   assert.deepEqual(blocking, [helperMod.REVIEWER_MAX_TURNS, helperMod.REVIEWER_MAX_TURNS]);
 });
 
 test("flow-0178 criterion 5: the intent reviewer cannot set a check status, block, or approve", { skip }, () => {
-  const job = wf.jobs[INTENT_JOB_NAME];
-  assert.equal(job["continue-on-error"], true, "a broken intent reviewer must not turn the PR red");
-  assert.equal(reviewerSteps(INTENT_JOB_NAME)[0]["continue-on-error"], true);
-  assert.equal(stepsOf(INTENT_JOB_NAME).some((s) => VERDICT_RUN.test(String(s.run ?? ""))), false,
-    "no verdict step: it has no PASS or FAIL to report");
-  for (const [name, other] of Object.entries(wf.jobs)) {
-    assert.ok(![].concat(other.needs ?? []).includes(INTENT_JOB_NAME), `${name} must not wait on the intent reviewer`);
+  // flow-0217: continue-on-error sits on each of its steps, now that it shares a job with the
+  // code-review check, and it runs AFTER that check's verdict step so it cannot change it.
+  for (const s of intentSteps()) {
+    assert.equal(s["continue-on-error"], true, `${s.name ?? s.id}: a broken intent reviewer must not turn the PR red`);
   }
-  for (const perms of [wf.permissions, job.permissions].filter(Boolean)) {
+  assert.equal(intentSteps().some((s) => VERDICT_RUN.test(String(s.run ?? ""))), false,
+    "no verdict step: it has no PASS or FAIL to report");
+  const steps = stepsOf(INTENT_HOST);
+  const verdictAt = steps.findIndex((s) => VERDICT_RUN.test(String(s.run ?? "")));
+  assert.ok(verdictAt < steps.indexOf(intentSteps()[0]), "the code-review verdict is decided before it runs");
+  for (const perms of [wf.permissions, wf.jobs[INTENT_HOST].permissions].filter(Boolean)) {
     assert.equal(perms.checks, undefined, "no checks: permission to set a status with");
     assert.equal(perms.statuses, undefined, "no statuses: permission to set a status with");
   }
-  const prompt = String(reviewerSteps(INTENT_JOB_NAME)[0].with.prompt).replace(/\s+/g, " ");
+  const prompt = String(intentSteps().find(isModelStep).with.prompt).replace(/\s+/g, " ");
   assert.match(prompt, /\.flow\/intents\/_TEMPLATE\.md/);
   for (const check of [/human's own words/, /`\[assumption\]`/, /Outcome states a result/, /Open question is a real question/]) {
     assert.match(prompt, check);

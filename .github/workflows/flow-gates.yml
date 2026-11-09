@@ -33,3 +33,32 @@ concurrency:
 jobs:
   flow-gates:
     uses: CandidDan/flow/.github/workflows/_flow-gates.yml@main
+
+  # The three Definition-of-Done review checks (qa, code-review, security), started only once the
+  # gate above has passed (flow-0217). A gate that fails, or is cancelled by a newer push, starts
+  # no reviewer, so the review is never billed for a commit the gate already rejected. Until 5.0
+  # this was a workflow of its own, flow-review.yml, that started at the same moment as the gate.
+  #
+  # The job is named `flow-review` so the checks keep their names: `flow-review / qa`,
+  # `flow-review / code-review` and `flow-review / security`. Branch protection does not change.
+  #
+  # The reusable skips every reviewer on a draft, on a fork PR, and unless repo variable FLOW_AI
+  # is 'true' with the CLAUDE_CODE_OAUTH_TOKEN secret set. Once enabled, make the three checks
+  # REQUIRED in branch protection: a blocking gate that nothing enforces is the failure mode
+  # flow-0007 exists to remove. The reviewer model and the security trigger paths are DATA, in
+  # .flow/config.yml under `review:`.
+  flow-review:
+    needs: flow-gates
+    if: ${{ github.event_name == 'pull_request' }}
+    # id-token: write must be granted here — OIDC is never in the default GITHUB_TOKEN, and a
+    # reusable workflow can't raise it above the caller's grant. A permissions block is
+    # exhaustive, so contents/pull-requests/issues are re-listed.
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    uses: CandidDan/flow/.github/workflows/_flow-review.yml@main
+    # Named, not `inherit` — the reusable declares only CLAUDE_CODE_OAUTH_TOKEN.
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

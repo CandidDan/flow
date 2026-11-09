@@ -140,7 +140,7 @@ security:
     # e.g. for a Supabase project you might add: "row-level security policies", "OAuth token handling"
 
 # The review gate — the three Definition-of-Done reviewers that run as CHECKS ON THE PR
-# (flow-review.yml), not as subagents inside the worker's session. The worker no longer
+# (the `flow-review` job of flow-gates.yml, after the gate passes), not as subagents inside the worker's session. The worker no longer
 # certifies its own work; these are the only things that do.
 #
 # Everything here is DATA. Nothing in the reusable workflow names a model or a path, so a

@@ -41,12 +41,17 @@ const REPO = resolve(BIN, "..", "..");
 const TEMPLATE = join(REPO, "project-template");
 
 const parse = (file) => yamlMod.parse(readFileSync(file, "utf8"));
-// Every caller here is a thin, single-job workflow — the one job's name varies (flow-review,
-// flow-open-pr, …) but there is always exactly one.
-const soleJob = (file) => {
-  const jobs = Object.values(parse(file).jobs ?? {});
-  assert.equal(jobs.length, 1, `${file} must be a thin caller: exactly one job`);
-  return jobs[0];
+// A caller is named by its file, and by `<file>#<job>` when the file holds more than one caller
+// job: flow-0217 made the review a second job of flow-gates.yml, named `flow-review`. The job
+// named after the `#` calls `_<job>.yml`; a bare file name calls the reusable it is named after.
+const fileOf = (key) => key.split("#")[0];
+const reusableOf = (key) => key.includes("#") ? `_${key.split("#")[1]}.yml` : `_${key}`;
+const callerJob = (file, key) => {
+  const jobs = parse(file).jobs ?? {};
+  const want = `/.github/workflows/${reusableOf(key)}@`;
+  const found = Object.values(jobs).filter((j) => String(j.uses ?? "").includes(want));
+  assert.equal(found.length, 1, `${file} must hold exactly one job that calls ${reusableOf(key)}`);
+  return found[0];
 };
 
 // Which secret(s) each caller should pass — null for "none", a string for one, an array for more
@@ -56,9 +61,9 @@ const COMMON = {
   "flow-compass.yml": "CLAUDE_CODE_OAUTH_TOKEN",
   "flow-done.yml": null,
   "flow-gates.yml": null,
+  "flow-gates.yml#flow-review": "CLAUDE_CODE_OAUTH_TOKEN",
   "flow-open-pr.yml": "FLOW_PAT",
   "flow-recover.yml": "FLOW_PAT",
-  "flow-review.yml": "CLAUDE_CODE_OAUTH_TOKEN",
   "flow-status.yml": null,
   "flow-triage.yml": "CLAUDE_CODE_OAUTH_TOKEN",
 };
@@ -70,8 +75,8 @@ const TEMPLATE_EXPECTED = {
 };
 
 function assertScoped(dir, name, wanted) {
-  const file = join(dir, ".github/workflows", name);
-  const job = soleJob(file);
+  const file = join(dir, ".github/workflows", fileOf(name));
+  const job = callerJob(file, name);
   if (wanted === null) {
     assert.equal(job.secrets, undefined,
       `${file} must carry no secrets: block at all — it never did, and gaining one here would ` +
@@ -94,7 +99,7 @@ function assertScoped(dir, name, wanted) {
 test("canonical's own _flow-*.yml reusables (on main) declare exactly what REPO_EXPECTED says", { skip }, () => {
   for (const [name, wanted] of Object.entries(REPO_EXPECTED)) {
     if (wanted === null) continue;
-    const reusable = join(REPO, ".github/workflows", `_${name.slice(0, -".yml".length)}.yml`);
+    const reusable = join(REPO, ".github/workflows", reusableOf(name));
     const declared = parse(reusable).on?.workflow_call?.secrets ?? {};
     const wantedKeys = (Array.isArray(wanted) ? wanted : [wanted]).slice().sort();
     assert.deepEqual(Object.keys(declared).sort(), wantedKeys,
@@ -126,9 +131,9 @@ for (const [name, wanted] of Object.entries(REPO_EXPECTED)) {
 test("every secret a caller forwards is declared by the reusable it calls", { skip }, () => {
   for (const [dir, table] of [[REPO, REPO_EXPECTED], [TEMPLATE, TEMPLATE_EXPECTED]]) {
     for (const name of Object.keys(table)) {
-      const reusable = join(REPO, ".github/workflows", `_${name}`);
+      const reusable = join(REPO, ".github/workflows", reusableOf(name));
       const declared = Object.keys(parse(reusable).on?.workflow_call?.secrets ?? {});
-      const forwarded = Object.keys(soleJob(join(dir, ".github/workflows", name)).secrets ?? {});
+      const forwarded = Object.keys(callerJob(join(dir, ".github/workflows", fileOf(name)), name).secrets ?? {});
       for (const secret of forwarded) {
         assert.ok(declared.includes(secret),
           `${dir}/.github/workflows/${name} forwards ${secret}, which ${reusable} does not ` +
@@ -143,7 +148,7 @@ test("every secret a caller forwards is declared by the reusable it calls", { sk
 
 test("canonical and project-template callers forward identical secret names", { skip }, () => {
   const names = (dir, file) =>
-    Object.keys(soleJob(join(dir, ".github/workflows", file)).secrets ?? {}).sort();
+    Object.keys(callerJob(join(dir, ".github/workflows", fileOf(file)), file).secrets ?? {}).sort();
   const canonical = {};
   const template = {};
   // COMMON is exactly the set of callers both sides have; flow-sync.yml is template-only by

@@ -174,12 +174,14 @@ test("flow-0178 criterion 4: an intent-only PR still triggers the security revie
 test("flow-0178 criterion 4: the security job's trigger does not read the intent classification", { skip }, () => {
   const src = readFileSync(join(REPO, ".github/workflows/_flow-review.yml"), "utf8");
   const sec = yamlMod.parse(src).jobs.security;
-  assert.equal(sec.if, "${{ needs.plan.outputs.security_run == 'true' }}", "the security job's only job-level if is the plan's review decision (flow-0186)");
+  // flow-0217: the job-level `if` is the fences only; the review decision sits on its steps.
+  assert.doesNotMatch(String(sec.if), /intent_pr|security_run/, "the security job's own if reads neither decision");
   assert.doesNotMatch(JSON.stringify(sec), /intent_pr/,
     "no step of the security job may be skipped, or reworded, for an intent PR");
-  const gated = (sec.steps ?? []).filter((s) => s.uses?.startsWith("anthropics/claude-code-action"));
+  // The guide's model step is advisory and carries its own id; the security reviewer is `claude`.
+  const gated = (sec.steps ?? []).filter((s) => s.uses?.startsWith("anthropics/claude-code-action") && s.id === "claude");
   assert.equal(gated.length, 1);
-  assert.equal(gated[0].if, "${{ needs.plan.outputs.security_run == 'true' }}");
+  assert.equal(gated[0].if, "${{ steps.plan.outputs.security_run == 'true' }}");
 });
 
 // ── G9: the run summary says which reviewers ran, at what effort ───────────────────────────

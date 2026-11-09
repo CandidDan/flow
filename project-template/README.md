@@ -49,15 +49,17 @@ CLAUDE.md                     A pointer, not the rules: a short host file that @
                               CandidDan/flow, adopted by reference — docs/flow-reusable-workflows.md).
   flow-gates.yml              CI: the gate from config.yml + the store-is-main-only guard +
                               the touches-guard (diff ⊆ declared scope) + the flow-tooling tests.
+                              Its second job, `flow-review`, runs the three Definition-of-Done
+                              review checks — qa, code-review, and (conditionally) security —
+                              once the gate has passed. They run HERE, not in the worker's
+                              session, so the work and its reviewer are never the same context.
+                              Security trigger paths come from the `review:` block in
+                              config.yml. Off by default: FLOW_AI
+                              variable + CLAUDE_CODE_OAUTH_TOKEN secret.
   flow-status.yml             PR open → `in_review` (+branch/pr); closed-unmerged → `ready`.
   flow-done.yml               On PR merge, flips the matching task to `done` on main.
   flow-triage.yml             Scheduled issue triage: propose → approve → ready task. Off by
                               default (FLOW_AI variable + CLAUDE_CODE_OAUTH_TOKEN secret to enable).
-  flow-review.yml             The three Definition-of-Done review checks on every PR — qa,
-                              code-review, and (conditionally) security. They run HERE, not in
-                              the worker's session, so the work and its reviewer are never the
-                              same context. Security trigger paths come from the
-                              `review:` block in config.yml. Same off-by-default gate.
 .gitattributes                Marks board-edits.json as generated (diff hygiene).
 .gitignore                    Ignores the transient .flow/board-edits.json.
 ```
@@ -150,7 +152,7 @@ your merge discipline. When the repo moves to a GitHub **org**, enable a Ruleset
 Actions Integration as a bypass actor and you get both.
 
 **Independent review on the way out.** Auto-triaged work especially needs eyes that aren't the
-worker's: `flow-review.yml` runs a server-side Claude review on every flow PR — independent of
+worker's: the `flow-review` job in `flow-gates.yml` runs a server-side Claude review on every flow PR — independent of
 the worker's session, though not of the model family. For true model diversity, also enable
 **GitHub Copilot code review** as an auto-requested reviewer (repo settings → rulesets; needs a
 Copilot seat) — keep it *advisory*, not a required check: two blocking AI reviewers invites

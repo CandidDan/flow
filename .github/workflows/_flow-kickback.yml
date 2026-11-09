@@ -4,8 +4,8 @@ name: _flow-kickback (reusable)
 # owns the `workflow_run` trigger and the per-PR concurrency group; the logic is authored once in
 # canonical. See docs/flow-reusable-workflows.md.
 #
-# WHAT IT DOES. When the flow-review run on a PR concludes `failure`, this dispatches ONE bounded
-# auto-fix worker onto that same PR, and the round's one push re-triggers review. The protocol already calls a red
+# WHAT IT DOES. When a review check (a `flow-review / <check>` job) fails on a PR, this dispatches
+# ONE bounded auto-fix worker onto that same PR, and the round's one push re-triggers review. The protocol already calls a red
 # review check a kickback; nothing started that work, so an `in_review` task with a precise,
 # mechanical finding sat until a human noticed and opened a session. The human was a relay.
 #
@@ -209,9 +209,18 @@ jobs:
           set -eu
           # A reusable workflow's jobs are named `<caller job> / <job>`, so take the last segment:
           # `flow-review / code-review` is the `code-review` check.
+          #
+          # flow-0217: since 5.0 the review jobs run inside the `flow-gates` workflow, after the
+          # gate, so a failed run may hold only failed GATE jobs (`flow-gates / gate`). Only jobs
+          # whose caller job is `flow-review` count. An empty list stops this plan below: a red
+          # gate is the worker's to fix, and is never an auto-fix round or a decision card.
           checks="$(gh api --paginate "repos/{owner}/{repo}/actions/runs/$RUN_ID/jobs" \
-            --jq '.jobs[] | select(.conclusion == "failure") | .name | split(" / ") | last' \
+            --jq '.jobs[] | select(.conclusion == "failure") | .name | split(" / ")
+                  | select(length >= 2 and .[-2] == "flow-review") | last' \
             | sort -u | tr '\n' ' ')"
+          if [ -z "$checks" ]; then
+            echo "No review check failed in this run (the gate failed, or it was cancelled) — nothing to kick back."
+          fi
           {
             echo "checks=$checks"
             # The card's one link. The run page is where each reviewer's full verdict is, which
@@ -221,7 +230,7 @@ jobs:
 
       - name: The task, and the rounds already used
         id: facts
-        if: ${{ steps.pr.outputs.number != '' }}
+        if: ${{ steps.pr.outputs.number != '' && steps.failed.outputs.checks != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -293,7 +302,7 @@ jobs:
 
       - name: Decide — dispatch, skip or escalate
         id: decide
-        if: ${{ steps.pr.outputs.number != '' }}
+        if: ${{ steps.pr.outputs.number != '' && steps.failed.outputs.checks != '' }}
         env:
           FLOW_AI: ${{ vars.FLOW_AI }}
           FLOW_CONFIG: .flow/config.yml
