@@ -1,12 +1,12 @@
 ---
 id: "flow-0217"
 title: "The review checks run only after the gate has passed, and in fewer jobs"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude/project-thread-8x6fo7"
 created: "2026-11-06"
-started: ""
+started: "2026-11-09T09:59:20Z"
 branch: ""
 pr: ""
 issue: ""
