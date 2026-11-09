@@ -1,14 +1,14 @@
 ---
 id: "flow-0218"
 title: "Workers open PRs as drafts, mark them ready only after the local gate, and push fixes once"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude/project-thread-irhd4m"
 created: "2026-11-09"
 started: "2026-11-09T12:38:29Z"
 branch: "claude/project-thread-irhd4m"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/303"
 issue: ""
 blocked_reason: ""
 cancelled_reason: ""
