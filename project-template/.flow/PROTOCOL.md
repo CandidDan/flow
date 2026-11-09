@@ -300,7 +300,7 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
    (`gh api "repos/{owner}/{repo}/pulls?head={owner}:<branch>" --jq '.[0].number'`). Setup for
    routines: `docs/flow-routines.md` in canonical.
 9. **Kickback** (if the human comments) arrives as a new `notes` entry on the task or a PR
-   comment. Address it on the same branch, re-run gates, re-request review. **Fix everything, then
+   comment. Address it on the same branch and re-request review. **Fix everything, then
    push once.** Every push to a ready PR re-runs the whole CI gate and the review checks, so three
    fixes pushed one at a time cost three times as much as the same fixes in one push. This applies
    to a red CI check or review check too: fix every failure it reports, run the local gate, then push.

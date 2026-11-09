@@ -162,7 +162,7 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0156",
   }],
   ["The loop you run", {
-    digest: "df1492db88203a6fae1605f4f866a7cbf8f1cee084e64967f2e74369c1146edf",
+    digest: "578969ba0d64bfaa7d1239bd3751f454b74cdda9f2a1ffcf2e6a7d279b87ceb0",
     why: "step 1 is the second place the claim rule is stated, and it said `in_progress` only. " +
          "Two statements of one rule drift apart unless both move; pick-task.test.mjs now " +
          "asserts on both strings for the same reason (flow-0118). flow-0172 then taught the " +
