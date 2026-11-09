@@ -34,7 +34,9 @@ name: _flow-open-pr (reusable)
 # just opens as a draft, and `flow-status`/`flow-review` key off `ready_for_review` instead of off
 # the PR existing. The worker's hand-off step is now `gh pr ready`.
 #
-# `flow-gates` deliberately still runs on drafts — a worker wants the gate red early.
+# `flow-gates` skips drafts too, since flow-0136: the worker runs the gate locally before it marks
+# the PR ready, so a CI run on a draft re-proves nothing. `gh workflow run flow-gates.yml --ref
+# <branch>` runs it on a draft on demand.
 #
 # GATING AUTO-WORKER PRs (CAN-58). A PR opened with the Actions GITHUB_TOKEN does NOT trigger
 # downstream workflows (GitHub's loop-prevention), so `flow-gates` (on: pull_request) never ran

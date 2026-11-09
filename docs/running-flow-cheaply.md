@@ -78,6 +78,20 @@ For a PR with three pushes and a review that passes first time, the bookkeeping 
 and the review checks are the rest of the bill, and they scale with the repo's test suite and the size
 of the diff. flow-0136 already cancels a superseded gate run and skips drafts.
 
+## What the worker controls: pushes to a ready PR
+
+The gate and the review checks run on every push to a PR that is **ready for review**, and on none
+to a draft. So the number of pushes after `gh pr ready` sets most of a PR's bill, and the protocol
+(steps 5, 7, 8 and 9 of the loop, flow-0218) asks the worker for three things:
+
+- Open the PR as a draft, and push to it as often as you like. CI skips it.
+- Run all of the local gate (`build`, `lint`, `test`, `coverage`) and mark the PR ready only once it
+  passes.
+- After a red check or a review comment, fix every point, run the local gate, and push **once**.
+  Three fixes in three pushes cost three gate runs and three review runs; in one push, one of each.
+
+To run the gate on a draft anyway, start it by hand: `gh workflow run flow-gates.yml --ref <branch>`.
+
 ## Pointing `FLOW_RUNNER` at a cheaper runner
 
 Every template caller passes `runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}`, so one repo

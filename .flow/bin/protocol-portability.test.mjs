@@ -162,7 +162,7 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0156",
   }],
   ["The loop you run", {
-    digest: "011bf25b8a485affca64be1727741da5ed208bc52afe06728aa53d396dbaa969",
+    digest: "578969ba0d64bfaa7d1239bd3751f454b74cdda9f2a1ffcf2e6a7d279b87ceb0",
     why: "step 1 is the second place the claim rule is stated, and it said `in_progress` only. " +
          "Two statements of one rule drift apart unless both move; pick-task.test.mjs now " +
          "asserts on both strings for the same reason (flow-0118). flow-0172 then taught the " +
@@ -170,8 +170,10 @@ const INTENTIONAL_DIVERGENCES = new Map([
          "with pick-task.mjs when started with no task id, and steps 7 and 8 fall back to the " +
          "REST pulls route and ccr/ready_for_review on the GraphQL 403. flow-0164 then dropped " +
          "the two board-regeneration steps (after the claim, and after the hand-off): the board " +
-         "is retired.",
-    task: "flow-0164",
+         "is retired. flow-0218 then told the worker how to use the draft-skipping CI: step 7 " +
+         "opens its own PR as a draft, steps 5 and 8 mark it ready only after the local gate " +
+         "passes (and name the on-demand gate run), and step 9 pushes a round of fixes once.",
+    task: "flow-0218",
   }],
   ["What stays out of here", {
     digest: "73329df2df1118a3129f95d896cf5cabab03bfda2aff86d1c191ee0f405f05b1",
