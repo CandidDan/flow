@@ -271,8 +271,10 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
 4. **Build.** Implement against the acceptance criteria in the task body. Nothing more, and
    nothing outside the task's declared `touches`.
 5. **Gate** — run the local half (`build`, `lint`, `test`, `coverage`) and fix what it finds;
-   don't open the PR until it is clean. The three review checks are not yours to run: they run
-   on the PR (see *The gate* below).
+   don't mark the PR ready (step 8) until all of it passes. CI skips a draft, so this local run is
+   the only gate a draft gets. To run the CI gate on a draft anyway, start it by hand:
+   `gh workflow run flow-gates.yml --ref <branch>`. The three review checks are not yours to run:
+   they run on the PR (see *The gate* below).
 6. **Rebase.** `git pull --rebase origin main` onto your branch; re-run the gate if `main`
    moved. Unresolvable conflict → `blocked`/kickback, surfaced.
 7. **PR.** Open it, title `[<task-id>] <title>` — **this exact prefix is load-bearing**, not
@@ -281,16 +283,15 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
    between your PR and a silently skipped transition. Link the task file path in the description,
    paste the acceptance-criteria checklist with each item ticked + the test that proves it.
    Normally `flow-open-pr` has already opened it as a draft (step 8), so you edit its title and
-   body. Only when **no PR exists for the branch yet** do you open one: `gh pr create`, or — in a
-   session without GraphQL (below) — `gh api repos/{owner}/{repo}/pulls -f title=… -f head=<branch>
-   -f base=main -F body=@<file>`, which opens it non-draft.
+   body. Only when **no PR exists for the branch yet** do you open one, **as a draft**:
+   `gh pr create --draft`, or — in a session without GraphQL (below) — `gh api
+   repos/{owner}/{repo}/pulls -f title=… -f head=<branch> -f base=main -F body=@<file> -F draft=true`.
 8. **Hand off — `gh pr ready`.** `flow-open-pr` opens your PR as a **draft** on your first push,
    so it already exists by the time you get here; `flow-status` recorded `branch` + `pr` then, and
    left the task `in_progress`. Marking it ready is the hand-off: it flips the task to `in_review`
    and starts the qa, code-review and security checks, which do not run on a draft. You don't write
-   that transition, and you don't open the PR — you finish it. If you opened the PR yourself with
-   `gh pr create` or the REST route (no draft), that step already happened. Stop. The human
-   validates.
+   that transition, and you don't open the PR — you finish it. Mark it ready only once the local
+   gate (step 5) passes on the commit you are handing off. Stop. The human validates.
    **In a Claude Code cloud session** (a routine, or Claude Code on the web) GraphQL is blocked,
    so `gh pr create` and `gh pr ready` fail with HTTP 403 and the message *"GitHub GraphQL is not
    available from Claude Code sessions"*. The rule: **try the `gh pr` command first, and on that
@@ -299,7 +300,10 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
    (`gh api "repos/{owner}/{repo}/pulls?head={owner}:<branch>" --jq '.[0].number'`). Setup for
    routines: `docs/flow-routines.md` in canonical.
 9. **Kickback** (if the human comments) arrives as a new `notes` entry on the task or a PR
-   comment. Address it on the same branch, re-run gates, re-request review.
+   comment. Address it on the same branch, re-run gates, re-request review. **Fix everything, then
+   push once.** Every push to a ready PR re-runs the whole CI gate and the review checks, so three
+   fixes pushed one at a time cost three times as much as the same fixes in one push. This applies
+   to a red CI check or review check too: fix every failure it reports, run the local gate, then push.
 
 Run **each task as a fresh session.** Do not carry one long thread across many tasks —
 context rot degrades quality across a backlog. Pull, work, PR, end. See *Session hygiene*.

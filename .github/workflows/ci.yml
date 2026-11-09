@@ -4,11 +4,15 @@ name: ci
 # never run here — nothing was validating the Flow tooling that consuming repos adopt by
 # reference. This runs the template's `.flow/bin` proving tests on every push/PR, so the bin
 # (and the reusable workflows that call it) can't ship broken from canonical.
+#
+# NOT ON PULL REQUESTS (flow-0218). It used to run on every PR push, drafts included. On a PR the
+# gate's `npm test` already runs these tests and more, and the gate skips drafts on purpose
+# (flow-0136), so this run only billed a second copy of a test the gate repeats. It still runs on
+# `main` after a merge, and on demand.
 
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
 jobs:
