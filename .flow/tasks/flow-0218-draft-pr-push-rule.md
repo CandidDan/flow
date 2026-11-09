@@ -1,7 +1,7 @@
 ---
 id: "flow-0218"
 title: "Workers open PRs as drafts, mark them ready only after the local gate, and push fixes once"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude/project-thread-irhd4m"
