@@ -32,6 +32,7 @@ effort: "high"
 model_reason: "Changes the reusable review and gate workflows, check names and the kickback trigger across every adopting repo."
 notes:
   - "2026-11-06 (orchestrator, on Dan's direction in the cost thread): written blocked, not ready, because the design choice below is Dan's."
+  - "2026-11-09: Dan chose option (a) on the decision card: the gate caller runs review as a job with needs: gate, check names become 'flow-gates / review / ...', kickback moves to workflow_run on flow-gates. List, per adopting repo, the branch-protection required-check names that must change, in the PR description and the changelog fragment's caller action (this makes it a MAJOR bump)."
 asks: []
 ---
 
