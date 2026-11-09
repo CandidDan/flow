@@ -1,7 +1,7 @@
 ---
 id: "flow-0217"
 title: "The review checks run only after the gate has passed, and in fewer jobs"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,7 +10,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Needs Dan's ruling on how review waits for the gate, because every option renames the review checks or changes what kickback listens to (see asks). Not machine-checkable."
+blocked_reason: ""
 cancelled_reason: ""
 blocked_by: []
 serves: ["maintenance"]
@@ -32,8 +32,7 @@ effort: "high"
 model_reason: "Changes the reusable review and gate workflows, check names and the kickback trigger across every adopting repo."
 notes:
   - "2026-11-06 (orchestrator, on Dan's direction in the cost thread): written blocked, not ready, because the design choice below is Dan's."
-asks:
-  - "decision: How should review wait for the gate? (a) the gate caller calls the review reusable as a job with needs: gate, and flow-review.yml goes away; checks are renamed to 'flow-gates / review / qa' etc., kickback moves to workflow_run on flow-gates, and branch protection in each repo must be updated; (b) review triggers on workflow_run of flow-gates and posts its verdicts as commit statuses under the old names. Recommend: (a), it keeps the checks attached to the PR natively and is the smaller change; (b) re-implements check reporting by hand."
+asks: []
 ---
 
 ## Summary
