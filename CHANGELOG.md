@@ -6,6 +6,82 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 5.0.0 — 2026-11-10
+
+**MAJOR: the review checks run only after the gate passes, in three billed jobs instead of five.**
+A push whose gate fails or is cancelled no longer pays for a review (flow-0217). Also: flow-done
+can read pull requests, so the intent repair works in a private repo (flow-0219), and the protocol
+asks workers to open PRs as drafts and batch their fixes into one push (flow-0218). Every template
+caller pins `@v5` and both VERSION stamps read 5.0.0.
+**Caller action:** run the flow-sync workflow at 5.0. It takes the new `flow-gates.yml`,
+`flow-kickback.yml` and `flow-done.yml` callers and deletes `.github/workflows/flow-review.yml`.
+Branch protection does not change. A repo that hand-edits its callers: see each entry below.
+
+- **MAJOR: the review checks start only after the gate has passed, and run in three jobs instead
+  of five** (`.github/workflows/_flow-review.yml`, `.github/workflows/_flow-kickback.yml`,
+  `project-template/.github/workflows/flow-gates.yml`, flow-0217). **Caller action:** take the new
+  `flow-gates.yml` and `flow-kickback.yml` callers and delete `.github/workflows/flow-review.yml`.
+  Running the flow-sync workflow at 5.0 does all three. Branch protection does **not** change: the
+  checks keep their names, `flow-review / qa`, `flow-review / code-review` and
+  `flow-review / security`.
+
+  Before, the review was a workflow of its own. It started at the same moment as the gate, so when
+  the gate failed, or a newer push cancelled it, the review still ran and was billed, model calls
+  included. Measured in one private adopter on 5 and 6 Nov 2026: 12 of 54 gate runs failed or were
+  cancelled, and the review ran on each. Now the review is a second job in `flow-gates.yml`, named
+  `flow-review`, that waits for the gate job. A red or cancelled gate starts no reviewer.
+
+  The reusable also drops from five jobs to three. GitHub bills every job at least one minute:
+  - `plan` was a job whose outputs every reviewer read. Each reviewer already ran the same `plan`
+    step to build its own context, so it now reads that step's outputs instead.
+  - The guide comment is now the last steps of the `security` job, which waits for qa and
+    code-review so it can report their results. Every guide step is `continue-on-error`, so it
+    still cannot turn a check red. The advisory intent reviewer is now the last steps of
+    `code-review`.
+  - `security` therefore always starts, unlike under flow-0186, but on a diff that does not need
+    the security review it runs no model and no verdict step, and records the skip as before. It
+    costs the same minute the separate `guide` job used to.
+
+  The kickback workflow now listens for `flow-gates` runs. It acts only when a `flow-review / ...`
+  job failed, so a red gate never starts an auto-fix round or posts a decision card. flow-sync
+  adds `.github/workflows/flow-review.yml` to its retired paths, so the sync PR deletes the old
+  caller; a copy left behind would run the review a second time on every push.
+
+  What an adopter at 4.x with old callers sees if it moves only the reusable tags: the old
+  `flow-review.yml` caller still works, because every reviewer job carries the draft, fork and
+  opt-in fences itself, but the review then does not wait for the gate. Take the callers.
+
+- **The protocol asks workers to open PRs as drafts, mark them ready only after the local gate
+  passes, and push fixes in one batch** (`project-template/.flow/PROTOCOL.md`, flow-0218). **No
+  caller action.** CI already skipped drafts (flow-0136); this tells the worker how to use that.
+  A worker that opens its own PR now opens it as a draft (`gh pr create --draft`, or `draft=true`
+  on the REST route), and after a red check or a review comment fixes every point before pushing
+  once, because each push to a ready PR re-runs the gate and the review checks. The protocol also
+  names the on-demand gate run for a draft: `gh workflow run flow-gates.yml --ref <branch>`.
+  `docs/running-flow-cheaply.md` gains a section on what the worker's pushes cost. Canonical's own
+  `ci.yml` no longer runs on pull requests, where the gate already runs the same tests.
+
+- **flow-done can read pull requests, so the intent repair works in a private repo**
+  (`.github/workflows/_flow-done.yml`, `project-template/.github/workflows/flow-done.yml`,
+  flow-0219). **Caller action:** none for a repo that runs flow-sync, which copies the new caller.
+  A repo that keeps a hand-edited `flow-done.yml` adds `pull-requests: read` next to
+  `contents: write` on the `flow-done` job.
+
+  The repair pass from flow-0209 asks the GitHub API which pull request added each unstamped
+  intent. In a private repo that call needs `pull-requests: read`, and the job did not have it, so
+  each lookup answered 403 or 404 and the intent stayed unstamped. The callers now grant the scope,
+  and `_flow-done.yml` drops its own `permissions:` block, which had cut `pull-requests` to none
+  whatever the caller granted. The reusable now inherits what the caller grants, as
+  `_flow-dispatch.yml` does since flow-0211. A repo whose caller is not yet synced keeps working:
+  its `done` transition runs, and the repair names each intent it could not look up.
+
+- **Keep a job-level `permissions:` block on the `flow-done` caller job** (security note on
+  flow-0219, low). **No caller action** for a repo that syncs. `_flow-done.yml` no longer sets its
+  own permissions, so it gets exactly what the caller's `flow-done` job grants. Both shipped callers
+  grant `contents: write` and `pull-requests: read` explicitly. A hand-edited caller that drops its
+  `permissions:` block would give the job the repository's default token, which on older repos can
+  write everything. Keep the block.
+
 ## 4.2.0 — 2026-11-07
 
 **MINOR: a repo whose coverage command already runs every test can stop the gate running them
