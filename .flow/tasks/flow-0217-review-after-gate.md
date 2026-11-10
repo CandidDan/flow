@@ -1,7 +1,7 @@
 ---
 id: "flow-0217"
 title: "The review checks run only after the gate has passed, and in fewer jobs"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "claude/project-thread-8x6fo7"
