@@ -1,7 +1,7 @@
 ---
 id: "flow-0220"
 title: "Flow goes to v5: template callers and flow-sync's fallback pin @v5, and VERSION moves to 5.0.0"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude/project-thread-8x6fo7"
