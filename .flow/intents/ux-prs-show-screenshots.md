@@ -1,6 +1,6 @@
 ---
 id: "ux-prs-show-screenshots"
-title: "A PR that changes what a person sees shows it in screenshots, so Dan can review it from the PR page"
+title: "PRs that change UX favour screenshots"
 status: "proposed"
 created: "2026-11-10"
 source: "Dan, TanPlan project chat 2026-11-10, reviewing CandidDan/tanplan-platform PR #344"
@@ -25,7 +25,9 @@ And a few minutes later:
 
 — Dan, TanPlan project chat, 2026-11-10.
 
-Evidence (not Dan's words):
+## Evidence
+
+None of this section is Dan's words. It is what the writer found in the repo.
 
 - The rule already exists, but weakly. `project-template/.flow/PROTOCOL.md`, "Response style",
   asks for captures only "when the change is something a person sees and the session can run
@@ -46,18 +48,20 @@ of, with no check that notices.
 
 ## Outcome
 
-When Dan opens a PR that changes what a person sees or does, he can judge the change by looking
-at it on the PR page, before and after, without checking out the branch. When a PR has no
-captures, its description says why in a way he can disagree with, and a check has already looked
-at that reason before he reaches the PR.
+A PR that changes what a person sees or does reaches Dan with screenshots of the change, and he
+can judge it by looking at them. A PR without screenshots never reaches him without a stated
+reason he can disagree with.
+
+- [assumption] The screenshots show before and after, and he does not need to check out the
+  branch to see them.
 
 ## Constraints
 
-- "Favour" is Dan's word: the default is to include captures. A reason is still allowed when a
-  capture is genuinely impossible.
-- Captures use synthetic data only, never a real customer's data or a production screen. This is
-  already in `show-me/SKILL.md` and must stay.
-- G9: it must not make PRs materially more expensive in tokens or CI minutes.
+- "Favour" is Dan's word: the default is to include screenshots.
+- [assumption] A written reason is still allowed when a screenshot is genuinely impossible.
+- [assumption] Screenshots use synthetic data only, never a real customer's data or a production
+  screen. This is already in `show-me/SKILL.md`.
+- [assumption] It must not make PRs materially more expensive in tokens or CI minutes (VISION.md G9).
 - [assumption] For a change a person feels but no screen shows yet (PR #344's case), a before/after
   table of real responses, run against the base commit and the PR head, counts as the capture.
 - [assumption] The check is the existing qa check on the PR, not a new job.
