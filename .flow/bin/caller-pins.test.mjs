@@ -395,6 +395,13 @@ test("the repinning doc has a section for reaching the current major, and names 
       [/flow-sync/, "that the sync makes both edits, so the reader knows the easy path"],
       [/startup/, "the symptom of a caller left pointing at a reusable that no longer exists"],
     ],
+    v5: [
+      [/flow-review\.yml/, "the caller to delete — the review is now a job in flow-gates.yml (flow-0217)"],
+      [/needs/, "that the new flow-review job waits for the gate"],
+      [/flow-kickback\.yml/, "the kickback caller, which now listens for flow-gates runs"],
+      [/pull-requests: read/, "the grant flow-done.yml gains (flow-0219)"],
+      [/flow-sync/, "that the sync makes these edits, so the reader knows the easy path"],
+    ],
   };
   assert.ok(STEPS[want], `no caller steps recorded for ${want} — add them to this test`);
   for (const [re, why] of STEPS[want]) assert.match(section, re, `the ${want} section must name ${why}`);
@@ -469,8 +476,11 @@ test("…and it says why, naming the skills and the second run that recovers a r
   const want = expectedRef(readFileSync(VERSION_FILE, "utf8"));
   const section = majorSection(readFileSync(join(REPO, "docs/repinning-a-consuming-repo.md"), "utf8"), want);
 
-  assert.match(section, /skills/i,
-    "the reason has to name what the old reusable leaves out — skills — or the order reads as " +
+  // What the previous major's reusable leaves out, per major: at v4 the skills tree, at v5 the
+  // retirement of the old flow-review.yml caller.
+  const LEFT_OUT = { v3: /skills/i, v4: /skills/i, v5: /flow-review\.yml/ };
+  assert.match(section, LEFT_OUT[want] ?? /skills/i,
+    "the reason has to name what the old reusable leaves out, or the order reads as " +
     "superstition and the next reader shortens it back to one command");
   assert.match(section, /canonical_ref/,
     "…and it has to distinguish the input from the pin, because a reader who has set " +
