@@ -23,7 +23,7 @@ jobs:
       contents: write
       issues: write
       id-token: write
-    uses: CandidDan/flow/.github/workflows/_flow-triage.yml@v4
+    uses: CandidDan/flow/.github/workflows/_flow-triage.yml@v5
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
     secrets:
