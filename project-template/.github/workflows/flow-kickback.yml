@@ -89,7 +89,7 @@ jobs:
       issues: write
       actions: read
       id-token: write
-    uses: CandidDan/flow/.github/workflows/_flow-kickback.yml@v4
+    uses: CandidDan/flow/.github/workflows/_flow-kickback.yml@v5
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}
     secrets:

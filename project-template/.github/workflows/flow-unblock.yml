@@ -34,6 +34,6 @@ jobs:
     permissions:
       contents: write          # the release commit to main
       pull-requests: read      # the blocked_by PR lookup, so a PR-url block releases on merge
-    uses: CandidDan/flow/.github/workflows/_flow-unblock.yml@v4
+    uses: CandidDan/flow/.github/workflows/_flow-unblock.yml@v5
     with:
       runner: ${{ vars.FLOW_RUNNER || 'ubuntu-latest' }}

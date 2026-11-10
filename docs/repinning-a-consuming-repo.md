@@ -78,12 +78,54 @@ Three things follow:
   longer carries one.
 - **Two callers pinned at different refs fail the sync**, with an error naming each file and its ref.
   That is the state a half-finished repin leaves behind, and it is now loud instead of silent.
-- **No flow-sync caller at all** falls back to the current major — `v4` — with a warning saying
+- **No flow-sync caller at all** falls back to the current major — `v5` — with a warning saying
   so. The fallback is the only hard-coded ref left in `_flow-sync.yml`, and `caller-pins.test.mjs`
   derives the expected value from root `VERSION`, so cutting a major moves it there and nowhere else.
 
 A `workflow_dispatch` run with the input filled in still overrides everything above — that is how you
 adopt from a canary ref once without repinning.
+
+---
+
+## Moving from `@v4` to `@v5` (the steps the `sed` does not cover)
+
+The 5.0.0 major moves the review checks into `flow-gates.yml`, as a job that waits for the gate
+(flow-0217), and lets flow-done read pull requests (flow-0219). Four caller files change, and the
+`sed` over the `uses:` lines makes none of those changes:
+
+1. **`flow-gates.yml` gains a `flow-review` job** that `needs` the gate and calls
+   `_flow-review.yml`. Its checks keep their names (`flow-review / qa`, `flow-review / code-review`,
+   `flow-review / security`), so branch protection does not change.
+2. **Delete `.github/workflows/flow-review.yml`.** A copy left behind runs the review a second time
+   on every push, without waiting for the gate. **`flow-sync` deletes it for you**: it is on the
+   5.0 sync's retired-paths list, so it shows under **Removed** in the sync PR.
+3. **`flow-kickback.yml` listens for `flow-gates` runs** instead of `flow-review` runs.
+4. **`flow-done.yml` grants `pull-requests: read`** next to `contents: write`. Keep the job-level
+   `permissions:` block: `_flow-done.yml` sets none of its own, so the job gets exactly what this
+   block grants.
+
+### Doing it
+
+Repin the `flow-sync` caller first, then dispatch it. As at v4, `canonical_ref` picks the files
+the sync copies, not the reusable that copies them: a sync run from the `@v4` pin uses the v4
+reusable, which does not retire `flow-review.yml`, so the old caller would stay and the review
+would run twice. If you already dispatched from the old pin, merge that PR, repin, and run the sync
+a second time.
+
+```bash
+sed -i "s|\(_flow-sync\.yml\)@v4$|\1@v5|" .github/workflows/flow-sync.yml
+gh workflow run flow-sync.yml -R <owner>/<repo> -f canonical_ref=v5
+```
+
+By hand, copy `flow-gates.yml`, `flow-kickback.yml` and `flow-done.yml` from canonical's
+`project-template/.github/workflows/` at `v5`, then:
+
+```bash
+FROM="v4"; TO="v5"
+sed -i "s|\(_flow-[a-z-]*\.yml\)@$FROM$|\1@$TO|" .github/workflows/flow-*.yml
+git rm .github/workflows/flow-review.yml                # retired: the review is a job in flow-gates.yml
+grep -h "uses:" .github/workflows/flow-*.yml | sort -u  # every line must show @v5
+```
 
 ---
 
