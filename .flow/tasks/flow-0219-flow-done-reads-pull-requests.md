@@ -1,7 +1,7 @@
 ---
 id: "flow-0219"
 title: "flow-done can read pull requests, so the intent approval repair works in a private repo"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "claude/project-thread-8x6fo7"
