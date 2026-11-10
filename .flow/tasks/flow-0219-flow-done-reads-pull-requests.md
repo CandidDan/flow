@@ -1,16 +1,16 @@
 ---
 id: "flow-0219"
 title: "flow-done can read pull requests, so the intent approval repair works in a private repo"
-status: "blocked"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "claude/project-thread-8x6fo7"
 created: "2026-11-10"
-started: ""
+started: "2026-11-10T10:50:44Z"
 branch: ""
 pr: ""
 issue: "https://github.com/CandidDan/flow/issues/296"
-blocked_reason: "Parked by queue cap at creation (Dan, 2026-11-10: wants this in before v5). Not machine-checkable: flip to ready when the ready count drops below the cap, or when Dan labels it urgent."
+blocked_reason: ""
 cancelled_reason: ""
 blocked_by: []
 serves: ["maintenance"]
@@ -27,6 +27,7 @@ effort: "high"
 model_reason: "Changes the token permissions of a reusable workflow every adopting repo calls on every merge; a wrong grant fails flow-done fleet-wide before any step runs"
 notes:
   - "2026-11-10 (Inflight project thread on marking merged intents approved, at Dan's request): written from flow-0209's open follow-up ask. Inflight (private) hit it: the repair step cannot look up the PR that added an intent, because the job's token has no pull-requests scope."
+  - "2026-11-10: block lifted by hand and claimed, at Dan's request in the project thread (land it before the 5.0.0 cut)."
 asks: []
 ---
 
