@@ -17,4 +17,5 @@ jobs:
   flow-done:
     permissions:
       contents: write
+      pull-requests: read
     uses: CandidDan/flow/.github/workflows/_flow-done.yml@main

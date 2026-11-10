@@ -82,10 +82,33 @@ test("flow-0209 criterion 7: the stamp step has the token, the repo and whole hi
   assert.equal(checkout.with["fetch-depth"], 0);
   assert.match(step.run,
     /if \[ "\$\(git rev-parse --is-shallow-repository\)" = "true" \]; then\n\s*git fetch --unshallow --quiet origin\n\s*fi/);
-  // No new permission request: asking for more than the caller grants fails the whole job before
-  // the task transition runs, and every caller grants `contents: write` only.
-  assert.deepEqual(wf.permissions, { contents: "write" });
+  // The reusable requests nothing (flow-0219): see the next test.
+  assert.equal(wf.permissions, undefined);
   assert.equal(job.permissions, undefined);
+});
+
+// flow-0219: callers grant, the reusable inherits (the flow-0211 pattern).
+const CALLERS = [
+  join(REPO, ".github", "workflows", "flow-done.yml"),
+  join(REPO, "project-template", ".github", "workflows", "flow-done.yml"),
+];
+
+test("flow-0219 criterion 1: both flow-done callers grant exactly contents: write and pull-requests: read", async (t) => {
+  if (!yamlMod) return t.skip(needsYaml);
+  for (const file of CALLERS) {
+    const wf = yamlMod.parse(readFileSync(file, "utf8"));
+    assert.deepEqual(wf.jobs["flow-done"].permissions, { contents: "write", "pull-requests": "read" }, file);
+    assert.match(wf.jobs["flow-done"].uses, /\/_flow-done\.yml@/, `${file} calls the reusable`);
+  }
+});
+
+test("flow-0219 criterion 2: _flow-done.yml declares no permissions, at the top level or on any job", async (t) => {
+  if (!yamlMod) return t.skip(needsYaml);
+  const wf = yamlMod.parse(readFileSync(WORKFLOW, "utf8"));
+  assert.equal(Object.hasOwn(wf, "permissions"), false, "a top-level block would cut what the caller grants");
+  for (const [name, job] of Object.entries(wf.jobs)) {
+    assert.equal(Object.hasOwn(job, "permissions"), false, `job ${name} must not request permissions`);
+  }
 });
 
 test("flow-0209 criterion 7: the step still retries a rejected push, discarding and redoing the stamp", async (t) => {
