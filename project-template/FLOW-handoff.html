@@ -377,11 +377,10 @@
         <div class="frow"><div class="path">.claude/agents/security-reviewer.md</div><div class="desc">Secrets, deps, authz, input validation + project focus.</div></div>
         <div class="frow"><div class="path">.claude/agents/code-reviewer.md</div><div class="desc">Correctness, scope adherence, maintainability.</div></div>
         <div class="frow"><div class="path">.claude/skills/task-writer/</div><div class="desc">Orchestrator discipline: how to write a ready task.</div></div>
-        <div class="frow"><div class="path">.github/workflows/flow-gates.yml</div><div class="desc">CI: the gate from config + store-is-main-only guard + tooling tests.</div></div>
+        <div class="frow"><div class="path">.github/workflows/flow-gates.yml</div><div class="desc">CI: the gate from config + store-is-main-only guard + tooling tests; then, once it passes, the independent Claude review checks. The review is off by default.</div></div>
         <div class="frow"><div class="path">.github/workflows/flow-status.yml</div><div class="desc">PR open → <code>in_review</code> (+branch/pr) · closed-unmerged → <code>ready</code>.</div></div>
         <div class="frow"><div class="path">.github/workflows/flow-done.yml</div><div class="desc">On PR merge, flips the matching task to <code>done</code> on main.</div></div>
         <div class="frow"><div class="path">.github/workflows/flow-triage.yml</div><div class="desc">Scheduled inbox sweep: propose → approve → ready task. Off by default.</div></div>
-        <div class="frow"><div class="path">.github/workflows/flow-review.yml</div><div class="desc">Independent Claude review on flow PRs. Off by default.</div></div>
         <div class="frow"><div class="path">.gitattributes · .gitignore</div><div class="desc">Diff hygiene; ignore the transient board-edits.json.</div></div>
       </div>
       <div class="fgroup">

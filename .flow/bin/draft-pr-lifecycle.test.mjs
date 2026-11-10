@@ -409,24 +409,22 @@ test("flow-recover opens its recovery PR as a draft, with the same fallback", { 
   });
 });
 
-// ── _flow-review.yml: one condition suppresses all four jobs ─────────────────────────────────
-test("flow-review's plan job is gated on the PR not being a draft", { skip }, () => {
+// ── _flow-review.yml: every job carries the draft condition ─────────────────────────────────
+// flow-0217 folded `plan` into the three reviewers, so there is no single job left for the others
+// to depend on: each carries the draft condition itself.
+test("every flow-review job is gated on the PR not being a draft", { skip }, () => {
   const jobs = parse(join(WF, "_flow-review.yml")).jobs;
-  assert.match(String(jobs.plan.if), /github\.event\.pull_request\.draft/,
-    "the draft condition belongs on `plan` — it is the one job the others depend on");
-  // The suppression only reaches qa/code-review/security through `needs`. If that link were ever
-  // broken, the three reviewers would run on drafts again with `plan` skipped, so pin it here.
   for (const name of ["qa", "code-review", "security"]) {
-    const needs = [].concat(jobs[name].needs ?? []);
-    assert.ok(needs.includes("plan"),
-      `${name} must declare needs: plan, or the draft gate does not reach it`);
+    assert.match(String(jobs[name].if), /github\.event\.pull_request\.draft != true/,
+      `${name} must be gated on draft state, or the reviewers run on every work-in-progress push`);
   }
 });
 
 // ── the thin callers, in both directories ────────────────────────────────────────────────────
-test("every flow-status / flow-review caller listens for ready_for_review", { skip }, () => {
+// flow-0217: the review is a job of flow-gates.yml now, so that file's triggers are the review's.
+test("every flow-status / flow-gates caller listens for ready_for_review", { skip }, () => {
   for (const dir of [WF, join(TEMPLATE, ".github", "workflows")]) {
-    for (const name of ["flow-status.yml", "flow-review.yml"]) {
+    for (const name of ["flow-status.yml", "flow-gates.yml"]) {
       const file = join(dir, name);
       const types = parse(file).on.pull_request.types;
       assert.ok(types.includes("ready_for_review"),

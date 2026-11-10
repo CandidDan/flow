@@ -88,6 +88,13 @@ const PRE_MOVE_SECTION_DIGESTS = [
 // same commit as the edit, with a `why` a reader can check against the diff. An entry whose
 // digest equals the pre-move one is noise and fails its own test below.
 const INTENTIONAL_DIVERGENCES = new Map([
+  ["The gate — Definition of Done (every task, every stack)", {
+    digest: "cfd96e40e2909a3e7258d663552eaea49931c3f0fdd760a1fd2b6ef1a87a03b9",
+    why: "the review checks are no longer the `flow-review.yml` workflow: since 5.0 they are the " +
+         "`flow-review` job of `flow-gates.yml`, which starts once the gate passes (flow-0217). " +
+         "The sentence naming where they run now names that job.",
+    task: "flow-0217",
+  }],
   ["Hard rules", {
     digest: "02a26beeb9e40753e7b8981b6d12d577f3f09d7f1e4c9b545fb1471c7a291fea",
     why: "the human's first touchpoint moved from approving each task spec to approving the " +

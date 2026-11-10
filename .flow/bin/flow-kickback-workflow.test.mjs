@@ -58,11 +58,13 @@ const allRuns = (wf) =>
 // The trigger and the concurrency group
 // ═════════════════════════════════════════════════════════════════════════════════════════
 
-test("both callers trigger on workflow_run for flow-review, types: [completed]", { skip }, () => {
+// flow-0217: the review checks run as the `flow-review` job of the flow-gates workflow, after the
+// gate, so the kickback listens for flow-gates runs.
+test("both callers trigger on workflow_run for flow-gates, types: [completed]", { skip }, () => {
   for (const file of [CANON_CALLER, TEMPLATE_CALLER]) {
     const on = parse(file).on;
     assert.ok(on.workflow_run, `${file} must trigger on workflow_run — nothing else can observe a review run's conclusion`);
-    assert.deepEqual(on.workflow_run.workflows, ["flow-review"], file);
+    assert.deepEqual(on.workflow_run.workflows, ["flow-gates"], file);
     assert.deepEqual(on.workflow_run.types, ["completed"], file);
     assert.ok(!on.schedule && !on.pull_request,
       `${file} must not poll and must not run on the PR event — a workflow_run is what runs the file from the DEFAULT branch`);

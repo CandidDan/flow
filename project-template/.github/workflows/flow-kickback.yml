@@ -6,8 +6,8 @@ name: flow-kickback
 # reusable declares by name rather than `secrets: inherit`.
 # See docs/flow-reusable-workflows.md in the flow repo.
 #
-# WHAT IT DOES. When the `flow-review` run on a PR concludes `failure`, one auto-fix worker is
-# dispatched onto that same PR to address the reviewers' blocking findings, and the PR is then
+# WHAT IT DOES. When a review check (`flow-review / qa`, `/ code-review` or `/ security`) fails on
+# a PR, one auto-fix worker is dispatched onto that same PR to address the reviewers' blocking findings, and the PR is then
 # re-reviewed from scratch in CI. Merge stays human. The protocol already called a red review
 # check a kickback; this is what finally starts that work instead of waiting for someone to
 # notice.
@@ -53,9 +53,13 @@ name: flow-kickback
 # or the guards that are about to judge it. Fork PRs are skipped outright, matching the fork
 # fence in _flow-review.yml.
 
+# Since 5.0 (flow-0217) the review checks run inside the `flow-gates` workflow, as a job that waits
+# for the gate, so this listens for that workflow. A `flow-gates` run also fails when only the gate
+# failed; the reusable's `plan` job reads the run's jobs and acts only when a `flow-review / ...`
+# job is among the failures, so a red gate never starts a round or posts a card.
 on:
   workflow_run:
-    workflows: ["flow-review"]
+    workflows: ["flow-gates"]
     types: [completed]
 
 # One round per PR at a time. A second review failure arriving mid-round queues behind it rather

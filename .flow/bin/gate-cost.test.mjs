@@ -13,10 +13,15 @@
 //
 // flow-0137 adds the other half of the same bill: GitHub bills every job at least one minute, and
 // the gate ran three bookkeeping jobs of a few seconds each. The last section pins them as one.
+//
+// flow-0217 is the review's half: the review checks started at the same moment as the gate and
+// were billed even when the gate failed or was cancelled. They now run as a job of the gate's
+// caller that `needs:` the gate, and in three jobs instead of five. Its section is at the end.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,7 +35,10 @@ const parse = (text) => yamlMod.parse(text);
 const REUSABLE_GATES = ".github/workflows/_flow-gates.yml";
 const REUSABLE_KICKBACK = ".github/workflows/_flow-kickback.yml";
 const GATE_CALLERS = [".github/workflows/flow-gates.yml", "project-template/.github/workflows/flow-gates.yml"];
-const REVIEW_CALLERS = [".github/workflows/flow-review.yml", "project-template/.github/workflows/flow-review.yml"];
+// flow-0217: the review's own callers are retired; the review is the `flow-review` job of the gate
+// callers above, so it shares their concurrency group and is cancelled with them.
+const RETIRED_REVIEW_CALLERS = [".github/workflows/flow-review.yml", "project-template/.github/workflows/flow-review.yml"];
+const REUSABLE_REVIEW = ".github/workflows/_flow-review.yml";
 
 const NOT_DRAFT = "(github.event_name != 'pull_request' || github.event.pull_request.draft == false)";
 const PR_NOT_DRAFT = "github.event.pull_request.draft == false";
@@ -101,8 +109,12 @@ function concurrencyProblems(text, prefix) {
 }
 
 test("flow-0136 criterion 3: gate and review callers cancel a superseded PR run, and never a manual one", { skip }, () => {
-  for (const f of GATE_CALLERS) assert.deepEqual(concurrencyProblems(WF(f), "flow-gates"), [], f);
-  for (const f of REVIEW_CALLERS) assert.deepEqual(concurrencyProblems(WF(f), "flow-review"), [], f);
+  for (const f of GATE_CALLERS) {
+    assert.deepEqual(concurrencyProblems(WF(f), "flow-gates"), [], f);
+    // The review runs inside this workflow (flow-0217), so the gate's group cancels it too.
+    assert.ok(jobsOf(WF(f))["flow-review"], `${f}: the review must be a job of the gate's caller`);
+  }
+  for (const f of RETIRED_REVIEW_CALLERS) assert.ok(!existsSync(join(REPO, f)), `${f} was retired by flow-0217`);
 });
 
 test("flow-0136 criterion 3 (mutation): a caller that cancels unconditionally, or has no group, is caught", { skip }, () => {
@@ -330,4 +342,151 @@ test("flow-0213 criterion 3 (mutation): the Test step that ignores coverage_runs
     "a Test step without the coverage_runs_tests clause runs the suite twice");
   // And the default: the key unset reads as "false", so every command still runs.
   assert.ok(gateRuns(text, { intentPr: "false", coverageRunsTests: "false" }).ran.includes("test"));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────
+// flow-0217: the review starts only after the gate has passed, and runs in three jobs, not five
+// ─────────────────────────────────────────────────────────────────────────────────────────
+
+const REVIEW_JOB = "flow-review";
+const REVIEW_CHECKS = ["qa", "code-review", "security"];
+// A ready, same-repo PR in a repo that has opted in: the case where every reviewer should start.
+const READY_PR = { FLOW_AI: "true", draft: false, sameRepo: true };
+
+// Whether a job runs, given the result of each job it needs. This is GitHub's rule for exactly the
+// shapes these files use: with no status function (`always()`, `!cancelled()`, `success()`,
+// `failure()`) in its `if:`, a job runs only when every job it needs SUCCEEDED; with one, the
+// status function decides. A job whose needs are not all `success` is skipped otherwise.
+function jobRuns(job, needResults, ctx = READY_PR) {
+  const results = [].concat(job.needs ?? []).map((n) => needResults[n]);
+  const cond = job.if == null ? "" : String(job.if).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
+  const hasStatusFn = /\b(always|cancelled|success|failure)\(\)/.test(cond);
+  if (!hasStatusFn && results.some((r) => r !== "success")) return false;
+  if (!cond) return true;
+  const expr = cond
+    .replaceAll("always()", "true")
+    .replaceAll("cancelled()", JSON.stringify(results.includes("cancelled")))
+    .replaceAll("success()", JSON.stringify(results.every((r) => r === "success")))
+    .replaceAll("failure()", JSON.stringify(results.includes("failure")))
+    .replaceAll("vars.FLOW_AI", JSON.stringify(ctx.FLOW_AI))
+    .replaceAll("github.event.pull_request.draft", String(ctx.draft))
+    .replaceAll("github.event.pull_request.head.repo.full_name == github.repository", String(ctx.sameRepo))
+    .replaceAll("github.event_name", JSON.stringify(ctx.event ?? "pull_request"))
+    .replace(/'([^']*)'/g, (_, v) => JSON.stringify(v))
+    .replace(/(?<![=!])==(?!=)/g, "===").replace(/!=(?!=)/g, "!==");
+  assert.match(expr, /^[\s()&|!=a-z"_0-9.-]+$/, `unexpected token in job condition: ${job.if}`);
+  return Function(`"use strict"; return (${expr});`)();
+}
+
+test("flow-0217 criterion 1: in both gate callers, a gate that fails or is cancelled starts no review", { skip }, () => {
+  for (const f of GATE_CALLERS) {
+    const review = jobsOf(WF(f))[REVIEW_JOB];
+    assert.ok(review, `${f} must call the review as its \`${REVIEW_JOB}\` job`);
+    assert.match(String(review.uses), /\/_flow-review\.yml@/, `${f}: the job must call the review reusable`);
+    assert.equal(review.needs, "flow-gates", `${f}: the review must wait for the gate job`);
+    for (const gate of ["failure", "cancelled", "skipped"]) {
+      assert.equal(jobRuns(review, { "flow-gates": gate }), false, `${f}: the review ran after a gate that was ${gate}`);
+    }
+    assert.equal(jobRuns(review, { "flow-gates": "success" }), true, `${f}: the review must run once the gate passed`);
+    assert.equal(jobRuns(review, { "flow-gates": "success" }, { ...READY_PR, event: "workflow_dispatch" }), false,
+      `${f}: a manual gate run has no PR to review`);
+  }
+});
+
+test("flow-0217 criterion 1 (mutation): a review job that drops its needs, or runs always(), is caught", { skip }, () => {
+  const doc = parse(WF(GATE_CALLERS[1]));
+  delete doc.jobs[REVIEW_JOB].needs;
+  assert.equal(jobRuns(doc.jobs[REVIEW_JOB], { "flow-gates": "failure" }), true);
+  const doc2 = parse(WF(GATE_CALLERS[1]));
+  doc2.jobs[REVIEW_JOB].if = "${{ always() && github.event_name == 'pull_request' }}";
+  assert.equal(jobRuns(doc2.jobs[REVIEW_JOB], { "flow-gates": "failure" }), true);
+});
+
+test("flow-0217 criterion 2: once the gate passes, qa, code-review and security run and report as before", { skip }, () => {
+  const jobs = jobsOf(WF(REUSABLE_REVIEW));
+  // The checks are reported as `<caller job> / <job>`, so these two names are the check names
+  // branch protection requires: flow-review / qa, flow-review / code-review, flow-review / security.
+  for (const f of GATE_CALLERS) assert.ok(jobsOf(WF(f))[REVIEW_JOB], f);
+  assert.deepEqual(Object.keys(jobs), REVIEW_CHECKS, "the three check names must not change");
+  const results = {};
+  for (const name of REVIEW_CHECKS) {
+    assert.equal(jobRuns(jobs[name], results), true, `${name} must run on a ready PR once the gate passed`);
+    results[name] = "success";
+    const steps = jobs[name].steps ?? [];
+    const reviewer = steps.filter((st) => String(st.uses ?? "").startsWith("anthropics/claude-code-action") && st.id === "claude");
+    assert.equal(reviewer.length, 1, `${name}: exactly one reviewer model step`);
+    const enforce = steps.filter((st) => new RegExp(`flow-review\\.mjs enforce \\S+ --check ${name}\\b`).test(String(st.run ?? "")));
+    assert.equal(enforce.length, 1, `${name}: exactly one step decides the check`);
+    assert.match(String(enforce[0].if), /always\(\)/, `${name}: a crashed reviewer must still fail the check`);
+    assert.equal(enforce[0]["continue-on-error"], undefined, `${name}: the deciding step must be able to fail`);
+  }
+  // security also runs when a reviewer before it failed, so its verdict and the guide still report.
+  assert.equal(jobRuns(jobs.security, { qa: "failure", "code-review": "success" }), true);
+  assert.equal(jobRuns(jobs.security, { qa: "cancelled", "code-review": "success" }), false);
+  // And the fences hold: a draft, a fork PR or a repo that has not opted in starts none of them.
+  for (const ctx of [{ ...READY_PR, draft: true }, { ...READY_PR, sameRepo: false }, { ...READY_PR, FLOW_AI: "" }]) {
+    for (const name of REVIEW_CHECKS) {
+      assert.equal(jobRuns(jobs[name], { qa: "success", "code-review": "success" }, ctx), false, `${name}: ${JSON.stringify(ctx)}`);
+    }
+  }
+});
+
+function reviewJobProblems(text) {
+  const names = Object.keys(jobsOf(text));
+  return names.length <= 3 ? [] : [`${names.length} jobs: ${names.join(", ")}`];
+}
+
+test("flow-0217 criterion 3: a review run is at most three jobs", { skip }, () => {
+  assert.deepEqual(reviewJobProblems(WF(REUSABLE_REVIEW)), [],
+    "GitHub bills every job at least one minute; plan and guide are steps now, not jobs");
+});
+
+test("flow-0217 criterion 3 (mutation): splitting the guide back out into its own job is caught", { skip }, () => {
+  const doc = parse(WF(REUSABLE_REVIEW));
+  doc.jobs.guide = { needs: ["qa", "code-review", "security"], "runs-on": "ubuntu-latest", steps: [{ run: "echo guide" }] };
+  assert.deepEqual(reviewJobProblems(yamlMod.stringify(doc)), ["4 jobs: qa, code-review, security, guide"]);
+});
+
+// The kickback's filter, run for real with jq over a jobs payload shaped like the API's. Since the
+// review runs inside flow-gates, a failed run can hold failed GATE jobs, and those must never read
+// as a failed review check.
+const hasJq = (() => { try { execFileSync("jq", ["--version"]); return true; } catch { return false; } })();
+function failedReviewChecks(jobs) {
+  const step = jobsOf(WF(REUSABLE_KICKBACK)).plan.steps.find((st) => st.id === "failed");
+  const filter = String(step.run).match(/--jq '([^']*)'/)?.[1];
+  assert.ok(filter, "the failed-jobs step must select the failed jobs with one --jq filter");
+  return execFileSync("jq", ["-r", filter], { input: JSON.stringify({ jobs }), encoding: "utf8" })
+    .split("\n").filter(Boolean).sort();
+}
+
+test("flow-0217 criterion 4: kickback listens for flow-gates and sees only failed review checks", { skip: skip || (!hasJq && "needs jq") }, () => {
+  for (const f of [".github/workflows/flow-kickback.yml", "project-template/.github/workflows/flow-kickback.yml"]) {
+    assert.deepEqual(triggersOf(WF(f)).workflow_run.workflows, ["flow-gates"], f);
+  }
+  const job = (name, conclusion) => ({ name, conclusion });
+  assert.deepEqual(failedReviewChecks([
+    job("flow-gates / gate", "success"), job("flow-review / qa", "failure"),
+    job("flow-review / code-review", "failure"), job("flow-review / security", "success"),
+  ]), ["code-review", "qa"]);
+  assert.deepEqual(failedReviewChecks([job("flow-review / security", "failure")]), ["security"]);
+  // A red gate is not a red review: no check reaches the decision.
+  assert.deepEqual(failedReviewChecks([job("flow-gates / gate", "failure"), job("flow-gates / source-root (app)", "failure")]), []);
+  // A cancelled review job is not a failed one either.
+  assert.deepEqual(failedReviewChecks([job("flow-review / qa", "cancelled")]), []);
+});
+
+test("flow-0217 criterion 4: with no failed review check, kickback decides nothing", { skip }, () => {
+  const steps = jobsOf(WF(REUSABLE_KICKBACK)).plan.steps;
+  for (const id of ["facts", "decide"]) {
+    assert.match(String(steps.find((st) => st.id === id).if), /steps\.failed\.outputs\.checks != ''/,
+      `${id}: a run whose only failures are gate jobs must not reach the decision, which would escalate at the round cap`);
+  }
+});
+
+test("flow-0217: flow-sync deletes an adopter's old flow-review.yml, and the review gate accepts that deletion", { skip }, async () => {
+  const sync = WF(".github/workflows/_flow-sync.yml");
+  assert.match(sync.match(/for RETIRED in [^\n]*; do/)?.[0] ?? "", /"\.github\/workflows\/flow-review\.yml"/,
+    "a caller left behind would run the review a second time, on every push, alongside the gate");
+  const { SYNC_RETIRED_PATHS } = await import("../../project-template/.flow/bin/flow-review.mjs");
+  assert.ok(SYNC_RETIRED_PATHS.includes(".github/workflows/flow-review.yml"));
 });

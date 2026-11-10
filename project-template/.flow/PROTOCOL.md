@@ -434,7 +434,7 @@ If a project genuinely cannot meet a gate (e.g. coverage tooling missing for the
 that is a `blocked` task with a `blocked_reason`, not a reason to skip the gate.
 
 **Where these run, and why it is not in your session.** 1–3 are **checks on the pull request**
-(`flow-review.yml`), not subagents you invoke. **You never run a review agent.** If you find
+(the `flow-review` job in `flow-gates.yml`, which starts once the gate passes), not subagents you invoke. **You never run a review agent.** If you find
 yourself about to spawn one, stop: that is the old shape, and it is the one place this system
 used to take the worker's word for its own work — same session, same context, same blind spots
 as the code being judged. Everything else here refuses that (`touches-guard` enforces scope in

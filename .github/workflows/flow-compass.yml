@@ -5,7 +5,7 @@ name: flow-compass
 # pin.
 #
 # Canonical runs the same gate it imposes on everyone else (CLAUDE.md), and that now includes
-# compass: it already runs flow-review.yml and flow-triage.yml on itself, so a repo whose own
+# compass: it already runs the review checks and flow-triage.yml on itself, so a repo whose own
 # work never gets audited against its own VISION.md would be the one exception to that rule.
 #
 # DORMANT until repo variable FLOW_AI=true and the CLAUDE_CODE_OAUTH_TOKEN secret is set. The

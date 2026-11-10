@@ -315,8 +315,13 @@ const wfSrc = (name) => readFileSync(join(WORKFLOWS, name), "utf8");
 // The reusables, by their short name: `_flow-open-pr.yml` -> `open-pr`.
 const REUSABLES = wfNames.filter((n) => n.startsWith("_flow-")).map((n) => n.slice(6, -4));
 // The callers this task added, distinct from the three canonical already had — less the
-// queue-runner's, retired in flow-0174.
-const ADDED = ["flow-open-pr.yml", "flow-recover.yml", "flow-triage.yml", "flow-review.yml"];
+// queue-runner's, retired in flow-0174. flow-0217 moved the review's caller into flow-gates.yml as
+// a job named `flow-review`, so a caller is now a FILE and a JOB: `CALLER_OF` names the job that
+// calls each reusable, and every other caller is a one-job file named after its reusable.
+const ADDED = ["flow-open-pr.yml", "flow-recover.yml", "flow-triage.yml", "flow-review"];
+const CALLER_OF = { "flow-review": { file: "flow-gates.yml", job: "flow-review" } };
+const callerFile = (name) => CALLER_OF[name]?.file ?? name;
+const reusableOf = (name) => `_${name.replace(/\.yml$/, "")}.yml`;
 
 const yamlMod = await import("yaml").then((m) => m, () => null);
 const skip = yamlMod ? false : "needs `npm ci` (yaml) — runs in the per-stack gate job";
@@ -327,7 +332,8 @@ const wfParse = (name) => yamlMod.parse(wfSrc(name));
 test("every reusable has a thin caller except _flow-sync.yml, whose absence is recorded in a comment", () => {
   assert.ok(REUSABLES.length >= 9, `expected canonical's reusables; found ${REUSABLES.join(", ")}`);
 
-  const missing = REUSABLES.filter((n) => n !== "sync" && !wfNames.includes(`flow-${n}.yml`));
+  const missing = REUSABLES.filter((n) => n !== "sync" && !wfNames.includes(`flow-${n}.yml`)
+    && !(CALLER_OF[`flow-${n}`] && wfNames.includes(CALLER_OF[`flow-${n}`].file)));
   assert.deepEqual(missing, [],
     "a reusable with no caller is a workflow canonical publishes and never runs on itself");
 
@@ -352,17 +358,27 @@ const ADDED_SECRET = {
   "flow-open-pr.yml": "FLOW_PAT",
   "flow-recover.yml": "FLOW_PAT",
   "flow-triage.yml": "CLAUDE_CODE_OAUTH_TOKEN",
-  "flow-review.yml": "CLAUDE_CODE_OAUTH_TOKEN",
+  "flow-review": "CLAUDE_CODE_OAUTH_TOKEN",
+};
+
+// The one job in `name`'s caller file that calls its reusable.
+const callerJob = (name) => {
+  const jobs = wfParse(callerFile(name)).jobs ?? {};
+  if (CALLER_OF[name]) return jobs[CALLER_OF[name].job];
+  const all = Object.values(jobs);
+  assert.equal(all.length, 1, `${name} is a thin caller: exactly one job`);
+  return all[0];
 };
 
 test("every new caller references CandidDan/flow's reusable at @main, not @v1", () => {
   for (const name of ADDED) {
-    const src = wfSrc(name);
-    const reusable = `_${name.replace(/\.yml$/, "")}.yml`;
+    const src = wfSrc(callerFile(name));
+    const reusable = reusableOf(name);
     assert.match(src, new RegExp(`uses:\\s*CandidDan/flow/\\.github/workflows/${reusable.replace(/[.]/g, "\\.")}@main`),
       `${name} must call ${reusable}@main — canonical gates against the reusables as they are ` +
       `now, not as they were at the last release (see flow-gates.yml's header)`);
-    assert.doesNotMatch(src, /@v1\b/,
+    // `uses:` lines only: flow-gates.yml's header explains, in prose, why it is not @v1.
+    assert.doesNotMatch(src, /uses:[^\n]*@v1\b/,
       `${name} must not pin @v1: that would gate canonical against a version of itself it has moved past`);
   }
 });
@@ -372,7 +388,7 @@ test("every new caller passes exactly the secret(s) its reusable declares, by na
     const wanted = ADDED_SECRET[name];
     assert.ok(wanted, `no expected secret recorded for ${name} — update ADDED_SECRET`);
     const wantedKeys = (Array.isArray(wanted) ? wanted : [wanted]).slice().sort();
-    const job = Object.values(wfParse(name).jobs ?? {})[0];
+    const job = callerJob(name);
     assert.deepEqual(Object.keys(job.secrets ?? {}).sort(), wantedKeys,
       `${name} must pass exactly {${wantedKeys.join(", ")}} — not \`secrets: inherit\`, which ` +
       `would also hand this job whichever credential it doesn't need`);
@@ -385,7 +401,7 @@ test("every new caller passes exactly the secret(s) its reusable declares, by na
 
 test("every new caller grants at least the permissions its reusable declares", { skip }, () => {
   for (const name of ADDED) {
-    const reusable = `_${name.replace(/\.yml$/, "")}.yml`;
+    const reusable = reusableOf(name);
     // The union of the reusable's top-level permissions and every job's own: a job-scoped grant
     // the caller lacks is just as fatal (GitHub refuses to start the run) as a top-level one.
     const parsed = wfParse(reusable);
@@ -395,9 +411,7 @@ test("every new caller grants at least the permissions its reusable declares", {
         if (required[scope] !== "write") required[scope] = level;
       }
     }
-    const jobs = Object.values(wfParse(name).jobs ?? {});
-    assert.equal(jobs.length, 1, `${name} is a thin caller: exactly one job`);
-    const granted = jobs[0].permissions ?? {};
+    const granted = callerJob(name).permissions ?? {};
 
     for (const [scope, level] of Object.entries(required)) {
       const ok = granted[scope] === level || (level === "read" && granted[scope] === "write");
@@ -410,9 +424,9 @@ test("every new caller grants at least the permissions its reusable declares", {
 
 test("id-token: write is granted on the caller wherever the reusable runs claude-code-action", { skip }, () => {
   for (const name of ADDED) {
-    const reusable = `_${name.replace(/\.yml$/, "")}.yml`;
+    const reusable = reusableOf(name);
     const usesAgent = /uses:\s*anthropics\/claude-code-action/.test(wfSrc(reusable));
-    const granted = Object.values(wfParse(name).jobs)[0].permissions ?? {};
+    const granted = callerJob(name).permissions ?? {};
 
     if (usesAgent) {
       assert.equal(granted["id-token"], "write",
@@ -432,7 +446,7 @@ test("checkWorkflows parses every workflow in canonical, including the new calle
   const { checked, failures } = checkWorkflows(WORKFLOWS);
   assert.deepEqual(failures, [], "npm run build is what stops a malformed reusable reaching the fleet");
   for (const name of ADDED) {
-    assert.ok(checked.includes(join(WORKFLOWS, name)), `${name} must be among the parsed files`);
+    assert.ok(checked.includes(join(WORKFLOWS, callerFile(name))), `${name} must be among the parsed files`);
   }
 });
 
