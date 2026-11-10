@@ -21,8 +21,17 @@ on:
         type: string
         default: "ubuntu-latest"
 
-permissions:
-  contents: write
+# Permissions (flow-0219). This file declares NO `permissions:` block: it inherits whatever the
+# caller grants, the pattern flow-0211 set in `_flow-dispatch.yml`. The caller grants
+# `contents: write` (the push of the `done` transition and of the intent stamps to main) and
+# `pull-requests: read` (the intent repair asks the API which pull request added each unstamped
+# intent; a public repo answers without it, a private repo answers 403 or 404). It must not REQUEST
+# `pull-requests: read` itself: a called workflow that asks for more than its caller grants fails
+# before any step runs, and every repo whose caller has not been synced would lose its `done`
+# transition at the next tag move. A top-level `contents: write` here would also be wrong: it
+# would cut `pull-requests` to none even when the caller grants it. A private repo whose caller
+# is not yet synced still gets its `done` transition; the repair names each intent it could not
+# look up and the step exits 0.
 
 jobs:
   mark-done:
@@ -208,12 +217,11 @@ jobs:
       # any intent still unstamped is repaired from the merge of the PR that added it, which needs
       # git history (the checkout's fetch-depth: 0, re-checked below) and the GitHub API.
       #
-      # The API token is the job's own GITHUB_TOKEN. This job deliberately requests no
-      # `pull-requests: read`: a reusable workflow asking for more than its caller grants fails
-      # before any step runs, and every caller today grants `contents: write` only — so asking here
-      # would stop the task transition above, fleet-wide. On a public repo the PR reads need no
-      # grant. On a private repo whose caller does not grant `pull-requests: read`, each lookup
-      # answers 403/404, the log names every intent left unstamped, and the step still exits 0.
+      # The API token is the job's own GITHUB_TOKEN, carrying what the caller grants (see
+      # "Permissions (flow-0219)" at the top). The synced caller grants `pull-requests: read`, so
+      # the lookups work on a private repo. On a public repo they need no grant. On a private repo
+      # whose caller predates flow-0219 and grants `contents: write` only, each lookup answers
+      # 403/404, the log names every intent left unstamped, and the step still exits 0.
       #
       # Its own step so a task transition that no-ops (no task id) or fails cannot drop a stamp;
       # `!cancelled()` keeps it running after a failed transition, and the reset below makes sure it
