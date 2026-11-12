@@ -50,7 +50,7 @@ const SECURITY_JOB_IF = "${{ !cancelled() && vars.FLOW_AI == 'true' && github.ev
 const PLAN_RUN = /node "\$FLOW_REVIEW_DIR"\/flow-review\.mjs plan\b/;
 // flow-0186: the review jobs enforce through `enforce`, which validates the vendor-neutral
 // verdict file in $RUNNER_TEMP. The older `verdict` command stays in the helper for adopters
-// pinned to an older workflow, but nothing in this workflow calls it any more.
+// pinned to an older workflow, and for the capability-gated fallback on older base helpers.
 const VERDICT_RUN = /node "\$FLOW_REVIEW_DIR"\/flow-review\.mjs enforce\b/;
 const SECURITY_IF = "${{ steps.plan.outputs.security_run == 'true' }}";
 const stepsOf = (job) => wf.jobs[job]?.steps ?? [];
@@ -1279,4 +1279,54 @@ test("flow-0178: changes/flow-0178.md states its caller action", () => {
   assert.match(text, /caller action/i);
   assert.match(text, /flow-doctor/);
   assert.ok(!/^#/m.test(text), "a fragment carries no heading of its own");
+});
+
+// Execute the actual parsed workflow shell, not a parallel implementation of the fallback.
+test("flow-0196: every enforce step probes and falls back; v4.0.1 and current helpers fail closed", { skip }, async () => {
+  const { execFileSync, spawnSync } = await import("node:child_process");
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "flow-0196-"));
+  try {
+    // Materialise the old helper's imports from the same release, never from PR code.
+    const archive = execFileSync("git", ["archive", "v4.0.1", "project-template/.flow/bin"], { cwd: REPO, maxBuffer: 32 * 1024 * 1024 });
+    execFileSync("tar", ["-x", "-C", dir], { input: archive });
+    const oldBin = join(dir, "project-template/.flow/bin");
+    writeFileSync(join(oldBin, "flow-review.mjs"), execFileSync("git", ["show", "v4.0.1:project-template/.flow/bin/flow-review.mjs"], { cwd: REPO }));
+    for (const check of REVIEW_JOBS) {
+      const step = stepsOf(check).find(s => VERDICT_RUN.test(s.run ?? ""));
+      assert.ok(step, check);
+      assert.match(step.run, /if node .*flow-review\.mjs commands .*grep -qx enforce; then/);
+      assert.match(step.run, /flow-review\.mjs verdict /);
+      for (const [kind, helper] of [["old", oldBin], ["current", join(TEMPLATE, ".flow/bin")]]) {
+        for (const mode of ["pass", "fail", "missing", "invalid", "empty", "blocking", "truncated", "unknown-truncation"]) {
+          const cwd = join(dir, `${check}-${kind}-${mode}`);
+          const temp = join(cwd, "runner");
+          mkdirSync(join(temp, "flow-review"), { recursive: true });
+          // A stale passing legacy output must never rescue a missing or invalid new verdict.
+          mkdirSync(join(cwd, ".flow-review"));
+          writeFileSync(join(cwd, ".flow-review", `${check}.json`), '{"verdict":"pass"}');
+          const file = join(temp, "flow-review", `${check}.json`);
+          if (mode !== "missing") writeFileSync(file, mode === "invalid" ? "{" : mode === "empty" ? "" : JSON.stringify({
+            check, verdict: mode === "fail" ? "fail" : "pass", summary: "compatibility fixture",
+            blocking: mode === "blocking" ? ["unresolved finding"] : [],
+          }));
+          const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run], {
+            cwd, encoding: "utf8", env: { ...process.env, FLOW_REVIEW_DIR: helper, RUNNER_TEMP: temp,
+              GITHUB_STEP_SUMMARY: join(cwd, "summary"), DIFF_TRUNCATED: mode === "truncated" ? "true" : mode === "unknown-truncation" ? "" : "false",
+              DIFF_BYTES: "10", DIFF_FULL_BYTES: "20" },
+          });
+          assert.equal(result.status === 0, mode === "pass", `${check}/${kind}/${mode}: ${result.stdout}\n${result.stderr}`);
+          if (kind === "old") {
+            assert.equal((result.stdout.match(/::warning::/g) ?? []).length, 1);
+            assert.doesNotMatch(result.stdout, /using enforce/);
+            assert.equal(readFileSync(join(cwd, ".flow-review", `${check}.json`), "utf8"), '{"verdict":"pass"}', "stale workspace verdict is neither consumed nor overwritten");
+          } else {
+            assert.match(result.stdout, /Flow review: using enforce/);
+            assert.doesNotMatch(result.stdout, /::warning::/);
+          }
+        }
+      }
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -2963,3 +2963,13 @@ test("flow-0186: a skipped security review is recorded in the plan summary with 
     assert.doesNotMatch(readFileSync(runSummary, "utf8"), /Security review — SKIPPED/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("flow-0196: commands reports supported CLI capabilities without planning or reading a verdict", () => {
+  const output = [];
+  const original = console.log;
+  console.log = line => output.push(line);
+  try {
+    assert.equal(runReviewCli(["commands"], { env: {}, git: () => { throw new Error("must not plan"); } }), 0);
+  } finally { console.log = original; }
+  assert.deepEqual(output.join("\n").split("\n"), ["plan", "verdict", "enforce", "classify", "commands"]);
+});

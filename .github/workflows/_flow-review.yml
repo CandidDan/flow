@@ -377,10 +377,22 @@ jobs:
           DIFF_TRUNCATED: ${{ steps.plan.outputs.diff_truncated }}
           DIFF_BYTES: ${{ steps.plan.outputs.diff_bytes }}
           DIFF_FULL_BYTES: ${{ steps.plan.outputs.diff_full_bytes }}
-        run: >-
-          node "$FLOW_REVIEW_DIR"/flow-review.mjs enforce "$RUNNER_TEMP/flow-review/qa.json" --check qa
-          --diff-truncated "$DIFF_TRUNCATED"
-          --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
+        run: |
+          # The workflow can advance before the adopter's BASE-branch helper is synced.
+          if node "$FLOW_REVIEW_DIR"/flow-review.mjs commands 2>/dev/null | grep -qx enforce; then
+            echo "Flow review: using enforce"
+            node "$FLOW_REVIEW_DIR"/flow-review.mjs enforce "$RUNNER_TEMP/flow-review/qa.json" --check qa \
+              --diff-truncated "$DIFF_TRUNCATED" \
+              --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
+          else
+            echo "::warning::Older BASE-branch Flow review helper: using verdict; merge a Flow sync to enable enforce."
+            legacy_dir="$(mktemp -d "$RUNNER_TEMP/flow-review-legacy.XXXXXX")"
+            trap 'rm -rf -- "$legacy_dir"' EXIT
+            cp "$RUNNER_TEMP/flow-review/qa.json" "$legacy_dir/qa.json"
+            node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict "$legacy_dir/qa.json" --check qa \
+              --diff-truncated "$DIFF_TRUNCATED" \
+              --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
+          fi
 
 
   # ── code-review ────────────────────────────────────────────────────────────────────────
@@ -608,10 +620,22 @@ jobs:
           DIFF_TRUNCATED: ${{ steps.plan.outputs.diff_truncated }}
           DIFF_BYTES: ${{ steps.plan.outputs.diff_bytes }}
           DIFF_FULL_BYTES: ${{ steps.plan.outputs.diff_full_bytes }}
-        run: >-
-          node "$FLOW_REVIEW_DIR"/flow-review.mjs enforce "$RUNNER_TEMP/flow-review/code-review.json" --check code-review
-          --diff-truncated "$DIFF_TRUNCATED"
-          --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
+        run: |
+          # The workflow can advance before the adopter's BASE-branch helper is synced.
+          if node "$FLOW_REVIEW_DIR"/flow-review.mjs commands 2>/dev/null | grep -qx enforce; then
+            echo "Flow review: using enforce"
+            node "$FLOW_REVIEW_DIR"/flow-review.mjs enforce "$RUNNER_TEMP/flow-review/code-review.json" --check code-review \
+              --diff-truncated "$DIFF_TRUNCATED" \
+              --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
+          else
+            echo "::warning::Older BASE-branch Flow review helper: using verdict; merge a Flow sync to enable enforce."
+            legacy_dir="$(mktemp -d "$RUNNER_TEMP/flow-review-legacy.XXXXXX")"
+            trap 'rm -rf -- "$legacy_dir"' EXIT
+            cp "$RUNNER_TEMP/flow-review/code-review.json" "$legacy_dir/code-review.json"
+            node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict "$legacy_dir/code-review.json" --check code-review \
+              --diff-truncated "$DIFF_TRUNCATED" \
+              --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
+          fi
 
       # ── intent review (advisory) ──────────────────────────────────────────────────────
       # flow-0178. ONE advisory reviewer, for an intent-only PR and nothing else, in place of what qa
@@ -944,10 +968,22 @@ jobs:
           DIFF_TRUNCATED: ${{ steps.plan.outputs.diff_truncated }}
           DIFF_BYTES: ${{ steps.plan.outputs.diff_bytes }}
           DIFF_FULL_BYTES: ${{ steps.plan.outputs.diff_full_bytes }}
-        run: >-
-          node "$FLOW_REVIEW_DIR"/flow-review.mjs enforce "$RUNNER_TEMP/flow-review/security.json" --check security
-          --diff-truncated "$DIFF_TRUNCATED"
-          --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
+        run: |
+          # The workflow can advance before the adopter's BASE-branch helper is synced.
+          if node "$FLOW_REVIEW_DIR"/flow-review.mjs commands 2>/dev/null | grep -qx enforce; then
+            echo "Flow review: using enforce"
+            node "$FLOW_REVIEW_DIR"/flow-review.mjs enforce "$RUNNER_TEMP/flow-review/security.json" --check security \
+              --diff-truncated "$DIFF_TRUNCATED" \
+              --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
+          else
+            echo "::warning::Older BASE-branch Flow review helper: using verdict; merge a Flow sync to enable enforce."
+            legacy_dir="$(mktemp -d "$RUNNER_TEMP/flow-review-legacy.XXXXXX")"
+            trap 'rm -rf -- "$legacy_dir"' EXIT
+            cp "$RUNNER_TEMP/flow-review/security.json" "$legacy_dir/security.json"
+            node "$FLOW_REVIEW_DIR"/flow-review.mjs verdict "$legacy_dir/security.json" --check security \
+              --diff-truncated "$DIFF_TRUNCATED" \
+              --diff-bytes "$DIFF_BYTES" --diff-full-bytes "$DIFF_FULL_BYTES"
+          fi
 
       # ── the guide (advisory) ─────────────────────────────────────────────────────────
       # ONE comment that tells the human where to look (flow-0084). It runs AFTER the three checks,
