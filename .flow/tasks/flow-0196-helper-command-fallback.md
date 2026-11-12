@@ -1,12 +1,12 @@
 ---
 id: "flow-0196"
 title: "A review job whose base-branch helper predates a command still gives a correct verdict, and a release cannot move an alias over that gap"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "goose-flow-0196"
 created: "2026-11-03"
-started: ""
+started: "2026-11-12T06:15:55Z"
 branch: ""
 pr: ""
 issue: ""
