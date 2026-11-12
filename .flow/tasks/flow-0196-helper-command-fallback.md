@@ -20,6 +20,7 @@ touches:
   - "project-template/.flow/bin/flow-review.test.mjs"
   - ".flow/bin/flow-review-workflow.test.mjs"
   - ".flow/bin/helper-command-compat.test.mjs"
+  - ".flow/bin/review-verdict-file.test.mjs"
   - "docs/flow-versioning-policy.md"
   - "changes/flow-0196.md"
 labels: [bug, review, release]
@@ -28,6 +29,7 @@ effort: "high"
 model_reason: "A fleet-wide incident in the review gate: the fix decides what an older helper's verdict means, and a wrong fallback could pass a failing review"
 asks: []
 notes:
+  - "2026-11-12 orchestrator scope amendment: include review-verdict-file.test.mjs to reconcile its blanket legacy-path rejection with this task\'s explicit same-JSON fallback; preserve the no-stale-verdict invariant."
   - "2026-11-03 orchestrator: incident. When Dan moved v4 to 4.1.0, every PR in tanplan-platform, inflight, progress and write went red on qa, code-review and security: `flow-review: unknown command \"enforce\" — expected \"plan\" or \"verdict\"`. _flow-review.yml@v4 (4.1.0, flow-0186) calls `flow-review.mjs enforce`, but the helper it runs is the repo's BASE-branch copy (\"Materialise the review gate from the BASE branch\"), still 4.0.x until that repo's sync PR merges. The sync PRs themselves could never go green for the same reason; Dan merged them past the red reviews (all twelve review comments said PASS). flow-0186 kept the old `verdict` command for the opposite skew (helper newer than workflow) and nothing covered this one."
 ---
 
