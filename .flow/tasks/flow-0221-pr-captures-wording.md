@@ -1,12 +1,12 @@
 ---
 id: "flow-0221"
 title: "Every PR description carries a Captures section, and a change a person sees or feels is captured by default"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_01NfrcU8rLycGD6TeDk8SRtY"
 created: "2026-11-13"
-started: ""
+started: "2026-11-13T01:44:10Z"
 branch: ""
 pr: ""
 issue: ""
