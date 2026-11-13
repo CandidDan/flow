@@ -25,9 +25,23 @@ on:
         required: false
         type: string
         default: "ubuntu-latest"
+      # GHES-ONLY FALLBACK for the `asks` job's canonical-helper fetch (flow-0120, ADR-0008). On
+      # github.com `job.workflow_sha` resolves and this is never read — leave it unset. Never a
+      # branch: the fetch step refuses a moving ref.
+      flow_ref:
+        description: "Fallback ref for canonical's helpers when job.workflow_sha is unavailable (GHES). A tag or a commit sha, never a branch."
+        required: false
+        type: string
+        default: ""
 
-permissions:
-  contents: write
+# No top-level `permissions:` (flow-0120). Each job states its own or inherits the caller's:
+#   sync-status  states `contents: write`, exactly what this file granted every job before.
+#   asks         states nothing, so it inherits the caller's job grant. The synced caller grants
+#                `contents: write`, `pull-requests: write` and `issues: write`. A caller that has
+#                not been synced grants only `contents: write`, so its PR calls get a 403 and the
+#                job ends green with a ::warning::.
+# A top-level block here would cap BOTH jobs at it, and a job that REQUESTED the two new scopes
+# would fail the whole run, sync-status included, in every repo whose caller has not been synced.
 
 jobs:
   sync-status:
@@ -35,6 +49,8 @@ jobs:
     # still transition. The id is resolved from the branch OR the PR title (CAN-52); the step
     # no-ops cleanly when neither carries one.
     runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -363,3 +379,147 @@ jobs:
             fi
             sleep "$attempt"
           done
+
+  # flow-0120. A PR whose task has open `asks` tells the repo owner, where they already are: one
+  # new comment that @-mentions them for every ask not announced on this PR before, and the
+  # `needs-input` label while the task has any ask. Draft PRs included: a worker that blocks opens
+  # its PR as a draft, and its `decision` ask is exactly what the owner must see.
+  #
+  # Ask text is written by a worker into the task file, so it is untrusted text. It reaches GitHub
+  # only through a file (`--body-file`-style `-F body=@…`), never through a `run:` line, and the
+  # renderer escapes it so it shows literally and can mention nobody.
+  #
+  # Every GitHub call here is best effort. A failure is a ::warning:: and the job stays green: the
+  # status transition above is the part that must not fail, and it does not depend on this job.
+  asks:
+    if: >-
+      github.event.action == 'opened' || github.event.action == 'reopened' ||
+      github.event.action == 'ready_for_review'
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 1
+
+      # check-latest (flow-0166): a major-line range alone takes the runner image's cached patch, which
+      # trailed Node's 2026-10-21 security release by days (CVE-2026-111497). Resolve the latest patch.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          check-latest: true
+          node-version: 22
+
+      # The renderer is canonical's, fetched at this workflow's own commit, so a repo that has
+      # never synced still has it. Copied from `_flow-gates.yml`; only the `for helper in` line
+      # differs, and `asks-comment.test.mjs` pins that.
+      - name: Materialise canonical's helpers at this workflow's commit
+        env:
+          # `job.workflow_sha` / `job.workflow_repository` describe THE FILE THAT DEFINES THIS JOB
+          # — this reusable — where `github.workflow_sha` describes the caller's 3-line caller and
+          # `github.job_workflow_sha` is not exposed as an expression at all. Both job properties
+          # are absent on GitHub Enterprise Server; `flow_ref` is the fallback for that case only,
+          # and its race is recorded in docs/adr/0008-helpers-from-canonical.md.
+          FLOW_WORKFLOW_REPO: ${{ job.workflow_repository }}
+          FLOW_WORKFLOW_SHA: ${{ job.workflow_sha }}
+          FLOW_REF_INPUT: ${{ inputs.flow_ref }}
+        run: |
+          set -euo pipefail
+          repo="${FLOW_WORKFLOW_REPO:-}"
+          ref="${FLOW_WORKFLOW_SHA:-}"
+          src="job.workflow_sha"
+          if [ -z "$ref" ]; then
+            src="flow_ref input"
+            ref="${FLOW_REF_INPUT:-}"
+          fi
+          [ -n "$repo" ] || repo="CandidDan/flow"
+          if [ -z "$ref" ]; then
+            echo "::error::Cannot resolve the commit of this reusable workflow: job.workflow_sha is"
+            echo "::error::empty (expected only on GitHub Enterprise Server) and no flow_ref input"
+            echo "::error::was passed. Set flow_ref in your flow-gates.yml caller to the same ref"
+            echo "::error::its uses: pins. See docs/adr/0008-helpers-from-canonical.md."
+            exit 1
+          fi
+          case "$repo" in
+            */*) ;;
+            *) echo "::error::Refusing canonical repo '$repo' — expected owner/repo."; exit 1 ;;
+          esac
+          case "$ref" in
+            main|master|HEAD|refs/heads/*)
+              echo "::error::Refusing to fetch the gate's helpers from the moving ref '$ref'. A"
+              echo "::error::gate that follows a branch cannot be reproduced from a run log. Pass"
+              echo "::error::flow_ref as a tag or a commit sha."
+              exit 1 ;;
+            -*) echo "::error::Invalid ref '$ref' — a ref cannot begin with '-'."; exit 1 ;;
+          esac
+          dir="$RUNNER_TEMP/flow-canonical"
+          rm -rf "$dir"
+          mkdir -p "$dir"
+          git -C "$dir" init -q
+          git -C "$dir" remote add origin "https://github.com/$repo.git"
+          git -C "$dir" config core.sparseCheckout true
+          printf 'project-template/.flow/bin/\n' > "$dir/.git/info/sparse-checkout"
+          git -C "$dir" fetch -q --depth 1 origin "$ref"
+          git -C "$dir" checkout -q FETCH_HEAD
+          bin="$dir/project-template/.flow/bin"
+          for helper in asks-comment.mjs asks.mjs flow-doctor.mjs; do
+            if [ -f "$bin/$helper" ]; then continue; fi
+            echo "::error::$repo@$ref carries no project-template/.flow/bin/$helper. That is"
+            echo "::error::canonical's own tree at the commit this workflow was resolved from, so"
+            echo "::error::it is a bug in canonical, not in this repository."
+            exit 1
+          done
+          echo "flow-helpers: decision=materialised repo=$repo ref=$ref source=$src bin=$bin"
+          echo "FLOW_BIN=$bin" >> "$GITHUB_ENV"
+
+      - name: Announce the task's asks on the PR
+        env:
+          HEAD_REF:   ${{ github.event.pull_request.head.ref }}
+          PR_TITLE:   ${{ github.event.pull_request.title }}
+          PR_NUM:     ${{ github.event.pull_request.number }}
+          REPO:       ${{ github.repository }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          GH_TOKEN:   ${{ github.token }}
+        run: |
+          # The task id the same way sync-status resolves it: branch first, PR title second, from
+          # THIS repo's own parse-task-id.mjs, which knows this repo's id prefix.
+          id=""
+          if [ -f .flow/bin/parse-task-id.mjs ]; then
+            id="$(node .flow/bin/parse-task-id.mjs "$HEAD_REF" "$PR_TITLE" || true)"
+          fi
+          if [ -z "$id" ]; then echo "No task id in branch '$HEAD_REF' or title '$PR_TITLE' — no asks to announce."; exit 0; fi
+
+          warn() { echo "::warning::flow-asks: $1 (PR #$PR_NUM, task $id). Is issues: write and pull-requests: write granted on the caller's flow-status job?"; }
+
+          comments="$RUNNER_TEMP/flow-asks-comments.jsonl"
+          body="$RUNNER_TEMP/flow-asks-body.md"
+          if ! gh api --paginate "repos/$REPO/issues/$PR_NUM/comments" \
+               --jq '.[] | {body: .body, user: .user.login} | @json' > "$comments"; then
+            warn "could not read this PR's earlier comments, so no ask was announced"
+            exit 0
+          fi
+
+          plan="$(node "$FLOW_BIN/asks-comment.mjs" plan --tasks-dir .flow/tasks --id "$id" \
+            --owner "$REPO_OWNER" --comments "$comments" --body-out "$body")"
+          echo "$plan"
+          has_asks="$(printf '%s\n' "$plan" | sed -n 's/^has_asks=//p')"
+          post="$(printf '%s\n' "$plan" | sed -n 's/^post=//p')"
+
+          if [ "$post" = "true" ]; then
+            if gh api -X POST "repos/$REPO/issues/$PR_NUM/comments" -F "body=@$body" > /dev/null; then
+              echo "flow-asks: posted a comment for $id on PR #$PR_NUM"
+            else
+              warn "could not post the asks comment"
+            fi
+          fi
+
+          if [ "$has_asks" = "true" ]; then
+            gh label create needs-input --color d93f0b \
+              --description "A Flow task on this PR has an open ask for a person" --force > /dev/null \
+              || warn "could not create the needs-input label"
+            gh api -X POST "repos/$REPO/issues/$PR_NUM/labels" -f "labels[]=needs-input" > /dev/null \
+              || warn "could not add the needs-input label"
+          else
+            # A 404 here means the label was not on the PR, which is the state we want.
+            gh api -X DELETE "repos/$REPO/issues/$PR_NUM/labels/needs-input" > /dev/null 2>&1 || true
+            echo "flow-asks: $id has no open asks; needs-input is not on PR #$PR_NUM"
+          fi
