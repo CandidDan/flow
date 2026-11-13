@@ -1,14 +1,14 @@
 ---
 id: "flow-0120"
 title: "A PR whose task has open asks gets a comment that @-mentions the repo owner, and a needs-input label"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "session_01NfrcU9iRVh8RVpDF6wsSzV"
 created: "2026-10-02"
 started: "2026-11-13T03:41:34Z"
 branch: "claude/project-thread-f0zs28"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/310"
 issue: ""
 blocked_reason: ""
 blocked_by: []
