@@ -20,9 +20,11 @@ touches:
   - "project-template/.flow/bin/asks-comment.mjs"
   - "project-template/.flow/bin/asks-comment.test.mjs"
   - "changes/flow-0120.md"
+  - "docs/adr/0005-split-authoring-from-release.md"
 labels: [flow-infra, human-loop, flow-status]
 asks: []
 notes:
+  - "2026-11-13 (worker session_01NfrcU9iRVh8RVpDF6wsSzV): touches widened to docs/adr/0005-split-authoring-from-release.md. The asks job copies the gate's materialise step byte for byte, and that step names the bare canonical repo, so _flow-status.yml joins the files ADR-0005's amendment counts and adr-split-authoring.test.mjs fails until the count moves from 53 to 54."
   - "2026-11-06 (Dan, decision card): CALLERS GRANT, REUSABLE INHERITS. Both flow-status callers are now in touches and grant pull-requests: write and issues: write on their flow-status job. The reusable's new asks job declares no extra permissions and inherits the caller's grant; a 403 degrades to a ::warning::. Criterion 6 becomes: a test that the reusable's top level is unchanged and both callers grant exactly those two at job scope. Released to ready."
   - "2026-10-14 (worker session_01B4b9s8btzJYkSqdSmHYkwB): BLOCKED before branching, no code written, no branch pushed. Finding: _flow-status.yml is called with permissions contents: write only (canonical caller and template caller), and a called workflow cannot exceed its caller. See the decision ask. Design notes for the next worker once unblocked: (1) do not use .flow/bin/asks-comment.mjs in the consuming repo - an un-synced repo will not have it and canonical would need an adapter outside touches; materialise canonical helpers at job.workflow_sha exactly as _flow-triage.yml does (for helper in asks-comment.mjs asks.mjs flow-state.mjs) and pin the step byte-equal to _flow-gates.yml as triage-allocate-id.test.mjs does. (2) Read asks from main with flow-state.mjs <id> --json --no-pr. (3) Earlier markers: gh api --paginate repos/{repo}/issues/{n}/comments, pass bodies to the pure helper by file. (4) A workflow-structure test placed in project-template/.flow/bin/ is copied to adopting repos that have no _flow-status.yml - skip it outside canonical, as flow-review.test.mjs does with inCanonical."
   - "2026-10-13 (orchestrator): UNBLOCKED: flow-0119 is done. Dan's queue rule 2026-10-13: every p1/p2 task plus flow-0108 is ready; p3s park."
