@@ -1,7 +1,7 @@
 ---
 id: "flow-0221"
 title: "Every PR description carries a Captures section, and a change a person sees or feels is captured by default"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,7 +10,7 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waiting on Dan's answer to the decision in asks: does a change to what happens when a person acts, with no screen change (TanPlan PR #344), need a capture? Criteria 2 and 4 are written for the recommended answer (yes). Not machine-checkable: release by hand once Dan answers."
+blocked_reason: ""
 cancelled_reason: ""
 blocked_by: []
 serves: ["G10"]
@@ -25,9 +25,9 @@ model: ""
 effort: ""
 model_reason: ""
 notes:
+  - "2026-11-13 (Dan, decision card): YES. A change to what happens to a person when they act, with no screen change (TanPlan PR #344), needs a capture, and a before/after table of real responses from the base commit and the PR head counts as the capture. Criteria 2 and 4 stand as written; ignore the 'If Dan answers no' note. Released to ready."
   - "2026-11-13 (task writer, project thread 'Write Flow tasks for PR screenshots'): two of the intent's four open questions are already answered by show-me's Captures section, so they are not asked again. Before/after is required only when an existing screen changed (the 'What' row says so). An environment that cannot run the app is a valid stated reason (the skip line lists 'no browser in the environment'); this task only requires the reason to name what was missing."
-asks:
-  - "decision: Does a change to what happens to a person when they act, with no screen change (TanPlan PR #344: a different card reader, a different branch clock), need a capture? Recommend: yes, and a before/after table of real responses from the base commit and the PR head counts as the capture. Dan's own words on #344 were 'exactly the sort of pr that should have screenshots', and #344 already shows the table form works."
+asks: []
 ---
 
 ## Context
