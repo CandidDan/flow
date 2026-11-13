@@ -1,14 +1,14 @@
 ---
 id: "ux-prs-show-screenshots"
 title: "PRs that change UX favour screenshots"
-status: "proposed"
+status: "approved"
 created: "2026-11-10"
 source: "Dan, TanPlan project chat 2026-11-10, reviewing CandidDan/tanplan-platform PR #344"
 serves: ["G10"]
 workstream: ""
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-11-13T01:30:02Z"
 evidence: []
 ---
 
