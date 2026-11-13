@@ -1,13 +1,13 @@
 ---
 id: "flow-0120"
 title: "A PR whose task has open asks gets a comment that @-mentions the repo owner, and a needs-input label"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_01NfrcU9iRVh8RVpDF6wsSzV"
 created: "2026-10-02"
-started: ""
-branch: ""
+started: "2026-11-13T03:41:34Z"
+branch: "claude/project-thread-f0zs28"
 pr: ""
 issue: ""
 blocked_reason: ""
