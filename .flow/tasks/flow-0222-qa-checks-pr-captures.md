@@ -10,9 +10,9 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Waiting on Dan's answer to the decision in asks: what the qa check does when a PR has no captures. Criteria 4 to 7 are written for the recommended answer (fail on a missing section or empty reason; a stated reason passes and is quoted). Not machine-checkable: release by hand once Dan answers. Once released, pick-task also holds it while flow-0196 (in progress) or flow-0188 / flow-0167 hold _flow-review.yml."
+blocked_reason: "Decision answered (fail). Waiting for flow-0196, in progress, which also edits _flow-review.yml and lands the missing-helper pattern scope item 5 follows. Also, the ready queue was at its cap of 8 when Dan answered. flow-unblock releases this to ready when flow-0196 is done."
 cancelled_reason: ""
-blocked_by: []
+blocked_by: ["flow-0196"]
 serves: ["G10"]
 intent: "ux-prs-show-screenshots"
 touches:
@@ -27,10 +27,10 @@ model: "opus"
 effort: "high"
 model_reason: "Changes the reusable qa check every adopting repo runs, handles attacker-chosen PR body text, and a false fail blocks every PR in the fleet"
 notes:
+  - "2026-11-13 (Dan, decision card): FAIL IF MISSING OR NO REASON. qa fails a task PR with no Captures section or an empty / n/a reason, decided in code; any stated reason passes and is quoted first in the qa comment; the model does not judge the reason. Criteria stand as written; ignore the 'warn only' and 'model judges' notes. Dan also agreed (thread reply) that every task PR carries the section. Left blocked on flow-0196 for the shared file and the queue cap."
   - "2026-11-13 (task writer, project thread 'Write Flow tasks for PR screenshots'): the decision is made IN CODE, not by the qa model, on purpose. flow-0199's history shows the qa model passing and failing the same task-less PR on different runs; a section-present / reason-present test is deterministic and costs no tokens (G9). The model's only new job is to quote the captures state in its comment."
   - "2026-11-13 (task writer): the flow-gates caller's pull_request types do not include `edited`, so fixing only the PR body does not re-run qa. This task does NOT add `edited` (every body edit would re-run three model reviewers, against G9). The fix is a re-run of the failed qa job or a new push; the qa FAIL message must say so."
-asks:
-  - "decision: What should the qa check do when a task PR has no captures? Recommend: FAIL when the description has no Captures section, or has one whose 'Not captured:' reason is empty or 'n/a'. Any stated reason PASSES, and qa quotes it at the top of its comment so you can disagree before merging. Do not let the model judge whether a reason is good enough: that verdict changes from run to run and would block correct PRs at random."
+asks: []
 ---
 
 ## Context
