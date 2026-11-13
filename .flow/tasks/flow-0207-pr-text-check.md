@@ -33,11 +33,13 @@ touches:
   - ".flow/bin/workflow-prompt-paths.test.mjs"
   - "docs/flow-reusable-workflows.md"
   - "changes/flow-0207.md"
+  - "docs/adr/0005-split-authoring-from-release.md"
 labels: [review, ci]
 model: "opus"
 effort: "high"
 model_reason: "Adds a reusable CI workflow every adopter runs, with a model call on untrusted PR text"
-notes: []
+notes:
+  - "2026-11-13 (worker session_01NfrcU9iRVh8RVpDF6wsSzV): touches widened to docs/adr/0005-split-authoring-from-release.md. The new reusable fetches canonical's helpers with the gate's step, which names the bare canonical repo, and the two new callers resolve a uses: reference to it, so adr-split-authoring.test.mjs fails until the amendment's counts move with them."
 asks: []
 ---
 
