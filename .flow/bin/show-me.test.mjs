@@ -33,10 +33,21 @@ test("the PR description order is TL;DR, visual, captures, criteria checklist, t
   const order = parts.map((w) => pr.indexOf(w));
   assert.ok(order.every((i) => i >= 0), `PR description must mention each part: ${order}`);
   assert.deepEqual([...order].sort((a, b) => a - b), order, "PR description parts out of order");
-  // flow-0141: the captures clause carries its condition, before the criteria checklist.
-  const clause = pr.slice(order[2], order[3]);
-  assert.match(clause, /something a person sees/, "captures clause must carry its condition");
-  assert.match(clause, /session can run it/, "captures clause must carry its condition");
+});
+
+// flow-0221: the captures part is always present; captures or a stated `Not captured:` line.
+const flatResponseStyle = responseStyle.replace(/\s+/g, " ");
+const prOrder = flatResponseStyle.slice(flatResponseStyle.indexOf("**PR description**"));
+
+test("PROTOCOL: the captures part is always present, with Not captured as the alternative, and no run condition", () => {
+  assert.match(prOrder, /The captures part is always present\./);
+  assert.match(prOrder, /otherwise it is one `Not captured: <reason>` line/);
+  assert.doesNotMatch(prOrder, /session can run it/);
+  assert.ok(prOrder.includes("`show-me`'s `## Captures`"), "the captures clause must point at show-me");
+});
+
+test("PROTOCOL: captures cover a change to what a person sees and to what happens when they act", () => {
+  assert.match(prOrder, /when the change alters what a person sees or what happens to them when they act/);
 });
 
 // flow-0141: captures in the PR description, and the show-me procedure for them.
@@ -58,9 +69,6 @@ test("show-me's PR description lists Captures as step 3, and a Captures section 
 
 test("show-me's Captures section states its condition, branch, SHA links, skip line, data and tooling rules", () => {
   const c = section("Captures").replace(/\s+/g, " ");
-  // condition: something a person sees, and the session can run it
-  assert.match(c, /changes something a person sees or interacts with/);
-  assert.match(c, /the session can run it/);
   // the orphan branch, and never the feature branch
   assert.match(c, /orphan branch named `captures\/<task-id>`/);
   assert.match(c, /never go on the feature branch/);
@@ -160,4 +168,37 @@ test("show-me rule 6 points at the PR TL;DR requirements without copying them", 
   const rule6 = read(SKILL_PATH).match(/^6\. \*\*Terse is not cryptic\.\*\*[\s\S]*?(?=\n\n)/m)[0].replace(/\s+/g, " ");
   assert.match(rule6, /PR TL;DR requirements/);
   assert.doesNotMatch(rule6, /60 words/);
+});
+
+// flow-0221: the Captures section is always present, covers felt changes, and a reason is required.
+const captureRow = (name) => {
+  const row = section("Captures").split("\n").find((l) => l.startsWith(`| **${name}** |`));
+  assert.ok(row, `show-me ## Captures has no ${name} row`);
+  return row;
+};
+
+test("show-me Captures When row: always present, default for seen or felt changes, old exemptions gone", () => {
+  const when = captureRow("When");
+  assert.match(when, /The section is always present in a PR description\./);
+  assert.match(when, /to what a person sees \(screen, rendered page, email, SMS, generated visual\)/);
+  assert.match(when, /to what happens to them when they act/);
+  const c = section("Captures").replace(/\s+/g, " ");
+  assert.ok(!c.includes("Not for backend, infra, docs or tooling-only diffs"), "old exemption still present");
+  assert.ok(!c.includes("the session can run it"), "old run condition still present");
+});
+
+test("show-me Captures What row: a before/after table of real responses from base and head is the capture when no screen shows it", () => {
+  const what = captureRow("What");
+  assert.match(
+    what,
+    /For a change no screen shows yet, the capture is a before\/after table of real responses, made by running the same request or test against the base commit and the PR head\./,
+  );
+  assert.match(what, /before\/after when an existing screen changed, and after only for a new one/);
+});
+
+test("show-me skip line: the reason names what is missing, and an empty reason or n/a is not a reason", () => {
+  const c = section("Captures").replace(/\s+/g, " ");
+  assert.match(c, /The reason names what is missing or why nothing is visible/);
+  assert.match(c, /A stated reason is what the reviewer can disagree with, so an empty reason or "n\/a" is not a reason\./);
+  assert.match(c, /no visible change · no runnable preview · no browser in the environment/);
 });
