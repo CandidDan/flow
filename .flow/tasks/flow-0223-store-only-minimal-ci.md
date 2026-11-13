@@ -79,7 +79,7 @@ Words used below:
    with a comment block in the template saying what each key does. Canonical lists
    `plane-guard.yml` and `flow-dispatch.yml` in `push_workflows_exempt` (both exist to react to
    state commits; `flow-dispatch.yml` already filters with `paths:` and would pass anyway, so list
-   only what is needed — the worker decides after item 4 works).
+   only what is needed — the worker decides once item 5 works).
 2. **Classifier.** In `project-template/.flow/bin/flow-review.mjs`, add `classifyStoreOnlyPr`
    beside `classifyIntentPr`, with the same shape (`classified`, `files`, `outside`) and the same
    fail-closed rules: an empty diff is not store-only; a git error throws. The globs come from the
