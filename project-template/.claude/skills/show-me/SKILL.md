@@ -92,19 +92,19 @@ In this order, nothing else:
 
 1. **TL;DR** — one line.
 2. **The change, shown** — one visual (diff, tree, table or mermaid).
-3. **Captures** — screenshots and, for motion, a recording; or one `Not captured:` line. See
-   `## Captures`.
+3. **Captures** — screenshots, a recording for motion, or a before/after table of real
+   responses; or one `Not captured: <reason>` line. See `## Captures`.
 4. **Criteria** — checklist, each ticked with its proving test.
 5. **To-dos for the human** — numbered; omit if none.
 
 ## Captures
 
-Lets the reviewer judge a visible change by looking, without checking out the branch.
+Lets the reviewer judge a change a person sees or feels by looking, without checking out the branch.
 
 | | |
 |---|---|
-| **When** | The diff changes something a person sees or interacts with (UI, rendered page, email, generated visual) **and** the session can run it. Not for backend, infra, docs or tooling-only diffs. |
-| **What** | The fewest frames that show the change: the changed state at each layout that differs (typically desktop and mobile); before/after when an existing screen changed; a recording (≤ 30 s, `.webm` or `.gif`) only for motion or a multi-step interaction. |
+| **When** | The section is always present in a PR description. Captures are the default for any change to what a person sees (screen, rendered page, email, SMS, generated visual) or to what happens to them when they act (a different result, a different device, a different time, as in TanPlan PR #344). Anything else gets the skip line below. |
+| **What** | The fewest frames that show the change: the changed state at each layout that differs (typically desktop and mobile); before/after when an existing screen changed, and after only for a new one; a recording (≤ 30 s, `.webm` or `.gif`) only for motion or a multi-step interaction. For a change no screen shows yet, the capture is a before/after table of real responses, made by running the same request or test against the base commit and the PR head. |
 | **Data** | Synthetic data only. Never a real user's data, a credential, a token or a production screen. |
 | **Tooling** | Whatever headless browser the environment already has (Playwright with a preinstalled Chromium is typical). Never add it to the repo's dependencies to take a capture. |
 
@@ -131,11 +131,13 @@ form for images in pull requests, and it renders in a **private** repo for any v
 access; a `raw.githubusercontent.com` link does not render there without a token.
 
 **When not possible**, the section still appears, as one line, so a stated skip is never confused
-with a forgotten one:
+with a forgotten one. The reason names what is missing or why nothing is visible:
 
 ```markdown
 Not captured: <reason>      e.g. no visible change · no runnable preview · no browser in the environment
 ```
+
+A stated reason is what the reviewer can disagree with, so an empty reason or "n/a" is not a reason.
 
 ## Anti-patterns
 

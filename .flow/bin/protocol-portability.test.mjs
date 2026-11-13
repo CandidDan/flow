@@ -116,7 +116,7 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0210",
   }],
   ["Response style — show, don't tell", {
-    digest: "f3fc986c9390b92c553262033e09b8b2e82c3c0b61d0f28080a3f64ba179180a",
+    digest: "01f405d1092f107b334aa56a9c99841180651f42d5db337e9f3de5a39f10fb35",
     why: "the section told workers they \"auto-load this file\", which stopped being true the " +
          "moment the protocol moved behind a host pointer: the HOST file auto-loads and imports " +
          "this one. One hop, stated as one hop (flow-0016). flow-0141 then added captures to the " +
@@ -126,8 +126,11 @@ const INTENTIONAL_DIVERGENCES = new Map([
          "with one bad/good example and the product's own user-facing text out of scope. " +
          "flow-0206 then defined a PR description's TL;DR as its first paragraph (what was wrong " +
          "and what changes for whom, readable without the code, no backticks, paths, task ids or " +
-         "code names, at most 60 words) and added a second bad/good row taken from PR #285.",
-    task: "flow-0206",
+         "code names, at most 60 words) and added a second bad/good row taken from PR #285. " +
+         "flow-0221 then made the captures part always present: captures when the change alters " +
+         "what a person sees or what happens to them when they act, otherwise one " +
+         "`Not captured: <reason>` line, with the run condition removed.",
+    task: "flow-0221",
   }],
   ["Concurrency — how parallel sessions don't collide", {
     digest: "d97f0e62de098ebc5d4ddfc79aa2d0d8c688ff0894a875aa31d591e084af06ee",
