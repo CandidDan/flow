@@ -66,6 +66,8 @@ const COMMON = {
   "flow-recover.yml": "FLOW_PAT",
   "flow-status.yml": null,
   "flow-triage.yml": "CLAUDE_CODE_OAUTH_TOKEN",
+  // flow-0207: the PR-text judge is a model call, on the same credential as the reviewers.
+  "flow-pr-text.yml": "CLAUDE_CODE_OAUTH_TOKEN",
 };
 const REPO_EXPECTED = { ...COMMON };
 const TEMPLATE_EXPECTED = {

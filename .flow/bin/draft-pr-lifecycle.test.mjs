@@ -420,6 +420,18 @@ test("every flow-review job is gated on the PR not being a draft", { skip }, () 
   }
 });
 
+// flow-0207: the PR-text check, like the reviewers, judges a hand-off, not a work-in-progress push.
+test("the flow-pr-text job is gated on the PR not being a draft, and its callers listen for ready_for_review", { skip }, () => {
+  const jobs = parse(join(WF, "_flow-pr-text.yml")).jobs;
+  for (const [name, job] of Object.entries(jobs)) {
+    assert.match(String(job.if), /github\.event\.pull_request\.draft != true/, `_flow-pr-text.yml job ${name}`);
+  }
+  for (const dir of [WF, join(TEMPLATE, ".github", "workflows")]) {
+    const types = parse(join(dir, "flow-pr-text.yml")).on.pull_request.types;
+    assert.ok(types.includes("ready_for_review"), `${dir}/flow-pr-text.yml: a draft leaving draft must be judged`);
+  }
+});
+
 // ── the thin callers, in both directories ────────────────────────────────────────────────────
 // flow-0217: the review is a job of flow-gates.yml now, so that file's triggers are the review's.
 test("every flow-status / flow-gates caller listens for ready_for_review", { skip }, () => {

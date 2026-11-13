@@ -178,14 +178,15 @@ test("every template caller pins the major root VERSION declares", () => {
     "adopts the stamp must get the reusables that go with it");
 });
 
-test("all eleven callers are covered, and each carries its resolved reusable pins", () => {
+test("all twelve callers are covered, and each carries its resolved reusable pins", () => {
   // The count is the part a hand-sweep gets wrong: eleven files edited by hand is exactly where
   // one gets missed, and a missed pin is invisible until that repo's CI fails weeks later.
   // The literal below moves whenever a task publishes a new caller — flow-0082 added
   // flow-kickback.yml, taking it from ten to eleven, and flow-0041 added flow-unblock.yml, taking it
   // to twelve, and flow-0174 retired the queue-runner's, taking it back to eleven, and flow-0182
   // added flow-dispatch.yml, taking it to twelve again, and flow-0217 folded flow-review.yml into
-  // flow-gates.yml as a second job, taking it to eleven files and twelve pins. That it must be
+  // flow-gates.yml as a second job, taking it to eleven files and twelve pins, and flow-0207 added
+  // flow-pr-text.yml, taking it to twelve files and thirteen pins. That it must be
   // edited is the point: a derived count would pass a sweep that silently dropped a caller.
   const callers = workflowsIn(TEMPLATE_DIR);
   const pins = callers.flatMap(({ name, text }) => {
@@ -194,8 +195,9 @@ test("all eleven callers are covered, and each carries its resolved reusable pin
     assert.equal(found.length, want, `${name} should reference exactly ${want} canonical reusable(s)`);
     return found.map((m) => `${name} -> @${m[2]}`);
   });
-  assert.equal(callers.length, 11, `expected eleven published caller files, got:\n${pins.join("\n")}`);
-  assert.equal(pins.length, 12, `expected twelve pins, got:\n${pins.join("\n")}`);
+  assert.equal(callers.length, 12, `expected twelve published caller files, got:\n${pins.join("\n")}`);
+  assert.equal(pins.length, 13, `expected thirteen pins, got:\n${pins.join("\n")}`);
+  assert.ok(pins.some((p) => p.includes("flow-pr-text.yml -> @")), "flow-pr-text.yml (flow-0207) is one of them");
   assert.ok(pins.some((p) => p.includes("flow-dispatch.yml -> @")), "flow-dispatch.yml (flow-0182) is one of them");
   assert.ok(!callers.some(({ name }) => name.endsWith("/flow-review.yml")), "flow-0217 retired flow-review.yml");
   const want = expectedRef(readFileSync(VERSION_FILE, "utf8"));
