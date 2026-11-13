@@ -19,12 +19,14 @@ touches:
   - "project-template/.flow/PROTOCOL.md"
   - "project-template/.claude/skills/show-me/SKILL.md"
   - ".flow/bin/show-me.test.mjs"
+  - ".flow/bin/protocol-portability.test.mjs"
   - "changes/flow-0221.md"
 labels: [protocol, docs, pr-description]
 model: ""
 effort: ""
 model_reason: ""
 notes:
+  - "2026-11-13 (task writer, at the build thread's request): touches widened to add .flow/bin/protocol-portability.test.mjs. Editing the PR-description sentence in PROTOCOL.md Response style changes that section's pinned digest in INTENTIONAL_DIVERGENCES, which must be updated in the same PR (flow-0141, flow-0168 and flow-0206 declared it for the same reason). No other live task touches it."
   - "2026-11-13 (Dan, decision card): YES. A change to what happens to a person when they act, with no screen change (TanPlan PR #344), needs a capture, and a before/after table of real responses from the base commit and the PR head counts as the capture. Criteria 2 and 4 stand as written; ignore the 'If Dan answers no' note. Released to ready."
   - "2026-11-13 (task writer, project thread 'Write Flow tasks for PR screenshots'): two of the intent's four open questions are already answered by show-me's Captures section, so they are not asked again. Before/after is required only when an existing screen changed (the 'What' row says so). An environment that cannot run the app is a valid stated reason (the skip line lists 'no browser in the environment'); this task only requires the reason to name what was missing."
 asks: []
