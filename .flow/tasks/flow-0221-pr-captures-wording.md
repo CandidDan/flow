@@ -1,7 +1,7 @@
 ---
 id: "flow-0221"
 title: "Every PR description carries a Captures section, and a change a person sees or feels is captured by default"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "session_01NfrcU8rLycGD6TeDk8SRtY"
