@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0046"
 title: "Point the protocol, the template README and INIT at the release repo, and empty flow-0030's migration ledger"
-status: "blocked"
+status: "cancelled"
 priority: 3
 project: "flow"
 owner: ""
@@ -11,12 +11,14 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "TO CANCEL (Dan, 2026-10-13): premise stale (mission control left canonical per ADR-0006; inflight watchdog never written; 0003's second-person trigger not expected). Set status cancelled once flow-0108 lands. Any part still wanted gets a fresh task. Do not unblock."
+blocked_reason: ""
+cancelled_reason: "Decided cancel (Dan, 2026-10-13), held only until flow-0108 added the cancelled status; flow-0108 is done. Any part still wanted gets a fresh task."
 blocked_by: []
 serves: ["maintenance"]   # re-anchored 2026-09-23 from retired G4 (decision D1)
 touches: ["project-template/.flow/PROTOCOL.md", "project-template/README.md", "project-template/INIT.md", "changes/flow-0046.md"]
 labels: [infra, docs, fleet]
 notes:
+  - "2026-11-13 (orchestrator): cancelled as decided on 2026-10-13, now that flow-0108 is done."
   - "2026-10-13 (orchestrator): DECIDED: cancel. Kept blocked only because `cancelled` does not exist until flow-0108 merges."
   - "2026-09-28 (orchestrator): CHANGELOG.md -> changes/flow-0046.md, human's decision. Since 2.1.0 canonical keeps one changelog fragment per task in `changes/` (see changes/README.md), and release assembles them into CHANGELOG.md. Declaring CHANGELOG.md was stale: a worker following the fragment convention would write `changes/flow-0046.md`, which was not in `touches`, and fail touches-guard, while one following the old wording would edit the shared file the convention exists to keep out of every task's `touches`. `touches`, the scope line and any criterion naming CHANGELOG.md now name the fragment instead. Write it in the shape changes/README.md gives, with no heading of its own; it lands under `## Unreleased` at release."
   - "2026-09-23 (orchestrator): serves re-anchored from G4 to `maintenance`, on the human's decision D1 in _private/flow-operating-model-spec.md: every open task on retired G4/G5 moves to `maintenance` in one orchestrator commit on main. This is a deliberate, human-directed exception to task-writer's no-retrofit rule for non-ready tasks, and nothing else about the task changed. G4 was retired on 2026-09-01 and no live goal names this work."

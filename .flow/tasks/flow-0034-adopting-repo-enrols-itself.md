@@ -2,7 +2,7 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "flow-0034"
 title: "Make enrolment part of adoption, so a repo that adopts Flow is not silently invisible to the fleet views"
-status: "blocked"
+status: "cancelled"
 priority: 2
 project: "flow"
 owner: ""
@@ -11,12 +11,14 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "TO CANCEL (Dan, 2026-10-13): premise stale (mission control left canonical per ADR-0006; inflight watchdog never written; 0003's second-person trigger not expected). Set status cancelled once flow-0108 lands. Any part still wanted gets a fresh task. Do not unblock."
+blocked_reason: ""
+cancelled_reason: "Premise stale (Dan, 2026-10-13: decided cancel once flow-0108 landed); flow-0108 is done. Any part still wanted gets a fresh task."
 blocked_by: []
 serves: ["maintenance"]   # re-anchored 2026-09-23 from retired G5 (decision D1)
 touches: ["project-template/INIT.md", "project-template/RETROFIT.md", "project-template/.flow/bin/flow-doctor.mjs", "project-template/.flow/bin/flow-doctor.test.mjs"]
 labels: [docs, infra, onboarding, flightdeck]
 notes:
+  - "2026-11-13 (orchestrator): cancelled as decided on 2026-10-13, now that flow-0108 is done."
   - "2026-10-13 (orchestrator): DECIDED: cancel. Kept blocked only because `cancelled` does not exist until flow-0108 merges."
   - "2026-09-23 (orchestrator): serves re-anchored from G5 to `maintenance`, on the human's decision D1 in _private/flow-operating-model-spec.md: every open task on retired G4/G5 moves to `maintenance` in one orchestrator commit on main. This is a deliberate, human-directed exception to task-writer's no-retrofit rule for non-ready tasks, and nothing else about the task changed. G5 was retired on 2026-09-01 and no live goal names this work."
   - "2026-09-01: found while asking why mission control rendered empty. Neither INIT.md nor RETROFIT.md mentions the `flow` topic — zero occurrences in either. The topic is documented only in flightdeck/README.md and project-template/README.md, which is not where someone onboarding a repo looks."
