@@ -351,3 +351,23 @@ test("the retrofit prohibition explains why, so it survives someone deciding it 
   assert.match(skillFlat, /inventing a history|drift/i,
     "the Don't entry gives no reason — an unexplained rule about tidiness is the first one dropped");
 });
+
+// ── flow-0227, criterion 7: the task writer writes `proposed` and asks Accept or Reject ──
+
+test("the procedure writes `status: proposed`, never `ready` (flow-0227)", () => {
+  const procedure = skillSection("procedure");
+  assert.match(procedure, /set `status: proposed`/, "the procedure does not tell the writer to set `status: proposed`");
+  assert.match(procedure, /never written `ready`/, "the procedure does not forbid writing a task `ready`");
+});
+
+test("the procedure has the Accept/Reject step and what each answer writes (flow-0227)", () => {
+  const procedure = skillSection("procedure");
+  const step = /11\. \*\*[\s\S]*?\*\*Show it to the human and get Accept or Reject[\s\S]*/.exec(procedure)?.[0];
+  assert.ok(step, "the procedure has no step 11 asking the human to Accept or Reject");
+  assert.match(step, /Accept\*\* → set `status: ready`, `accepted_by`[\s\S]*`accepted_at`[\s\S]*`accepted_via: chat`/,
+    "Accept must set `ready` and record accepted_by, accepted_at and accepted_via");
+  assert.match(step, /Reject\*\* → set `status: cancelled`[\s\S]*`cancelled_reason`/,
+    "Reject must set `cancelled` with a `cancelled_reason`");
+  assert.match(step, /No answer\*\* → leave it `proposed`/, "no answer must leave the task `proposed`");
+  assert.match(step, /Never promote it yourself/, "the step must forbid the writer promoting its own task");
+});
