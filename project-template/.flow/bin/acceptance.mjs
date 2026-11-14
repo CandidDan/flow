@@ -42,6 +42,7 @@
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { posix } from "node:path";
 
 export const ACCEPT_FROM_KEY = "tasks.accept_from";
 export const ACCEPTED_VIA = ["chat", "inflight", "issue-label", "auto"];
@@ -198,9 +199,13 @@ export function autoAcceptReasons(task, policy) {
   if (!(Number.isInteger(policy.max_touches) && policy.max_touches > 0))
     reasons.push(`auto_accept.max_touches "${policy.max_touches}" is not a positive whole number`);
   else if (touches.length > policy.max_touches) reasons.push(`touches has ${touches.length} entries, over ${policy.max_touches}`);
-  for (const e of touches) {
+  for (const raw of touches) {
+    // Match the path the entry really names: `./.github/x` and `src/../.github/x` are `.github/x`.
+    // An absolute path, or one that still climbs out of the repo, can reach anything.
+    const e = String(raw).startsWith("/") ? null : posix.normalize(String(raw)).replace(/^(\.\/)+/, "");
+    if (e === null || e === ".." || e.startsWith("../")) { reasons.push(`touches "${raw}" is not a path inside the repo`); continue; }
     const hit = policy.never.find((n) => touchesReachesNever(e, n));
-    if (hit) reasons.push(`touches "${e}" can reach "${hit}"`);
+    if (hit) reasons.push(`touches "${raw}" can reach "${hit}"`);
   }
   return reasons;
 }

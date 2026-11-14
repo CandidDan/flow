@@ -213,6 +213,15 @@ test("touchesReachesNever is conservative about wildcards", () => {
   assert.equal(touchesReachesNever("docs/*.md", ".github/**"), false);
 });
 
+test("touches entries are normalized before the never check, and paths out of the repo never qualify", () => {
+  assert.match(autoAcceptReasons(small({ touches: ["./.github/workflows/x.yml"] }), POLICY)[0], /can reach ".github\/\*\*"/);
+  assert.match(autoAcceptReasons(small({ touches: ["src/../.github/x"] }), POLICY)[0], /can reach ".github\/\*\*"/);
+  assert.match(autoAcceptReasons(small({ touches: ["/etc/passwd"] }), POLICY)[0], /not a path inside the repo/);
+  assert.match(autoAcceptReasons(small({ touches: ["../other/x"] }), POLICY)[0], /not a path inside the repo/);
+  assert.match(autoAcceptReasons(small({ touches: ["docs/../.."] }), POLICY)[0], /not a path inside the repo/);
+  assert.deepEqual(autoAcceptReasons(small({ touches: ["./docs/a.md"] }), POLICY), []);
+});
+
 test("a haiku task touching up to 3 safe paths qualifies", () => {
   assert.deepEqual(autoAcceptReasons(small(), POLICY), []);
   assert.deepEqual(autoAcceptReasons(small({ touches: ["a.md", "b.md", "c.md"] }), POLICY), []);
