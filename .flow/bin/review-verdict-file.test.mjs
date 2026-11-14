@@ -107,12 +107,18 @@ test("criterion 2: no step that decides a check reads a model step's outputs", {
   }
 });
 
-test("criterion 2: the deciding steps read only $RUNNER_TEMP/flow-review/<check>.json", { skip }, () => {
+test("criterion 2: the deciding steps read the runner verdict or its isolated legacy copy", { skip }, () => {
   for (const check of CHECKS) {
     const deciding = stepsOf(check).filter(isDecidingStep);
     assert.equal(deciding.length, 1, `${check}: exactly one step decides the check`);
     const run = String(deciding[0].run);
     assert.match(run, new RegExp(`flow-review\\.mjs enforce "${escape(verdictPath(check))}" --check ${escape(check)}\\b`));
+    assert.match(run, /legacy_dir="\$\(mktemp -d "\$RUNNER_TEMP\/flow-review-legacy\.XXXXXX"\)"/,
+      "the legacy copy is isolated from reviewer-written workspace files");
+    const copy = `cp "${verdictPath(check)}" "$legacy_dir/${check}.json"`;
+    const legacy = `flow-review.mjs verdict "$legacy_dir/${check}.json" --check ${check}`;
+    assert.ok(run.includes(copy) && run.includes(legacy));
+    assert.ok(run.indexOf(copy) < run.indexOf(legacy), "copy failure must stop before legacy enforcement");
     assert.doesNotMatch(run, /\.flow-review\//,
       "the workspace is where the reviewer works; the verdict is not read from it");
     assert.match(String(deciding[0].if ?? ""), /always\(\)/,

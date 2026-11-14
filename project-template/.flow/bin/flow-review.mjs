@@ -1651,6 +1651,11 @@ export function runReviewCli(argv, {
     ? (args) => execFileSync("git", args, { cwd: repoDir, encoding: "utf8", maxBuffer: 1024 * 1024 * 64 })
     : git;
   try {
+    // Capability discovery is read-only; older helpers reject it and use the legacy path.
+    if (cmd === "commands") {
+      console.log("plan\nverdict\nenforce\nclassify\ncommands");
+      return 0;
+    }
     if (cmd === "plan") {
       const plan = runPlan({
         configPath: env.FLOW_CONFIG || configPath,
