@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 // flow-0111: the same list parser flow-doctor uses. Both YAML list forms, so block-form
 // `touches` (what every real task file uses) is not silently read as empty.
 import { parseListField, yamlScalar } from "./flow-doctor.mjs";
-import { acceptanceAllowsWork, parseAcceptFrom } from "./acceptance.mjs";
+import { acceptanceAllowsWork, parseAcceptFrom, parseAutoAccept } from "./acceptance.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -72,7 +72,8 @@ export function parseTask(text) {
   const id = get("id");
   if (!id) return null;
   return { id, status: get("status"), priority: parseInt(get("priority"), 10), touches,
-           created: get("created"), accepted_by: get("accepted_by"), accepted_at: get("accepted_at") };
+           created: get("created"), accepted_by: get("accepted_by"), accepted_at: get("accepted_at"),
+           accepted_via: get("accepted_via"), model: get("model") };
 }
 
 // The literal path prefix of a glob: everything up to (not including) the first wildcard.
@@ -115,15 +116,16 @@ export const IN_FLIGHT_STATUSES = ["in_progress", "in_review"];
 // A `ready` task is eligible unless its touches overlap an in-flight task's touches, or the
 // human has not accepted it yet (flow-0227): with `acceptFrom` set (the repo's
 // `tasks.accept_from`), a task created on or after it needs `accepted_by` and `accepted_at`.
-// A `proposed` task is never eligible, because it is not `ready`.
-export function pickTask(tasks, { acceptFrom } = {}) {
+// A `proposed` task is never eligible, because it is not `ready`. An `auto` accept is re-checked
+// against `autoAccept` (the repo's `tasks.auto_accept`), so a false claim is never picked.
+export function pickTask(tasks, { acceptFrom, autoAccept = null } = {}) {
   const inFlight = tasks.filter((t) => IN_FLIGHT_STATUSES.includes(t.status));
   const numId = (id) => { const m = String(id).match(/(\d+)\s*$/); return m ? parseInt(m[1], 10) : Infinity; };
   const pri = (t) => (Number.isFinite(t.priority) ? t.priority : 999);
 
   const eligible = tasks
     .filter((t) => t.status === "ready")
-    .filter((t) => acceptanceAllowsWork(t, acceptFrom))
+    .filter((t) => acceptanceAllowsWork(t, acceptFrom, autoAccept))
     .filter((t) => !inFlight.some((p) => touchesOverlap(t.touches, p.touches)))
     .sort((a, b) => pri(a) - pri(b) || numId(a.id) - numId(b.id) || String(a.id).localeCompare(b.id));
 
@@ -144,8 +146,9 @@ export function readTasks(tasksDir) {
 // ── CLI ── prints the chosen id (or nothing). Always exits 0; "no task" is not an error.
 if (__isMain) {
   const flowDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const config = join(flowDir, "config.yml");
   const id = pickTask(readTasks(join(flowDir, "tasks")),
-    { acceptFrom: parseAcceptFrom(join(flowDir, "config.yml")) });
+    { acceptFrom: parseAcceptFrom(config), autoAccept: parseAutoAccept(config) });
   if (id) process.stdout.write(id + "\n");
   process.exit(0);
 }

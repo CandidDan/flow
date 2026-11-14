@@ -110,7 +110,7 @@ body
 test("parseTask reads id/status/priority/touches and ignores non-frontmatter", () => {
   const t = parseTask(taskFile("CAN-99", { status: "ready", priority: 2, touches: '["a/**", "b.ts"]' }));
   assert.deepEqual(t, { id: "CAN-99", status: "ready", priority: 2, touches: ["a/**", "b.ts"],
-    created: "", accepted_by: "", accepted_at: "" });
+    created: "", accepted_by: "", accepted_at: "", accepted_via: "", model: "" });
   assert.equal(parseTask("no frontmatter here"), null);
 });
 
@@ -374,4 +374,12 @@ test("flow-0227: parseTask reads created and the acceptance fields", () => {
   assert.equal(t.created, "2026-11-14");
   assert.equal(t.accepted_by, "CandidDan");
   assert.equal(t.accepted_at, "2026-11-14T02:13:59Z");
+});
+
+test("flow-0227: a false auto accept is never picked", () => {
+  const base = { ...T("CAN-1", { priority: 1 }), created: "2026-11-14", accepted_by: "auto",
+    accepted_at: "2026-11-14T03:00:00Z", accepted_via: "auto", model: "opus" };
+  const policy = { max_model: "haiku", max_touches: 3, never: [] };
+  assert.equal(pickTask([base], { acceptFrom: "2026-11-14", autoAccept: policy }), null);
+  assert.equal(pickTask([{ ...base, model: "haiku" }], { acceptFrom: "2026-11-14", autoAccept: policy }), "CAN-1");
 });

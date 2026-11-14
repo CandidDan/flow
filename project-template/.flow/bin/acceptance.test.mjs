@@ -278,3 +278,28 @@ test("the auto CLI says yes with exit 0, no with the reasons and exit 1, and usa
     assert.match(out.pop(), /^usage:/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("a bare directory in touches reaches every never glob under it (review finding)", () => {
+  const P = { ...POLICY, never: [...POLICY.never, "project-template/**"] };
+  for (const dir of [".github", ".github/", ".flow", ".flow/bin", "project-template", "src/auth", "auth"]) {
+    assert.ok(autoAcceptReasons(small({ touches: [dir] }), P).some((r) => /can reach/.test(r)), dir);
+  }
+  assert.equal(touchesReachesNever("docs", ".github/**"), false);
+  assert.equal(touchesReachesNever(".githubx", ".github/**"), false, "a segment boundary, not a string prefix");
+});
+
+test("acceptanceAllowsWork fails closed on a false or unpoliced auto accept", () => {
+  const auto = { status: "ready", created: "2026-11-14", accepted_by: "auto", accepted_at: "2026-11-14T03:00:00Z",
+    accepted_via: "auto", model: "haiku", touches: ["docs/a.md"] };
+  assert.equal(acceptanceAllowsWork(auto, "2026-11-14", POLICY), true);
+  assert.equal(acceptanceAllowsWork({ ...auto, model: "opus" }, "2026-11-14", POLICY), false);
+  assert.equal(acceptanceAllowsWork(auto, "2026-11-14", null), false, "no policy, no valid auto accept");
+  assert.equal(acceptanceAllowsWork({ ...auto, accepted_by: "CandidDan", accepted_via: "chat", model: "opus" }, "2026-11-14", null), true);
+});
+
+test("a malformed accept_from still re-checks auto accepts", () => {
+  const t = { id: "F-1", status: "ready", accepted_by: "auto", accepted_at: "x", accepted_via: "auto", model: "opus", touchesList: ["a"] };
+  const { problems, warnings } = acceptanceFindings([t], "soon", POLICY);
+  assert.equal(warnings.length, 1);
+  assert.match(problems[0], /auto-accepted but does not qualify/);
+});

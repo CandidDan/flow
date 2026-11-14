@@ -175,12 +175,21 @@ const staticPrefix = (g) => { const i = g.search(/[*?]/); return i === -1 ? g : 
 /**
  * Could a `touches` entry reach a path a `never` glob protects? Conservative, because a wrong
  * "no" lets a risky task skip the human: true when the never glob matches the entry as written,
- * when the entry is a wildcard over a directory that contains the protected one, or when the
- * entry is a `**` wildcard and the protected glob can match at any depth.
+ * when the entry is a bare directory or a wildcard over one that contains the protected path, or
+ * when the entry is a `**` wildcard and the protected glob can match at any depth.
  */
 export function touchesReachesNever(entry, never) {
-  if (globToRegex(never).test(entry)) return true;
-  if (!/[*?]/.test(entry)) return false;
+  const re = globToRegex(never);
+  if (re.test(entry)) return true;
+  if (!/[*?]/.test(entry)) {
+    // A wildcard-free entry may name a directory, and Flow's `touches` reads a bare directory as
+    // everything under it (pick-task: "src" covers "src/lib"). So `.github` reaches `.github/**`,
+    // `src/auth` reaches `**/auth/**`, and `.flow` reaches `.flow/bin/**`.
+    const dir = entry.replace(/\/+$/, "");
+    if (re.test(`${dir}/x`)) return true;
+    const pn = staticPrefix(never);
+    return !!dir && pn.startsWith(`${dir}/`);
+  }
   const pe = staticPrefix(entry), pn = staticPrefix(never);
   if (pn && pn.startsWith(pe)) return true;
   return entry.includes("**") && never.startsWith("**");
@@ -214,9 +223,17 @@ export function isAccepted(task) {
   return !!String(task?.accepted_by ?? "").trim() && !!String(task?.accepted_at ?? "").trim();
 }
 
-/** True when a worker may be handed this task as far as acceptance goes. */
-export function acceptanceAllowsWork(task, acceptFrom) {
-  return !needsAcceptance(task, acceptFrom) || isAccepted(task);
+const isAuto = (t) => String(t?.accepted_via ?? "").trim() === AUTO || String(t?.accepted_by ?? "").trim() === AUTO;
+
+/**
+ * True when a worker may be handed this task as far as acceptance goes. An `auto` accept is
+ * re-checked against `autoAccept` here too, so a false claim is never dispatched (fails closed:
+ * with no policy, no auto accept is valid).
+ */
+export function acceptanceAllowsWork(task, acceptFrom, autoAccept = null) {
+  if (!needsAcceptance(task, acceptFrom)) return true;
+  if (!isAccepted(task)) return false;
+  return !isAuto(task) || autoAcceptReasons(task, autoAccept).length === 0;
 }
 
 /**
@@ -229,7 +246,6 @@ export function acceptanceFindings(tasks, acceptFrom, autoAccept = null) {
   if (acceptFrom !== undefined && acceptFrom !== "" && !acceptCutoff(acceptFrom)) {
     warnings.push(`${ACCEPT_FROM_KEY} is "${acceptFrom}", not a YYYY-MM-DD date — the accept rule ` +
       "is off until it parses");
-    return { problems, warnings };
   }
   for (const t of tasks ?? []) {
     const via = String(t.accepted_via ?? "").trim();
@@ -238,8 +254,7 @@ export function acceptanceFindings(tasks, acceptFrom, autoAccept = null) {
     }
     // An auto accept is a claim about the task's facts, so it is checked, not trusted. Only a
     // task that is still waiting for work: once claimed, its touches may legitimately widen.
-    const auto = via === AUTO || String(t.accepted_by ?? "").trim() === AUTO;
-    if (auto && t.status === "ready") {
+    if (isAuto(t) && t.status === "ready") {
       const why = autoAcceptReasons(t, autoAccept);
       if (why.length) problems.push(`${t.id}: auto-accepted but does not qualify (${why.join("; ")}) — ` +
         "set it back to proposed and ask the human");

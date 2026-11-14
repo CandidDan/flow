@@ -61,7 +61,7 @@ import { fileURLToPath } from "node:url";
 import { yamlScalar } from "./flow-doctor.mjs";
 import { DEFAULT_CANONICAL_REPO } from "./flow-init.mjs";
 import { parseTask, pickTask, readTasks } from "./pick-task.mjs";
-import { parseAcceptFromText } from "./acceptance.mjs";
+import { parseAcceptFromText, parseAutoAcceptText } from "./acceptance.mjs";
 import { findTaskFile, resolve as resolveModel } from "./task-model.mjs";
 
 // --- main-module detection (do not simplify back to a string compare) -------------------
@@ -133,12 +133,12 @@ export function routineFor(tier, env) {
  * `acceptFrom` is the repo's `tasks.accept_from` (flow-0227): a task the human has not accepted
  * is never dispatched.
  */
-export function planDispatch(tasks, maxInProgress, acceptFrom) {
+export function planDispatch(tasks, maxInProgress, acceptFrom, autoAccept = null) {
   const inProgress = tasks.filter((t) => t.status === "in_progress").length;
   if (inProgress >= maxInProgress) {
     return { decision: "skipped", reason: "at-capacity", in_progress: inProgress, max: maxInProgress };
   }
-  const taskId = pickTask(tasks, { acceptFrom });
+  const taskId = pickTask(tasks, { acceptFrom, autoAccept });
   if (!taskId) return { decision: "skipped", reason: "nothing-ready" };
   return { decision: "pick", taskId };
 }
@@ -356,7 +356,8 @@ export async function dispatch({
     return fail({ reason: "bad-config" }, e.message);
   }
 
-  const plan = planDispatch(readTasks(tasksDir), maxInProgress, parseAcceptFromText(configText));
+  const plan = planDispatch(readTasks(tasksDir), maxInProgress, parseAcceptFromText(configText),
+    parseAutoAcceptText(configText));
   if (plan.decision === "skipped") {
     const { decision, ...fields } = plan;
     say(decision, fields);
