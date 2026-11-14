@@ -57,7 +57,9 @@ export const STATUSES = new Set(["proposed", "ready", "in_progress", "in_review"
 // Patch a single frontmatter field in a task-file's text, touching nothing else.
 function replaceField(block, key, value) {
   const re = new RegExp(`^(${key}:)[^\\n]*`, "m");
-  return re.test(block) ? block.replace(re, `$1 ${value}`) : `${block}\n${key}: ${value}`;
+  // A replacer function, not a replacement string: `$&`, `$'` or `$1` inside a free-text value
+  // (a `cancelled_reason`, say) must be written as typed, not expanded by String.replace.
+  return re.test(block) ? block.replace(re, (_, k) => `${k} ${value}`) : `${block}\n${key}: ${value}`;
 }
 
 // Quoted-string frontmatter fields we may patch. The `accepted_*` fields and `cancelled_reason`

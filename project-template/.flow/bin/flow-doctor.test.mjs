@@ -2554,6 +2554,7 @@ test("flow-0227: canonical sets tasks.accept_from, and its own doctor reports no
   const canonFlow = join(canonicalRoot, ".flow");
   const cfg = readFileSync(join(canonFlow, "config.yml"), "utf8");
   assert.match(cfg, /^tasks:\n(?:\s+#.*\n)*\s+accept_from: "2026-11-14"/m);
+  assert.match(cfg, /auto_accept:[\s\S]*never: \[[^\]]*"project-template\/\*\*"/, "canonical protects the published template");
   const r = runDoctor({ flowDir: canonFlow, gitStatus: () => ({ inRepo: false }) });
   assert.deepEqual(acceptProblems(r), []);
 });

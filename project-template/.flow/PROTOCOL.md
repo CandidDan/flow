@@ -49,6 +49,9 @@ Reject; a batch may be shown together. Accept sets `ready` plus `accepted_by`, `
 `accepted_via`. Reject sets `cancelled` with the human's reason. Nobody else's word counts as the
 yes. If the human is not there, the task stays `proposed` and waits in inflight. Setting
 `tasks.accept_from` in `.flow/config.yml` makes the tooling enforce it (see *Status lifecycle*).
+Where the config sets `tasks.auto_accept`, a task that meets it on facts (build tier, number of
+`touches`, no protected path) is written `ready` with `accepted_by: auto` instead; `node
+.flow/bin/acceptance.mjs auto <file>` says whether it qualifies, and `flow-doctor` re-checks it.
 
 **Changelog entries, where the repo keeps a `changes/` directory.** A task's changelog entry goes
 in `changes/<task-id>.md` — one file per task, holding exactly what would otherwise have gone

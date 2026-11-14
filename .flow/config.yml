@@ -84,6 +84,15 @@ intents:
 # them, and pick-task and flow-dispatch never hand one to a worker. Remove the key to switch off.
 tasks:
   accept_from: "2026-11-14"
+  # Small, low-risk tasks may skip the human, judged on facts in the task file (Dan, 2026-11-14):
+  # the build tier, how many paths it touches, and whether any of them can reach a protected
+  # path. A qualifying task is written `ready` with accepted_by/accepted_via "auto", and
+  # flow-doctor re-checks every such claim. Delete this block to send every task to the human.
+  auto_accept:
+    max_model: haiku
+    max_touches: 3
+    # Canonical adds project-template/**: it is the published artefact every repo consumes.
+    never: [".github/**", ".flow/bin/**", "project-template/**", "**/auth/**", "**/payments/**"]
 
 # Gate-coverage floor. Note an honest limitation, recorded rather than papered over: every one
 # of canonical's source trees lives under a dot-directory (`.flow/bin/`, `.github/workflows/`,

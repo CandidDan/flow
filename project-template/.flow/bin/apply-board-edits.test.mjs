@@ -235,3 +235,14 @@ test("proposed is a legal status, and an acceptance field with a quote is refuse
   assert.equal(readFileSync(join(dir, "0005-e.md"), "utf8"), before);
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("flow-0227: a `$` sequence in a written value is kept as typed, not expanded", () => {
+  const dir = fixture({ "0006-f.md": task("PROJ-0006", { status: "proposed" }) });
+  const reason = "costs $1 and $' and $& too";
+  applyEdits({ tasksDir: dir, updates: [{ id: "PROJ-0006", status: "cancelled", cancelled_reason: reason }] });
+  const out = readFileSync(join(dir, "0006-f.md"), "utf8");
+  assert.ok(out.includes(`cancelled_reason: "${reason}"`));
+  assert.match(out, /^status: "cancelled"$/m);
+  assert.equal(out.match(/^title:/gm).length, 1, "no part of the frontmatter was copied into the value");
+  rmSync(dir, { recursive: true, force: true });
+});

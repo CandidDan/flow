@@ -27,7 +27,8 @@ implementation, that's yours to specify.
    focused sitting is the right grain.
 3. For each task, write a file `NNNN-slug.md` with full frontmatter and body. Allocate the next
    id number; set `status: proposed`, `priority` (from the human's signal, default 3), `created`.
-   A task is never written `ready`: step 11 is how it gets there.
+   A task is never written `ready`: step 11 is how it gets there. (The one exception is the issue
+   triage lanes below, where the human's `approved` or `auto-ok` label is the accept.)
 4. **Acceptance criteria are the work.** Each must be observable and testable, phrased
    given/when/then where it helps. If you can't write a test for a criterion, it's not a
    criterion yet — sharpen it. The worker writes one test per criterion, so vague criteria
@@ -74,7 +75,14 @@ implementation, that's yours to specify.
    depth, it is work planned faster than it can be done. A `proposed` draft is never refused,
    because it is not `ready`. So when the human accepts, check the ready count first: at the cap,
    say so in the same message, and let the human choose to accept anyway or leave it `proposed`.
-11. **Show it to the human and get Accept or Reject before it is `ready`.** Commit the task as
+11. **Auto-accept first, where the repo allows it.** If `.flow/config.yml` sets
+   `tasks.auto_accept`, run `node .flow/bin/acceptance.mjs auto <task-file>` (in canonical:
+   `node project-template/.flow/bin/acceptance.mjs auto <task-file>`). On "auto-accept: yes",
+   write the task `ready` with `accepted_by: auto`, `accepted_at` now and `accepted_via: auto`,
+   and list it to the human as auto-accepted, so they still see it. Never lower `model` or trim
+   `touches` to make a task qualify: those fields decide who builds it and what it may change,
+   and `flow-doctor` re-checks the claim. On "no", carry on below.
+   **Show it to the human and get Accept or Reject before it is `ready`.** Commit the task as
    `proposed`, then show the human, in the conversation you are in, what each task is: its id,
    title, one line on what changes, `priority` and `model`. Ask Accept or Reject. Use the host's
    decision UI where there is one (a decision card, a question with options); otherwise ask in

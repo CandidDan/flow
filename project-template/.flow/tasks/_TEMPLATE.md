@@ -20,7 +20,8 @@ accepted_by: ""           # who accepted it: the human's GitHub login, or "label
                           # "label:auto-ok" from the issue lanes. Set only on the human's yes —
                           # never by the session that wrote the task on its own judgement.
 accepted_at: ""           # full UTC ISO-8601 datetime of the accept
-accepted_via: ""          # chat | inflight | issue-label
+accepted_via: ""          # chat | inflight | issue-label | auto (with accepted_by "auto", only
+                          # when the task meets `tasks.auto_accept` in .flow/config.yml)
                           # Where `.flow/config.yml` sets `tasks.accept_from`, flow-doctor fails a
                           # task created on or after it that is past `proposed` without
                           # accepted_by and accepted_at, and no worker is handed one.
