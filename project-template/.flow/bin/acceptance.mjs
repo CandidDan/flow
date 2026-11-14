@@ -223,7 +223,10 @@ export function autoAcceptReasons(task, policy) {
     const e = String(raw).startsWith("/") ? null : posix.normalize(String(raw)).replace(/^(\.\/)+/, "");
     if (e === null || e === ".." || e.startsWith("../")) { reasons.push(`touches "${raw}" is not a path inside the repo`); continue; }
     if (e === "" || e === ".") { reasons.push(`touches "${raw}" names the whole repo`); continue; }
-    const hit = policy.never.find((n) => touchesReachesNever(e, n));
+    // A backslash is a separator on Windows and an escape in a glob: either way not a plain path.
+    if (e.includes("\\")) { reasons.push(`touches "${raw}" contains a backslash`); continue; }
+    // Case-insensitive, because macOS and Windows checkouts treat `.GITHUB` as `.github`.
+    const hit = policy.never.find((n) => touchesReachesNever(e.toLowerCase(), n.toLowerCase()));
     if (hit) reasons.push(`touches "${raw}" can reach "${hit}"`);
   }
   return reasons;

@@ -225,6 +225,8 @@ test("touches entries are normalized before the never check, and paths out of th
   assert.match(autoAcceptReasons(small({ touches: ["../other/x"] }), POLICY)[0], /not a path inside the repo/);
   assert.match(autoAcceptReasons(small({ touches: ["docs/../.."] }), POLICY)[0], /not a path inside the repo/);
   assert.deepEqual(autoAcceptReasons(small({ touches: ["./docs/a.md"] }), POLICY), []);
+  assert.match(autoAcceptReasons(small({ touches: [".github\\workflows\\a.yml"] }), POLICY)[0], /contains a backslash/);
+  assert.match(autoAcceptReasons(small({ touches: [".GITHUB/workflows/a.yml"] }), POLICY)[0], /can reach ".github\/\*\*"/);
   for (const root of ["./", ".", "././"]) {
     assert.match(autoAcceptReasons(small({ touches: [root] }), POLICY)[0], /names the whole repo/, root);
   }
