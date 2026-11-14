@@ -305,3 +305,26 @@ test("a malformed accept_from still re-checks auto accepts", () => {
   assert.equal(warnings.length, 1);
   assert.match(problems[0], /auto-accepted but does not qualify/);
 });
+
+test("single-segment wildcards and mid-glob wildcards are treated as reachable (review finding)", () => {
+  assert.equal(touchesReachesNever("src/*", "**/auth/**"), true);
+  assert.equal(touchesReachesNever("src/a", "src/*/secret/**"), true, "src/a/secret/x is reachable");
+  assert.equal(touchesReachesNever("lib/a", "src/*/secret/**"), false);
+  for (const e of ["src/*/login.ts", "lib/a?th/x.ts", "src/*"]) {
+    assert.ok(autoAcceptReasons(small({ touches: [e] }), POLICY).some((r) => /can reach/.test(r)), e);
+  }
+});
+
+test("pick-task agrees with flow-doctor: a false auto claim is refused even before the cutoff or with the rule off", () => {
+  const auto = { status: "ready", created: "2026-01-01", accepted_by: "auto", accepted_at: "x", accepted_via: "auto",
+    model: "opus", touches: ["docs/a.md"] };
+  assert.equal(acceptanceAllowsWork(auto, "2026-11-14", POLICY), false);
+  assert.equal(acceptanceAllowsWork(auto, undefined, POLICY), false);
+  assert.equal(acceptanceAllowsWork({ ...auto, accepted_by: "", accepted_via: "" }, "2026-11-14", POLICY), true, "old task, no claim");
+});
+
+test("a column-0 comment inside the tasks block does not switch the rule off", () => {
+  const text = 'tasks:\n# a note\n  accept_from: "2026-11-14"\n# another\n  auto_accept:\n    max_touches: 2\n';
+  assert.equal(parseAcceptFromText(text), "2026-11-14");
+  assert.equal(parseAutoAcceptText(text).max_touches, 2);
+});

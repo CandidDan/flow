@@ -75,6 +75,7 @@ export function parseAcceptFromText(text) {
   const i = lines.findIndex((l) => /^tasks:\s*(#.*)?$/.test(l));
   if (i === -1) return undefined;
   for (let j = i + 1; j < lines.length; j++) {
+    if (/^#/.test(lines[j])) continue;                // a column-0 comment does not end the block
     if (/^\S/.test(lines[j])) break;                 // dedent: the block is over
     const m = lines[j].match(/^\s+accept_from:\s*(.*)$/);
     if (m) return unquote(m[1]);
@@ -99,6 +100,7 @@ export function parseAutoAcceptText(text) {
   if (t === -1) return null;
   let a = -1, indent = 0;
   for (let j = t + 1; j < lines.length; j++) {
+    if (/^#/.test(lines[j])) continue;
     if (/^\S/.test(lines[j])) break;
     const m = lines[j].match(/^(\s+)auto_accept:\s*(#.*)?$/);
     if (m) { a = j; indent = m[1].length; break; }
@@ -188,7 +190,11 @@ export function touchesReachesNever(entry, never) {
     const dir = entry.replace(/\/+$/, "");
     if (re.test(`${dir}/x`)) return true;
     const pn = staticPrefix(never);
-    return !!dir && pn.startsWith(`${dir}/`);
+    if (!dir) return false;
+    if (pn.startsWith(`${dir}/`)) return true;
+    // A wildcard after the prefix (`src/*/secret/**`) can match inside a directory deeper than
+    // the prefix itself, so a directory under the prefix may reach it too.
+    return !!pn && /[*?]/.test(never) && `${dir}/`.startsWith(pn);
   }
   const pe = staticPrefix(entry), pn = staticPrefix(never);
   if (pn && pn.startsWith(pe)) return true;
@@ -233,9 +239,9 @@ const isAuto = (t) => String(t?.accepted_via ?? "").trim() === AUTO || String(t?
  * with no policy, no auto accept is valid).
  */
 export function acceptanceAllowsWork(task, acceptFrom, autoAccept = null) {
-  if (!needsAcceptance(task, acceptFrom)) return true;
-  if (!isAccepted(task)) return false;
-  return !isAuto(task) || autoAcceptReasons(task, autoAccept).length === 0;
+  // An `auto` claim is checked whatever the date, the same as flow-doctor does.
+  if (isAuto(task) && autoAcceptReasons(task, autoAccept).length) return false;
+  return !needsAcceptance(task, acceptFrom) || isAccepted(task);
 }
 
 /**
