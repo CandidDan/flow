@@ -27,8 +27,9 @@ implementation, that's yours to specify.
    focused sitting is the right grain.
 3. For each task, write a file `NNNN-slug.md` with full frontmatter and body. Allocate the next
    id number; set `status: proposed`, `priority` (from the human's signal, default 3), `created`.
-   A task is never written `ready`: step 11 is how it gets there. (The one exception is the issue
-   triage lanes below, where the human's `approved` or `auto-ok` label is the accept.)
+   A task is never written `ready`: step 11 is how it gets there. (The two exceptions: a task that
+   qualifies for `tasks.auto_accept` in step 11, and the issue triage lanes below, where the
+   human's `approved` or `auto-ok` label is the accept.)
 4. **Acceptance criteria are the work.** Each must be observable and testable, phrased
    given/when/then where it helps. If you can't write a test for a criterion, it's not a
    criterion yet — sharpen it. The worker writes one test per criterion, so vague criteria
@@ -215,7 +216,8 @@ writing the problem in the first place.
   for the same reason. New tasks carry it; finished ones stay as they were.
 - Don't leave a real open decision inside a `ready` task. Decide it (or ask the human), then write it.
 - Don't write `ready`, and don't fill `accepted_by`, on your own judgement or on another
-  session's say-so. A task becomes `ready` only on the human's yes (step 11).
+  session's say-so. A task becomes `ready` only on the human's yes, or when `acceptance.mjs auto`
+  says it qualifies (step 11).
 
 ## This repo's additions
 

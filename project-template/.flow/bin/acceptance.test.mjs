@@ -248,6 +248,8 @@ test("readTaskFacts reads model and touches in both list forms", () => {
   assert.deepEqual(readTaskFacts('---\nmodel: "haiku"\ntouches: ["a.md", "b.md"] # two\n---\nbody'), { model: "haiku", touches: ["a.md", "b.md"] });
   assert.deepEqual(readTaskFacts('---\ntouches:\n  - "a.md"\n  - b.md\nlabels: []\n---\n'), { model: "", touches: ["a.md", "b.md"] });
   assert.deepEqual(readTaskFacts("no frontmatter"), { model: "", touches: [] });
+  assert.deepEqual(readTaskFacts('---\ntouches:\n  - "a.md"\n  # the protected one\n  - ".github/x.yml"\n---\n').touches,
+    ["a.md", ".github/x.yml"], "a comment inside the list does not cut it short");
 });
 
 test("the auto CLI says yes with exit 0, no with the reasons and exit 1, and usage with exit 2", () => {

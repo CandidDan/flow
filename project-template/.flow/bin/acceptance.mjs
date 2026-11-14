@@ -5,7 +5,7 @@
 //
 //   accepted_by:  "CandidDan"             # a GitHub login, or "label:approved" / "label:auto-ok"
 //   accepted_at:  "2026-11-14T02:13:59Z"  # full UTC ISO datetime
-//   accepted_via: "chat"                  # chat | inflight | issue-label
+//   accepted_via: "chat"                  # chat | inflight | issue-label | auto
 //
 // A "no" is `cancelled` with the human's reason in `cancelled_reason`.
 //
@@ -265,7 +265,11 @@ export function readTaskFacts(text) {
   if (i !== -1) {
     const inline = parseInlineList(lines[i].replace(/^touches:\s*/, "").replace(/\s+#.*$/, ""));
     if (inline) touches = inline;
-    else for (let j = i + 1; j < lines.length && /^\s*-\s/.test(lines[j]); j++) touches.push(unquote(lines[j].replace(/^\s*-\s+/, "")));
+    else for (let j = i + 1; j < lines.length; j++) {
+      if (/^\s*(#.*)?$/.test(lines[j])) continue;     // a blank or comment line inside the list
+      if (!/^\s*-\s/.test(lines[j])) break;
+      touches.push(unquote(lines[j].replace(/^\s*-\s+/, "")));
+    }
   }
   return { model: get("model"), touches };
 }
