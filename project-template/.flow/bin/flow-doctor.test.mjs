@@ -1075,7 +1075,7 @@ test("_TEMPLATE.md ships blocked_by as an empty list, and still parses", () => {
     const parsed = yamlParse(text.slice(3, text.indexOf("\n---", 3)));
     assert.ok(Object.hasOwn(parsed, "blocked_by"), "the published template must declare the field");
     assert.deepEqual(parsed.blocked_by, [], "it ships empty — absent means 'not declared'");
-    assert.equal(parsed.status, "ready", "the rest of the frontmatter must survive the addition");
+    assert.equal(parsed.status, "proposed", "the rest of the frontmatter must survive the addition (flow-0227: a new task ships `proposed`)");
   }
 
   // The other reader, and the one every consuming repo runs: flow-doctor's own frontmatter scan.
