@@ -123,8 +123,10 @@ export function applyEdits({ tasksDir, updates }) {
       problems.push(`${u.id}: priority must be an integer 1-5, got ${u.priority}`); continue;
     }
     const badString = STRING_FIELDS.find(k =>
-      u[k] !== undefined && (typeof u[k] !== "string" || /["\n]/.test(u[k])));
-    if (badString) { problems.push(`${u.id}: ${badString} must be a plain string (no quotes/newlines)`); continue; }
+      // No quote, backslash or control character: any of them can end the quoted scalar or start
+      // a new frontmatter line (`\r` does for YAML and for a multiline regex).
+      u[k] !== undefined && (typeof u[k] !== "string" || /["\\\u0000-\u001f\u007f\u2028\u2029]/.test(u[k])));
+    if (badString) { problems.push(`${u.id}: ${badString} must be a plain string (no quotes, backslashes or control characters)`); continue; }
     const badClear = Object.keys(CLEARABLE_FIELDS).find(k =>
       u[k] !== undefined && !(k === "blocked_by" ? Array.isArray(u[k]) && u[k].length === 0 : u[k] === ""));
     if (badClear) { problems.push(`${u.id}: ${badClear} may only be cleared (${CLEARABLE_FIELDS[badClear]})`); continue; }

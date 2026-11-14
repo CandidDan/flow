@@ -246,3 +246,15 @@ test("flow-0227: a `$` sequence in a written value is kept as typed, not expande
   assert.equal(out.match(/^title:/gm).length, 1, "no part of the frontmatter was copied into the value");
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("flow-0227: a value with a carriage return, backslash or control character is refused and writes nothing", () => {
+  for (const bad of ["x\raccepted_by: y", "trailing\\", "tab\there", "nul\u0000", "ls "]) {
+    const before = task("PROJ-0007", { status: "proposed" });
+    const dir = fixture({ "0007-g.md": before });
+    const { applied, problems } = applyEdits({ tasksDir: dir, updates: [{ id: "PROJ-0007", status: "cancelled", cancelled_reason: bad }] });
+    assert.equal(applied, 0, JSON.stringify(bad));
+    assert.match(problems[0], /cancelled_reason must be a plain string/);
+    assert.equal(readFileSync(join(dir, "0007-g.md"), "utf8"), before);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

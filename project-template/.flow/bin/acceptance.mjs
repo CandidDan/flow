@@ -176,7 +176,7 @@ const staticPrefix = (g) => { const i = g.search(/[*?]/); return i === -1 ? g : 
  * Could a `touches` entry reach a path a `never` glob protects? Conservative, because a wrong
  * "no" lets a risky task skip the human: true when the never glob matches the entry as written,
  * when the entry is a bare directory or a wildcard over one that contains the protected path, or
- * when the entry is a `**` wildcard and the protected glob can match at any depth.
+ * when the entry has any wildcard and the protected glob can match at any depth.
  */
 export function touchesReachesNever(entry, never) {
   const re = globToRegex(never);
@@ -192,7 +192,9 @@ export function touchesReachesNever(entry, never) {
   }
   const pe = staticPrefix(entry), pn = staticPrefix(never);
   if (pn && pn.startsWith(pe)) return true;
-  return entry.includes("**") && never.startsWith("**");
+  // Any wildcard can stand for a segment named like the protected one (`src/*/login.js` can be
+  // `src/auth/login.js`), so against a glob that matches at any depth it is reachable.
+  return never.startsWith("**");
 }
 
 /** Why a task does not qualify for auto-accept: [] when it does. */

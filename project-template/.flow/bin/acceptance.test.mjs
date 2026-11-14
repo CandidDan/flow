@@ -209,6 +209,8 @@ test("touchesReachesNever is conservative about wildcards", () => {
   assert.equal(touchesReachesNever("src/**", "**/auth/**"), true, "a ** wildcard can reach auth/ anywhere");
   assert.equal(touchesReachesNever(".github/**", ".github/workflows/**"), true, "a wildcard over the protected dir");
   assert.equal(touchesReachesNever("src/*.ts", "src/secret/**"), true);
+  assert.equal(touchesReachesNever("src/*/login.js", "**/auth/**"), true, "a * can be the auth segment");
+  assert.equal(touchesReachesNever("src/a?th/x.js", "**/auth/**"), true, "a ? can spell auth");
   assert.equal(touchesReachesNever("docs/guide.md", "**/auth/**"), false);
   assert.equal(touchesReachesNever("docs/*.md", ".github/**"), false);
 });
