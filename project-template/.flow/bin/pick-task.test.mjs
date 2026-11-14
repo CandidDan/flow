@@ -109,7 +109,8 @@ body
 
 test("parseTask reads id/status/priority/touches and ignores non-frontmatter", () => {
   const t = parseTask(taskFile("CAN-99", { status: "ready", priority: 2, touches: '["a/**", "b.ts"]' }));
-  assert.deepEqual(t, { id: "CAN-99", status: "ready", priority: 2, touches: ["a/**", "b.ts"] });
+  assert.deepEqual(t, { id: "CAN-99", status: "ready", priority: 2, touches: ["a/**", "b.ts"],
+    created: "", accepted_by: "", accepted_at: "" });
   assert.equal(parseTask("no frontmatter here"), null);
 });
 
@@ -353,4 +354,24 @@ test("flow-0131: pick-task still drops a trailing unquoted # comment", () => {
   assert.equal(t.id, "CAN-1");
   assert.equal(t.status, "ready");
   assert.equal(t.priority, 2);
+});
+
+// ── flow-0227: the human's accept ──
+
+test("flow-0227: an unaccepted new task is skipped, an accepted one is picked, proposed never", () => {
+  const tasks = [
+    { ...T("CAN-1", { priority: 1 }), created: "2026-11-14" },
+    { ...T("CAN-2", { priority: 2, touches: ["b/**"] }), created: "2026-11-14", accepted_by: "CandidDan", accepted_at: "2026-11-14T02:13:59Z" },
+    { ...T("CAN-3", { status: "proposed", touches: ["c/**"] }), created: "2026-11-14" },
+  ];
+  assert.equal(pickTask(tasks, { acceptFrom: "2026-11-14" }), "CAN-2");
+  assert.equal(pickTask([tasks[0], tasks[2]], { acceptFrom: "2026-11-14" }), null);
+  assert.equal(pickTask([tasks[0]]), "CAN-1", "rule off: unchanged");
+});
+
+test("flow-0227: parseTask reads created and the acceptance fields", () => {
+  const t = parseTask('---\nid: "CAN-1"\nstatus: "ready"\npriority: 1\ncreated: "2026-11-14"\naccepted_by: "CandidDan"\naccepted_at: "2026-11-14T02:13:59Z"\ntouches: []\n---\n');
+  assert.equal(t.created, "2026-11-14");
+  assert.equal(t.accepted_by, "CandidDan");
+  assert.equal(t.accepted_at, "2026-11-14T02:13:59Z");
 });

@@ -15,6 +15,7 @@ import { realpathSync as __realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath as __fileURLToPath } from "node:url";
 import { pickTask, readTasks } from "../../project-template/.flow/bin/pick-task.mjs";
+import { parseAcceptFrom } from "../../project-template/.flow/bin/acceptance.mjs";
 
 // --- main-module detection (do not simplify back to a string compare) -------------------
 // See project-template/.flow/bin/pick-task.mjs for the incident this guards against.
@@ -41,7 +42,8 @@ export function canonicalFlowDir(here = __fileURLToPath(import.meta.url)) {
 // ── CLI ── prints the next task id, or nothing. Always exits 0 — "queue dry" means the worker
 // stops, not an error.
 if (__isMain) {
-  const id = pickTask(readTasks(join(canonicalFlowDir(), "tasks")));
+  const id = pickTask(readTasks(join(canonicalFlowDir(), "tasks")),
+    { acceptFrom: parseAcceptFrom(join(canonicalFlowDir(), "config.yml")) });
   if (id) process.stdout.write(id + "\n");
   process.exit(0);
 }

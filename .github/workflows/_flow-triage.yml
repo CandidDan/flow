@@ -525,6 +525,10 @@ jobs:
             3a. Write the task body to a scratch file OUTSIDE the repository, at
                ${{ runner.temp }}/flow-triage-task.md, in the task template's shape (the same
                template step 2 uses). Set `issue:` to the issue URL and `status:` to ready.
+               The lane label is the human's accept, so also set `accepted_by:` to
+               "label:approved" or "label:auto-ok" (whichever lane this issue is in),
+               `accepted_at:` to the current UTC time (date -u +%Y-%m-%dT%H:%M:%SZ) and
+               `accepted_via:` to "issue-label".
                Leave the frontmatter `id:` line present but with a placeholder value: the
                allocator rewrites that line with the id it allocates, and it is the only thing
                that may fill it in.

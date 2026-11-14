@@ -143,7 +143,7 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0174",
   }],
   ["Status lifecycle", {
-    digest: "43a0402f496edf5b40b59e95074778d436ef83df737319107e4d15fda23712c2",
+    digest: "cb5f08b7d475b27a2886a402ec818624db8045ce5ba6dfb3eb6bd42b6c04cbf5",
     why: "the `blocked` bullet told a worker to record the undecidable thing in " +
          "`blocked_reason` and `blocked_by` only — both of which a person reads only once they " +
          "are already looking at the task file, which is the thing a human never opens. It now " +
@@ -159,8 +159,11 @@ const INTENTIONAL_DIVERGENCES = new Map([
          "flow-0173 then stopped flow-unblock starting the next worker: the `blocked` bullet now " +
          "says the released task is picked up by the next worker run. flow-0174 then retired " +
          "the queue-runner: escalation trigger 1 is now a stranded claim flow-recover resets " +
-         "because nothing was pushed, not a queue-runner run that ended without a PR.",
-    task: "flow-0174",
+         "because nothing was pushed, not a queue-runner run that ended without a PR. " +
+         "flow-0227 then added the `proposed` status ahead of `ready`: a diagram branch for the " +
+         "human's accept and reject, a bullet naming what enforces it, and `ready` now says " +
+         "the orchestrator sets it on the human's accept.",
+    task: "flow-0227",
   }],
   ["Session hygiene — context is a budget", {
     digest: "b6a0eebb93032a65950114f77279de5bbac095278b2dc44583ca959852f7a5a9",

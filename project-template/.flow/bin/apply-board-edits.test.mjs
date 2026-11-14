@@ -193,3 +193,45 @@ test("existing callers are unchanged: a status/owner edit leaves blocked_reason 
   assert.match(out, /^blocked_by:\n  - "PROJ-0001"$/m);
   rmSync(dir, { recursive: true, force: true });
 });
+
+// ── flow-0227: the human accepts or rejects a `proposed` task through the store writer ──
+
+test("accepting a proposed task writes ready plus who, when and how", () => {
+  const dir = fixture({ "0003-c.md": task("PROJ-0003", { status: "proposed" }) });
+  const { applied, problems } = applyEdits({ tasksDir: dir, updates: [{
+    id: "PROJ-0003", status: "ready",
+    accepted_by: "CandidDan", accepted_at: "2026-11-14T02:13:59Z", accepted_via: "inflight",
+  }] });
+  assert.equal(applied, 1);
+  assert.deepEqual(problems, []);
+  const out = readFileSync(join(dir, "0003-c.md"), "utf8");
+  assert.match(out, /^status: "ready"$/m);
+  assert.match(out, /^accepted_by: "CandidDan"$/m);
+  assert.match(out, /^accepted_at: "2026-11-14T02:13:59Z"$/m);
+  assert.match(out, /^accepted_via: "inflight"$/m);
+  assert.match(out, /\n## Context\nbody\n$/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("rejecting a proposed task writes cancelled with the human's reason", () => {
+  const dir = fixture({ "0004-d.md": task("PROJ-0004", { status: "proposed" }) });
+  const { applied } = applyEdits({ tasksDir: dir, updates: [{
+    id: "PROJ-0004", status: "cancelled", cancelled_reason: "Not now, the vision moved",
+  }] });
+  assert.equal(applied, 1);
+  const out = readFileSync(join(dir, "0004-d.md"), "utf8");
+  assert.match(out, /^status: "cancelled"$/m);
+  assert.match(out, /^cancelled_reason: "Not now, the vision moved"$/m);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("proposed is a legal status, and an acceptance field with a quote is refused", () => {
+  assert.ok(STATUSES.has("proposed"));
+  const before = task("PROJ-0005", { status: "proposed" });
+  const dir = fixture({ "0005-e.md": before });
+  const { applied, problems } = applyEdits({ tasksDir: dir, updates: [{ id: "PROJ-0005", accepted_by: 'a"b' }] });
+  assert.equal(applied, 0);
+  assert.match(problems[0], /accepted_by must be a plain string/);
+  assert.equal(readFileSync(join(dir, "0005-e.md"), "utf8"), before);
+  rmSync(dir, { recursive: true, force: true });
+});

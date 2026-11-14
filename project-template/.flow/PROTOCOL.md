@@ -40,8 +40,15 @@ or import `buildIntentReport` from the pinned Flow release and run it on files y
 this repo's local skills, so asking it to "create a task" will not trigger `task-writer` on its
 own. To write a new task, **read `.claude/skills/task-writer/SKILL.md` and follow it** — that is
 the canonical procedure and produces a correctly-shaped file in `.flow/tasks/` (frontmatter per
-`_TEMPLATE.md`, `status: ready`, next sequential id, `touches` declared) committed to `main`. The
+`_TEMPLATE.md`, next sequential id, `touches` declared) committed to `main`. The
 worker never creates tasks; it only executes `ready` ones.
+
+**Nothing enters the queue without the human's yes.** Whoever writes a task (a session, a chat,
+a tool) writes it `proposed` and shows it to the human, in that same conversation, with Accept or
+Reject; a batch may be shown together. Accept sets `ready` plus `accepted_by`, `accepted_at` and
+`accepted_via`. Reject sets `cancelled` with the human's reason. Nobody else's word counts as the
+yes. If the human is not there, the task stays `proposed` and waits in inflight. Setting
+`tasks.accept_from` in `.flow/config.yml` makes the tooling enforce it (see *Status lifecycle*).
 
 **Changelog entries, where the repo keeps a `changes/` directory.** A task's changelog entry goes
 in `changes/<task-id>.md` — one file per task, holding exactly what would otherwise have gone
@@ -144,13 +151,18 @@ and the same code. It exits 1 with nothing printed when it is not sure, and then
 A task's `status` field moves in one direction only:
 
 ```
-ready  →  in_progress  →  in_review  →  done
-                ↘  blocked  ↗
-   ready ─┬─→ cancelled   (terminal; hand-written by the orchestrator only)
-  blocked ┘
+proposed ──(human accepts)──→ ready  →  in_progress  →  in_review  →  done
+    │                                        ↘  blocked  ↗
+    └──(human rejects)──→ cancelled  ←─┬─ ready      (terminal; hand-written by the orchestrator only)
+                                       └─ blocked
 ```
 
-- `ready` — fully specified, you may start it. Set by the orchestrator, not by you. (A PR
+- `proposed` — written by the task writer, waiting for the human (see *Creating a task*). Never
+  picked: `pick-task` and `flow-dispatch` skip it, and skip any newer task with no `accepted_by`.
+  `flow-doctor` fails a task created on or after `tasks.accept_from` that is past `proposed`
+  without `accepted_by` and `accepted_at`.
+- `ready` — fully specified and accepted, you may start it. Set by the orchestrator on the
+  human's accept, not by you. (A PR
   closed without merging also returns its task here automatically, cleared for re-claim.)
 - `in_progress` — you have claimed it. Set `owner` to your session id and `started` to the
   **current UTC instant** as a full ISO-8601 datetime (`2026-08-14T09:23:00Z` — `date -u

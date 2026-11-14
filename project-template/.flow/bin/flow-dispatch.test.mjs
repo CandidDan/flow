@@ -675,3 +675,23 @@ test("flow-0211: an issue whose label was dropped is still found by its marker, 
   await runWithGitHub(tasksDir, gh, { tiers: { sonnet: "trig_sonnet" } });
   assert.equal(gh.state.issues[0].state, "closed");
 });
+
+// ── flow-0227: a task the human has not accepted is never dispatched ──
+
+test("flow-0227: planDispatch skips an unaccepted new task and never picks a proposed one", () => {
+  const unaccepted = { id: "A", status: "ready", priority: 1, touches: [], created: "2026-11-14" };
+  const accepted = { ...unaccepted, id: "B", priority: 2, accepted_by: "CandidDan", accepted_at: "2026-11-14T02:13:59Z" };
+  const proposed = { id: "C", status: "proposed", priority: 1, touches: [], created: "2026-11-14" };
+  assert.deepEqual(planDispatch([unaccepted, accepted, proposed], 3, "2026-11-14"), { decision: "pick", taskId: "B" });
+  assert.deepEqual(planDispatch([unaccepted, proposed], 3, "2026-11-14"), { decision: "skipped", reason: "nothing-ready" });
+  assert.deepEqual(planDispatch([unaccepted], 3, undefined), { decision: "pick", taskId: "A" }, "rule off: unchanged");
+});
+
+test("flow-0227: dispatch reads tasks.accept_from from config and fires nothing for an unaccepted task", async (t) => {
+  const text = task("P-1").replace("---\n\nbody", 'created: "2026-11-14"\n---\n\nbody');
+  const { tasksDir } = store(t, { "p-1.md": text });
+  const r = await run(tasksDir, { tiers: { sonnet: "trig_sonnet" }, configText: 'tasks:\n  accept_from: "2026-11-14"\n' });
+  assert.equal(r.code, 0);
+  assert.equal(r.calls.length, 0);
+  assert.deepEqual(r.decisions, ["flow-dispatch: decision=skipped reason=nothing-ready"]);
+});

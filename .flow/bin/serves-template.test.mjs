@@ -64,12 +64,15 @@ function skillSection(heading) {
 // shows up as a mismatch instead of quietly shrinking both sides of the comparison.
 const INTENDED_KEYS = [
   "id", "title", "status", "priority", "project", "owner", "created", "started",
-  "branch", "pr", "issue", "blocked_reason", "cancelled_reason", "blocked_by", "serves", "intent", "touches", "labels",
+  "branch", "pr", "issue", "blocked_reason", "cancelled_reason", "accepted_by", "accepted_at",
+  "accepted_via", "blocked_by", "serves", "intent", "touches", "labels",
   "model", "effort", "model_reason", "notes", "asks",
 ];
 // `model`, `effort` and `model_reason` were added by flow-0083, directly under `labels` — the
 // three answer one question (which model builds this task, how hard it thinks, and why), so they
 // sit together, ahead of the append-only `notes`/`asks` pair that always closes the frontmatter.
+// `accepted_by`, `accepted_at` and `accepted_via` were added by flow-0227, directly under
+// `cancelled_reason` — the record of the human's yes, beside the record of their no.
 // `cancelled_reason` was added by flow-0108, directly under `blocked_reason` — its sibling for the
 // terminal `cancelled` status, required iff the status is set.
 // `blocked_by` was added by flow-0040, directly under `blocked_reason` — the machine-readable
@@ -190,6 +193,8 @@ None.
 function taskFromTemplate(servesValue) {
   const head = FRONTMATTER
     .replace(/^id: .*$/m, 'id: "P-0001"')
+    // The template ships `proposed` (flow-0227); these checks are about a task offered to a worker.
+    .replace(/^status: .*$/m, 'status: "ready"')
     .replace(/^title: .*$/m, 'title: "A task cut from the shipped template"')
     .replace(/^project: .*$/m, 'project: "p"')
     .replace(/^created: .*$/m, 'created: "2026-08-21"')

@@ -1026,7 +1026,7 @@ function cliFixture(files, opts) {
   // Every module flow-doctor imports, not just the entry point: a missing one is an
   // ERR_MODULE_NOT_FOUND on stderr with exit 1, which an exit-code assertion reads as "the
   // problem was found". Add to this list whenever flow-doctor gains a relative import.
-  for (const f of ["flow-doctor.mjs", "apply-board-edits.mjs", "asks.mjs"])
+  for (const f of ["flow-doctor.mjs", "apply-board-edits.mjs", "asks.mjs", "acceptance.mjs"])
     copyFileSync(join(import.meta.dirname, f), join(flowDir, "bin", f));
   return flowDir;
 }
@@ -2507,4 +2507,53 @@ test("workstreams (flow-0151): a workstream breaking none of the rules gets no f
   assert.deepEqual(r.problems, []);
   assert.deepEqual(wsFindings(r), []);
   cleanup(d);
+});
+
+// ── the human's accept (flow-0227) ──
+// A task created on or after `tasks.accept_from` is `proposed` until the human accepts it.
+
+const withAccept = (flowDir, date = "2026-11-14") => {
+  const p = join(flowDir, "config.yml");
+  writeFileSync(p, `${existsSync(p) ? readFileSync(p, "utf8") : ""}tasks:\n  accept_from: "${date}"\n`);
+  return flowDir;
+};
+const accepted = (text) => text.replace(/^serves:/m,
+  'accepted_by: "CandidDan"\naccepted_at: "2026-11-14T02:13:59Z"\naccepted_via: "chat"\nserves:');
+const acceptProblems = (r) => r.problems.filter((p) => /accepted_(by|at)/.test(p));
+
+test("flow-0227: a new ready task with no accept fails the doctor, naming the task", () => {
+  const d = withAccept(fixture({ "0001-a.md": task("P-0001", { created: "2026-11-14" }) }));
+  const r = runDoctor({ flowDir: d });
+  assert.equal(acceptProblems(r).length, 1);
+  assert.match(acceptProblems(r)[0], /^P-0001: ready with no accepted_by/);
+  cleanup(d);
+});
+
+test("flow-0227: proposed is a legal status and is never asked for an accept", () => {
+  const d = withAccept(fixture({ "0001-a.md": task("P-0001", { status: "proposed", created: "2026-11-14" }) }));
+  const r = runDoctor({ flowDir: d });
+  assert.ok(!r.problems.some((p) => /illegal status/.test(p)));
+  assert.deepEqual(acceptProblems(r), []);
+  cleanup(d);
+});
+
+test("flow-0227: an accepted task, an older task, and a store with the rule off all pass", () => {
+  const d = withAccept(fixture({
+    "0001-a.md": accepted(task("P-0001", { created: "2026-11-14" })),
+    "0002-b.md": task("P-0002", { created: "2026-11-01" }),
+  }));
+  assert.deepEqual(acceptProblems(runDoctor({ flowDir: d })), []);
+  cleanup(d);
+  const off = fixture({ "0001-a.md": task("P-0001", { created: "2026-11-14" }) });
+  assert.deepEqual(acceptProblems(runDoctor({ flowDir: off })), []);
+  cleanup(off);
+});
+
+test("flow-0227: canonical sets tasks.accept_from, and its own doctor reports no accept problem",
+  { skip: inCanonical ? false : "canonical-only: reads canonical's own .flow/" }, () => {
+  const canonFlow = join(canonicalRoot, ".flow");
+  const cfg = readFileSync(join(canonFlow, "config.yml"), "utf8");
+  assert.match(cfg, /^tasks:\n(?:\s+#.*\n)*\s+accept_from: "2026-11-14"/m);
+  const r = runDoctor({ flowDir: canonFlow, gitStatus: () => ({ inRepo: false }) });
+  assert.deepEqual(acceptProblems(r), []);
 });

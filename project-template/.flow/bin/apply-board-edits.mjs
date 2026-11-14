@@ -50,7 +50,9 @@ const __isMain = (() => {
   } catch { return false; }
 })();
 // ---------------------------------------------------------------------------------------
-export const STATUSES = new Set(["ready", "in_progress", "in_review", "done", "blocked", "cancelled"]);
+// `proposed` (flow-0227): written by a task writer, waiting for the human's accept. No worker
+// picks it; accepting it is a board edit to `ready` plus the three `accepted_*` fields below.
+export const STATUSES = new Set(["proposed", "ready", "in_progress", "in_review", "done", "blocked", "cancelled"]);
 
 // Patch a single frontmatter field in a task-file's text, touching nothing else.
 function replaceField(block, key, value) {
@@ -58,7 +60,9 @@ function replaceField(block, key, value) {
   return re.test(block) ? block.replace(re, `$1 ${value}`) : `${block}\n${key}: ${value}`;
 }
 
-const STRING_FIELDS = ["owner", "branch", "pr"];   // quoted-string frontmatter fields we may patch
+// Quoted-string frontmatter fields we may patch. The `accepted_*` fields and `cancelled_reason`
+// (flow-0227) are how inflight records the human's accept or reject of a `proposed` task.
+const STRING_FIELDS = ["owner", "branch", "pr", "accepted_by", "accepted_at", "accepted_via", "cancelled_reason"];
 
 // Fields an update may only CLEAR, each with the one value that clears it (flow-0041). A task
 // leaving `blocked` must not keep the prose and the dependency list of a block that no longer
@@ -82,7 +86,8 @@ function clearField(block, key, value) {
   return lines.join("\n");
 }
 
-// Apply a list of {id, status?, priority?, owner?, branch?, pr?, blocked_reason?, blocked_by?}
+// Apply a list of {id, status?, priority?, owner?, branch?, pr?, accepted_by?, accepted_at?,
+// accepted_via?, cancelled_reason?, blocked_reason?, blocked_by?}
 // updates to the task files in tasksDir. Returns { applied, problems[], warnings[] }. Only
 // writes the matched task files.
 // A missing task file is a WARNING, not a problem (live-validation finding, 2026-06-05): the

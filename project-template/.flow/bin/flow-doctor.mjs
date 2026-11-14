@@ -112,6 +112,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { STATUSES } from "./apply-board-edits.mjs";
 import { parseAsks } from "./asks.mjs";
+import { acceptanceFindings, parseAcceptFrom } from "./acceptance.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -1154,6 +1155,7 @@ function parseTask(text) {
            blockedByList: parseListField(head, "blocked_by"),
            servesList: parseListField(head, "serves"),
            intent: get("intent"), created: get("created"),
+           accepted_by: get("accepted_by"), accepted_at: get("accepted_at"), accepted_via: get("accepted_via"),
            asksList: parseListField(head, "asks"), body };
 }
 
@@ -1357,6 +1359,14 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
         }
       }
     }
+  }
+
+  // The human's accept (flow-0227): a task created on or after `tasks.accept_from` is `proposed`
+  // until the human accepts it. Off when the key is unset. See acceptance.mjs.
+  {
+    const a = acceptanceFindings(tasks, parseAcceptFrom(configPath));
+    problems.push(...a.problems);
+    warnings.push(...a.warnings);
   }
 
   // Intent store: shape only, and an absent store is one warning — see the intent-store block above.

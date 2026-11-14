@@ -32,6 +32,7 @@ import { fileURLToPath } from "node:url";
 // flow-0111: the same list parser flow-doctor uses. Both YAML list forms, so block-form
 // `touches` (what every real task file uses) is not silently read as empty.
 import { parseListField, yamlScalar } from "./flow-doctor.mjs";
+import { acceptanceAllowsWork, parseAcceptFrom } from "./acceptance.mjs";
 
 
 import { realpathSync as __realpathSync } from "node:fs";
@@ -70,7 +71,8 @@ export function parseTask(text) {
   const touches = parseListField(head, "touches");
   const id = get("id");
   if (!id) return null;
-  return { id, status: get("status"), priority: parseInt(get("priority"), 10), touches };
+  return { id, status: get("status"), priority: parseInt(get("priority"), 10), touches,
+           created: get("created"), accepted_by: get("accepted_by"), accepted_at: get("accepted_at") };
 }
 
 // The literal path prefix of a glob: everything up to (not including) the first wildcard.
@@ -110,14 +112,18 @@ export function touchesOverlap(aList, bList) {
 export const IN_FLIGHT_STATUSES = ["in_progress", "in_review"];
 
 // Pure selector: given the parsed tasks, return the id of the task to work next, or null.
-// A `ready` task is eligible unless its touches overlap an in-flight task's touches.
-export function pickTask(tasks) {
+// A `ready` task is eligible unless its touches overlap an in-flight task's touches, or the
+// human has not accepted it yet (flow-0227): with `acceptFrom` set (the repo's
+// `tasks.accept_from`), a task created on or after it needs `accepted_by` and `accepted_at`.
+// A `proposed` task is never eligible, because it is not `ready`.
+export function pickTask(tasks, { acceptFrom } = {}) {
   const inFlight = tasks.filter((t) => IN_FLIGHT_STATUSES.includes(t.status));
   const numId = (id) => { const m = String(id).match(/(\d+)\s*$/); return m ? parseInt(m[1], 10) : Infinity; };
   const pri = (t) => (Number.isFinite(t.priority) ? t.priority : 999);
 
   const eligible = tasks
     .filter((t) => t.status === "ready")
+    .filter((t) => acceptanceAllowsWork(t, acceptFrom))
     .filter((t) => !inFlight.some((p) => touchesOverlap(t.touches, p.touches)))
     .sort((a, b) => pri(a) - pri(b) || numId(a.id) - numId(b.id) || String(a.id).localeCompare(b.id));
 
@@ -138,7 +144,8 @@ export function readTasks(tasksDir) {
 // ── CLI ── prints the chosen id (or nothing). Always exits 0; "no task" is not an error.
 if (__isMain) {
   const flowDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const id = pickTask(readTasks(join(flowDir, "tasks")));
+  const id = pickTask(readTasks(join(flowDir, "tasks")),
+    { acceptFrom: parseAcceptFrom(join(flowDir, "config.yml")) });
   if (id) process.stdout.write(id + "\n");
   process.exit(0);
 }

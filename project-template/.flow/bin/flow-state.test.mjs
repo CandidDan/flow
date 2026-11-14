@@ -613,3 +613,12 @@ test("flow-0113: human mode summarises workstreams and ungrouped intents; <inten
     assert.match(two, /t-2 {2}blocked {2}\(no PR\)/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("flow-0227: an intent whose only tasks are proposed has not started, and proposed does not hold back done", () => {
+  const I2 = { status: "approved" };
+  const T2 = (...st) => st.map((status, n) => ({ id: `t-${n}`, status }));
+  assert.equal(deriveIntentStatus(I2, T2("proposed")), "not_started");
+  assert.equal(deriveIntentStatus(I2, T2("proposed", "proposed")), "not_started");
+  assert.equal(deriveIntentStatus(I2, T2("done", "proposed")), "done");
+  assert.equal(deriveIntentStatus(I2, T2("ready", "proposed")), "in_progress");
+});

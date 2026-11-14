@@ -78,6 +78,13 @@ queue_cap: 8
 intents:
   required_from: "2026-10-06"
 
+# The human's accept (flow-0227). A task created on or after this date is written `proposed` and
+# becomes `ready` only when Dan accepts it (in chat, or in inflight), recorded as `accepted_by`,
+# `accepted_at` and `accepted_via`. flow-doctor fails a newer task that is past `proposed` without
+# them, and pick-task and flow-dispatch never hand one to a worker. Remove the key to switch off.
+tasks:
+  accept_from: "2026-11-14"
+
 # Gate-coverage floor. Note an honest limitation, recorded rather than papered over: every one
 # of canonical's source trees lives under a dot-directory (`.flow/bin/`, `.github/workflows/`,
 # `project-template/.flow/bin/`), and flow-doctor's undeclared-tree scan skips dot-directories.
