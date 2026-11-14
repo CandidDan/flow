@@ -46,6 +46,7 @@ model: "opus"
 effort: "high"
 model_reason: "Protocol and Flow infra change that every adopter picks up at the next sync."
 notes:
+  - "2026-11-14: The template ships accept_from and auto_accept on, following Dan's 'every new task' choice; repos that adopt it on a sync opt in through their own config.yml (03:30Z)."
   - "2026-11-14: Dan approved auto-accept on facts (model tier, touches count, protected paths), not self-scored confidence; added to this task's scope (02:37Z)."
   - "2026-11-14: Dan asked for this in the Flow project thread and chose 'every new task' on a decision card (02:13Z). `urgent` label applied on his go, because canonical's ready queue is at the cap."
 asks: []
