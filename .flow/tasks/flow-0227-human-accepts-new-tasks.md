@@ -1,14 +1,14 @@
 ---
 id: "flow-0227"
 title: "New tasks land as proposed and become ready only when the human accepts them"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "session_01NfrcUAejmYWpbguwNm28GT"
 created: "2026-11-14"
 started: "2026-11-14T02:16:40Z"
-branch: ""
-pr: ""
+branch: "claude/project-thread-in1w3c"
+pr: "https://github.com/CandidDan/flow/pull/313"
 issue: ""
 intent: ""
 serves: ["maintenance"]
@@ -46,6 +46,7 @@ model: "opus"
 effort: "high"
 model_reason: "Protocol and Flow infra change that every adopter picks up at the next sync."
 notes:
+  - "2026-11-14: Dan approved auto-accept on facts (model tier, touches count, protected paths), not self-scored confidence; added to this task's scope (02:37Z)."
   - "2026-11-14: Dan asked for this in the Flow project thread and chose 'every new task' on a decision card (02:13Z). `urgent` label applied on his go, because canonical's ready queue is at the cap."
 asks: []
 ---
@@ -105,3 +106,9 @@ Out of scope: the inflight Proposed view and the MCP connector (they are infligh
       `proposed` and present the task to the human for accept or reject.
 - [ ] Canonical's `.flow/config.yml` sets `tasks.accept_from: "2026-11-14"`, and canonical's own
       `flow-doctor` passes.
+- [ ] Given `tasks.auto_accept` (`max_model`, `max_touches`, `never`), a task at or below the tier,
+      within the path count and reaching no `never` glob qualifies; `acceptance.mjs auto <file>`
+      prints yes (exit 0) or the reasons (exit 1). Unset model counts as sonnet.
+- [ ] `flow-doctor` re-checks a `ready` task with `accepted_by`/`accepted_via: auto` and fails one
+      that does not qualify, or any auto accept when `auto_accept` is unset.
+- [ ] Canonical's config enables `auto_accept` and protects `project-template/**`.
