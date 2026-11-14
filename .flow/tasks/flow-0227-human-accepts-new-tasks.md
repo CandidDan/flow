@@ -1,7 +1,7 @@
 ---
 id: "flow-0227"
 title: "New tasks land as proposed and become ready only when the human accepts them"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "session_01NfrcUAejmYWpbguwNm28GT"
