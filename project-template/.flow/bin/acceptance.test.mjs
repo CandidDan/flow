@@ -213,6 +213,9 @@ test("touchesReachesNever is conservative about wildcards", () => {
   assert.equal(touchesReachesNever("src/a?th/x.js", "**/auth/**"), true, "a ? can spell auth");
   assert.equal(touchesReachesNever("docs/guide.md", "**/auth/**"), false);
   assert.equal(touchesReachesNever("docs/*.md", ".github/**"), false);
+  assert.equal(touchesReachesNever("src/a/**", "src/*/secret/**"), true, "a wildcard entry deeper than the prefix");
+  assert.equal(touchesReachesNever("src/a/*", "src/*/secret/**"), true);
+  assert.equal(touchesReachesNever("src/a", "src/*/secret/**"), true, "agrees with the bare-directory branch");
 });
 
 test("touches entries are normalized before the never check, and paths out of the repo never qualify", () => {
@@ -222,6 +225,9 @@ test("touches entries are normalized before the never check, and paths out of th
   assert.match(autoAcceptReasons(small({ touches: ["../other/x"] }), POLICY)[0], /not a path inside the repo/);
   assert.match(autoAcceptReasons(small({ touches: ["docs/../.."] }), POLICY)[0], /not a path inside the repo/);
   assert.deepEqual(autoAcceptReasons(small({ touches: ["./docs/a.md"] }), POLICY), []);
+  for (const root of ["./", ".", "././"]) {
+    assert.match(autoAcceptReasons(small({ touches: [root] }), POLICY)[0], /names the whole repo/, root);
+  }
 });
 
 test("a haiku task touching up to 3 safe paths qualifies", () => {

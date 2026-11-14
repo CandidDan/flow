@@ -196,11 +196,12 @@ export function touchesReachesNever(entry, never) {
     // the prefix itself, so a directory under the prefix may reach it too.
     return !!pn && /[*?]/.test(never) && `${dir}/`.startsWith(pn);
   }
+  // Two globs can match a common path whenever one fixed prefix extends the other: `src/a/**`
+  // meets `src/*/secret/**` at `src/a/secret/x`, and any wildcard can stand for a segment named
+  // like a protected one (`src/*/login.js` can be `src/auth/login.js`), so a `never` glob with an
+  // empty prefix (`**/auth/**`) is reachable from every wildcard entry.
   const pe = staticPrefix(entry), pn = staticPrefix(never);
-  if (pn && pn.startsWith(pe)) return true;
-  // Any wildcard can stand for a segment named like the protected one (`src/*/login.js` can be
-  // `src/auth/login.js`), so against a glob that matches at any depth it is reachable.
-  return never.startsWith("**");
+  return pn.startsWith(pe) || pe.startsWith(pn);
 }
 
 /** Why a task does not qualify for auto-accept: [] when it does. */
@@ -221,6 +222,7 @@ export function autoAcceptReasons(task, policy) {
     // An absolute path, or one that still climbs out of the repo, can reach anything.
     const e = String(raw).startsWith("/") ? null : posix.normalize(String(raw)).replace(/^(\.\/)+/, "");
     if (e === null || e === ".." || e.startsWith("../")) { reasons.push(`touches "${raw}" is not a path inside the repo`); continue; }
+    if (e === "" || e === ".") { reasons.push(`touches "${raw}" names the whole repo`); continue; }
     const hit = policy.never.find((n) => touchesReachesNever(e, n));
     if (hit) reasons.push(`touches "${raw}" can reach "${hit}"`);
   }
