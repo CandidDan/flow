@@ -163,8 +163,11 @@ test("the task-writer skill writes `proposed`, never `ready`, and asks Accept or
   assert.match(skill, /id number; set `status: proposed`/, "step 3 writes a new task as proposed");
   assert.doesNotMatch(skill, /id number; set `status: ready`/, "step 3 must not write a new task as ready");
   assert.match(skill, /\*\*Show it to the human and get Accept or Reject before it is `ready`\.\*\*/);
-  assert.match(skill, /\*\*Accept\*\* → set `status: ready`, `accepted_by`/);
+  assert.match(skill, /\*\*Accept\*\* → set `status: ready` \(or `blocked`/);
   assert.match(skill, /\*\*Reject\*\* → set `status: cancelled`/);
+  // A new task written `blocked` has no accept, and the doctor fails it (see "covers blocked").
+  assert.doesNotMatch(skill, /written\s+`blocked`/, "no step may write a new task as blocked");
+  assert.match(skill, /\*\*written\s+`proposed`\*\*, which the cap never refuses/);
 });
 
 

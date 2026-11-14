@@ -63,14 +63,17 @@ implementation, that's yours to specify.
    rule (`.flow/PROTOCOL.md`, **Response style**). A product's own user-facing text keeps the
    project's voice; the spec describing it does not.
 8. State scope boundaries explicitly — what the task does NOT touch. This is what stops scope creep.
-9. Sequence: if task B depends on A, note it and leave B at lower priority or a `blocked` note
-   until A lands. Keep a queue of `ready` tasks so the worker never runs dry.
+9. Sequence: if task B depends on A, name A in B's `blocked_by` and give B a lower priority. B is
+   still written `proposed` like every new task; on the human's accept it becomes `blocked` (with
+   `blocked_reason`) instead of `ready` if A has not landed. Keep a queue of `ready` tasks so the
+   worker never runs dry.
 10. **The queue has a cap, and the allocator enforces it — not this file.** Where
    `.flow/config.yml` sets `queue_cap`, that is the maximum number of `ready` tasks the store may
    hold, and `allocate-task-id` refuses a new `ready` task while that many already are, before it
    writes, commits or pushes anything. A refused task is therefore one of exactly two things:
    **not written yet** (the queue drains first — usually the right answer), or **written
-   `blocked`** with a `blocked_reason`, which the cap never refuses. The one bypass is the draft's
+   `proposed`**, which the cap never refuses (never `blocked`: a new task with no accept fails
+   `flow-doctor`, whatever its status). The one bypass is the draft's
    own `urgent` label, and that is the human's to apply — never yours on your own judgement, the
    same rule as `auto-ok`. Step 9's "never runs dry" stops at the cap: a queue past it is not
    depth, it is work planned faster than it can be done. A `proposed` draft is never refused,
@@ -89,7 +92,8 @@ implementation, that's yours to specify.
    decision UI where there is one (a decision card, a question with options); otherwise ask in
    plain words. Several tasks from one request go out as one batch, and the human may accept all,
    reject all, or pick.
-   - **Accept** → set `status: ready`, `accepted_by` (the human's GitHub login), `accepted_at`
+   - **Accept** → set `status: ready` (or `blocked`, with `blocked_reason`, when step 9's
+     dependency has not landed), `accepted_by` (the human's GitHub login), `accepted_at`
      (`date -u +%Y-%m-%dT%H:%M:%SZ`) and `accepted_via: chat`, as one commit to `main`.
    - **Reject** → set `status: cancelled` with the human's reason in `cancelled_reason`.
    - **No answer** → leave it `proposed`. It waits in inflight's Proposed list, where the human

@@ -364,7 +364,7 @@ test("the procedure has the Accept/Reject step and what each answer writes (flow
   const procedure = skillSection("procedure");
   const step = /11\. \*\*[\s\S]*?\*\*Show it to the human and get Accept or Reject[\s\S]*/.exec(procedure)?.[0];
   assert.ok(step, "the procedure has no step 11 asking the human to Accept or Reject");
-  assert.match(step, /Accept\*\* → set `status: ready`, `accepted_by`[\s\S]*`accepted_at`[\s\S]*`accepted_via: chat`/,
+  assert.match(step, /Accept\*\* → set `status: ready`[\s\S]*`accepted_by`[\s\S]*`accepted_at`[\s\S]*`accepted_via: chat`/,
     "Accept must set `ready` and record accepted_by, accepted_at and accepted_via");
   assert.match(step, /Reject\*\* → set `status: cancelled`[\s\S]*`cancelled_reason`/,
     "Reject must set `cancelled` with a `cancelled_reason`");
