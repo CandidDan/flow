@@ -226,7 +226,7 @@ tasks:
   auto_accept:
     max_model: haiku
     max_touches: 3
-    never: [".github/**", ".flow/bin/**", "**/auth/**", "**/payments/**"]
+    never: [".github/**", ".flow/bin/**", ".flow/config.yml", ".claude/**", "CLAUDE.md", "AGENTS.md", "**/auth/**", "**/payments/**"]
 
 # The intent rule's start date (ADR-0007 slice 2). Uncomment when this repo starts writing intents
 # (`.flow/intents/`, via the intent-writer skill), set to that day. From then on, a `ready` task

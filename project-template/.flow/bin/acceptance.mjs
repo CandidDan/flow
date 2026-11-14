@@ -27,7 +27,7 @@
 //     auto_accept:
 //       max_model: haiku        # the highest build tier that may skip the human (unset model = sonnet)
 //       max_touches: 3          # at most this many `touches` entries, and at least one
-//       never: [".github/**", ".flow/bin/**", "**/auth/**", "**/payments/**"]
+//       never: [".github/**", ".flow/bin/**", ".flow/config.yml", ".claude/**", "CLAUDE.md", "AGENTS.md", "**/auth/**", "**/payments/**"]
 //
 // A qualifying task is written `ready` with `accepted_by: "auto"` and `accepted_via: "auto"`. It
 // still shows in inflight as auto-accepted. flow-doctor re-checks every `auto` accept against the
@@ -52,7 +52,7 @@ export const DEFAULT_MODEL = "sonnet";
 export const AUTO_DEFAULTS = Object.freeze({
   max_model: "haiku",
   max_touches: 3,
-  never: [".github/**", ".flow/bin/**", "**/auth/**", "**/payments/**"],
+  never: [".github/**", ".flow/bin/**", ".flow/config.yml", ".claude/**", "CLAUDE.md", "AGENTS.md", "**/auth/**", "**/payments/**"],
 });
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 

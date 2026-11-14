@@ -230,6 +230,10 @@ test("touches entries are normalized before the never check, and paths out of th
   assert.deepEqual(autoAcceptReasons(small({ touches: ["./docs/a.md"] }), POLICY), []);
   assert.match(autoAcceptReasons(small({ touches: [".github\\workflows\\a.yml"] }), POLICY)[0], /contains a backslash/);
   assert.match(autoAcceptReasons(small({ touches: [".GITHUB/workflows/a.yml"] }), POLICY)[0], /can reach ".github\/\*\*"/);
+  // The gate's own settings: a task that can edit them could widen its own policy.
+  for (const own of [".flow/config.yml", ".claude/skills/x/SKILL.md", "CLAUDE.md", "AGENTS.md", "claude.md"]) {
+    assert.match(autoAcceptReasons(small({ touches: [own] }), POLICY)[0], /can reach/, own);
+  }
   for (const root of ["./", ".", "././"]) {
     assert.match(autoAcceptReasons(small({ touches: [root] }), POLICY)[0], /names the whole repo/, root);
   }
