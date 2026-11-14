@@ -927,3 +927,31 @@ test("The store says a Flow state commit is never a release target, and names de
   assert.match(section, /`node \.flow\/bin\/deployable-sha\.mjs --head <that commit>`/);
   assert.match(section, /exits 1 with nothing printed when it is not sure, and then you do not release/);
 });
+
+// flow-0227, criterion 7. The digest above only proves the Status lifecycle section changed, not
+// that it now carries `proposed`, so this asserts the content: the diagram starts at `proposed`
+// and branches on the human's accept and reject, and a `proposed` bullet names what enforces it.
+test("Status lifecycle documents `proposed` in the diagram and as a bullet (flow-0227)", () => {
+  const section = new Map(sectionsOf(protocol)).get("Status lifecycle");
+  assert.ok(section, "PROTOCOL.md has a section named Status lifecycle");
+
+  const diagram = /```\n([\s\S]*?)```/.exec(section)?.[1] ?? "";
+  assert.match(diagram, /^proposed\b/m, "the lifecycle diagram must start at `proposed`");
+  assert.match(diagram, /proposed[^\n]*accepts[^\n]*→\s*ready/,
+    "the diagram must take `proposed` to `ready` on the human's accept");
+  assert.match(diagram, /rejects[^\n]*→\s*cancelled/,
+    "the diagram must take a rejected `proposed` task to `cancelled`");
+
+  const bullet = statusBullet(section, "proposed");
+  assert.ok(bullet, "Status lifecycle must carry a `proposed` bullet");
+  const flat = bullet.replace(/\s+/g, " ");
+  assert.match(flat, /Never picked/, "the `proposed` bullet must say a worker never picks it");
+  assert.match(flat, /pick-task/);
+  assert.match(flat, /flow-dispatch/);
+  assert.match(flat, /accepted_by/);
+  assert.match(flat, /tasks\.accept_from/,
+    "the `proposed` bullet must name the config key that switches the doctor check on");
+
+  const ready = statusBullet(section, "ready").replace(/\s+/g, " ");
+  assert.match(ready, /human's accept/, "the `ready` bullet must say it is set on the human's accept");
+});
