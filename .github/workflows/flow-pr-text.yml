@@ -1,0 +1,32 @@
+name: flow-pr-text
+
+# Canonical's own caller of the PR-summary check (flow-0207). Referenced from `main` rather than a
+# tag — see flow-gates.yml in this directory for why canonical is the one repo where that is the
+# safer pin.
+#
+# `edited` is the point: fixing a PR description re-runs this check alone, never the gate or the
+# three reviewers. The reusable skips drafts, PRs with no task id, and sync and release PRs.
+
+on:
+  pull_request:
+    types: [opened, reopened, edited, ready_for_review, synchronize]
+    branches: [main]
+
+# A newer event on the same PR cancels the run it supersedes.
+concurrency:
+  group: flow-pr-text-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  flow-pr-text:
+    # id-token: write must be granted here — OIDC is never in the default GITHUB_TOKEN, and a
+    # reusable workflow can't raise it above the caller's grant. A permissions block is
+    # exhaustive, so contents and pull-requests are re-listed.
+    permissions:
+      contents: read
+      pull-requests: read
+      id-token: write
+    uses: CandidDan/flow/.github/workflows/_flow-pr-text.yml@main
+    # Named, not `inherit` — the reusable declares only CLAUDE_CODE_OAUTH_TOKEN.
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

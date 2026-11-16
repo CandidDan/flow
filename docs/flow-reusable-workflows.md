@@ -37,6 +37,7 @@ them. They are:
 | `_flow-dispatch.yml` | **The routine dispatcher** (flow-0182), no model in the loop. Fires the Claude Code worker routine for the next `ready` task's tier: counts `in_progress` (stops at `dispatch.max_in_progress`, default 3), picks with `pick-task.mjs`, resolves the tier with `task-model.mjs`, re-reads the task from `main` and fires only if it is still `ready`, then POSTs `{"text": "<task-id>"}` to `https://api.anthropic.com/v1/claude_code/routines/<id>/fire`. **At most one task a run**; the worker's claim is a push that starts the next run. One decision line per run: `fired`, `skipped` (`at-capacity`, `nothing-ready`, `no-routine-for-<tier>`, `no-longer-ready`) or `failed` (non-2xx, naming status and tier). A tier with no routine configured is skipped with exit 0. Callers fire it on a push to `.flow/tasks/**` on `main`, on `repository_dispatch` `flow-task-state` (sent by `flow-unblock` and `flow-recover` only after they push a task-file change — their `GITHUB_TOKEN` pushes start no workflow; until flow-0185 this was `workflow_run` on both, which started a runner after every run), daily, and on dispatch; `concurrency: flow-dispatch`, not cancel-in-progress. Wiring: `docs/flow-routines.md`, *Wiring the trigger* | inputs `runner`, `haiku_routine_id` … `fable_routine_id` (caller passes `vars.FLOW_ROUTINE_<TIER>_ID`); secrets `FLOW_ROUTINE_HAIKU_TOKEN`, `_SONNET_`, `_OPUS_`, `_FABLE_TOKEN` (all optional), reaching the script only through `env:`; caller grant exactly `contents: read` |
 | `_flow-triage.yml` | Scheduled issue triage (off unless `FLOW_AI=true`) | secret `CLAUDE_CODE_OAUTH_TOKEN` |
 | `_flow-review.yml` | The three Definition-of-Done review checks on a PR — qa, code-review and a conditional security review (flow-0007). **Skipped entirely while the PR is a draft** (flow-0039) — the `plan` job carries the condition and the other three `needs: plan` — so the reviewers run once, when the worker marks the PR ready, not on every work-in-progress push. Runs for **any** PR author, not just `flow/` branches; model and security-trigger paths come from the caller's `.flow/config.yml` `review:` block, and `.flow/bin/flow-review.mjs` turns each written verdict into an exit code (fail-closed). Off unless `FLOW_AI=true` | input `node_version`; secret `CLAUDE_CODE_OAUTH_TOKEN` |
+| `_flow-pr-text.yml` | **The `flow-pr-text` check** (flow-0207): fails a task PR whose opening paragraph, its TL;DR, is not in plain English. Mechanical rules first, in code: the paragraph must exist, and have no backtick, no task id in this repo's format, no file path or file name, and at most 60 words. Only when all pass is one judge called (one turn, no tools, the haiku tier unless `review.pr_text_model` says otherwise), which answers whether a reader who has not read the code would understand what was wrong and what changes. Callers run it on `opened`, `reopened`, `edited`, `ready_for_review` and `synchronize`, so fixing a description re-runs this check alone. Skips drafts, PRs with no task id, and `flow-sync/` and `release/` branches. See below | inputs `runner`, `flow_ref`; secret `CLAUDE_CODE_OAUTH_TOKEN`; caller grant exactly `contents: read`, `pull-requests: read`, `id-token: write` |
 | `_flow-kickback.yml` | **The bounded auto-fix round** (flow-0082). When the `flow-review` run on a PR concludes `failure`, dispatches ONE auto-fix worker onto that same PR to address the reviewers' **blocking** findings, and the round's one push re-runs review — so a red check starts the kickback instead of waiting for a human to notice. The worker **commits and does not push**; the workflow checks the round and pushes, which is what lets the test-weakening guard sit between the two. Off unless `FLOW_AI=true` **and** `review.auto_fix_rounds` is set (see below) | input `node_version`; secrets `CLAUDE_CODE_OAUTH_TOKEN` + `FLOW_PAT` (**required**, not optional — see below) |
 | `_flow-sync.yml` | The adopt mechanism (Phase 4): when the repo's `.flow/VERSION` is behind canonical, copies the updated `.flow/bin/*` + thin callers in, bumps the stamp, and opens a **reviewed PR**. Safe to run anytime (only opens a PR; no `FLOW_AI` gate). The ref it adopts from is **read off the caller's own `uses:` pin** when `canonical_ref` is empty — which is every scheduled run (flow-0105) | input `canonical_ref` (overrides the pin; empty ⇒ resolved from the caller, `v2` only if no caller pins one); secret `FLOW_PAT` (optional) |
 
@@ -294,6 +295,25 @@ decides this from the paths alone, and both workflows run it from a copy the PR 
 | `intent-review` | not run | one **advisory** comment at `--max-turns 15` on `review.model`: checks the intent against `_TEMPLATE.md`. No verdict, no check status, never approves |
 
 The review run summary's `reviewers:` line names which of these ran and at what turn budget.
+
+### The PR summary check — `flow-pr-text` (flow-0207)
+
+The protocol requires a PR description to open with a paragraph that says what was wrong and what
+changes, for whom, in words a person who has not read the code understands. The three review
+checks judge the code, not the description, so this check judges that paragraph.
+
+| Step | What it does | Model call |
+|---|---|---|
+| Mechanical rules | Takes the first paragraph of the description (after any attribution comment, italic byline or heading), strips a leading TL;DR marker, and reports **every** rule it breaks: missing, backtick, task id, file path or file name, over 60 words | none |
+| Judge | Runs only when every mechanical rule passes, `FLOW_AI=true`, and the PR is not from a fork. Reads the PR title and the paragraph, fenced as data. One turn, no tools. Answers `PASS` or `FAIL: <one sentence>` | one, on the haiku tier or `review.pr_text_model` |
+| Verdict file | Code reads the judge's reply out of the action's execution file and writes `verdict.json`. A reply that is not `PASS` or `FAIL` writes nothing | none |
+| Enforce | Reads the mechanical result and `verdict.json`, nothing from the model step. A missing or unparseable verdict fails, saying the judge returned no verdict, which is a different message from "the text failed" | none |
+
+The failing summary lists each reason and quotes the paragraph it judged. Without `FLOW_AI`, or on
+a fork PR, the mechanical rules decide alone and the summary says the judge did not run. The
+check needs no secret beyond the `CLAUDE_CODE_OAUTH_TOKEN` the review already uses. An
+intent PR normally carries no task id, so it is skipped by that rule. Whether `flow-pr-text /
+check` is a required status in branch protection is the repo owner's choice.
 
 ### Which copy of a helper CI runs — and why there are two (flow-0094)
 

@@ -168,6 +168,14 @@ review:
   # the limit on its own diff.
   # max_diff_bytes: 900000
 
+  # Optional: the model that judges a PR's opening paragraph in the `flow-pr-text` check
+  # (flow-0207). Omitted, it is the haiku tier from `.flow/bin/task-model.mjs`, the cheapest
+  # model Flow names. The judge runs only after the mechanical rules pass, gets one turn and no
+  # tools, and reads only the PR title and that paragraph. Read from the BASE branch's copy of this
+  # file, so a PR cannot choose the model that judges it. The value is passed as `--model`, so it
+  # must be a bare model name.
+  # pr_text_model: <the haiku tier>
+
   # OPTIONAL — the auto-fix round (flow-0082). COMMENTED OUT, and that is the default: with no
   # `auto_fix_rounds`, a failed review check does nothing automatic, exactly as before.
   #
