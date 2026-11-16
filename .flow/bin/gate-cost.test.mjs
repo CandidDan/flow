@@ -243,11 +243,14 @@ const CLASSIFY = (s) => s.id === "kind";
 
 // Evaluate a STEP condition for one value of the classification. Only the shapes these steps use
 // are understood; anything else fails the assertion inside, rather than guessing.
-function stepRuns(cond, { intentPr, event = "pull_request", coverageRunsTests = "false" }) {
+// flow-0223: `store_only` defaults to `intent_pr`'s value, because the classifier sets both on an
+// intent PR and leaves both empty on a manual run. store-only-pr.test.mjs varies it on its own.
+function stepRuns(cond, { intentPr, storeOnly = intentPr, event = "pull_request", coverageRunsTests = "false" }) {
   if (cond == null) return true;
   let expr = String(cond).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
   expr = expr
     .replaceAll("steps.kind.outputs.intent_pr", JSON.stringify(intentPr))
+    .replaceAll("steps.kind.outputs.store_only", JSON.stringify(storeOnly))
     .replaceAll("steps.cfg.outputs.coverage_runs_tests", JSON.stringify(coverageRunsTests))
     .replaceAll("github.event_name", JSON.stringify(event))
     .replace(/'([^']*)'/g, (_, s) => JSON.stringify(s))
@@ -308,6 +311,7 @@ test("flow-0178: an intent-only PR runs no source-root matrix", { skip }, () => 
   const count = String(jobs[PLAN_JOB].outputs.count).replace(/^\$\{\{\s*|\s*\}\}$/g, "");
   const evalCount = (intentPr, planned) => Function(`"use strict"; return (${count
     .replaceAll("steps.kind.outputs.intent_pr", JSON.stringify(intentPr))
+    .replaceAll("steps.kind.outputs.store_only", JSON.stringify(intentPr))
     .replaceAll("steps.plan.outputs.count", JSON.stringify(planned))
     .replace(/'([^']*)'/g, (_, s) => JSON.stringify(s))
     .replace(/(?<![=!])==(?!=)/g, "===")});`)();

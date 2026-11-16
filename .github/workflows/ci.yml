@@ -13,6 +13,9 @@ name: ci
 on:
   push:
     branches: [main]
+    # flow-0223: a task-state commit, or a merge that changed only tasks, intents, workstreams or
+    # research, changes none of the tooling this tests. The globs are `minimal_ci.paths`.
+    paths-ignore: [".flow/tasks/**", ".flow/intents/**", ".flow/workstreams/**", "docs/research/**"]
   workflow_dispatch:
 
 jobs:

@@ -1173,7 +1173,8 @@ test("flow-0084: the adapter's CLI block actually runs — silence is the symlin
 
 const helperMod = await import("../../project-template/.flow/bin/flow-review.mjs");
 const INTENT_IF = "${{ steps.plan.outputs.intent_pr == 'true' }}";
-const NOT_INTENT_IF = "${{ steps.plan.outputs.intent_pr != 'true' }}";
+// flow-0223: the Claude step skips on a store-only PR as well.
+const NOT_INTENT_IF = "${{ steps.plan.outputs.intent_pr != 'true' && steps.plan.outputs.store_only != 'true' }}";
 const intentPassStep = (job) =>
   stepsOf(job).find((s) => String(s.name ?? "").startsWith("Intent PR — the fixed PASS line"));
 
@@ -1189,7 +1190,7 @@ test("flow-0178 criterion 3: on an intent PR, qa and code-review skip the model 
     assert.equal(reviewers.length, 1, job);
     assert.equal(reviewers[0].if, NOT_INTENT_IF, `${job}: the Claude step must not run on an intent PR`);
     const report = stepsOf(job).find((s) => s.name === "Report the model that answered");
-    assert.equal(report.if, "${{ always() && steps.plan.outputs.intent_pr != 'true' }}",
+    assert.equal(report.if, "${{ always() && steps.plan.outputs.intent_pr != 'true' && steps.plan.outputs.store_only != 'true' }}",
       `${job}: no model ran, so there is no model to report`);
     const pass = intentPassStep(job);
     assert.ok(pass, `${job}: no fixed-PASS step`);
@@ -1329,4 +1330,95 @@ test("flow-0196: every enforce step probes and falls back; v4.0.1 and current he
       }
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── flow-0223: a store-only PR — the fixed PASS line in all three checks, and no model call ──
+// `flow-review.test.mjs` proves the plan publishes `store_only=true` only for a store-only,
+// non-intent PR, and sets `security_run=false` for one. These prove the wiring that reads it.
+
+const STORE_ONLY_IF = "${{ steps.plan.outputs.store_only == 'true' }}";
+const storeOnlyPassStep = (job) =>
+  stepsOf(job).find((s) => String(s.name ?? "").startsWith("Store-only PR — the fixed PASS line"));
+
+// Evaluate a step condition for one set of plan outputs. Only the shapes this file uses are
+// understood; anything else fails the token check rather than guessing.
+function stepRunsWith(cond, outputs) {
+  if (cond == null) return true;
+  let expr = String(cond).replace(/^\$\{\{\s*|\s*\}\}$/g, "")
+    .replace(/always\(\)|!cancelled\(\)/g, "true")
+    .replace(/steps\.plan\.outcome/g, '"success"')
+    .replace(/steps\.plan\.outputs\.([a-z_]+)/g, (_, k) => JSON.stringify(outputs[k] ?? ""))
+    .replace(/'([^']*)'/g, (_, s) => JSON.stringify(s))
+    .replace(/(?<![=!])==(?!=)/g, "===").replace(/!=(?!=)/g, "!==");
+  assert.match(expr, /^[\s()&|!=a-z"_0-9.-]+$/, `unexpected token in step condition: ${cond}`);
+  return Function(`"use strict"; return (${expr});`)();
+}
+
+// What the plan publishes for each kind (flow-review.test.mjs proves these).
+const STORE_ONLY_OUTPUTS = { store_only: "true", intent_pr: "false", security_run: "false" };
+const INTENT_OUTPUTS = { store_only: "false", intent_pr: "true", security_run: "true" };
+const FULL_OUTPUTS = { store_only: "false", intent_pr: "false", security_run: "true" };
+
+test("flow-0223 criterion 5: on store_only == 'true', qa, code-review and security write the fixed line and no model step runs", { skip }, () => {
+  for (const job of REVIEW_JOBS) {
+    const pass = storeOnlyPassStep(job);
+    assert.ok(pass, `${job}: no store-only PASS step`);
+    assert.equal(pass.if, STORE_ONLY_IF, `${job}: the fixed line is for a store-only PR only`);
+    assert.equal(pass.env?.VERDICT_FILE, `\${{ runner.temp }}/flow-review/${job}.json`);
+    assert.equal(stepRunsWith(pass.if, STORE_ONLY_OUTPUTS), true);
+    for (const outputs of [INTENT_OUTPUTS, FULL_OUTPUTS]) {
+      assert.equal(stepRunsWith(pass.if, outputs), false, `${job}: the store-only line must not run for ${JSON.stringify(outputs)}`);
+    }
+    const models = stepsOf(job).filter(isModelStep);
+    assert.ok(models.length > 0, job);
+    for (const s of models) {
+      assert.equal(stepRunsWith(s.if, STORE_ONLY_OUTPUTS), false, `${job}: model step ${s.id} runs on a store-only PR`);
+    }
+  }
+  // Mutation: a model step that loses its store-only clause is caught by the evaluation above.
+  const qa = reviewerSteps("qa")[0];
+  assert.equal(stepRunsWith(qa.if.replace(" && steps.plan.outputs.store_only != 'true'", ""), STORE_ONLY_OUTPUTS), true);
+  // And the full review is untouched: every blocking reviewer still runs on an ordinary PR.
+  for (const job of REVIEW_JOBS) {
+    assert.equal(stepRunsWith(reviewerSteps(job)[0].if, FULL_OUTPUTS), true, `${job} on an ordinary PR`);
+  }
+});
+
+test("flow-0223 criterion 5: on an intent PR the advisory intent reviewer still runs and the store-only line does not", { skip }, () => {
+  const intentModel = intentSteps().filter(isModelStep);
+  assert.equal(intentModel.length, 1);
+  assert.equal(stepRunsWith(intentModel[0].if, INTENT_OUTPUTS), true);
+  assert.equal(stepRunsWith(reviewerSteps("security")[0].if, INTENT_OUTPUTS), true, "security reviews an intent PR as before");
+});
+
+test("flow-0223 criterion 5: the line in the workflow equals STORE_ONLY_PR_PASS_LINE, and the step writes a passing verdict", { skip }, async (t) => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  assert.match(reusableSrc, /STORE_ONLY_PR_PASS_LINE/, "the workflow names the constant its line is pinned to");
+  for (const job of REVIEW_JOBS) {
+    const pass = storeOnlyPassStep(job);
+    assert.equal(pass.env?.PASS_LINE, helperMod.STORE_ONLY_PR_PASS_LINE, `${job}: the two copies of the line drifted`);
+    const script = String(pass.run).match(/node -e '([^']*)'/)?.[1];
+    assert.ok(script, `${job}: the pass step's node script was not found`);
+    const dir = mkdtempSync(join(tmpdir(), "flow-store-only-pass-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const file = join(dir, `${job}.json`);
+    const r = spawnSync(process.execPath, ["-e", script], {
+      encoding: "utf8", env: { ...process.env, PASS_LINE: pass.env.PASS_LINE, VERDICT_FILE: file },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const v = helperMod.validateVerdictFile(file, { check: job });
+    assert.equal(v.valid, true, v.reason);
+    assert.equal(v.summary, helperMod.STORE_ONLY_PR_PASS_LINE);
+    const parsed = { verdict: v.verdict.toUpperCase(), unproven: v.unproven, blocking: v.blocking, summary: v.summary };
+    assert.equal(helperMod.verdictOutcome(parsed, { check: job }).ok, true);
+  }
+  // qa and code-review enforce the written line exactly as they would a reviewer's verdict.
+  for (const job of ["qa", "code-review"]) {
+    const steps = stepsOf(job);
+    const verdict = steps.find((s) => VERDICT_RUN.test(String(s.run ?? "")));
+    assert.ok(steps.indexOf(storeOnlyPassStep(job)) < steps.indexOf(verdict), `${job}: the verdict step reads what the pass step wrote`);
+    assert.equal(stepRunsWith(verdict.if, STORE_ONLY_OUTPUTS), true);
+  }
 });

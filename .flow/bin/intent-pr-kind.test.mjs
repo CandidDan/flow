@@ -141,16 +141,19 @@ test("flow-0178: the classify CLI publishes intent_pr and fails closed when git 
     const out = join(dir, "gh");
     assert.equal(runReviewCli(["classify"], {
       env: { GITHUB_OUTPUT: out, BASE_REF: "origin/main" },
+      // flow-0223: `classify` also reads the base branch's config (`git show`), for the store-only
+      // globs. The diff call is still asserted exactly.
       git: (args) => {
+        if (args[0] === "show") return "";
         assert.deepEqual(args, ["diff", "--name-only", "--no-renames", "origin/main...HEAD"]);
         return ".flow/intents/a.md\n.flow/intents/b.md\n";
       },
     }), 0);
-    assert.equal(readFileSync(out, "utf8"), "intent_pr=true\n");
+    assert.match(readFileSync(out, "utf8"), /^intent_pr=true$/m);
 
     const out2 = join(dir, "gh2");
     assert.equal(runReviewCli(["classify"], { env: { GITHUB_OUTPUT: out2 }, git: () => "src/a.mjs\n" }), 0);
-    assert.equal(readFileSync(out2, "utf8"), "intent_pr=false\n");
+    assert.match(readFileSync(out2, "utf8"), /^intent_pr=false$/m);
 
     const out3 = join(dir, "gh3");
     assert.equal(runReviewCli(["classify"], {
@@ -239,8 +242,9 @@ test("flow-0178 (regression): renaming src/x.mjs to .flow/intents/x.md classifie
       env: { GITHUB_OUTPUT: out, BASE_REF: "main", REVIEW_REPO_DIR: repo },
     }), 0);
   } finally { log.mock.restore(); }
-  assert.equal(readFileSync(out, "utf8"), "intent_pr=false\n");
-  assert.deepEqual(logs, ["pr-kind: decision=full files=2 outside=1"]);
+  assert.match(readFileSync(out, "utf8"), /^intent_pr=false$/m);
+  // flow-0223 adds the store-only decision line after it; the moved source keeps that full too.
+  assert.deepEqual(logs, ["pr-kind: decision=full files=2 outside=1", "store-only: decision=full files=2 outside=1"]);
 
   // And the review plan, which reaches git the same way, agrees.
   const cfg = join(repo, "config.yml");

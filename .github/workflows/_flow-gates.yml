@@ -240,7 +240,15 @@ jobs:
           set -euo pipefail
           node "$FLOW_BIN"/check-claude-md.mjs --entry CLAUDE.md
 
-      # ── An intent-only PR (flow-0178) ──
+      # ── An intent-only PR (flow-0178), and a store-only PR (flow-0223) ──
+      #
+      # flow-0223 widens the same rule: a PR whose every changed path is on `minimal_ci.paths` in the
+      # BASE branch's .flow/config.yml (default: tasks, intents, workstreams, docs/research) is a
+      # STORE-ONLY PR, and gets exactly what an intent PR gets here — the store-guard above, this
+      # classification and flow-doctor. Being store-only never excuses touching `.flow/tasks/`: the
+      # store-guard has already run, and failed the job, before this step. `store_only` is `true` on
+      # an intent PR too; the conditions below name both so an intent PR is gated as before even
+      # where a repo's `minimal_ci.paths` leaves intents out.
       #
       # A PR whose every changed path is `.flow/intents/*.md` (never `_TEMPLATE.md`) has no code to
       # install, build, lint, test or cover. What an intent needs checked — frontmatter, required
@@ -251,7 +259,7 @@ jobs:
       # workflow's commit (`$FLOW_BIN`), never the PR's: a PR cannot widen the list that exempts
       # it, and the rule is not re-implemented in shell. Pull requests only; a manual run has no
       # diff, so `intent_pr` is empty and the full gate runs. A git failure fails this step.
-      - name: Classify — is this an intent-only PR?
+      - name: Classify — is this an intent-only or store-only PR?
         id: kind
         if: github.event_name == 'pull_request'
         env:
@@ -261,32 +269,33 @@ jobs:
           node "$FLOW_BIN"/flow-review.mjs classify
 
       - name: Install
-        if: steps.kind.outputs.intent_pr != 'true'
+        if: steps.kind.outputs.intent_pr != 'true' && steps.kind.outputs.store_only != 'true'
         run: ${{ steps.cfg.outputs.install }}
 
       - name: Build
-        if: steps.kind.outputs.intent_pr != 'true'
+        if: steps.kind.outputs.intent_pr != 'true' && steps.kind.outputs.store_only != 'true'
         run: ${{ steps.cfg.outputs.build }}
 
       - name: Lint
-        if: steps.kind.outputs.intent_pr != 'true'
+        if: steps.kind.outputs.intent_pr != 'true' && steps.kind.outputs.store_only != 'true'
         run: ${{ steps.cfg.outputs.lint }}
 
       # flow-0213: a repo whose `coverage` command already runs every test (and fails on a failing
       # one) sets `coverage_runs_tests: true`, and the suite is not run and billed twice. Measured
       # in mapd: Test 16 min, then Coverage 18.5 min running the same suite. Coverage still runs.
       - name: Test
-        if: steps.kind.outputs.intent_pr != 'true' && steps.cfg.outputs.coverage_runs_tests != 'true'
+        if: steps.kind.outputs.intent_pr != 'true' && steps.kind.outputs.store_only != 'true' && steps.cfg.outputs.coverage_runs_tests != 'true'
         run: ${{ steps.cfg.outputs.test }}
 
       - name: Coverage (fails under coverage_min)
-        if: steps.kind.outputs.intent_pr != 'true'
+        if: steps.kind.outputs.intent_pr != 'true' && steps.kind.outputs.store_only != 'true'
         run: ${{ steps.cfg.outputs.coverage }}
 
-      # flow-0178: the whole per-stack gate for an intent-only PR. It fails on malformed intent
-      # frontmatter, a missing required field and a duplicate id.
-      - name: flow-doctor — the gate for an intent-only PR
-        if: steps.kind.outputs.intent_pr == 'true'
+      # flow-0178 / flow-0223: the whole per-stack gate for an intent-only or store-only PR. It
+      # fails on malformed task, intent or workstream frontmatter, a missing required field and a
+      # duplicate id.
+      - name: flow-doctor — the gate for an intent-only or store-only PR
+        if: steps.kind.outputs.intent_pr == 'true' || steps.kind.outputs.store_only == 'true'
         run: node .flow/bin/flow-doctor.mjs
 
       # Optional but recommended: a dependency audit. Wire to the stack's auditor.
@@ -335,7 +344,10 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       # flow-0178: an intent-only PR runs no source-root matrix, so its count is 0 and
       # `source-root` reports SKIPPED — the same state it is in for any repo with nothing extra.
-      count: ${{ steps.kind.outputs.intent_pr == 'true' && '0' || steps.plan.outputs.count }}
+      # flow-0223: a store-only PR runs no source-root matrix either, for the same reason: it has
+      # no source. `store_only` is "true" on an intent PR too; both are named so an intent PR keeps
+      # its zero even where a repo's `minimal_ci.paths` leaves intents out.
+      count: ${{ (steps.kind.outputs.intent_pr == 'true' || steps.kind.outputs.store_only == 'true') && '0' || steps.plan.outputs.count }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -419,7 +431,7 @@ jobs:
           echo "FLOW_BIN=$bin" >> "$GITHUB_ENV"
 
       # flow-0178: the same classification the `gate` job runs, from the same canonical helper.
-      - name: Classify — is this an intent-only PR?
+      - name: Classify — is this an intent-only or store-only PR?
         id: kind
         if: ${{ !cancelled() && env.FLOW_BIN != '' && github.event_name == 'pull_request' }}
         env:

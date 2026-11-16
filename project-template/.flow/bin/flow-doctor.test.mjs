@@ -2558,3 +2558,65 @@ test("flow-0227: canonical sets tasks.accept_from, and its own doctor reports no
   const r = runDoctor({ flowDir: canonFlow, gitStatus: () => ({ inRepo: false }) });
   assert.deepEqual(acceptProblems(r), []);
 });
+
+// ── flow-0223: push-to-main workflows that would run on every task-state commit ──
+// Six fixture repos, one workflow each, run through the real CLI: what it prints and its exit code.
+const PUSH_CASES = {
+  a: { file: "unfiltered.yml", src: "name: e2e\non:\n  push:\n    branches: [main]\njobs: {}\n", warn: /WARN\s+\.github\/workflows\/unfiltered\.yml: runs on every push to main.*paths-ignore: \[".flow\/tasks\/\*\*"\]/ },
+  b: { file: "ignored.yml", src: "on:\n  push:\n    branches: [main]\n    paths-ignore: [\".flow/tasks/**\"]\njobs: {}\n", warn: null },
+  c: { file: "paths.yml", src: "on:\n  push:\n    branches:\n      - main\n    paths:\n      - \"src/**\"\njobs: {}\n", warn: null },
+  d: { file: "exempt.yml", src: "on:\n  push:\n    branches: [main]\njobs: {}\n", warn: null,
+       config: "minimal_ci:\n  push_workflows_exempt:\n    # reacts to state commits by design\n    - \"exempt.yml\"\n" },
+  e: { file: "_reusable.yml", src: "on:\n  workflow_call:\n    inputs:\n      runner:\n        type: string\njobs: {}\n", warn: null },
+  f: { file: "broken.yml", src: "on:\n  push:\n    branches: [main\njobs: {}\n", warn: /WARN\s+\.github\/workflows\/broken\.yml: flow-doctor could not read its `on:` block/ },
+};
+
+for (const [label, c] of Object.entries(PUSH_CASES)) {
+  test(`flow-0223 criterion 7 (${label}): ${c.file} → ${c.warn ? "a WARNING naming the file" : "no warning"}, exit 0`, () => {
+    const flowDir = cliFixture({});
+    const repo = dirname(flowDir);
+    try {
+      mkdirSync(join(repo, ".github", "workflows"), { recursive: true });
+      writeFileSync(join(repo, ".github", "workflows", c.file), c.src);
+      if (c.config) writeFileSync(join(flowDir, "config.yml"), `source_roots: []\n${c.config}`);
+      const { code, out } = runCli(flowDir);
+      assert.equal(code, 0, out);
+      if (c.warn) {
+        assert.match(out, c.warn);
+        assert.doesNotMatch(out, /FAIL/, "a workflow finding is never a PROBLEM");
+      } else {
+        assert.doesNotMatch(out, /WARN\s+\.github\/workflows\//, out);
+      }
+    } finally { rmSync(repo, { recursive: true, force: true }); }
+  });
+}
+
+test("flow-0223: the push-trigger reader handles the shapes workflows use", async () => {
+  const { readPushTrigger, pushFiresOnMain, pushSkipsTaskCommits, pushWorkflowFindings } = await import("./flow-doctor.mjs");
+  const verdict = (src) => {
+    const p = readPushTrigger(src);
+    return p === null ? "no-push" : !pushFiresOnMain(p) ? "not-main" : pushSkipsTaskCommits(p) ? "covered" : "warn";
+  };
+  assert.equal(verdict("on: push\n"), "warn");
+  assert.equal(verdict("on: [push, pull_request]\n"), "warn");
+  assert.equal(verdict("on: [pull_request]\n"), "no-push");
+  assert.equal(verdict("\"on\":\n  push:\n"), "warn", "a bare push: with no filters");
+  assert.equal(verdict("on:\n  push: {}\n"), "warn");
+  assert.equal(verdict("on:\n  push:\n    branches: [\"flow/**\"]\n"), "not-main");
+  assert.equal(verdict("on:\n  push:\n    branches: ['**']\n"), "warn");
+  assert.equal(verdict("on:\n  push:\n    branches-ignore: [main]\n"), "not-main");
+  assert.equal(verdict("on:\n  push:\n    branches-ignore: [dev]\n"), "warn");
+  assert.equal(verdict("on:\n  push:\n    tags:\n      - \"v*\"\n"), "not-main", "a tags-only trigger ignores branch pushes");
+  assert.equal(verdict("on:\n  push:\n    branches: [main]\n    paths-ignore:\n    - \".flow/**\"\n"), "covered");
+  assert.equal(verdict("on:\n  push:\n    branches: [main]\n    paths-ignore: [\"docs/**\"]\n"), "warn",
+    "a paths-ignore that does not cover .flow/tasks/ does not count");
+  assert.equal(verdict("on:\n  push:\n    branches: [main]\n    paths-ignore: [\".flow/**\", \"!.flow/tasks/**\"]\n"), "warn",
+    "a negated pattern re-includes task commits");
+  assert.equal(verdict("on:\n  schedule:\n    - cron: \"0 0 * * *\"\n# a comment at column 0\n  push:\n    branches: [main]\n"), "warn",
+    "a column-0 comment inside the block does not end it");
+  for (const bad of ["name: x\njobs: {}\n", "on: {push: {}}\n", "on:\n\tpush:\n", "on:\n  push: [main]\n"]) {
+    assert.throws(() => readPushTrigger(bad), Error, JSON.stringify(bad));
+  }
+  // A repo with no .github/workflows/ has nothing to report.
+  assert.deepEqual(pushWorkflowFindings(mkdtempSync(join(tmpdir(), "flow-doc-nowf-"))), []);
+});

@@ -244,7 +244,7 @@ jobs:
           printf '### qa — intent PR\n\n%s\n' "$PASS_LINE" >> "$GITHUB_STEP_SUMMARY"
       - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         id: claude
-        if: ${{ steps.plan.outputs.intent_pr != 'true' }}
+        if: ${{ steps.plan.outputs.intent_pr != 'true' && steps.plan.outputs.store_only != 'true' }}
         continue-on-error: true          # the verdict step below decides; never this action's exit
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -328,7 +328,7 @@ jobs:
       # flow-0140: name the model that actually answered, read from the action's own output,
       # so a pin whose CLI resolves to a different model can never again run unreported.
       - name: Report the model that answered
-        if: ${{ always() && steps.plan.outputs.intent_pr != 'true' }}
+        if: ${{ always() && steps.plan.outputs.intent_pr != 'true' && steps.plan.outputs.store_only != 'true' }}
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
           REQUESTED_MODEL: ${{ steps.plan.outputs.model }}
@@ -365,6 +365,19 @@ jobs:
           process.stdout.write(out);
           if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
           FLOW_MODEL_REPORT
+      # flow-0223. A store-only PR (tasks, intents, workstreams, research — `minimal_ci.paths` in
+      # base's config) has no code to review, so this check calls no model: it writes the fixed PASS
+      # line, and the verdict step below enforces it as it would a reviewer's. The line is pinned in
+      # flow-review.mjs (`STORE_ONLY_PR_PASS_LINE`); `flow-review-workflow.test.mjs` holds the copies
+      # in step. The plan never sets `store_only` on an intent PR, which keeps the steps above.
+      - name: Store-only PR — the fixed PASS line, no model call
+        if: ${{ steps.plan.outputs.store_only == 'true' }}
+        env:
+          PASS_LINE: "store-only PR: tasks, intents, workstreams or research only; flow-doctor and the store-guard gate it"
+          VERDICT_FILE: ${{ runner.temp }}/flow-review/qa.json
+        run: |
+          node -e 'const fs = require("fs"); fs.writeFileSync(process.env.VERDICT_FILE, JSON.stringify({ check: "qa", verdict: "pass", summary: process.env.PASS_LINE }) + "\n");'
+          printf '### qa — store-only PR\n\n%s\n' "$PASS_LINE" >> "$GITHUB_STEP_SUMMARY"
       - name: Enforce the qa verdict
         if: always()
         # flow-0103: the plan's truncation fact, from the `plan` step's output. A step output is
@@ -499,7 +512,7 @@ jobs:
           printf '### code-review — intent PR\n\n%s\n' "$PASS_LINE" >> "$GITHUB_STEP_SUMMARY"
       - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         id: claude
-        if: ${{ steps.plan.outputs.intent_pr != 'true' }}
+        if: ${{ steps.plan.outputs.intent_pr != 'true' && steps.plan.outputs.store_only != 'true' }}
         continue-on-error: true
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -571,7 +584,7 @@ jobs:
       # flow-0140: name the model that actually answered, read from the action's own output,
       # so a pin whose CLI resolves to a different model can never again run unreported.
       - name: Report the model that answered
-        if: ${{ always() && steps.plan.outputs.intent_pr != 'true' }}
+        if: ${{ always() && steps.plan.outputs.intent_pr != 'true' && steps.plan.outputs.store_only != 'true' }}
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
           REQUESTED_MODEL: ${{ steps.plan.outputs.code_review_model || steps.plan.outputs.model }}
@@ -608,6 +621,19 @@ jobs:
           process.stdout.write(out);
           if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
           FLOW_MODEL_REPORT
+      # flow-0223. A store-only PR (tasks, intents, workstreams, research — `minimal_ci.paths` in
+      # base's config) has no code to review, so this check calls no model: it writes the fixed PASS
+      # line, and the verdict step below enforces it as it would a reviewer's. The line is pinned in
+      # flow-review.mjs (`STORE_ONLY_PR_PASS_LINE`); `flow-review-workflow.test.mjs` holds the copies
+      # in step. The plan never sets `store_only` on an intent PR, which keeps the steps above.
+      - name: Store-only PR — the fixed PASS line, no model call
+        if: ${{ steps.plan.outputs.store_only == 'true' }}
+        env:
+          PASS_LINE: "store-only PR: tasks, intents, workstreams or research only; flow-doctor and the store-guard gate it"
+          VERDICT_FILE: ${{ runner.temp }}/flow-review/code-review.json
+        run: |
+          node -e 'const fs = require("fs"); fs.writeFileSync(process.env.VERDICT_FILE, JSON.stringify({ check: "code-review", verdict: "pass", summary: process.env.PASS_LINE }) + "\n");'
+          printf '### code-review — store-only PR\n\n%s\n' "$PASS_LINE" >> "$GITHUB_STEP_SUMMARY"
       - name: Enforce the code-review verdict
         if: always()
         # flow-0103: the plan's truncation fact, from the `plan` step's output. A step output is
@@ -955,6 +981,20 @@ jobs:
           process.stdout.write(out);
           if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
           FLOW_MODEL_REPORT
+      # flow-0223. A store-only PR (tasks, intents, workstreams, research — `minimal_ci.paths` in
+      # base's config) has no code to review. The plan sets `security_run` false for one, so the
+      # model step and the verdict step above and below are skipped, as on any skipped review, and
+      # this step records the fixed PASS line as the check's outcome. The line is pinned in
+      # flow-review.mjs (`STORE_ONLY_PR_PASS_LINE`); `flow-review-workflow.test.mjs` holds the copies
+      # in step. The plan never sets `store_only` on an intent PR, whose security review runs as before.
+      - name: Store-only PR — the fixed PASS line, no model call
+        if: ${{ steps.plan.outputs.store_only == 'true' }}
+        env:
+          PASS_LINE: "store-only PR: tasks, intents, workstreams or research only; flow-doctor and the store-guard gate it"
+          VERDICT_FILE: ${{ runner.temp }}/flow-review/security.json
+        run: |
+          node -e 'const fs = require("fs"); fs.writeFileSync(process.env.VERDICT_FILE, JSON.stringify({ check: "security", verdict: "pass", summary: process.env.PASS_LINE }) + "\n");'
+          printf '### security — store-only PR\n\n%s\n' "$PASS_LINE" >> "$GITHUB_STEP_SUMMARY"
       - name: Enforce the security verdict
         id: enforce
         if: ${{ always() && steps.plan.outputs.security_run == 'true' }}
@@ -1029,7 +1069,8 @@ jobs:
         run: node "$FLOW_REVIEW_DIR"/review-guide.mjs facts
       - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         id: guide_prose
-        if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
+        # flow-0223: no model call on a store-only PR; the guide still renders, from its facts alone.
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && steps.plan.outputs.store_only != 'true' }}
         continue-on-error: true          # advisory: nothing here may turn the check red
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
