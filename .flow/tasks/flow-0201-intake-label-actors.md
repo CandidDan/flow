@@ -1,12 +1,12 @@
 ---
 id: "flow-0201"
 title: "Triage honours `approved`, `auto-ok` and `flow:trusted` only when the issue's events show a permitted actor applied them"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "claude-session-01NfrcU8HYFgFEsgjMfiyUAq"
 created: "2026-11-03"
-started: ""
+started: "2026-11-16T11:03:58Z"
 branch: ""
 pr: ""
 issue: ""
