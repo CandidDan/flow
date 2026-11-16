@@ -1,7 +1,7 @@
 ---
 id: "flow-0229"
 title: "The PR summary check says the right thing when its config is wrong, the judge gives no reason, or the summary is formatted unusually"
-status: "proposed"
+status: "ready"
 priority: 3
 project: "flow"
 owner: ""
@@ -15,21 +15,22 @@ serves: ["maintenance"]
 blocked_reason: ""
 cancelled_reason: ""
 blocked_by: []
-accepted_by: ""
-accepted_at: ""
-accepted_via: ""
+accepted_by: "CandidDan"
+accepted_at: "2026-11-16T11:06:08Z"
+accepted_via: "chat"
 touches:
   - "project-template/.flow/bin/flow-pr-text.mjs"
   - "project-template/.flow/bin/flow-pr-text.test.mjs"
   - ".github/workflows/_flow-pr-text.yml"
   - ".flow/bin/pr-text-workflow.test.mjs"
   - "changes/flow-0229.md"
-labels: [review, ci]
+labels: [review, ci, urgent]
 model: "haiku"
 effort: "medium"
 model_reason: "Three small, fully specified fixes in one helper and one workflow condition, each with its test named."
 notes:
   - "2026-11-16: From the code-review check on PR #311 (flow-0207), findings 1 to 3, all non-blocking. #311 merged without them. Findings 4 (check name) and 5 (path false positives such as 1.5/2.0) were judged fine as they are; do not change them here."
+  - "2026-11-16: Accepted by Dan in chat. The ready queue was 8 of 8; Dan chose to add it anyway (urgent label), since the other ready tasks overlap open PRs and this one does not."
 asks: []
 ---
 
