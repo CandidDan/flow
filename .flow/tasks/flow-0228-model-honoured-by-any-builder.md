@@ -1,7 +1,7 @@
 ---
 id: "flow-0228"
 title: "The model a task names is the model that builds it, whoever picks the task up"
-status: "in_progress"
+status: "in_review"
 priority: 1
 project: "flow"
 owner: "claude-worker"
