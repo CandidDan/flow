@@ -147,6 +147,8 @@ A task's `model` and `effort` decide what builds it. **The default is `sonnet` /
 leave both unset for well-specified work. Every task that departs from the default sets `model`,
 `effort` **and** `model_reason` (one line saying why); `task-model.mjs` fails a task that sets
 either without a reason, or names a value outside the lists.
+The field is honoured whoever builds the task: an interactive builder hands the build to a
+subagent on that model (see step 4 of *The loop you run* in `.flow/PROTOCOL.md`).
 
 | Tier / effort | Use it for |
 |---|---|

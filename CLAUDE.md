@@ -86,7 +86,8 @@ Skills live under `project-template/.claude/`, and are readable there:
 Definition-of-Done reviewers — qa, security, code-review — out of the worker's session and onto
 the PR as checks (`.github/workflows/_flow-review.yml`). A worker that spawns a review subagent is
 doing the one thing this system otherwise refuses to do: certifying its own work from inside the
-context that produced it. Run `build`, `lint`, `test` and `coverage`; the reviewers meet you on the
+context that produced it. A build subagent on the task's model is the opposite case and is
+required, not forbidden (step 4 of the protocol). Run `build`, `lint`, `test` and `coverage`; the reviewers meet you on the
 PR. Their model and the paths that trigger the conditional security review are data, in the
 consuming repo's `.flow/config.yml` under `review:`.
 

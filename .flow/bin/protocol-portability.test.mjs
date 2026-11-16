@@ -166,16 +166,17 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0227",
   }],
   ["Session hygiene — context is a budget", {
-    digest: "b6a0eebb93032a65950114f77279de5bbac095278b2dc44583ca959852f7a5a9",
+    digest: "4e39dad0c7612f902602ff3f286a671600e54ddb39fdd85eb103f39f7960c13c",
     why: "the handoff rule specified `notes` and nothing else, so an item only a PERSON could " +
          "act on had one correct place to go and reached nobody from there. The section now " +
          "states the split — `notes` for the next session, `asks` for the human — with the " +
          "three kinds and what each one is for. Nothing about the trip conditions changed. flow-0156 then added two rules to the " +
-         "`decision` kind: check the spec before asking, and no open `decision` at hand-off.",
-    task: "flow-0156",
+         "`decision` kind: check the spec before asking, and no open `decision` at hand-off. " +
+         "flow-0228 then added a trip condition: asked to build a second task in one session.",
+    task: "flow-0228",
   }],
   ["The loop you run", {
-    digest: "578969ba0d64bfaa7d1239bd3751f454b74cdda9f2a1ffcf2e6a7d279b87ceb0",
+    digest: "41acc77c558a9300beb76aaf9f4b97db225cb194b7c4630096f0ff10ddd5bc84",
     why: "step 1 is the second place the claim rule is stated, and it said `in_progress` only. " +
          "Two statements of one rule drift apart unless both move; pick-task.test.mjs now " +
          "asserts on both strings for the same reason (flow-0118). flow-0172 then taught the " +
@@ -185,8 +186,10 @@ const INTENTIONAL_DIVERGENCES = new Map([
          "the two board-regeneration steps (after the claim, and after the hand-off): the board " +
          "is retired. flow-0218 then told the worker how to use the draft-skipping CI: step 7 " +
          "opens its own PR as a draft, steps 5 and 8 mark it ready only after the local gate " +
-         "passes (and name the on-demand gate run), and step 9 pushes a round of fixes once.",
-    task: "flow-0218",
+         "passes (and name the on-demand gate run), and step 9 pushes a round of fixes once. " +
+         "flow-0228 then made step 4 run on the task's model whoever picked the task up: a " +
+         "session not on that tier hands steps 4 to 6 to one subagent on it.",
+    task: "flow-0228",
   }],
   ["What stays out of here", {
     digest: "73329df2df1118a3129f95d896cf5cabab03bfda2aff86d1c191ee0f405f05b1",
