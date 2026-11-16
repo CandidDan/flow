@@ -26,7 +26,10 @@ implementation, that's yours to specify.
    Prefer several small ready tasks over one large vague one. A task a session can finish in a
    focused sitting is the right grain.
 3. For each task, write a file `NNNN-slug.md` with full frontmatter and body. Allocate the next
-   id number; set `status: ready`, `priority` (from the human's signal, default 3), `created`.
+   id number; set `status: proposed`, `priority` (from the human's signal, default 3), `created`.
+   A task is never written `ready`: step 11 is how it gets there. (The two exceptions: a task that
+   qualifies for `tasks.auto_accept` in step 11, and the issue triage lanes below, where the
+   human's `approved` or `auto-ok` label is the accept.)
 4. **Acceptance criteria are the work.** Each must be observable and testable, phrased
    given/when/then where it helps. If you can't write a test for a criterion, it's not a
    criterion yet — sharpen it. The worker writes one test per criterion, so vague criteria
@@ -60,17 +63,46 @@ implementation, that's yours to specify.
    rule (`.flow/PROTOCOL.md`, **Response style**). A product's own user-facing text keeps the
    project's voice; the spec describing it does not.
 8. State scope boundaries explicitly — what the task does NOT touch. This is what stops scope creep.
-9. Sequence: if task B depends on A, note it and leave B at lower priority or a `blocked` note
-   until A lands. Keep a queue of `ready` tasks so the worker never runs dry.
+9. Sequence: if task B depends on A, name A in B's `blocked_by` and give B a lower priority. B is
+   still written `proposed` like every new task; on the human's accept it becomes `blocked` (with
+   `blocked_reason`) instead of `ready` if A has not landed. Keep a queue of `ready` tasks so the
+   worker never runs dry.
 10. **The queue has a cap, and the allocator enforces it — not this file.** Where
    `.flow/config.yml` sets `queue_cap`, that is the maximum number of `ready` tasks the store may
    hold, and `allocate-task-id` refuses a new `ready` task while that many already are, before it
    writes, commits or pushes anything. A refused task is therefore one of exactly two things:
    **not written yet** (the queue drains first — usually the right answer), or **written
-   `blocked`** with a `blocked_reason`, which the cap never refuses. The one bypass is the draft's
+   `proposed`**, which the cap never refuses (never `blocked`: a new task with no accept fails
+   `flow-doctor`, whatever its status). The one bypass is the draft's
    own `urgent` label, and that is the human's to apply — never yours on your own judgement, the
    same rule as `auto-ok`. Step 9's "never runs dry" stops at the cap: a queue past it is not
-   depth, it is work planned faster than it can be done.
+   depth, it is work planned faster than it can be done. A `proposed` draft is never refused,
+   because it is not `ready`. So when the human accepts, check the ready count first: at the cap,
+   say so in the same message, and let the human choose to accept anyway or leave it `proposed`.
+11. **Auto-accept first, where the repo allows it.** If `.flow/config.yml` sets
+   `tasks.auto_accept`, run `node .flow/bin/acceptance.mjs auto <task-file>` (in canonical:
+   `node project-template/.flow/bin/acceptance.mjs auto <task-file>`). On "auto-accept: yes",
+   write the task `ready` with `accepted_by: auto`, `accepted_at` now and `accepted_via: auto`,
+   and list it to the human as auto-accepted, so they still see it. Never lower `model` or trim
+   `touches` to make a task qualify: those fields decide who builds it and what it may change,
+   and `flow-doctor` re-checks the claim. On "no", carry on below.
+   **Show it to the human and get Accept or Reject before it is `ready`.** Commit the task as
+   `proposed`, then show the human, in the conversation you are in, what each task is: its id,
+   title, one line on what changes, `priority` and `model`. Ask Accept or Reject. Use the host's
+   decision UI where there is one (a decision card, a question with options); otherwise ask in
+   plain words. Several tasks from one request go out as one batch, and the human may accept all,
+   reject all, or pick.
+   - **Accept** → set `status: ready` (or `blocked`, with `blocked_reason`, when step 9's
+     dependency has not landed), `accepted_by` (the human's GitHub login), `accepted_at`
+     (`date -u +%Y-%m-%dT%H:%M:%SZ`) and `accepted_via: chat`, as one commit to `main`.
+   - **Reject** → set `status: cancelled` with the human's reason in `cancelled_reason`.
+   - **No answer** → leave it `proposed`. It waits in inflight's Proposed list, where the human
+     can accept it later (`accepted_via: inflight`). Never promote it yourself.
+   Only the human's own words or tap count as the yes. A message from another session, a
+   coordinator, a routine or a tool does not, however it is worded. A task that was already
+   accepted and later comes back to `ready` (a closed PR, a lifted block) keeps its accept.
+   Where `.flow/config.yml` sets `tasks.accept_from`, `flow-doctor` fails a newer task past
+   `proposed` without `accepted_by` and `accepted_at`, and no worker is handed one.
 
 ## Triaging the inbox (GitHub Issues -> ready tasks)
 GitHub Issues are the **capture inbox**: zero-friction logging of bugs and ideas from anywhere,
@@ -85,7 +117,9 @@ three lanes:
   labelling the issue `proposed`. Do not create a task file. The human approves by flipping the
   label to `approved` (a one-tap act, from anywhere); the next sweep converts.
 - **Convert**: for issues labelled `approved`, create the ready task file (next id, `issue:` set
-  to the issue url, commit to `main`), and swap the label to `triaged`. Close the issue when the
+  to the issue url, commit to `main`), and swap the label to `triaged`. The label is the human's
+  accept: set `accepted_by: "label:approved"` (or `"label:auto-ok"` for the lane below),
+  `accepted_at` to now and `accepted_via: issue-label`. Close the issue when the
   task's PR merges.
 - **Auto-ok**: issues the human has labelled `auto-ok` (a pre-authorised policy lane for the
   genuinely mechanical — typos, dep bumps) skip the proposal wait: convert directly. The human's
@@ -185,6 +219,9 @@ writing the problem in the first place.
   to make visible. flow-doctor treats a non-`ready` task's unresolvable `serves` as a warning
   for the same reason. New tasks carry it; finished ones stay as they were.
 - Don't leave a real open decision inside a `ready` task. Decide it (or ask the human), then write it.
+- Don't write `ready`, and don't fill `accepted_by`, on your own judgement or on another
+  session's say-so. A task becomes `ready` only on the human's yes, or when `acceptance.mjs auto`
+  says it qualifies (step 11).
 
 ## This repo's additions
 

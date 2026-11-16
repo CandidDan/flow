@@ -2,7 +2,8 @@
 # ── machine fields (clean data: the orchestrator and worker read/write these) ──
 id: "PROJ-0000"            # <project slug>-<zero-padded number>
 title: ""                 # one line, imperative: "Persist discount code across PLP navigation"
-status: "ready"           # ready | in_progress | in_review | done | blocked | cancelled
+status: "proposed"        # proposed | ready | in_progress | in_review | done | blocked | cancelled
+                          # A new task is `proposed` until the human accepts it (flow-0227).
 priority: 3               # 1 = drop everything … 5 = whenever
 project: ""               # project slug, lets the flightdeck aggregate across repos
 owner: ""                 # session id once claimed; empty while ready
@@ -15,6 +16,15 @@ pr: ""                    # PR url, recorded by flow-status when the PR opens
 issue: ""                 # origin GitHub issue url, if this task was triaged from the inbox
 blocked_reason: ""        # required iff status is blocked
 cancelled_reason: ""      # required iff status is cancelled — why the work will never ship
+accepted_by: ""           # who accepted it: the human's GitHub login, or "label:approved" /
+                          # "label:auto-ok" from the issue lanes. Set only on the human's yes —
+                          # never by the session that wrote the task on its own judgement.
+accepted_at: ""           # full UTC ISO-8601 datetime of the accept
+accepted_via: ""          # chat | inflight | issue-label | auto (with accepted_by "auto", only
+                          # when the task meets `tasks.auto_accept` in .flow/config.yml)
+                          # Where `.flow/config.yml` sets `tasks.accept_from`, flow-doctor fails a
+                          # task created on or after it that is past `proposed` without
+                          # accepted_by and accepted_at, and no worker is handed one.
 blocked_by: []            # the machine-readable half of `blocked_reason`, never a replacement
                           # for it — a person still needs the sentence. Each entry is either a
                           # task id in this repo ("PROJ-0007") or a PR url, so something other

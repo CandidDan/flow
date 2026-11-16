@@ -143,7 +143,7 @@ const INTENTIONAL_DIVERGENCES = new Map([
     task: "flow-0174",
   }],
   ["Status lifecycle", {
-    digest: "43a0402f496edf5b40b59e95074778d436ef83df737319107e4d15fda23712c2",
+    digest: "cb5f08b7d475b27a2886a402ec818624db8045ce5ba6dfb3eb6bd42b6c04cbf5",
     why: "the `blocked` bullet told a worker to record the undecidable thing in " +
          "`blocked_reason` and `blocked_by` only — both of which a person reads only once they " +
          "are already looking at the task file, which is the thing a human never opens. It now " +
@@ -159,8 +159,11 @@ const INTENTIONAL_DIVERGENCES = new Map([
          "flow-0173 then stopped flow-unblock starting the next worker: the `blocked` bullet now " +
          "says the released task is picked up by the next worker run. flow-0174 then retired " +
          "the queue-runner: escalation trigger 1 is now a stranded claim flow-recover resets " +
-         "because nothing was pushed, not a queue-runner run that ended without a PR.",
-    task: "flow-0174",
+         "because nothing was pushed, not a queue-runner run that ended without a PR. " +
+         "flow-0227 then added the `proposed` status ahead of `ready`: a diagram branch for the " +
+         "human's accept and reject, a bullet naming what enforces it, and `ready` now says " +
+         "the orchestrator sets it on the human's accept.",
+    task: "flow-0227",
   }],
   ["Session hygiene — context is a budget", {
     digest: "b6a0eebb93032a65950114f77279de5bbac095278b2dc44583ca959852f7a5a9",
@@ -923,4 +926,32 @@ test("The store says a Flow state commit is never a release target, and names de
   assert.match(section, /\*\*A Flow state commit is\s+never a release target\.\*\*/);
   assert.match(section, /`node \.flow\/bin\/deployable-sha\.mjs --head <that commit>`/);
   assert.match(section, /exits 1 with nothing printed when it is not sure, and then you do not release/);
+});
+
+// flow-0227, criterion 7. The digest above only proves the Status lifecycle section changed, not
+// that it now carries `proposed`, so this asserts the content: the diagram starts at `proposed`
+// and branches on the human's accept and reject, and a `proposed` bullet names what enforces it.
+test("Status lifecycle documents `proposed` in the diagram and as a bullet (flow-0227)", () => {
+  const section = new Map(sectionsOf(protocol)).get("Status lifecycle");
+  assert.ok(section, "PROTOCOL.md has a section named Status lifecycle");
+
+  const diagram = /```\n([\s\S]*?)```/.exec(section)?.[1] ?? "";
+  assert.match(diagram, /^proposed\b/m, "the lifecycle diagram must start at `proposed`");
+  assert.match(diagram, /proposed[^\n]*accepts[^\n]*→\s*ready/,
+    "the diagram must take `proposed` to `ready` on the human's accept");
+  assert.match(diagram, /rejects[^\n]*→\s*cancelled/,
+    "the diagram must take a rejected `proposed` task to `cancelled`");
+
+  const bullet = statusBullet(section, "proposed");
+  assert.ok(bullet, "Status lifecycle must carry a `proposed` bullet");
+  const flat = bullet.replace(/\s+/g, " ");
+  assert.match(flat, /Never picked/, "the `proposed` bullet must say a worker never picks it");
+  assert.match(flat, /pick-task/);
+  assert.match(flat, /flow-dispatch/);
+  assert.match(flat, /accepted_by/);
+  assert.match(flat, /tasks\.accept_from/,
+    "the `proposed` bullet must name the config key that switches the doctor check on");
+
+  const ready = statusBullet(section, "ready").replace(/\s+/g, " ");
+  assert.match(ready, /human's accept/, "the `ready` bullet must say it is set on the human's accept");
 });

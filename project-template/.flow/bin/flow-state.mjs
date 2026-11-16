@@ -260,10 +260,12 @@ function resolveServes(ids, goals) {
 
 // Pure: an intent's status from its own `status` and the tasks that name it. `tasks` carry the
 // PR-reconciled `status` (or `resolved`) where the caller has it. A `cancelled` task is dead work
-// and counts for nothing either way: an intent whose only task was cancelled has not started.
+// and counts for nothing either way: an intent whose only task was cancelled has not started. A
+// `proposed` task (flow-0227) is waiting for the human's accept, so it has not started either.
 export function deriveIntentStatus(intent, tasks) {
   if (intent && intent.status === "superseded") return "superseded";
-  const st = (tasks || []).map((t) => t.resolved ?? t.status).filter((s) => s !== "cancelled");
+  const st = (tasks || []).map((t) => t.resolved ?? t.status)
+    .filter((s) => s !== "cancelled" && s !== "proposed");
   if (!st.length) return "not_started";
   if (st.includes("blocked")) return "blocked";
   if (st.every((s) => s === "done")) return "done";
