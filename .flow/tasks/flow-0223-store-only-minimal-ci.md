@@ -35,8 +35,10 @@ touches:
   - "docs/flow-reusable-workflows.md"
   - "changes/flow-0223.md"
 labels: [ci, cost, gate, review]
-notes: []
-asks: []
+notes:
+  - "2026-11-16: PR #317 (branch claude/eager-keller-wx6tsl) opened and marked ready. Local gate green; coverage 97.88%. Intent PRs deliberately unchanged: the review plan publishes store_only only for non-intent store-only PRs, so their security review and advisory reviewer still run. source-root is skipped via the planned count (as for intent PRs), because source-roots-gate.test.mjs pins its step conditions. Next action: address review-check findings on #317, if any."
+asks:
+  - "fyi: PR #317 edits .flow/bin/gate-cost.test.mjs, which is not in touches: its condition evaluator only knew intent_pr, so two lines teach it store_only. No assertion changed."
 ---
 
 ## Context
