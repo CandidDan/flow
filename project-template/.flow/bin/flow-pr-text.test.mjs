@@ -77,10 +77,11 @@ test("rule: a missing TL;DR fails, saying it is missing", () => {
 });
 
 test("rule: an empty TL;DR after the marker is removed fails as missing", () => {
-  const reasons = mechanicalReasons(extractTldr("**TL;DR:**\n\nThe rest."), { prefix: "flow" });
-  // The marker paragraph is empty once stripped, so the TL;DR is "".
+  // A marker-only paragraph is preamble (flow-0229), so the TL;DR is the paragraph after it.
+  assert.deepEqual(mechanicalReasons(extractTldr("**TL;DR:**\n\nThe rest."), { prefix: "flow" }), []);
+  // With nothing after the marker there is no TL;DR at all, which fails as missing.
   assert.equal(extractTldr("**TL;DR:**"), "");
-  assert.ok(reasons.length >= 1);
+  assert.match(mechanicalReasons(extractTldr("**TL;DR:**"), { prefix: "flow" })[0], /TL;DR is missing/);
   const empty = mechanicalReasons(extractTldr("TL;DR:"), { prefix: "flow" });
   assert.deepEqual(empty.length, 1);
   assert.match(empty[0], /TL;DR is missing/);
@@ -181,7 +182,9 @@ test("parseJudgeReply: PASS, FAIL with a reason, and anything else is no verdict
   assert.deepEqual(parseJudgeReply("FAIL: it never says who is affected.\nmore"),
     { verdict: "fail", summary: "it never says who is affected." });
   assert.equal(parseJudgeReply("**FAIL** — vague").summary, "vague");
-  assert.equal(parseJudgeReply("FAIL"), null);
+  assert.deepEqual(parseJudgeReply("FAIL"),
+    { verdict: "fail", summary: "The judge said FAIL without giving a reason." });
+  assert.equal(parseJudgeReply("maybe"), null);
   assert.equal(parseJudgeReply("I think it passes."), null);
   assert.equal(parseJudgeReply(""), null);
 });
@@ -302,6 +305,26 @@ test("CLI rules: a task id on a flow/ branch is enough without one in the title"
   const out = sink();
   runCli(rulesArgs(dir, "flow/flow-0207-x"), { out });
   assert.match(out.text, /^skip=false/);
+});
+
+test("CLI rules: a malformed model value exits 2 and writes no reasons.json or tldr.txt", () => {
+  const dir = fixture({ config: "review:\n  pr_text_model: a;b\n" });
+  const err = sink();
+  assert.equal(runCli(rulesArgs(dir), { out: sink(), err }), 2);
+  assert.equal(existsSync(join(dir, "reasons.json")), false);
+  assert.equal(existsSync(join(dir, "tldr.txt")), false);
+});
+
+test("extractTldr: a **TL;DR** marker on its own paragraph is preamble, so the next paragraph is the TL;DR", () => {
+  assert.equal(extractTldr("**TL;DR**\n\nPlain prose here."), "Plain prose here.");
+  assert.equal(extractTldr("TL;DR:\n\nPlain prose here."), "Plain prose here.");
+  assert.equal(extractTldr("**TL;DR**: Plain text."), "Plain text.");
+});
+
+test("extractTldr: a whole-italic first paragraph is the TL;DR, but an italic Requested by line is skipped", () => {
+  assert.equal(extractTldr("_A whole summary in italics._\n\nNext."), "_A whole summary in italics._");
+  assert.equal(extractTldr("_Requested by **Dan**_\n\nThe summary."), "The summary.");
+  assert.equal(extractTldr("*Requested by Dan*\n\nThe summary."), "The summary.");
 });
 
 test("CLI rules: a malformed model value or a missing --out-dir exits 2", () => {

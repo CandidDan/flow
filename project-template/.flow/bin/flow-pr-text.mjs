@@ -60,14 +60,17 @@ export const NOT_TASK_BRANCHES = Object.freeze(["flow-sync/", "release/"]);
  * A paragraph that is not prose: only HTML comments, a heading, or a byline (every line wholly in
  * `_…_` or `*…*`). A PR opened from a Claude project thread starts with an attribution comment and
  * an italic "Requested by" line, and a description may open with a `## TL;DR` heading. None of
- * those is the summary, so they are skipped before the first paragraph is taken.
+ * those is the summary, so they are skipped before the first paragraph is taken. A paragraph that
+ * is only a TL;DR marker is preamble too, like a heading. An italic paragraph is a byline only when
+ * it starts with "Requested by"; a whole-italic summary is the TL;DR like any other paragraph.
  */
 function isPreamble(paragraph) {
   const withoutComments = paragraph.replace(/<!--[\s\S]*?-->/g, "").trim();
   if (withoutComments === "") return true;
+  if (MARKER.test(withoutComments) && withoutComments.replace(MARKER, "").trim() === "") return true;
   const lines = withoutComments.split("\n").map((l) => l.trim()).filter(Boolean);
   if (lines.every((l) => /^#{1,6}\s/.test(l))) return true;
-  return lines.every((l) => /^_[^_].*_$/.test(l) || /^\*[^*].*\*$/.test(l));
+  return lines.every((l) => /^_requested by\b.*_$/i.test(l) || /^\*requested by\b.*\*$/i.test(l));
 }
 
 const MARKER = /^\s*(?:\*\*|__)?TL;?DR(?:\*\*|__)?\s*(?:\*\*|__)?\s*[:—–-]?\s*(?:\*\*|__)?\s*/i;
@@ -171,8 +174,7 @@ export function parseJudgeReply(text) {
   const m = first.match(/^\**(PASS|FAIL)\b\**\s*[:—–-]?\s*(.*)$/);
   if (!m) return null;
   if (m[1] === "PASS") return { verdict: "pass", summary: m[2].trim() || "A reader who has not read the code would understand it." };
-  const why = m[2].trim();
-  return why ? { verdict: "fail", summary: why } : null;
+  return { verdict: "fail", summary: m[2].trim() || "The judge said FAIL without giving a reason." };
 }
 
 /**
@@ -250,6 +252,8 @@ export function runRules(argv, out) {
   const headRef = flag(argv, "--head-ref") ?? "";
   const config = readOr(flag(argv, "--config"));
   if (!outDir) throw new Error("rules needs --out-dir");
+  // Read the model before anything is written: a malformed value exits 2 with no result on disk.
+  const model = judgeModel(config);
 
   let skip = "";
   if (NOT_TASK_BRANCHES.some((p) => headRef.startsWith(p))) skip = `a ${headRef.split("/")[0]} PR is not a task PR`;
@@ -262,7 +266,7 @@ export function runRules(argv, out) {
   const reasons = mechanicalReasons(tldr, { prefix: configValue(config, "project", "name") });
   writeFileSync(join(outDir, "tldr.txt"), tldr);
   writeFileSync(join(outDir, "reasons.json"), JSON.stringify(reasons) + "\n");
-  out.write(`skip=false\nmechanical=${reasons.length ? "fail" : "pass"}\nmodel=${judgeModel(config)}\n`);
+  out.write(`skip=false\nmechanical=${reasons.length ? "fail" : "pass"}\nmodel=${model}\n`);
   return 0;
 }
 

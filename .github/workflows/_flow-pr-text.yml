@@ -257,7 +257,7 @@ jobs:
             --verdict-out "$RUNNER_TEMP/flow-pr-text/verdict.json"
 
       - name: Enforce the flow-pr-text verdict
-        if: ${{ always() && steps.rules.outputs.skip != 'true' }}
+        if: ${{ always() && steps.rules.outcome == 'success' && steps.rules.outputs.skip != 'true' }}
         env:
           JUDGED: ${{ steps.rules.outputs.judge }}
         run: |
