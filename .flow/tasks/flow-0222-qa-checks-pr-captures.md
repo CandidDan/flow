@@ -1,7 +1,7 @@
 ---
 id: "flow-0222"
 title: "qa check fails a task PR whose description has no Captures section or an empty reason"
-status: "blocked"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -10,9 +10,9 @@ started: ""
 branch: ""
 pr: ""
 issue: ""
-blocked_reason: "Decision answered (fail). Waiting for flow-0196, in progress, which also edits _flow-review.yml and lands the missing-helper pattern scope item 5 follows. Also, the ready queue was at its cap of 8 when Dan answered. flow-unblock releases this to ready when flow-0196 is done."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["flow-0196"]
+blocked_by: []
 serves: ["G10"]
 intent: "ux-prs-show-screenshots"
 touches:

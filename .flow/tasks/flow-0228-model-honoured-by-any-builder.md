@@ -1,7 +1,7 @@
 ---
 id: "flow-0228"
 title: "The model a task names is the model that builds it, whoever picks the task up"
-status: "blocked"
+status: "ready"
 priority: 1
 project: "flow"
 owner: ""
@@ -12,10 +12,9 @@ pr: ""
 issue: ""
 intent: ""
 serves: ["maintenance"]
-blocked_reason: "Edits project-template/.flow/PROTOCOL.md, which flow-0227 (PR #313) is also changing. Waiting for that PR to merge."
+blocked_reason: ""
 cancelled_reason: ""
-blocked_by:
-  - "https://github.com/CandidDan/flow/pull/313"
+blocked_by: []
 accepted_by: "CandidDan"
 accepted_at: "2026-11-16T00:14:34Z"
 accepted_via: "chat"
