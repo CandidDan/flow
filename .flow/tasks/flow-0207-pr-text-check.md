@@ -1,7 +1,7 @@
 ---
 id: "flow-0207"
 title: "A low-cost check fails a task PR whose summary is not in plain English, and editing the description re-runs only that check"
-status: "in_review"
+status: "done"
 priority: 2
 project: "flow"
 owner: "session_01NfrcU9iRVh8RVpDF6wsSzV"
