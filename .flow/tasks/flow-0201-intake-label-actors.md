@@ -29,7 +29,9 @@ model_reason: "Closes a trust gap in a reusable workflow that runs a write-capab
 notes:
   - "2026-11-03 orchestrator: ADR-0010 task 1 of 6 (docs/adr/0010-intake-lanes.md §2). Accepted when Dan merged CandidDan/flow#277 (b81de46); no canonical intent file exists, so `intent` is empty by design."
   - "2026-11-03 orchestrator: criteria from the review note on #277 'For the session that writes ADR-0010's tasks': test the revoked-write case; log every label not honoured; permission and trusted_labelers are read when triage runs."
-asks: []
+  - "2026-11-16 worker: built and handed off as PR #315 (branch claude/eager-keller-gpk4yi), marked ready. Local gate: build, lint, coverage 97.94% green; npm test 18 failures that also fail on untouched main in a tagless clone (git archive v4.0.1), not touched by this diff. Design: the permission lookup runs inside intake-trust.mjs (gh api, once per login), the lanes step runs after `content` because it reuses its issue-<n>.json files, and the agent reads $RUNNER_TEMP/flow-triage-lanes.json. Next action: none until review; a kickback is addressed on the same branch."
+asks:
+  - "fyi: an approved/auto-ok applied by an app acting on behalf of a user (actor type User, performed_via_github_app set) is honoured if that user has write; the spec checks actor.type only"
 ---
 
 ## Context
