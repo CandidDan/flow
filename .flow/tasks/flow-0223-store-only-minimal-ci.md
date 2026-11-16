@@ -1,12 +1,12 @@
 ---
 id: "flow-0223"
 title: "Run only flow-doctor and the store-guard on PRs that change only tasks, intents, workstreams or research"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "session_01NfrcU9QSm1E3bcksYxM6P9"
 created: "2026-11-13"
-started: ""
+started: "2026-11-16T11:02:33Z"
 branch: ""
 pr: ""
 issue: ""
