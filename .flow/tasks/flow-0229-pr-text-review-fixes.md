@@ -1,12 +1,12 @@
 ---
 id: "flow-0229"
 title: "The PR summary check says the right thing when its config is wrong, the judge gives no reason, or the summary is formatted unusually"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "session_01NfrcUBUQwYCYxRRVhsMUpZ"
 created: "2026-11-16"
-started: ""
+started: "2026-11-16T11:14:51Z"
 branch: ""
 pr: ""
 issue: ""
