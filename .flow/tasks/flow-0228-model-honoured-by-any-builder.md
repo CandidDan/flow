@@ -1,12 +1,12 @@
 ---
 id: "flow-0228"
 title: "The model a task names is the model that builds it, whoever picks the task up"
-status: "ready"
+status: "in_progress"
 priority: 1
 project: "flow"
-owner: ""
+owner: "claude-worker"
 created: "2026-11-16"
-started: ""
+started: "2026-11-16T11:03:12Z"
 branch: ""
 pr: ""
 issue: ""
