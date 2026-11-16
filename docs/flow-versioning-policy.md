@@ -59,6 +59,12 @@ exactly what a repo pinned to `@v1` should get from a major bump: nothing moves 
 
 ## Release procedure
 
+A reusable workflow may call a command missing from an adopter's previous helper only when
+the call probes support and falls back to a supported command with the same fail-closed result.
+The helper comes from the adopter's **base branch**, not the workflow tag or the sync PR: moving
+an alias can otherwise break the very sync PR that updates it. The helper-command compatibility
+test checks calls against the latest immutable release tag before a new release advances an alias.
+
 **A release PR carries release files and nothing else.** That is a rule with a check behind it,
 not a convention: the review gate classifies a PR as a *release PR* in code when its head branch
 starts with `release/` **and** every changed path is one of `CHANGELOG.md`, `changes/**`,
