@@ -1,7 +1,7 @@
 ---
 id: "flow-0229"
 title: "The PR summary check says the right thing when its config is wrong, the judge gives no reason, or the summary is formatted unusually"
-status: "in_progress"
+status: "in_review"
 priority: 3
 project: "flow"
 owner: "session_01NfrcUBUQwYCYxRRVhsMUpZ"
