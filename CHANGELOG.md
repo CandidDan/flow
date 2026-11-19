@@ -6,6 +6,91 @@ after a canary passes). Note any **caller action** required (a caller change is 
 
 ## Unreleased
 
+## 5.1.0 — 2026-11-19
+
+**MINOR: two new PR checks, a protocol rule for new tasks, and a test fix for adopting repos.** A
+PR whose task has open asks now says so on the PR (flow-0120). A task PR whose first paragraph is
+not plain English fails the new `flow-pr-text` check (flow-0207). New tasks wait for the human's
+accept (flow-0227). Every PR description has a Captures part (flow-0221). The review checks stay
+fail-closed when the workflow is newer than the base-branch helper (flow-0196). The old Haiku 4.5
+id scan no longer runs in adopting repos, where it failed the gate (flow-0232).
+**Caller action:** none required. Run the flow-sync workflow to take the new `flow-status.yml` and
+`flow-pr-text.yml` callers and the new protocol text.
+
+- **A PR whose task has open asks now tells the repo owner on the PR itself** (`.github/workflows/_flow-status.yml`,
+  `project-template/.flow/bin/asks-comment.mjs`, `.github/workflows/flow-status.yml`, flow-0120).
+  **No caller action required.** The synced `flow-status.yml` caller now grants `pull-requests: write`
+  and `issues: write` beside `contents: write`, and it arrives with the next flow-sync PR. Until then
+  the status sync works as before, and the new job ends green with a warning that it could not
+  comment.
+
+  When a PR is opened, reopened or marked ready, a new `asks` job in `_flow-status.yml` reads the
+  task's `asks` from `main`. Every ask not announced on that PR before goes into one new comment that
+  starts with an @-mention of the repository owner, decisions first with their recommendation. A
+  hidden `<!-- flow-asks: … -->` line records which asks a comment announced, and only comments by
+  `github-actions[bot]` count, so an ask is never posted twice and nobody else can silence one. The
+  PR carries the `needs-input` label while the task has any ask, and loses it when the task has none.
+  Ask text reaches GitHub through a file and is escaped, so it shows exactly as written and cannot
+  mention anyone. `_flow-status.yml` no longer has a top-level `permissions:` block: `sync-status`
+  states `contents: write` itself, as before, and the `asks` job inherits the caller's grant.
+
+- **Review checks remain fail-closed when the workflow advances before the base-branch helper** (`.github/workflows/_flow-review.yml`, flow-0196). **No caller action.** Helpers without capability discovery use the legacy verdict command on the same JSON, with one warning per check recommending a Flow sync. Release tests guard command compatibility and exercise the v4.0.1 helper.
+
+- **A task PR whose opening paragraph is not in plain English now fails a check** (`.github/workflows/_flow-pr-text.yml`,
+  `project-template/.flow/bin/flow-pr-text.mjs`, `.github/workflows/flow-pr-text.yml`, flow-0207).
+  **No caller action required** beyond merging the next flow-sync PR, which delivers the new
+  `flow-pr-text.yml` caller. No new secret: the judge uses the `CLAUDE_CODE_OAUTH_TOKEN` secret and
+  the `FLOW_AI` variable the review checks already use, and without them the mechanical rules
+  decide alone.
+
+  The new `flow-pr-text` check reads the first paragraph of a task PR's description. It fails, and
+  lists every reason, when the paragraph is missing, has a backtick, a task id, a file path or file
+  name, or more than 60 words. When those all pass, one low-cost model call (the haiku tier unless
+  `review.pr_text_model` is set) judges whether a reader who has not read the code would
+  understand it. The callers run on `edited`, so fixing the description re-runs this check alone
+  and never the gate or the reviewers. Drafts, PRs with no task id, and sync and release PRs are
+  skipped.
+
+- **Every PR description now has a Captures part, and captures are the default for any change a
+  person sees or feels** (`project-template/.flow/PROTOCOL.md`,
+  `project-template/.claude/skills/show-me/SKILL.md`, flow-0221). The part is no longer
+  conditional on "the session can run it": it holds captures, or one `Not captured: <reason>` line
+  whose reason names what is missing ("n/a" or an empty reason does not count). A change to what
+  happens to a person when they act, with no screen change, is captured by a before/after table of
+  real responses from the base commit and the PR head. **No caller action** beyond merging the
+  next flow-sync PR, which delivers the new protocol and skill text.
+
+- **A new task now waits for the human's accept before any worker can start it**
+  (`project-template/.flow/PROTOCOL.md`, `project-template/.claude/skills/task-writer/SKILL.md`,
+  `project-template/.flow/bin/acceptance.mjs`, flow-0227). Task writers write a new task as
+  `proposed` and show it to the human with Accept or Reject. Accept sets `ready` plus
+  `accepted_by`, `accepted_at` and `accepted_via`; Reject sets `cancelled` with the reason. Where
+  `.flow/config.yml` sets `tasks.accept_from`, `flow-doctor` fails a task created on or after that
+  date that is past `proposed` without an accept, and `pick-task` and `flow-dispatch` never hand
+  one to a worker. The issue triage lanes record their label as the accept. `apply-board-edits`
+  accepts `proposed` and the acceptance fields, so inflight can accept and reject through it.
+  **Caller action:** add `tasks:` / `accept_from: "<today>"` to your `.flow/config.yml` to switch
+  on enforcement. New repos get it, and `auto_accept`, from the template on purpose (Dan chose
+  both on by default). Without it, the rule is followed by task writers but not checked. A task
+  file with no `created` date counts as covered, so if your store has undated tasks, set `created`
+  on them before turning the rule on, or `flow-doctor` reports each one.
+- **Small, low-risk tasks can skip the human's accept, judged on facts in the task file**
+  (`tasks.auto_accept` in `.flow/config.yml`, `project-template/.flow/bin/acceptance.mjs`,
+  flow-0227). A task at or below `max_model` (default `haiku`), with at most `max_touches` paths
+  (default 3) and none that can reach a `never` glob, is written `ready` with `accepted_by: auto`
+  and `accepted_via: auto`. `node .flow/bin/acceptance.mjs auto <task-file>` tells the writer
+  whether a task qualifies; `flow-doctor`, `pick-task` and `flow-dispatch` re-check every auto
+  accept, so a false one fails the doctor and is never handed to a worker. A bare directory in
+  `touches` counts as everything under it. **Caller action:** add
+  the `auto_accept` block under `tasks:` to use it; without it every task goes to the human.
+
+- **The old Haiku 4.5 id scan in `task-model.test.mjs` now runs only in canonical**
+  (`project-template/.flow/bin/task-model.test.mjs`, flow-0232). It searched every tracked file of
+  the repo it ran in, so in an adopting repo that names the old id in its own code it failed
+  `flow-gates`, and in v5 that skipped the qa, code-review and security reviews on every PR. It now
+  skips outside canonical with a reason, the same way `check-claude-md.test.mjs` does.
+  **No caller action** beyond taking the release.
+
 ## 5.0.0 — 2026-11-10
 
 **MAJOR: the review checks run only after the gate passes, in three billed jobs instead of five.**
