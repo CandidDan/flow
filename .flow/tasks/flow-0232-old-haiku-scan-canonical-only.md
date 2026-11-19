@@ -1,7 +1,7 @@
 ---
 id: "flow-0232"
 title: "The old Haiku id scan runs only in canonical, so it stops failing adopting repos"
-status: "proposed"
+status: "ready"
 priority: 1
 project: "flow"
 owner: ""
@@ -15,9 +15,9 @@ serves: ["maintenance"]
 blocked_reason: ""
 cancelled_reason: ""
 blocked_by: []
-accepted_by: ""
-accepted_at: ""
-accepted_via: ""
+accepted_by: "CandidDan"
+accepted_at: "2026-11-19T04:28:34Z"
+accepted_via: "chat"
 touches:
   - "project-template/.flow/bin/task-model.test.mjs"
   - "changes/flow-0232.md"
