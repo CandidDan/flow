@@ -7,7 +7,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -57,17 +57,62 @@ test("a task with model haiku resolves to claude-haiku-5-5", () => {
   assert.equal(r.id, "claude-haiku-5-5");
 });
 
-test("no tracked file outside the store, changelog and fixtures still names the old Haiku 4.5 id", () => {
-  const OLD = ["claude-haiku-4-5", "20251001"].join("-"); // built in pieces so this file does not name it
-  let root, files;
+// The old-id scan is canonical-only. It searches every tracked file in the repo it runs in, and an
+// adopting repo is free to name the old Haiku 4.5 id in its own code (Nudge does, on purpose). Run
+// there, it failed the adopter's gate on a file Flow does not own. Canonical is identified the way
+// `check-claude-md.test.mjs` identifies it: it holds BOTH the template's helper and its own
+// `.flow/bin` adapter, a shape no adopting repo has, because `flow-sync` copies the bin and not
+// the template tree.
+export const OLD_HAIKU_ID = ["claude-haiku-4-5", "20251001"].join("-"); // built in pieces so this file does not name it
+export function isCanonicalRoot(root) {
+  return existsSync(join(root, "project-template", ".flow", "bin", "task-model.mjs")) &&
+    existsSync(join(root, ".flow", "bin", "task-model.mjs"));
+}
+export function oldIdScan(root) {
+  if (!isCanonicalRoot(root)) return { skip: "adopting repo: the old-id scan covers canonical's own files only" };
+  let files;
   try {
-    const cwd = import.meta.dirname;
-    root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" }).trim();
     files = execFileSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" }).split("\0").filter(Boolean);
-  } catch { return; } // not a git checkout (a packed release): nothing tracked to search
+  } catch { return { skip: "not a git checkout (a packed release): nothing tracked to search" }; }
   const exempt = (f) => f.startsWith(".flow/tasks/") || f === "CHANGELOG.md" || f.startsWith("changes/") || /fixtures?\//.test(f);
-  const hits = files.filter((f) => !exempt(f) && readFileSync(join(root, f), "utf8").includes(OLD));
-  assert.deepEqual(hits, []);
+  return { hits: files.filter((f) => !exempt(f) && readFileSync(join(root, f), "utf8").includes(OLD_HAIKU_ID)) };
+}
+
+test("no tracked file outside the store, changelog and fixtures still names the old Haiku 4.5 id", (t) => {
+  let root;
+  try {
+    root = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: import.meta.dirname, encoding: "utf8" }).trim();
+  } catch { return t.skip("not a git checkout (a packed release): nothing tracked to search"); }
+  const r = oldIdScan(root);
+  if (r.skip) return t.skip(r.skip);
+  assert.deepEqual(r.hits, []);
+});
+
+test("the old-id scan skips an adopting repo that names the id, and still catches it in canonical", () => {
+  const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
+  const repo = (canonical) => {
+    const root = mkdtempSync(join(tmpdir(), "old-id-"));
+    mkdirSync(join(root, ".flow", "bin"), { recursive: true });
+    writeFileSync(join(root, ".flow", "bin", "task-model.mjs"), "");
+    if (canonical) {
+      mkdirSync(join(root, "project-template", ".flow", "bin"), { recursive: true });
+      writeFileSync(join(root, "project-template", ".flow", "bin", "task-model.mjs"), "");
+    }
+    writeFileSync(join(root, "models.ts"), `export const HAIKU = "${OLD_HAIKU_ID}";\n`);
+    git(root, "init", "-q");
+    git(root, "add", "-A");
+    return root;
+  };
+  const adopter = repo(false), canon = repo(true);
+  try {
+    assert.equal(isCanonicalRoot(adopter), false);
+    assert.match(oldIdScan(adopter).skip, /adopting repo/);
+    assert.equal(isCanonicalRoot(canon), true);
+    assert.deepEqual(oldIdScan(canon).hits, ["models.ts"]);
+  } finally {
+    rmSync(adopter, { recursive: true, force: true });
+    rmSync(canon, { recursive: true, force: true });
+  }
 });
 
 // ── criterion 1: the default ─────────────────────────────────────────────
@@ -307,4 +352,23 @@ for (const [name, path] of Object.entries(DOCS)) {
       `${name}: the worker's self-escalation rule is missing`);
     assert.match(flat, /model_reason/, `${name}: departures must be told to carry model_reason`);
   });
+}
+
+// ── flow-0232: the changelog entry ──
+// Canonical-only: `changes/` and CHANGELOG.md are not synced to adopting repos. Read through
+// `changelog-entry.mjs`, which reads the fragment first and the assembled entry second, so this
+// stays green on the release PR that folds the fragment in.
+{
+  const { pathToFileURL } = await import("node:url");
+  const root = join(import.meta.dirname, "..", "..", "..");
+  const CANON = existsSync(join(root, ".flow", "bin", "changelog-entry.mjs")) && isCanonicalRoot(root) ? root : null;
+  test("flow-0232 has a changelog entry that names the canonical-only scan and the caller action",
+    { skip: CANON ? false : "canonical-only: `changes/` and CHANGELOG.md are not synced to adopting repos" },
+    async () => {
+      const { changelogEntry } = await import(pathToFileURL(join(CANON, ".flow", "bin", "changelog-entry.mjs")).href);
+      const text = changelogEntry(CANON, "flow-0232");
+      assert.ok(text, "flow-0232's changelog entry must exist, as a fragment or in CHANGELOG.md");
+      assert.match(text, /canonical/);
+      assert.match(text, /caller action/i);
+    });
 }
