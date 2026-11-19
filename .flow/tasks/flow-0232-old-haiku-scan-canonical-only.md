@@ -1,7 +1,7 @@
 ---
 id: "flow-0232"
 title: "The old Haiku id scan runs only in canonical, so it stops failing adopting repos"
-status: "in_review"
+status: "done"
 priority: 1
 project: "flow"
 owner: "session_01NfrcUBgbAmfpXHKvUt2Bey"
