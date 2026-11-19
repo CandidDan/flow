@@ -14,7 +14,7 @@ intent: ""
 serves: ["maintenance"]
 blocked_reason: ""
 cancelled_reason: ""
-blocked_by: ["flow-0234"]
+blocked_by: []
 accepted_by: ""
 accepted_at: ""
 accepted_via: ""
@@ -27,7 +27,7 @@ model: "sonnet"
 effort: "medium"
 model_reason: "Well specified: a fixed list of rules in one JSON file, with the matching syntax to be checked against the docs."
 notes:
-  - "2026-11-19: Written from the Claude Code best-practices review (reports/claude-code-best-practices-vs-flow.md, item 4). blocked_by flow-0234 because both edit the same settings file and their touches overlap."
+  - "2026-11-19: Written from the Claude Code best-practices review (reports/claude-code-best-practices-vs-flow.md, item 4). Build after flow-0234: both edit the same settings file, so their touches overlap. flow-doctor fails a proposed task with blocked_by, so the dependency is recorded here. On accept, if flow-0234 has not merged, set this task blocked with blocked_by [flow-0234]."
 asks:
   - "fyi: Force-push is deliberately NOT denied. The protocol has a worker rebase onto main after its draft PR is already pushed, which needs git push --force-with-lease. Protect main with branch protection on GitHub instead."
   - "fyi: Same reach limit as flow-0234. flow-sync never touches .claude/settings.json, so only repos set up after this release get the rules. Existing repos copy them by hand."
