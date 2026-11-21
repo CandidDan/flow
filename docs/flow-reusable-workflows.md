@@ -296,6 +296,51 @@ decides this from the paths alone, and both workflows run it from a copy the PR 
 
 The review run summary's `reviewers:` line names which of these ran and at what turn budget.
 
+### Minimal CI — store-only PRs and push-to-main workflows (flow-0223)
+
+`minimal_ci:` in `.flow/config.yml` has two keys. Both are read from the **base branch's** copy, so
+a PR cannot add the glob that exempts it.
+
+```yaml
+minimal_ci:
+  paths: [".flow/tasks/**", ".flow/intents/**", ".flow/workstreams/**", "docs/research/**"]
+  push_workflows_exempt: []
+```
+
+**A store-only PR** changes at least one file, and every changed file matches `paths` (absent: the
+four defaults above). A file under `.flow/` outside those three stores, under `.github/` or
+`.claude/`, or `CLAUDE.md` / `AGENTS.md` is never store-only, whatever `paths` says; neither is a
+`_`-prefixed format file such as `_TEMPLATE.md`. `classifyStoreOnlyPr` in `flow-review.mjs` decides.
+
+| Check | Any other PR | Store-only PR |
+|---|---|---|
+| `gate` | install, build, lint, test, coverage | store-guard, classify, `flow-doctor` only. Same check name. The store-guard still fails a PR that touches `.flow/tasks/` |
+| `source-roots-plan` | touches-guard, flow-tooling tests, flow-doctor, plan | unchanged; the planned count is forced to `0` |
+| `source-root` | one job per extra source root | skipped, as in any repo with none |
+| `qa`, `code-review`, `security` | model review | no model call; each writes `store-only PR: tasks, intents, workstreams or research only; flow-doctor and the store-guard gate it` |
+
+An intent-only PR is also store-only. It is gated the same way, and keeps its own review handling
+from the section above: the advisory intent reviewer, and the security review on the `.flow/**`
+floor.
+
+**The push-to-main warning.** Every task claim, hand-off and block is a commit pushed to `main`. A
+workflow whose `push` trigger can fire on `main` with no path filter runs on every one of them.
+`flow-doctor` warns, naming the file, for each `.github/workflows/*.yml` whose push trigger fires
+on `main` unless it has a `paths:` filter, a `paths-ignore:` covering `.flow/tasks/**`, or is
+listed by file name in `push_workflows_exempt`. Workflows without a `push` trigger (every reusable)
+are not checked. A file the doctor cannot read is a warning naming it. Fix one by adding the
+store-only globs to its push trigger:
+
+```yaml
+on:
+  push:
+    branches: [main]
+    paths-ignore: [".flow/tasks/**", ".flow/intents/**", ".flow/workstreams/**", "docs/research/**"]
+```
+
+List a workflow in `push_workflows_exempt` only when it must run on a state commit, with a comment
+saying why. Canonical lists `plane-guard.yml`, which audits every direct push to `main`.
+
 ### The PR summary check — `flow-pr-text` (flow-0207)
 
 The protocol requires a PR description to open with a paragraph that says what was wrong and what

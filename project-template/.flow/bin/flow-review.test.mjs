@@ -2973,3 +2973,155 @@ test("flow-0196: commands reports supported CLI capabilities without planning or
   } finally { console.log = original; }
   assert.deepEqual(output.join("\n").split("\n"), ["plan", "verdict", "enforce", "classify", "commands"]);
 });
+
+// ── flow-0223: the store-only PR ──────────────────────────────────────────────────────────
+// Imported here rather than in the block at the top so this section reads on its own.
+const storeOnlyMod = await import("./flow-review.mjs");
+
+test("flow-0223 criterion 1: classifyStoreOnlyPr classifies tasks, intents, workstreams and research", () => {
+  const { classifyStoreOnlyPr } = storeOnlyMod;
+  for (const files of [[".flow/intents/a.md"], ["docs/research/x.md", ".flow/workstreams/w.md"]]) {
+    const c = classifyStoreOnlyPr({ changedFiles: files });
+    assert.equal(c.classified, true, files.join(", "));
+    assert.deepEqual(c.outside, []);
+    assert.equal(c.kind, "store-only");
+  }
+});
+
+test("flow-0223 criterion 1: an empty diff, code, config, helpers and workflows are never store-only — even under [\"**\"]", () => {
+  const { classifyStoreOnlyPr } = storeOnlyMod;
+  for (const paths of [undefined, ["**"]]) {
+    const opts = paths ? { paths } : {};
+    assert.equal(classifyStoreOnlyPr({ changedFiles: [], ...opts }).classified, false, "an empty diff");
+    const mixed = classifyStoreOnlyPr({ changedFiles: [".flow/intents/a.md", "src/a.js"], ...opts });
+    if (!paths) {
+      assert.equal(mixed.classified, false, "a list adding src/a.js");
+      assert.deepEqual(mixed.outside, ["src/a.js"], "the offending path is named");
+    }
+    for (const f of [".flow/config.yml", ".flow/bin/x.mjs", ".github/workflows/x.yml", "CLAUDE.md", "AGENTS.md", ".claude/settings.json"]) {
+      const c = classifyStoreOnlyPr({ changedFiles: [".flow/intents/a.md", f], ...opts });
+      assert.equal(c.classified, false, `${f} with paths ${JSON.stringify(paths ?? "default")}`);
+      assert.deepEqual(c.outside, [f]);
+      assert.equal(classifyStoreOnlyPr({ changedFiles: [f], ...opts }).classified, false, `${f} alone`);
+    }
+  }
+  // Under ["**"] a non-floor path IS store-only: the floor, not the default list, is what holds above.
+  assert.equal(classifyStoreOnlyPr({ changedFiles: ["src/a.js"], paths: ["**"] }).classified, true);
+  // A format file in a store is not an entry, and keeps the full gate.
+  assert.equal(classifyStoreOnlyPr({ changedFiles: [".flow/intents/_TEMPLATE.md"] }).classified, false);
+});
+
+test("flow-0223 criterion 2: no minimal_ci key in base config means the four defaults; a PR-only glob does not classify", () => {
+  const { parseMinimalCi, MINIMAL_CI_DEFAULT_PATHS, runReviewCli } = storeOnlyMod;
+  assert.deepEqual(MINIMAL_CI_DEFAULT_PATHS,
+    [".flow/tasks/**", ".flow/intents/**", ".flow/workstreams/**", "docs/research/**"]);
+  assert.deepEqual(parseMinimalCi("review:\n  model: x\n").paths, MINIMAL_CI_DEFAULT_PATHS);
+  assert.deepEqual(parseMinimalCi("minimal_ci:\n  push_workflows_exempt: []\n").paths, MINIMAL_CI_DEFAULT_PATHS,
+    "a block without `paths` still gets the defaults");
+  assert.deepEqual(parseMinimalCi("minimal_ci:\n  paths: [\"notes/**\"]\n").paths, ["notes/**"]);
+  assert.deepEqual(parseMinimalCi("minimal_ci:\n  paths:\n    - \"notes/**\"  # ours\n    - 'docs/research/**'\n").paths,
+    ["notes/**", "docs/research/**"]);
+
+  // The classify CLI, end to end: base has no minimal_ci; the PR's own config adds `notes/**`.
+  // The PR's copy is never read — only `git show <base>:.flow/config.yml` is.
+  const dir = mkdtempSync(join(tmpdir(), "flow-store-only-base-"));
+  try {
+    const run = (files, baseConfig) => {
+      const out = join(dir, `gh-${Math.random()}`);
+      const shown = [];
+      const code = runReviewCli(["classify"], {
+        env: { GITHUB_OUTPUT: out, BASE_REF: "origin/main" },
+        git: (args) => {
+          if (args[0] === "show") { shown.push(args[1]); return baseConfig; }
+          return files.join("\n") + "\n";
+        },
+      });
+      return { code, out: readFileSync(out, "utf8"), shown };
+    };
+    const base = "review:\n  model: haiku\n";
+    const r1 = run(["notes/plan.md"], base);
+    assert.equal(r1.code, 0);
+    assert.match(r1.out, /^store_only=false$/m, "a glob only the PR's config adds does not exempt the PR");
+    assert.deepEqual(r1.shown, ["origin/main:.flow/config.yml"], "the globs are read from BASE");
+    assert.match(run(["docs/research/r.md"], base).out, /^store_only=true$/m, "the defaults apply");
+    assert.match(run(["notes/plan.md"], "minimal_ci:\n  paths: [\"notes/**\"]\n").out, /^store_only=true$/m,
+      "the same glob in BASE's config does classify");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0223 criterion 3: classify writes store_only= and intent_pr=, and throws on a git failure", () => {
+  const { runReviewCli } = storeOnlyMod;
+  const dir = mkdtempSync(join(tmpdir(), "flow-store-only-cli-"));
+  try {
+    const out = join(dir, "gh");
+    assert.equal(runReviewCli(["classify"], {
+      env: { GITHUB_OUTPUT: out }, git: (a) => (a[0] === "show" ? "" : ".flow/intents/a.md\n"),
+    }), 0);
+    assert.equal(readFileSync(out, "utf8"), "intent_pr=true\nstore_only=true\n", "an intent-only PR is both");
+
+    const out2 = join(dir, "gh2");
+    assert.equal(runReviewCli(["classify"], {
+      env: { GITHUB_OUTPUT: out2 }, git: (a) => (a[0] === "show" ? "" : "docs/research/r.md\n.flow/workstreams/w.md\n"),
+    }), 0);
+    assert.equal(readFileSync(out2, "utf8"), "intent_pr=false\nstore_only=true\n");
+
+    // A git failure on the diff fails the step: no output is written, and the step exits 1.
+    const out3 = join(dir, "gh3");
+    assert.equal(runReviewCli(["classify"], {
+      env: { GITHUB_OUTPUT: out3 }, git: () => { throw new Error("bad revision"); },
+    }), 1);
+    assert.equal(existsSync(out3), false, "nothing is published for an unclassified PR");
+
+    // Base config unreadable AND base ref missing: throws too, rather than guessing defaults.
+    const out4 = join(dir, "gh4");
+    assert.equal(runReviewCli(["classify"], {
+      env: { GITHUB_OUTPUT: out4 },
+      git: (a) => { if (a[0] === "diff") return "docs/research/r.md\n"; throw new Error("unknown revision"); },
+    }), 1);
+    assert.equal(existsSync(out4), false);
+
+    // Base ref exists but carries no .flow/config.yml (the adopting PR): the defaults apply.
+    const out5 = join(dir, "gh5");
+    assert.equal(runReviewCli(["classify"], {
+      env: { GITHUB_OUTPUT: out5 },
+      git: (a) => { if (a[0] === "diff") return "docs/research/r.md\n"; if (a[0] === "show") throw new Error("does not exist"); return "abc\n"; },
+    }), 0);
+    assert.match(readFileSync(out5, "utf8"), /^store_only=true$/m);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("flow-0223: the review plan publishes store_only, skips security for it, and never sets it on an intent PR", () => {
+  const { runPlan, runReviewCli, planSummary, STORE_ONLY_PR_PASS_LINE } = storeOnlyMod;
+  const dir = mkdtempSync(join(tmpdir(), "flow-store-only-plan-"));
+  try {
+    writeFileSync(join(dir, "config.yml"), "review:\n  model: haiku\n");
+    const plan = (files, opts = {}) => runPlan({
+      configPath: join(dir, "config.yml"), outDir: join(dir, "out"), headRef: "claude/x", prTitle: "t",
+      tasksDir: join(dir, "tasks"), ls: () => [],
+      git: (a) => (a.includes("--name-only") ? files.join("\n") + "\n" : "diff --git a/x b/x\n"), ...opts,
+    });
+    const p = plan(["docs/research/r.md", ".flow/workstreams/w.md"]);
+    assert.equal(p.storeOnly, true);
+    assert.equal(p.security.run, false, "the security model is not called on a store-only PR");
+    assert.match(p.security.reason, /STORE-ONLY PR/);
+    assert.ok(p.security.reason.includes(STORE_ONLY_PR_PASS_LINE));
+    assert.match(planSummary(p), /- reviewers: \*\*store-only PR\*\*/);
+
+    const intent = plan([".flow/intents/a.md"]);
+    assert.equal(intent.intentPr, true);
+    assert.equal(intent.storeOnly, false, "an intent PR keeps its own handling");
+    assert.equal(intent.security.run, true, "and its security review, on the .flow/** floor");
+    assert.equal(plan(["docs/research/r.md", "src/a.js"]).storeOnly, false);
+    assert.equal(plan(["docs/research/r.md"], { bootstrap: true }).storeOnly, false, "never under BOOTSTRAP");
+
+    for (const [files, want] of [[["docs/research/r.md"], "true"], [["src/a.js"], "false"], [[".flow/intents/a.md"], "false"]]) {
+      const out = join(dir, `gh-${want}-${files[0].replace(/\W/g, "")}`);
+      assert.equal(runReviewCli(["plan"], {
+        env: { GITHUB_OUTPUT: out, HEAD_REF: "claude/x", PR_TITLE: "t", REVIEW_TASKS_DIR: join(dir, "none") },
+        configPath: join(dir, "config.yml"), outDir: join(dir, "o"),
+        git: (a) => (a.includes("--name-only") ? files.join("\n") : ""),
+      }), 0);
+      assert.match(readFileSync(out, "utf8"), new RegExp(`^store_only=${want}$`, "m"), files.join(","));
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

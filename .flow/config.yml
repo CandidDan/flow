@@ -146,6 +146,15 @@ security:
     - "the `uses:` pins consuming repos inherit — an unpinned or moved third-party action is a supply-chain hole in every adopting repo at once"
     - "dependency footprint: canonical ships as source that others copy, so every dependency added here is a dependency imposed downstream"
 
+# Minimal CI for PRs that change no code (flow-0223). See the template's config.yml for what each key
+# does. The paths are the defaults, written out.
+minimal_ci:
+  paths: [".flow/tasks/**", ".flow/intents/**", ".flow/workstreams/**", "docs/research/**"]
+  push_workflows_exempt:
+    # plane-guard audits every direct push to main, and task-state commits are exactly those
+    # pushes. (flow-dispatch.yml also runs on them, but filters with `paths:`, so needs no entry.)
+    - "plane-guard.yml"
+
 git:
   base_branch: "main"
   branch_prefix: "flow/"

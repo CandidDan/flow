@@ -38,7 +38,9 @@
 //   with malformed frontmatter, a missing `id`/`title`/`created`, or an `id` unlike its filename,
 //   an intent whose `workstream` names no workstream, and a workstream that serves no goal, three
 //   or more goals or an undeclared one, whose `status` is outside the three allowed values, or
-//   whose Dependencies name an unknown workstream (see "workstream store" below).
+//   whose Dependencies name an unknown workstream (see "workstream store" below) · a
+//   `.github/workflows/` file whose push trigger fires on main with no path filter covering
+//   `.flow/tasks/**`, or whose `on:` block cannot be read (flow-0223, see its block below).
 // NOTES (exit 0): a check that was skipped because its precondition wasn't met (e.g. not run
 //   inside a git work tree, so the uncommitted-task guard can't read `git status`).
 //
@@ -351,6 +353,180 @@ export function parseListField(head, key) {
     out.push(yamlScalar(m[1]));
   }
   return out.filter(Boolean);
+}
+
+// ── push-to-main workflows that run on every task-state commit (flow-0223) ──
+// Every claim, hand-off and block is a commit pushed to `main`. A workflow whose `push` trigger can
+// fire on `main` with no path filter therefore runs on every one of them — tanplan's e2e suite ran
+// on 53 of 73 pushes in four days, all task commits. It had been missed three times, and nothing
+// told a repo it had the problem. This does: a WARNING per such workflow, naming the file and the
+// line to add. Never a PROBLEM — the repo may have a reason, which it records by listing the file
+// in `minimal_ci.push_workflows_exempt` in .flow/config.yml.
+//
+// The workflow is read by a deliberately small reader of the `on:` block, not a YAML parser
+// (zero dependencies). A file it cannot read is a WARNING naming the file — never a PROBLEM, and
+// never silence, because a check that skips what it cannot read reports a clean repo it never saw.
+//
+// Fires on main: `push` with no `branches`/`branches-ignore`/`tags`/`tags-ignore` filter, or with
+// `branches` matching main, or `branches-ignore` not matching it. Covered: any `paths` filter (a
+// positive filter is the repo saying what the workflow is for), or `paths-ignore` matching a
+// `.flow/tasks/` file. A workflow with no `push` trigger — every reusable — is not checked.
+export const TASK_COMMIT_PROBE = ".flow/tasks/x-0001-probe.md";
+const PUSH_FILTER_KEYS = new Set(["branches", "branches-ignore", "tags", "tags-ignore", "paths", "paths-ignore"]);
+
+function workflowGlob(glob) {
+  let re = "";
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      if (glob[i + 1] === "*") { re += ".*"; i++; if (glob[i + 1] === "/") i++; }
+      else re += "[^/]*";
+    } else if ("\\^$+?.()|{}[]".includes(c)) re += "\\" + c;
+    else re += c;
+  }
+  return new RegExp("^" + re + "$");
+}
+
+// GitHub's rule for a filter list: patterns apply in order, a `!` pattern un-matches.
+function filterMatches(patterns, value) {
+  let matched = false;
+  for (const p of patterns) {
+    if (p.startsWith("!")) { if (workflowGlob(p.slice(1)).test(value)) matched = false; }
+    else if (workflowGlob(p).test(value)) matched = true;
+  }
+  return matched;
+}
+
+// `[a, "b", 'c']` → ["a", "b", "c"]. Throws on anything it cannot read whole.
+function flowSequence(raw) {
+  const v = stripYamlComment(raw).trim();
+  if (!v.startsWith("[") || !v.endsWith("]")) throw new Error(`cannot read the list ${JSON.stringify(v)}`);
+  const inner = v.slice(1, -1);
+  if (/[[\]{}]/.test(inner.replace(QUOTED_ITEM, ""))) throw new Error(`cannot read the list ${JSON.stringify(v)}`);
+  const items = [];
+  let cur = "", q = null;
+  for (const c of inner) {
+    if (q) { cur += c; if (c === q) q = null; continue; }
+    if (c === '"' || c === "'") { q = c; cur += c; continue; }
+    if (c === ",") { items.push(cur); cur = ""; continue; }
+    cur += c;
+  }
+  if (q) throw new Error(`unterminated quote in ${JSON.stringify(v)}`);
+  items.push(cur);
+  return items.map((s) => yamlScalar(s)).filter((s) => s !== "");
+}
+
+const indentOf = (l) => l.match(/^ */)[0].length;
+const isBlank = (l) => /^\s*(#.*)?$/.test(l);
+
+// The `push` trigger of one workflow file: null when it has none, else an object of its filter
+// lists. Throws when the `on:` block is not something this reader can read whole.
+export function readPushTrigger(text) {
+  const lines = String(text).split(/\r?\n/);
+  if (lines.some((l) => /^\s*\t/.test(l))) throw new Error("a tab in the indentation");
+  const at = lines.findIndex((l) => /^(?:on|"on"|'on'):(?:\s|$)/.test(l));
+  if (at === -1) throw new Error("no top-level `on:` key");
+  const inline = stripYamlComment(lines[at].replace(/^[^:]*:/, "")).trim();
+  if (inline) {
+    const events = inline.startsWith("[") ? flowSequence(inline) : [yamlScalar(inline)];
+    if (events.some((e) => !/^[a-z_]+$/.test(e))) throw new Error(`cannot read \`on: ${inline}\``);
+    return events.includes("push") ? {} : null;
+  }
+  const body = [];
+  for (let i = at + 1; i < lines.length; i++) {
+    if (isBlank(lines[i])) continue;
+    if (indentOf(lines[i]) === 0) break;
+    body.push(lines[i]);
+  }
+  if (!body.length) throw new Error("an empty `on:` block");
+  const eventIndent = indentOf(body[0]);
+  const p = body.findIndex((l) => indentOf(l) === eventIndent && /^\s*push:/.test(l));
+  if (p === -1) return null;
+  const pushInline = stripYamlComment(body[p].replace(/^\s*push:/, "")).trim();
+  const children = [];
+  for (let i = p + 1; i < body.length && indentOf(body[i]) > eventIndent; i++) children.push(body[i]);
+  if (pushInline) {
+    if (pushInline === "{}" || pushInline === "~" || pushInline === "null") return {};
+    throw new Error(`cannot read \`push: ${pushInline}\``);
+  }
+  const filters = {};
+  if (!children.length) return filters;
+  const keyIndent = indentOf(children[0]);
+  for (let i = 0; i < children.length; i++) {
+    const l = children[i];
+    if (indentOf(l) !== keyIndent || /^\s*-\s/.test(l)) continue;   // an item of the key above
+    const m = l.match(/^\s*([A-Za-z_-]+):(.*)$/);
+    if (!m) throw new Error(`cannot read the line ${JSON.stringify(l.trim())} under \`push:\``);
+    const [, key, rest] = m;
+    if (!PUSH_FILTER_KEYS.has(key)) continue;
+    const value = stripYamlComment(rest).trim();
+    if (value) { filters[key] = flowSequence(value); continue; }
+    const items = [];
+    for (let j = i + 1; j < children.length && (indentOf(children[j]) > keyIndent ||
+      (indentOf(children[j]) === keyIndent && /^\s*-\s/.test(children[j]))); j++) {
+      const item = children[j].match(/^\s*-\s+(.*)$/);
+      if (!item) throw new Error(`cannot read the \`${key}\` list`);
+      items.push(yamlScalar(item[1]));
+    }
+    filters[key] = items;
+  }
+  return filters;
+}
+
+export function pushFiresOnMain(push) {
+  if (push.branches) return filterMatches(push.branches, "main");
+  if (push["branches-ignore"]) return !filterMatches(push["branches-ignore"], "main");
+  if (push.tags || push["tags-ignore"]) return false;   // a tags-only trigger ignores branch pushes
+  return true;
+}
+
+export function pushSkipsTaskCommits(push) {
+  if (push.paths) return true;
+  if (push["paths-ignore"]) return filterMatches(push["paths-ignore"], TASK_COMMIT_PROBE);
+  return false;
+}
+
+// `minimal_ci.push_workflows_exempt` from .flow/config.yml: the file names allowed to run on every
+// push to main. Absent → [].
+export function parsePushWorkflowsExempt(configPath) {
+  if (!existsSync(configPath)) return [];
+  const lines = readFileSync(configPath, "utf8").split(/\r?\n/);
+  const start = lines.findIndex((l) => /^minimal_ci:\s*(#.*)?$/.test(l));
+  if (start === -1) return [];
+  const block = [];
+  for (let i = start + 1; i < lines.length && !(/^\S/.test(lines[i]) && !/^#/.test(lines[i])); i++) block.push(lines[i]);
+  const head = block.join("\n");
+  const inline = head.match(/^\s+push_workflows_exempt:(.*)$/m);
+  if (inline && stripYamlComment(inline[1]).trim()) {
+    try { return flowSequence(inline[1]); } catch { return []; }
+  }
+  return parseListField(head, "push_workflows_exempt");
+}
+
+export function pushWorkflowFindings(repoRoot, exempt = []) {
+  const warnings = [];
+  const dir = join(repoRoot, ".github", "workflows");
+  let names;
+  try { names = readdirSync(dir).filter((n) => /\.ya?ml$/.test(n)).sort(); } catch { return warnings; }
+  const skip = new Set(exempt);
+  for (const name of names) {
+    if (skip.has(name)) continue;
+    const rel = `.github/workflows/${name}`;
+    let push;
+    try {
+      push = readPushTrigger(readFileSync(join(dir, name), "utf8"));
+    } catch (e) {
+      warnings.push(`${rel}: flow-doctor could not read its \`on:\` block (${e.message}) — check it by hand: ` +
+        "a workflow whose push trigger fires on main with no path filter runs on every task-state commit");
+      continue;
+    }
+    if (!push || !pushFiresOnMain(push) || pushSkipsTaskCommits(push)) continue;
+    warnings.push(`${rel}: runs on every push to main, so on every task-state commit — add ` +
+      "`paths-ignore: [\".flow/tasks/**\"]` (or a `paths:` filter) to its push trigger, or, if it " +
+      "must run on a state commit, list it in `minimal_ci.push_workflows_exempt` in .flow/config.yml " +
+      "with the reason");
+  }
+  return warnings;
 }
 
 // ── blocked_by (flow-0040) ──
@@ -1383,6 +1559,9 @@ export function runDoctor({ flowDir, canonicalVersion, gitStatus }) {
     problems.push(...w.problems);
     warnings.push(...w.warnings);
   }
+
+  // flow-0223: push-to-main workflows that would run on every task-state commit. Warnings only.
+  warnings.push(...pushWorkflowFindings(repoRoot, parsePushWorkflowsExempt(configPath)));
 
   // Version drift: Flow infra is authored in canonical and repos adopt it, so a repo can fall
   // behind. When the caller supplies canonical's current version (CI passes FLOW_CANONICAL_VERSION,

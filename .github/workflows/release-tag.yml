@@ -33,6 +33,10 @@ name: release-tag
 on:
   push:
     branches: [main]
+    # flow-0223: a push that changed only tasks, intents, workstreams or research changes no code
+    # an adopter runs, so the edge tag stays on the last commit that did. A Flow state commit is
+    # never a release target (PROTOCOL.md). The globs are `minimal_ci.paths`.
+    paths-ignore: [".flow/tasks/**", ".flow/intents/**", ".flow/workstreams/**", "docs/research/**"]
   workflow_dispatch:
 
 permissions:
