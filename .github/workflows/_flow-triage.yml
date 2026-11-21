@@ -93,6 +93,8 @@ jobs:
       # gate's helpers": rewording them for this caller would buy nothing and cost the check.
       # `flow-state.mjs` is listed because the allocator imports it, and a sparse checkout that
       # silently lost it would fail at import time, inside the agent, where nothing reports it.
+      # `intake-trust.mjs` is run by the `lanes` step below, and `intake-config.mjs` is the module
+      # it imports to read `intake.trusted_labelers` (flow-0201).
       #
       # Deliberately NOT guarded by the `inbox` step's `if:`, unlike the agent below: this is a
       # shallow sparse fetch, and running it up front makes a broken fetch fail the run loudly
@@ -146,7 +148,7 @@ jobs:
           git -C "$dir" fetch -q --depth 1 origin "$ref"
           git -C "$dir" checkout -q FETCH_HEAD
           bin="$dir/project-template/.flow/bin"
-          for helper in allocate-task-id.mjs flow-state.mjs; do
+          for helper in allocate-task-id.mjs flow-state.mjs intake-trust.mjs intake-config.mjs; do
             if [ -f "$bin/$helper" ]; then continue; fi
             echo "::error::$repo@$ref carries no project-template/.flow/bin/$helper. That is"
             echo "::error::canonical's own tree at the commit this workflow was resolved from, so"
@@ -473,6 +475,55 @@ jobs:
           FLOW_TRIAGE_CONTENT
           node "$RUNNER_TEMP/flow-triage-content.mjs" "$raw" "$FLOW_TRIAGE_CONTENT_DIR"
 
+      # ── Who applied the lane labels (ADR-0010 §2, flow-0201) ─────────────────────────────
+      # The steps above decide whose ISSUES and whose COMMENTS the agent reads. This one decides
+      # which LABELS it may act on. `approved` and `auto-ok` are a person's decision, and
+      # `flow:trusted` is an intake App vouching for a submitter — but a label on its own says
+      # nothing about who put it there. Once an intake App can create issues it can label them
+      # too, and an App-applied `approved` would read as the maintainer's approval.
+      #
+      # So each admitted issue's event history is fetched here, and `intake-trust.mjs` (canonical's
+      # copy, from $FLOW_BIN) writes, per issue, which lanes a permitted actor really applied:
+      # `approved`/`auto-ok` only from a `User` (never a `Bot`) who holds write, maintain or admin
+      # NOW; `flow:trusted` only from a login in `intake.trusted_labelers` in this repo's
+      # `.flow/config.yml` NOW. The agent is told to use that file, not the raw labels. Every
+      # label that is present but not honoured prints one `flow-triage: label-not-honoured` line.
+      #
+      # Same rules as the steps above: issue numbers arrive through `env:`, each is re-checked as
+      # digits before it builds a URL, and nothing issue-authored is interpolated into a script.
+      # The events endpoint is paginated, hence `--paginate --slurp`; the helper flattens pages.
+      - id: lanes
+        name: Verify who applied each lane label (approved, auto-ok, flow:trusted)
+        if: ${{ steps.inbox.outputs.numbers != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FLOW_TRIAGE_NUMBERS: ${{ steps.inbox.outputs.numbers }}
+          FLOW_TRIAGE_LANES: ${{ runner.temp }}/flow-triage-lanes.json
+        run: |
+          set -euo pipefail
+          # `issue-<n>.json` was written here by the `content` step; the events join it.
+          raw="$RUNNER_TEMP/flow-triage-raw"
+          mkdir -p "$raw"
+          IFS=',' read -r -a nums <<< "$FLOW_TRIAGE_NUMBERS"
+          for n in "${nums[@]}"; do
+            case "$n" in
+              ''|*[!0-9]*)
+                echo "flow-triage: refusing a non-numeric issue reference: '$n'" >&2
+                exit 1
+                ;;
+            esac
+            gh api --method GET "repos/$GITHUB_REPOSITORY/issues/$n/events" \
+              -F per_page=100 --paginate --slurp > "$raw/events-$n.json"
+          done
+          # The permission lookup (`collaborators/<login>/permission`) happens inside the helper,
+          # once per login, and any failure there reads as "no write".
+          node "$FLOW_BIN"/intake-trust.mjs \
+            --numbers "$FLOW_TRIAGE_NUMBERS" \
+            --raw-dir "$raw" \
+            --config "$GITHUB_WORKSPACE/.flow/config.yml" \
+            --repo "$GITHUB_REPOSITORY" \
+            --out "$FLOW_TRIAGE_LANES"
+
       - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         id: claude
         # Nothing admitted means nothing to sweep. Skipping keeps the agent — and its turn
@@ -507,21 +558,31 @@ jobs:
                same trust check the issue itself passed. Read those files for issue content.
                Comments from untrusted authors were withheld deliberately; the file states how
                many, and the run log names them.
-            2. For each remaining issue WITHOUT the `auto-ok` label: draft a complete ready-task
+            1b. Which LANE each issue is in has been VERIFIED for you, in the file
+               ${{ runner.temp }}/flow-triage-lanes.json: for each issue number, `approved`,
+               `auto-ok` and `flow:trusted` are true only when the issue's event history shows a
+               permitted actor applied that label — a person with write access for `approved`
+               and `auto-ok`, a configured intake App for `flow:trusted`. Use the verified lanes,
+               not the raw labels: the labels in the content files say what is on the issue, not
+               who put it there. An issue whose `approved` or `auto-ok` is false in that file is
+               treated as if the label were absent, whatever its labels say. Do not act on
+               `flow:trusted` in this sweep.
+            2. For each remaining issue WITHOUT a verified `auto-ok` lane (step 1b): draft a complete ready-task
                spec in the task template's shape (context, scope with explicit boundaries,
                observable acceptance criteria, touches globs). That template is at
                .flow/tasks/_TEMPLATE.md in a scaffolded repo and at
                project-template/.flow/tasks/_TEMPLATE.md in canonical — read whichever exists.
                Post the spec as a comment on the issue, then add the `proposed` label. Do NOT
                create a task file.
-            3. For each in-scope issue labelled `approved` (the human accepted a proposal) or
-               `auto-ok` (pre-authorised lane): create the ready task file — and create it ONLY
-               by running the allocator, as set out in 3a-3d. The allocator is
-               allocate-task-id.mjs, and the copy to run is canonical's own, materialised for
-               this job at this workflow's commit: the directory is in the environment as
-               $FLOW_BIN, so the command names it as "$FLOW_BIN"/allocate-task-id.mjs. Do not
-               run a copy out of this repository's checkout — it may be stale, or absent
-               entirely in a repo that has never run flow-sync.
+            3. For each in-scope issue whose verified lane (step 1b) is `approved` (the human
+               accepted a proposal) or `auto-ok` (pre-authorised lane): create the ready task
+               file — and create it ONLY by running the allocator, as set out in 3a-3d. The
+               allocator is allocate-task-id.mjs, and the copy to run is canonical's own,
+               materialised for this job at this workflow's commit: the directory is in the
+               environment as $FLOW_BIN, so the command names it as
+               "$FLOW_BIN"/allocate-task-id.mjs. Do not run a copy out of this repository's
+               checkout — it may be stale, or absent entirely in a repo that has never run
+               flow-sync.
             3a. Write the task body to a scratch file OUTSIDE the repository, at
                ${{ runner.temp }}/flow-triage-task.md, in the task template's shape (the same
                template step 2 uses). Set `issue:` to the issue URL and `status:` to ready.

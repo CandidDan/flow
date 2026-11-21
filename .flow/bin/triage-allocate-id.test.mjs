@@ -50,6 +50,8 @@ const gates = readFileSync(GATES, "utf8");
 // checkout the workflow performs, which is why the fetch step names both.
 const HELPER = "allocate-task-id.mjs";
 const HELPER_DEP = "flow-state.mjs";
+// The lane-label verifier the `lanes` step runs (flow-0201), and the config reader it imports.
+const TRUST_HELPERS = ["intake-trust.mjs", "intake-config.mjs"];
 
 // The invocation form `_flow-gates.yml` already uses for a materialised helper. The prompt must
 // use the SAME form — that is what "resolve it the way the other helper calls do" means, and it
@@ -250,6 +252,11 @@ test("the triage workflow materialises canonical at this workflow's own commit",
     "discovered inside the agent, where nothing reports a failure");
   assert.match(step, new RegExp(`for helper in .*\\b${HELPER_DEP.replace(".", "\\.")}\\b`),
     `${HELPER_DEP} is imported by the allocator; without it the run fails at import time`);
+  // The whole line, pinned: a helper dropped from it is discovered inside a run, not here.
+  assert.match(step,
+    /^ *for helper in allocate-task-id\.mjs flow-state\.mjs intake-trust\.mjs intake-config\.mjs; do$/m,
+    "the presence check must name the allocator, its dependency, the lane verifier the `lanes` " +
+    "step runs (intake-trust.mjs) and the config reader that verifier imports (intake-config.mjs)");
 });
 
 test("the fetch step is the gates workflow's, differing only in which helpers it checks for", () => {
@@ -284,7 +291,7 @@ test("the flow_ref input exists and defaults to empty, never to a branch", () =>
 });
 
 test("the helpers the fetch insists on are really in canonical's template tree", () => {
-  for (const helper of [HELPER, HELPER_DEP]) {
+  for (const helper of [HELPER, HELPER_DEP, ...TRUST_HELPERS]) {
     assert.ok(existsSync(join(TEMPLATE_BIN, helper)),
       `project-template/.flow/bin/${helper} is what the fetch sparse-checks out. Missing here, ` +
       "every triage run in the fleet fails its materialise step.");
