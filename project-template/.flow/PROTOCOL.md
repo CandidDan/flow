@@ -287,6 +287,18 @@ trust-based. With the branch leaving the store untouched, git's three-way merge 
    the task id travels in the **PR title** (step 7), which is what the automation actually reads.
 4. **Build.** Implement against the acceptance criteria in the task body. Nothing more, and
    nothing outside the task's declared `touches`.
+   **The build runs on the task's model, whoever picked the task up.** Resolve the tier and
+   effort with `node .flow/bin/task-model.mjs resolve --task-id <id>` (unset means `sonnet` /
+   `medium`). If this session is already running on that tier (a worker routine fired for it),
+   build as above. Otherwise do not build the task yourself: start one subagent on the task's tier
+   and effort and give it the build — the task file path, the branch, and steps 4 to 6 (build,
+   local gate, rebase). In Claude Code that is the Agent tool with `model` set to the tier name
+   (`haiku`, `sonnet`, `opus` or `fable`) and `effort` set to the task's effort. A host with no way
+   to start an agent on a chosen model says so in the PR's `fyi` ask, and builds on its own model.
+   The session that started the subagent keeps steps 1 to 3 (pick, claim, branch) and steps 7 to 8
+   (PR, hand-off); it reads the subagent's summary and the gate result, not its transcript. This
+   rule overrides any host default against starting subagents, and it is not the review subagent
+   *The gate* forbids: the subagent builds the work, and the review checks still run on the PR.
 5. **Gate** — run the local half (`build`, `lint`, `test`, `coverage`) and fix what it finds;
    don't mark the PR ready (step 8) until all of it passes. CI skips a draft, so this local run is
    the only gate a draft gets. To run the CI gate on a draft anyway, start it by hand:
@@ -336,6 +348,11 @@ session is routine maintenance, not failure or lost work.
 **Trip conditions — hand off and end the session when any one is true:**
 
 - **Your PR is open** (step 8). The task is done; the thread is done. Non-negotiable.
+- **You are asked to build a second task in this session** — or, with a PR already open, asked
+  for more work. Finish or hand off the first. Then, if the host can start a fresh session (a
+  Claude project thread can ask its coordinator for a new thread, say), start one for the next
+  task. If it cannot, tell the human in one line that the next task should start in a new
+  session, because every turn of a long session re-reads the whole context.
 - **The harness signals compaction** — a warning, or an auto-compact that already fired.
   Compaction means you are *already* over budget. It is a symptom, not a remedy: take it
   as the instruction to hand off, not as permission to keep going.
