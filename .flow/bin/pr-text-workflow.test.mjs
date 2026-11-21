@@ -71,6 +71,8 @@ test("a PR with no task id is skipped: the rules step resolves the id and the la
   assert.equal(rules.env.HEAD_REF, "${{ github.head_ref }}");
   assert.match(String(judgeStep().if), /steps\.rules\.outputs\.judge == 'true'/);
   assert.match(String(enforceStep().if), /steps\.rules\.outputs\.skip != 'true'/);
+  // flow-0229: a red rules step must not reach enforce, which would print a PASS over a failed run.
+  assert.match(String(enforceStep().if), /steps\.rules\.outcome == 'success'/);
 });
 
 test("the judge runs only after the mechanical rules pass, with FLOW_AI, and not on a fork PR", { skip }, () => {
