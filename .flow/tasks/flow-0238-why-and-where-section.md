@@ -1,7 +1,7 @@
 ---
 id: "flow-0238"
 title: "Every task says why and where it came from"
-status: "proposed"
+status: "ready"
 priority: 3
 project: "flow"
 owner: ""
@@ -15,9 +15,9 @@ serves: ["G11"]
 blocked_reason: ""
 cancelled_reason: ""
 blocked_by: []
-accepted_by: ""
-accepted_at: ""
-accepted_via: ""
+accepted_by: "CandidDan"
+accepted_at: "2026-11-23T21:26:15Z"
+accepted_via: "chat"
 touches:
   - "project-template/.flow/tasks/_TEMPLATE.md"
   - "project-template/.claude/skills/task-writer/SKILL.md"
