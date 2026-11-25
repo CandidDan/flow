@@ -1,7 +1,7 @@
 ---
 id: "flow-0233"
 title: "Canonical's root CLAUDE.md points at the real protocol file"
-status: "proposed"
+status: "ready"
 priority: 3
 project: "flow"
 owner: ""
@@ -15,9 +15,9 @@ serves: ["maintenance"]
 blocked_reason: ""
 cancelled_reason: ""
 blocked_by: []
-accepted_by: ""
-accepted_at: ""
-accepted_via: ""
+accepted_by: "CandidDan"
+accepted_at: "2026-11-25T06:38:27Z"
+accepted_via: "inflight"
 touches:
   - "CLAUDE.md"
   - ".flow/bin/protocol-docs.test.mjs"
@@ -29,6 +29,7 @@ effort: "low"
 model_reason: "A small wording fix with the exact target file named and an existing test to update; no design decision."
 notes:
   - "2026-11-19: Written from the Claude Code best-practices review (reports/claude-code-best-practices-vs-flow.md, item 2 and 8)."
+  - "2026-11-25 (CandidDan via inflight): accepted"
 asks:
   - "fyi: The fix names the file in prose and does not import it. Importing project-template/.flow/PROTOCOL.md (about 39 KB) would add roughly 10k tokens to every canonical session and would need claude_md_max raised well above 12000. Raise that as its own task if you prefer an import."
 ---
