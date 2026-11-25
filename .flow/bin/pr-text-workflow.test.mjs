@@ -93,6 +93,10 @@ test("the judge gets one turn and no tools, and never bypasses permissions", { s
   assert.equal(j["continue-on-error"], true, "the enforce step decides, never the action's exit");
 });
 
+test("the judge accepts a bot actor, so a PR opened by a bot is judged and not refused", { skip }, () => {
+  assert.equal(judgeStep().with.allowed_bots, "*");
+});
+
 test("the judge's prompt carries only the title and the TL;DR, fenced as data", { skip }, () => {
   const prompt = String(judgeStep().with.prompt);
   const exprs = prompt.match(/\$\{\{[^}]*\}\}/g) ?? [];

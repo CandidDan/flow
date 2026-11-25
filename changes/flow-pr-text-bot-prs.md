@@ -1,0 +1,3 @@
+- **The `flow-pr-text` check no longer fails on PRs opened by a bot** (`.github/workflows/_flow-pr-text.yml`). **No caller action**: callers reference the reusable workflow, so the fix arrives with the next pinned release.
+
+  A PR opened by a bot such as Cursor made the bot the run's actor, and `claude-code-action` refused it ("Workflow initiated by non-human actor"), so the check failed before judging anything. The judge step now sets `allowed_bots: "*"`. The judge has one turn and no tools, so this grants nothing; `_flow-review.yml` already does the same.

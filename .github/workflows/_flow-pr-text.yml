@@ -176,6 +176,11 @@ jobs:
         if: ${{ steps.rules.outputs.judge == 'true' }}
         continue-on-error: true          # the enforce step decides; never this action's exit
         with:
+          # A PR opened by a bot (Cursor, Dependabot, another agent) makes that bot the run's
+          # actor, and the action refuses a bot actor unless it is listed ("Workflow initiated by
+          # non-human actor"). The judge has no tools and one turn, so who triggered it grants
+          # nothing; "*" is the same choice _flow-review.yml makes and is not an author fence.
+          allowed_bots: "*"
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
           # One turn and no tools: the judge reads the text below and answers. The model comes from
