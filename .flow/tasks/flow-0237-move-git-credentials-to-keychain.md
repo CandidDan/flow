@@ -23,6 +23,7 @@ labels: [human-only, security]
 notes:
   - "2026-11-19: Written from the Claude Code best-practices review (reports/claude-code-best-practices-vs-flow.md, item 10). The file was never opened or printed by any session while writing this."
   - "2026-11-25 (CandidDan via inflight): accepted"
+  - "2026-11-25: worker picked up, set blocked at once per Scope (human-only). Credentials file not opened."
   - "2026-11-25: worker set blocked, human-only: needs Dan's Mac. Credentials file not opened."
 asks:
   - "fyi: This is a task only Dan can do, on his Mac. No code changes and no PR, so Flow cannot move it to done. After doing it, cancel it with cancelled_reason 'Done by hand on <date>'. Accept it only when you are about to do it, so no worker picks it up first."
