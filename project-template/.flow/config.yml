@@ -212,6 +212,24 @@ review:
     - "package.json"                    # dependency changes, whatever the lockfile stack
     - "package-lock.json"
 
+# Minimal CI for PRs that change no code (flow-0223). Read from the BASE branch's copy of this file,
+# so a PR cannot add the glob that exempts it.
+#
+# `paths` — a PR whose every changed file matches one of these globs is a STORE-ONLY PR: the gate
+#   runs only the store-guard and flow-doctor (no install, build, lint, test or coverage), and qa,
+#   code-review and security pass it with a fixed line and call no model. Omit the key for the four
+#   defaults below. Add your own research folder if it is not docs/research/. A file under `.flow/`
+#   (other than the task, intent and workstream stores), `.github/`, `.claude/`, CLAUDE.md or
+#   AGENTS.md always gets the full gate, whatever this list says.
+# `push_workflows_exempt` — workflow FILE NAMES (e.g. "plane-guard.yml") allowed to run on every
+#   push to main. Every task claim is a push to main, so flow-doctor warns about any other workflow
+#   whose push trigger can fire on main without a `paths:` filter or a `paths-ignore:` that covers
+#   `.flow/tasks/**`. List one here only when it must run on a task-state commit, with a comment
+#   saying why.
+minimal_ci:
+  paths: [".flow/tasks/**", ".flow/intents/**", ".flow/workstreams/**", "docs/research/**"]
+  push_workflows_exempt: []
+
 # The routine dispatcher (flow-0182, `flow-dispatch.yml`). It fires the worker routine for the
 # next `ready` task, one task a run, and stops while this many tasks are already `in_progress`.
 # Each claim it causes is a push that starts the next run, so this number is how many workers run

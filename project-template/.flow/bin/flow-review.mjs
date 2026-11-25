@@ -670,6 +670,105 @@ export function intentPrText({ files = [] } = {}) {
   ].join("\n") + "\n";
 }
 
+// ── a STORE-ONLY PR (flow-0223) ───────────────────────────────────────────────────────────
+// The intent-only PR above, widened: a PR whose every changed path is a task, an intent, a
+// workstream or a research note has no code to install, build, lint, test or cover, and nothing
+// for qa or code-review to judge. Dan, 2026-11-13: "tasks, intents, research should have minimal
+// ci". What such a PR does need is what flow-doctor checks (frontmatter, required fields, unique
+// ids) and the store-guard (a PR must never edit `.flow/tasks/`). That is all the gate runs for one.
+//
+// THE PATHS ARE CONFIG, READ FROM BASE. `minimal_ci.paths` in the BASE branch's `.flow/config.yml`
+// lists them; absent, the four defaults below apply. Read from base for the same reason
+// `review.security_paths` is (flow-0079): a PR must not be able to add the glob that exempts it.
+//
+// THE FLOOR STILL HOLDS. A path on `SECURITY_FLOOR_PATHS` decides what the gates do, so it is
+// never store-only, whatever a repo writes in `minimal_ci.paths` — `["**"]` included. The one
+// carve-out is the three stores themselves, which sit under `.flow/**` and are the point of this.
+// `_`-prefixed files in them are formats (`_TEMPLATE.md`), not entries, and are never store-only:
+// an edit to a format changes every file written to it, the same exclusion `classifyIntentPr` makes.
+//
+// PURE and FAIL-CLOSED, like every classifier in this file: an empty diff is not store-only, and
+// any path outside the list keeps the full gate. An intent-only PR is also a store-only PR; the
+// review plan keeps the intent kind's own handling (its advisory reviewer) for it, see `runPlan`.
+export const MINIMAL_CI_DEFAULT_PATHS = Object.freeze([
+  ".flow/tasks/**",
+  ".flow/intents/**",
+  ".flow/workstreams/**",
+  "docs/research/**",
+]);
+export const STORE_ONLY_STORES = Object.freeze([".flow/tasks/**", ".flow/intents/**", ".flow/workstreams/**"]);
+export const STORE_ONLY_EXCLUDED = Object.freeze([".flow/tasks/_*", ".flow/intents/_*", ".flow/workstreams/_*"]);
+// Pinned here AND in `_flow-review.yml`'s qa, code-review and security jobs;
+// `flow-review-workflow.test.mjs` holds the copies in step, as it does for the intent line.
+export const STORE_ONLY_PR_PASS_LINE =
+  "store-only PR: tasks, intents, workstreams or research only; flow-doctor and the store-guard gate it";
+
+// The text of one top-level block (`key:` at column 0 up to the next column-0 key), or null.
+function topLevelBlock(src, key) {
+  const lines = String(src ?? "").split(/\r?\n/);
+  const start = lines.findIndex((l) => new RegExp(`^${key}:\\s*(#.*)?$`).test(l));
+  if (start === -1) return null;
+  const out = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^\S/.test(lines[i]) && !/^#/.test(lines[i])) break;
+    out.push(lines[i]);
+  }
+  return out.join("\n");
+}
+
+// `minimal_ci:` as the gate needs it. `paths` absent → the defaults; present, even empty → as
+// written (an empty list switches store-only PRs off). `configured` says which happened.
+export function parseMinimalCi(src) {
+  const block = topLevelBlock(src, "minimal_ci");
+  const has = (key) => block !== null && new RegExp(`^\\s+${key}:`, "m").test(block);
+  return {
+    paths: has("paths") ? listAt(block, "paths") : [...MINIMAL_CI_DEFAULT_PATHS],
+    pushWorkflowsExempt: has("push_workflows_exempt") ? listAt(block, "push_workflows_exempt") : [],
+    configured: has("paths"),
+  };
+}
+
+export function classifyStoreOnlyPr({ changedFiles = [], paths = MINIMAL_CI_DEFAULT_PATHS } = {}) {
+  const files = changedFiles.filter(Boolean);
+  const inside = paths.map(globToRegExp);
+  const stores = STORE_ONLY_STORES.map(globToRegExp);
+  const floor = SECURITY_FLOOR_PATHS.map(globToRegExp);
+  const excluded = STORE_ONLY_EXCLUDED.map(globToRegExp);
+  const isStoreOnly = (f) =>
+    inside.some((r) => r.test(f)) &&
+    !excluded.some((r) => r.test(f)) &&
+    (!floor.some((r) => r.test(f)) || stores.some((r) => r.test(f)));
+  const outside = files.filter((f) => !isStoreOnly(f));
+  return {
+    kind: "store-only",
+    paths: [...paths],
+    files,
+    outside,
+    // `[].every(…)` is vacuously true, and an empty diff is not store-only.
+    classified: files.length > 0 && outside.length === 0,
+  };
+}
+
+// The gate's decision line, in the guards' `<name>: decision=` shape.
+export function storeOnlyDecisionLine(c) {
+  return c.classified
+    ? `store-only: decision=minimal files=${c.files.length}`
+    : `store-only: decision=full files=${c.files.length} outside=${c.outside.length}`;
+}
+
+// The BASE branch's config, for `classify` (which runs in the PR's checkout). A base with no
+// `.flow/config.yml` is a repo adopting Flow in this very PR: it gets the defaults, which is the
+// same answer an adopted repo with no `minimal_ci` key gets. Any other git failure — the base ref
+// itself missing — throws, so the step fails rather than guessing.
+function baseConfigSource(git, baseRef) {
+  try {
+    return git(["show", `${baseRef}:.flow/config.yml`]);
+  } catch {
+    git(["rev-parse", "--verify", "--quiet", `${baseRef}^{commit}`]);   // throws if base is bad
+    return "";
+  }
+}
+
 // ── the qa verdict on a PR with NO TASK (flow-0199) ───────────────────────────────────────
 // `NO TASK FILE RESOLVED` used to end with "this is a finding" and nothing else, and the qa prompt
 // said only "say so plainly". Neither said PASS or FAIL, so the model chose: PR #277 (VISION.md
@@ -1701,6 +1800,9 @@ export function runReviewCli(argv, {
         // reviewer runs only on it. Exactly "true" or "false", never empty, so a workflow
         // comparing against 'true' can only fall back to the full review.
         `intent_pr=${Boolean(plan.intentPr)}`,
+        // flow-0223: qa, code-review and security write STORE_ONLY_PR_PASS_LINE and call no model
+        // on `true`. Never `true` on an intent PR, which keeps its own handling.
+        `store_only=${Boolean(plan.storeOnly)}`,
       ].join("\n"));
       const summary = planSummary(plan);
       emit(env.GITHUB_STEP_SUMMARY, summary);
@@ -1764,11 +1866,19 @@ export function runReviewCli(argv, {
       // destination ONLY, which reads as intent-only. Off, a rename is its source AND its
       // destination, and the source keeps the PR on the full gate. Same flag in `runPlan`.
       const run = gitFor ?? ((args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 1024 * 1024 * 64 }));
-      const changedFiles = run(["diff", "--name-only", "--no-renames", `${env.BASE_REF || "origin/main"}...HEAD`])
+      const baseRef = env.BASE_REF || "origin/main";
+      const changedFiles = run(["diff", "--name-only", "--no-renames", `${baseRef}...HEAD`])
         .split("\n").map((s) => s.trim()).filter(Boolean);
       const intent = classifyIntentPr({ changedFiles });
-      emit(env.GITHUB_OUTPUT, `intent_pr=${intent.classified}`);
+      // flow-0223. The globs come from BASE's config, never the PR's checkout: a PR must not be
+      // able to add the glob that exempts it from the gate.
+      const { paths } = parseMinimalCi(baseConfigSource(run, baseRef));
+      const storeOnly = classifyStoreOnlyPr({ changedFiles, paths });
+      // Exactly "true" or "false", never empty, so a workflow comparing against 'true' can only
+      // fall back to the full gate. An intent-only PR is both.
+      emit(env.GITHUB_OUTPUT, [`intent_pr=${intent.classified}`, `store_only=${storeOnly.classified}`].join("\n"));
       console.log(intentDecisionLine(intent));
+      console.log(storeOnlyDecisionLine(storeOnly));
       return 0;
     }
 
@@ -1804,7 +1914,8 @@ export function runPlan({
     throw new ReviewError(`${configPath} not found — the review gate reads its model and its ` +
       `security triggers from the repo's own config, and will not invent them`);
   }
-  const cfg = parseReviewConfig(read(configPath));
+  const configSrc = read(configPath);
+  const cfg = parseReviewConfig(configSrc);
   // `configPath` is BASE's copy of config.yml — `_flow-review.yml` materialises it outside the
   // working tree and points FLOW_CONFIG at it (flow-0079). So `review.max_diff_bytes` is read
   // from base for the same reason `security_paths` is: a PR must not be able to raise the limit
@@ -1815,7 +1926,7 @@ export function runPlan({
   // from the security triggers. See the `classify` command for the case.
   const changedFiles = git(["diff", "--name-only", "--no-renames", `${baseRef}...HEAD`])
     .split("\n").map((s) => s.trim()).filter(Boolean);
-  const security = securityDecision({ changedFiles, securityPaths: cfg.securityPaths, bootstrap });
+  let security = securityDecision({ changedFiles, securityPaths: cfg.securityPaths, bootstrap });
   const diff = boundDiff(git(["diff", `${baseRef}...HEAD`]), { maxBytes: limit.bytes });
   // flow-0089. The guard reads the PR's own tree through the SAME injected `git` the diffs use,
   // so it follows `REVIEW_REPO_DIR` to the PR checkout rather than to the base worktree the
@@ -1847,6 +1958,24 @@ export function runPlan({
   const intent = classifyIntentPr({ changedFiles });
   const intentPr = !classified && !bootstrap && intent.classified;
   if (intentPr) prKind = intent;
+  // flow-0223. A store-only PR that is not an intent PR: all three reviewers write the fixed line
+  // and call no model. The globs are `minimal_ci.paths` from `configPath`, which is BASE's copy.
+  // Never under BOOTSTRAP or for a PR a branch prefix already claimed, and never for an intent PR,
+  // whose advisory reviewer and security review stay exactly as flow-0178 left them.
+  const storeOnlyKind = classifyStoreOnlyPr({ changedFiles, paths: parseMinimalCi(configSrc).paths });
+  const storeOnly = !classified && !bootstrap && !intentPr && storeOnlyKind.classified;
+  if (storeOnly) {
+    security = {
+      ...security,
+      run: false,
+      storeOnly: true,
+      reason:
+        `STORE-ONLY PR — all ${changedFiles.length} changed file(s) match \`minimal_ci.paths\` in ` +
+        `the base branch's .flow/config.yml (${storeOnlyKind.paths.join(", ")}). There is no code ` +
+        `to review: qa, code-review and security pass with exactly "${STORE_ONLY_PR_PASS_LINE}", ` +
+        `and flow-doctor and the store-guard gate the PR.`,
+    };
+  }
   const task = taskContext({
     headRef, prTitle, tasksDir, ls, read, prKind, changedFiles,
     ...(callerSupplied === undefined ? {} : { callerSupplied }),
@@ -1857,7 +1986,7 @@ export function runPlan({
   writeFileSync(join(outDir, "diff.patch"), diff.text);
   writeFileSync(join(outDir, "task.md"), task.text);
 
-  return { cfg, changedFiles, security, diff, task, prKind, limit, outDir, bootstrap: Boolean(bootstrap), intentPr };
+  return { cfg, changedFiles, security, diff, task, prKind, limit, outDir, bootstrap: Boolean(bootstrap), intentPr, storeOnly };
 }
 
 const LIMIT_SOURCE = {
@@ -1869,7 +1998,11 @@ const LIMIT_SOURCE = {
 // flow-0178 (G9): which reviewers this plan runs, and at what effort, in one line a human reads
 // before the verdicts. An intent-only PR runs a different set, and the summary is where that has
 // to be visible, or a PR with no model-written qa comment reads as a reviewer that broke.
-export function reviewersLine({ cfg, security, intentPr = false }) {
+export function reviewersLine({ cfg, security, intentPr = false, storeOnly = false }) {
+  if (storeOnly) {
+    return "- reviewers: **store-only PR** — qa, code-review and security PASS with the fixed line " +
+      "and call no model";
+  }
   const sec = `security ${security.run ? "RUNNING" : "SKIPPED"} (unchanged by PR kind)`;
   if (intentPr) {
     return `- reviewers: **intent PR** — qa and code-review PASS with the fixed line and call no ` +
@@ -1884,6 +2017,8 @@ export function planSummary({
   cfg, changedFiles, security, diff, task, bootstrap = false,
   // flow-0178. Defaulted, like `prKind`, so an older plan object renders as the full review.
   intentPr = false,
+  // flow-0223. Defaulted for the same reason.
+  storeOnly = false,
   // flow-0115. Defaulted for the same reason `limit` is: a caller holding an older plan object
   // still renders, and simply reports no provenance verdict — which is the truth for one.
   prKind = null,
@@ -1908,7 +2043,7 @@ export function planSummary({
     // human unable to tell whether 300000 was anyone's decision.
     `- diff limit: ${limit.bytes} bytes — ${LIMIT_SOURCE[limit.source] ?? limit.source}`,
     `- security review: **${security.run ? "RUNNING" : "SKIPPED"}** — ${security.reason}`,
-    reviewersLine({ cfg, security, intentPr }),
+    reviewersLine({ cfg, security, intentPr, storeOnly }),
     task.found
       ? `- task under review: \`${task.id}\` (${task.reason}) — \`${task.path}\``
       // flow-0089: "none resolved" and "none, by design" are different facts, and the summary is
