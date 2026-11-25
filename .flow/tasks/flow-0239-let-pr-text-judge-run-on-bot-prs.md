@@ -1,12 +1,12 @@
 ---
 id: "flow-0239"
 title: "Let the flow-pr-text judge run on bot-opened PRs"
-status: "ready"
+status: "in_progress"
 priority: 3
 project: "flow"
-owner: ""
+owner: "session_01NfrcU9WiHzDSN4VMk9GWMF"
 created: "2026-11-25"
-started: ""
+started: "2026-11-25T03:38:50Z"
 branch: ""
 pr: ""
 issue: ""
