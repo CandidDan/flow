@@ -1,7 +1,7 @@
 ---
 id: "flow-0231"
 title: "Run Flow builds from one dispatcher on the ci-3 server, so a new repo needs no routine or secret setup"
-status: "proposed"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -15,9 +15,9 @@ serves: ["G9"]
 blocked_reason: ""
 cancelled_reason: ""
 blocked_by: []
-accepted_by: ""
-accepted_at: ""
-accepted_via: ""
+accepted_by: "CandidDan"
+accepted_at: "2026-11-25T06:38:25Z"
+accepted_via: "inflight"
 touches:
   - "dispatcher/**"
   - "docs/flow-dispatcher.md"
@@ -40,6 +40,7 @@ effort: "high"
 model_reason: "Flow infra that every adopting repo will rely on, with credential handling, concurrency caps and a container boundary. Cross-cutting, and the design has open points a worker must settle against evidence."
 notes:
   - "2026-11-18: Written from the design thread Dan approved (he chose 'Yes, write the task'). The design is decided; the three things marked 'inferred' there are listed under 'Check these first' and are not decided."
+  - "2026-11-25 (CandidDan via inflight): accepted"
 asks:
   - "follow-up: After the pilot build passes (rollout step 4), a second task removes the per-repo dispatch (the caller workflows, `_flow-dispatch.yml`, `flow-dispatch.mjs`) through `flow-sync`'s retired-path list and cuts a release. It is deliberately not part of this task, so a failed pilot does not leave the fleet with no way to start builds."
   - "fyi: The daily build cap defaults to 10. That number is a guess. Dan sets the real one in the dispatcher's settings on ci-3."
