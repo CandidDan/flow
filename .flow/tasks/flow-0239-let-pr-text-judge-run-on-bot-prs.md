@@ -1,7 +1,7 @@
 ---
 id: "flow-0239"
 title: "Let the flow-pr-text judge run on bot-opened PRs"
-status: "proposed"
+status: "ready"
 priority: 3
 project: "flow"
 owner: ""
@@ -15,9 +15,9 @@ serves: ["maintenance"]
 blocked_reason: ""
 cancelled_reason: ""
 blocked_by: []
-accepted_by: ""
-accepted_at: ""
-accepted_via: ""
+accepted_by: "CandidDan"
+accepted_at: "2026-11-25T03:38:50Z"
+accepted_via: "chat"
 touches:
   - ".github/workflows/_flow-pr-text.yml"
   - ".flow/bin/pr-text-workflow.test.mjs"
