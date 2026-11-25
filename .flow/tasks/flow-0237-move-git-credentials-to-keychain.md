@@ -1,7 +1,7 @@
 ---
 id: "flow-0237"
 title: "Move the git credentials file out of the flow project folder"
-status: "proposed"
+status: "ready"
 priority: 2
 project: "flow"
 owner: ""
@@ -15,13 +15,14 @@ serves: ["maintenance"]
 blocked_reason: ""
 cancelled_reason: ""
 blocked_by: []
-accepted_by: ""
-accepted_at: ""
-accepted_via: ""
+accepted_by: "CandidDan"
+accepted_at: "2026-11-25T06:38:29Z"
+accepted_via: "inflight"
 touches: []
 labels: [human-only, security]
 notes:
   - "2026-11-19: Written from the Claude Code best-practices review (reports/claude-code-best-practices-vs-flow.md, item 10). The file was never opened or printed by any session while writing this."
+  - "2026-11-25 (CandidDan via inflight): accepted"
 asks:
   - "fyi: This is a task only Dan can do, on his Mac. No code changes and no PR, so Flow cannot move it to done. After doing it, cancel it with cancelled_reason 'Done by hand on <date>'. Accept it only when you are about to do it, so no worker picks it up first."
 ---
