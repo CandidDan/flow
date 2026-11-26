@@ -93,6 +93,17 @@ test("the judge gets one turn and no tools, and never bypasses permissions", { s
   assert.equal(j["continue-on-error"], true, "the enforce step decides, never the action's exit");
 });
 
+test("the judge accepts a bot actor, so a PR opened by a bot is judged and not refused", { skip }, () => {
+  assert.equal(judgeStep().with.allowed_bots, "*");
+  // What makes "*" harmless: one turn, no tools (pinned in the test above), and the judge runs
+  // only on a same-repo PR with FLOW_AI set. Loosening either guard must fail here too.
+  assert.match(String(judgeStep().with.claude_args), /--max-turns 1\b/);
+  assert.match(String(judgeStep().if), /steps\.rules\.outputs\.judge == 'true'/);
+  const rules = step((s) => s.id === "rules", "rules");
+  assert.match(rules.run, /HEAD_REPO" = "\$REPO"/);
+  assert.match(rules.run, /FLOW_AI" = "true"/);
+});
+
 test("the judge's prompt carries only the title and the TL;DR, fenced as data", { skip }, () => {
   const prompt = String(judgeStep().with.prompt);
   const exprs = prompt.match(/\$\{\{[^}]*\}\}/g) ?? [];
