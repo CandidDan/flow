@@ -1,7 +1,7 @@
 ---
 id: "flow-0239"
 title: "Let the flow-pr-text judge run on bot-opened PRs"
-status: "in_review"
+status: "done"
 priority: 3
 project: "flow"
 owner: "session_01NfrcU9WiHzDSN4VMk9GWMF"
