@@ -1,14 +1,14 @@
 ---
 id: "flow-0240"
 title: "Install Claude Code from npm in the review checks, not from the download site"
-status: "in_progress"
+status: "in_review"
 priority: 2
 project: "flow"
 owner: "session_01NfrcUCGdo6GcBvWugscEm1"
 created: "2026-11-26"
 started: "2026-11-26T04:03:45Z"
 branch: "claude/project-thread-b6oro8"
-pr: ""
+pr: "https://github.com/CandidDan/flow/pull/323"
 issue: ""
 intent: ""
 serves: ["maintenance"]
