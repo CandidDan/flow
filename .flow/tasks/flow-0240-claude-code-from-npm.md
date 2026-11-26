@@ -31,6 +31,7 @@ effort: "high"
 model_reason: "Edits three reusable workflows that every adopting repo calls; a mistake breaks the fleet's review checks at once."
 notes:
   - "2026-11-26: Found on CandidDan/tanplan-platform. Since 25 Nov, 11 of 96 flow-review jobs failed at claude-code-action's install step: `curl https://claude.ai/install.sh` got HTTP 403 on all three attempts. Every failure ran on the self-hosted Hetzner runners, which share one public IP; neighbouring jobs on the same server succeeded. Dan ruled it a real bug, not a re-run (26 Nov)."
+  - "2026-11-26: Built on branch claude/project-thread-b6oro8, PR https://github.com/CandidDan/flow/pull/323, gate green locally. One change from Scope: the `claude-code` step sits immediately before each job's first action step (if: !cancelled(), or the judge condition in pr-text), not right after setup-node, so pr-text installs only when its judge runs. tanplan pins @v4 (.flow/VERSION 4.1.0), so a v5 release does not reach it; backport vs. moving tanplan to v5 is Dan's call."
 asks: []
 ---
 
