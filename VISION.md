@@ -9,8 +9,8 @@ the diff goes unread. The human approves the merge; that approval is what makes 
 Flow came out of how Dan actually works with Claude: discuss an idea in Cowork, write a PRD or a
 task, make a handoff, paste it into a Claude Code session. It worked, but it was lengthy and had
 too much of him in it. Flow is the protocol built to fix that — **agent delegation with the trust
-moved out of prompts and into CI.** Tasks are Markdown files on `main`; a worker claims one and
-opens a PR; CI, not a prompt, enforces scope, tests and coverage; there are two touchpoints —
+moved out of prompts and into CI.** Tasks are Markdown records in a store, which a repo keeps as
+files in git or as rows in a database; a worker claims one and opens a PR; CI, not a prompt, enforces scope, tests and coverage; there are two touchpoints —
 approve the intent, approve the merge.
 
 **Flow is a protocol, not a tool.** Dan runs several projects at once, so what Flow has to earn is
@@ -26,8 +26,11 @@ not foreclose one, and nothing is built to serve one. A product remains a **live
 deliberately not built for yet** — not ruled out, and not a thing to design against. Teams are a
 shape of multi-operator and are covered by that same word.
 
-**Git-native is how Flow works today, not a commitment.** If state ever needs to live outside the
-repo, that is open rather than settled.
+**The protocol does not depend on where tasks are stored.** The lifecycle, the gate, the reviews,
+the accept step and the fields on a task are the protocol. The store is how one repo keeps them: a
+git-backed store and a database-backed store are both valid, and each must give the same
+guarantees, such as a claim that only one worker can win. Intents and this file stay in the repo,
+because merging a PR is how they are approved.
 
 **An AI judgement may turn the gate green, but it sits on top.** Tests, coverage and scope must
 still pass on their own; no AI verdict can make a red build green, and where something genuinely
@@ -156,6 +159,7 @@ pointing at them surface as warnings, which is the intended signal.
 
 | Date | Change | Why |
 |---|---|---|
+| 2026-11-26 | Purpose amended: tasks are Markdown records in a store, kept as files in git or as rows in a database. "Git-native is how Flow works today, not a commitment" is replaced by the rule that the protocol does not depend on the store. | Dan: "Flow as the protocol still exists. its the way of working, the way of work moving through from inception to completion. The ci, the control, the reviews"; "the implementation of the protocol is not specified, someone could choose to use the git backed storage, we are now choosing a database backed storage"; "The metadata, the schemas, principles, primitives all still exist regardless of the mechanism". Keeping task state in git has cost CI runs, API rate limits and guard code (ADR-0011); intent `task-store-not-a-pain-point` is the work that follows. |
 | 2026-11-03 | G13 declared: a repo's VISION.md stays true for months and reads plainly to someone new to the project. | Dan: the information in a vision "become[s] stale almost immediately"; it should be "more of a method statement than a set of rules", to "ensure we don't start building a calculator for tax", and "writen in clear plain english so a human reader can just pick it up and think ah this makes sense". Evidence: on 2026-11-03 TanPlan's VISION.md held two goals whose dates had passed (a 15 October conference, a 29 October cutover), a non-goal whose reason had expired, and references to streams, phases and task numbers a reader cannot look up. Nothing in Flow names that failure; G3 ("Direction survives the work") was retired on 2026-09-01 for how it was written, not because the need went away. |
 | 2026-11-02 | G11 amended: issues are the capture inbox for ideas as well as things that are wrong, and a trusted submitter's trivial fix may become a `maintenance` task without an intent. Open item "where a reader's feedback lands" closed: in a GitHub issue, sent through a form that needs no account (inflight). Its other half, whose words an intent's Problem section holds, stays Open as its own item. | Dan: "if something is submitted, it should always go into issues on GitHub … if it's really simple … it can be triaged, turned into a task, and fixed automatically. If it's a bigger job, then it stays an issue"; "I don't want J&S to have to have GitHub logins". ADR-0010 records the lanes; inflight intent `send-to-an-agent` supplies the form. |
 | 2026-09-23 | G12 declared: anything Flow needs from the operator is one decision with a recommendation, answerable in under a minute from a phone. | Sessions end with about a dozen questions and options the operator cannot process, so they get left open as bookmarks and the two-touchpoint model quietly becomes many touchpoints. No live goal named that failure. Declaring it gives the clean-exit work (the decide-or-ask rule, decision cards, length budgets, a session-exit check) a goal to serve instead of `maintenance` (decision D2 in the operating-model spec). |
