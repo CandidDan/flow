@@ -1,13 +1,13 @@
 ---
 id: "flow-0240"
 title: "Install Claude Code from npm in the review checks, not from the download site"
-status: "ready"
+status: "in_progress"
 priority: 2
 project: "flow"
-owner: ""
+owner: "session_01NfrcUCGdo6GcBvWugscEm1"
 created: "2026-11-26"
-started: ""
-branch: ""
+started: "2026-11-26T04:03:45Z"
+branch: "claude/project-thread-b6oro8"
 pr: ""
 issue: ""
 intent: ""
