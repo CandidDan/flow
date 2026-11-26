@@ -1,14 +1,14 @@
 ---
 id: "task-store-not-a-pain-point"
 title: "Flow's task storage stops being a pain point, so every project builds faster without losing quality"
-status: "proposed"
+status: "approved"
 created: "2026-11-26"
 source: "Dan, project thread on Beads and Gas Town, 2026-11-25 to 2026-11-26"
 serves: ["G8", "G9"]       # [assumption] chosen by the writer, not Dan
 workstream: ""
 supersedes: ""
-approved_by: ""
-approved_at: ""
+approved_by: "CandidDan"
+approved_at: "2026-11-26T02:15:26Z"
 evidence: []
 ---
 
