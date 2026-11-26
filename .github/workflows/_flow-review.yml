@@ -104,6 +104,16 @@ on:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: false
 
+# flow-0240. The Claude Code CLI version every `claude-code-action` step in this file runs. Each such
+# job installs it from the npm registry (step `claude-code`) and hands the binary to the action
+# through `path_to_claude_code_executable`, so the action never fetches `claude.ai/install.sh`. That
+# download answered 403 to some jobs on self-hosted runners that share one public IP (11 of 96
+# review jobs on 25-26 Nov 2026). Keep this equal to the version the pinned action itself installs
+# (`claudeCodeVersion` in its `src/entrypoints/run.ts`); `claude-code-install-workflow.test.mjs`
+# maps the action SHA to that version and fails when the two drift. See docs/flow-reusable-workflows.md.
+env:
+  FLOW_CLAUDE_CODE_VERSION: "2.1.293"
+
 permissions:
   contents: read
   pull-requests: write
@@ -242,11 +252,36 @@ jobs:
         run: |
           node -e 'const fs = require("fs"); fs.writeFileSync(process.env.VERDICT_FILE, JSON.stringify({ check: "qa", verdict: "pass", summary: process.env.PASS_LINE }) + "\n");'
           printf '### qa — intent PR\n\n%s\n' "$PASS_LINE" >> "$GITHUB_STEP_SUMMARY"
+      # flow-0240. Install the pinned Claude Code CLI from npm, so the action below skips its own
+      # download from claude.ai. continue-on-error: on failure `path` stays empty and the action
+      # falls back to that download, exactly as before this step existed.
+      - name: Install Claude Code from npm (pinned)
+        id: claude-code
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set -u
+          dir="$RUNNER_TEMP/claude-code"
+          pkg="@anthropic-ai/claude-code@$FLOW_CLAUDE_CODE_VERSION"
+          for attempt in 1 2 3; do
+            if npm install --prefix "$dir" --no-save --no-package-lock --no-audit --no-fund "$pkg"; then
+              bin="$dir/node_modules/.bin/claude"
+              if "$bin" --version | grep -qF "$FLOW_CLAUDE_CODE_VERSION"; then
+                echo "path=$bin" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "$bin does not report version $FLOW_CLAUDE_CODE_VERSION"
+            fi
+            [ "$attempt" = 3 ] || sleep $((attempt * 10))
+          done
+          echo "::warning::Could not install $pkg from npm; claude-code-action will download Claude Code itself."
+          exit 1
       - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         id: claude
         if: ${{ steps.plan.outputs.intent_pr != 'true' }}
         continue-on-error: true          # the verdict step below decides; never this action's exit
         with:
+          path_to_claude_code_executable: ${{ steps.claude-code.outputs.path }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           # Flow worker PRs are opened by a bot, so the reviewer must accept a bot-initiated run.
@@ -497,11 +532,36 @@ jobs:
         run: |
           node -e 'const fs = require("fs"); fs.writeFileSync(process.env.VERDICT_FILE, JSON.stringify({ check: "code-review", verdict: "pass", summary: process.env.PASS_LINE }) + "\n");'
           printf '### code-review — intent PR\n\n%s\n' "$PASS_LINE" >> "$GITHUB_STEP_SUMMARY"
+      # flow-0240. Install the pinned Claude Code CLI from npm, so the action below skips its own
+      # download from claude.ai. continue-on-error: on failure `path` stays empty and the action
+      # falls back to that download, exactly as before this step existed.
+      - name: Install Claude Code from npm (pinned)
+        id: claude-code
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set -u
+          dir="$RUNNER_TEMP/claude-code"
+          pkg="@anthropic-ai/claude-code@$FLOW_CLAUDE_CODE_VERSION"
+          for attempt in 1 2 3; do
+            if npm install --prefix "$dir" --no-save --no-package-lock --no-audit --no-fund "$pkg"; then
+              bin="$dir/node_modules/.bin/claude"
+              if "$bin" --version | grep -qF "$FLOW_CLAUDE_CODE_VERSION"; then
+                echo "path=$bin" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "$bin does not report version $FLOW_CLAUDE_CODE_VERSION"
+            fi
+            [ "$attempt" = 3 ] || sleep $((attempt * 10))
+          done
+          echo "::warning::Could not install $pkg from npm; claude-code-action will download Claude Code itself."
+          exit 1
       - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         id: claude
         if: ${{ steps.plan.outputs.intent_pr != 'true' }}
         continue-on-error: true
         with:
+          path_to_claude_code_executable: ${{ steps.claude-code.outputs.path }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_bots: "*"
@@ -660,6 +720,7 @@ jobs:
         if: ${{ always() && steps.plan.outputs.intent_pr == 'true' }}
         continue-on-error: true          # advisory: nothing here may turn the check red
         with:
+          path_to_claude_code_executable: ${{ steps.claude-code.outputs.path }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_bots: "*"
@@ -835,6 +896,30 @@ jobs:
         run: |
           rm -f "$RUNNER_TEMP/flow-review/security.json"
           mkdir -p "$RUNNER_TEMP/flow-review"
+      # flow-0240. Install the pinned Claude Code CLI from npm, so the action below skips its own
+      # download from claude.ai. continue-on-error: on failure `path` stays empty and the action
+      # falls back to that download, exactly as before this step existed.
+      - name: Install Claude Code from npm (pinned)
+        id: claude-code
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set -u
+          dir="$RUNNER_TEMP/claude-code"
+          pkg="@anthropic-ai/claude-code@$FLOW_CLAUDE_CODE_VERSION"
+          for attempt in 1 2 3; do
+            if npm install --prefix "$dir" --no-save --no-package-lock --no-audit --no-fund "$pkg"; then
+              bin="$dir/node_modules/.bin/claude"
+              if "$bin" --version | grep -qF "$FLOW_CLAUDE_CODE_VERSION"; then
+                echo "path=$bin" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "$bin does not report version $FLOW_CLAUDE_CODE_VERSION"
+            fi
+            [ "$attempt" = 3 ] || sleep $((attempt * 10))
+          done
+          echo "::warning::Could not install $pkg from npm; claude-code-action will download Claude Code itself."
+          exit 1
       - uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         id: claude
         # The security review proper runs only when the plan says the diff warrants it. The job
@@ -842,6 +927,7 @@ jobs:
         if: ${{ steps.plan.outputs.security_run == 'true' }}
         continue-on-error: true
         with:
+          path_to_claude_code_executable: ${{ steps.claude-code.outputs.path }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_bots: "*"
@@ -1032,6 +1118,7 @@ jobs:
         if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
         continue-on-error: true          # advisory: nothing here may turn the check red
         with:
+          path_to_claude_code_executable: ${{ steps.claude-code.outputs.path }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_bots: "*"

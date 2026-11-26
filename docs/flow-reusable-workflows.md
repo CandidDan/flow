@@ -547,3 +547,23 @@ someone else's machine. Do not set `FLOW_RUNNER` on a public repo.
 **Secrets.** A non-GitHub runner sees every secret its jobs hold — `FLOW_PAT` in the kickback push
 job, `CLAUDE_CODE_OAUTH_TOKEN` in the AI jobs. Choosing `FLOW_RUNNER` is
 choosing to trust that provider with them.
+
+**The runner needs the npm registry.** `_flow-review.yml`, `_flow-kickback.yml` and
+`_flow-pr-text.yml` install the Claude Code CLI from `registry.npmjs.org`
+(`@anthropic-ai/claude-code`), not from `claude.ai/install.sh`, which `claude-code-action` uses by
+default. The download site answered 403 to some jobs on self-hosted runners that share one public
+IP (flow-0240). If the npm install fails, the step warns and the action falls back to its own
+download.
+
+### The Claude Code version pin
+
+Each of those three files sets the CLI version once, in its top-level `env.FLOW_CLAUDE_CODE_VERSION`.
+It must equal the version the pinned `claude-code-action` installs itself, which is
+`claudeCodeVersion` in that action SHA's `src/entrypoints/run.ts`. When you bump the action SHA:
+
+1. Read `claudeCodeVersion` at the new SHA.
+2. Add the SHA and that version to `ACTION_INSTALLS` in `.flow/bin/claude-code-install-workflow.test.mjs`.
+3. Set `FLOW_CLAUDE_CODE_VERSION` to that version in all three files.
+
+The test fails until all three agree, so a bumped action never runs with a CLI it was not
+released with. Adopting repos change nothing: they get the new pin with the next Flow release.

@@ -111,6 +111,16 @@ on:
 # `convertPullRequestToDraft` on GITHUB_TOKEN, which GitHub refuses to an integration token, so
 # `fix` and `push` were skipped and the card blamed a round that never ran. Moving FLOW_PAT onto
 # it would have made it work, at the cost of FLOW_PAT reaching a second job for nothing.
+# flow-0240. The Claude Code CLI version every `claude-code-action` step in this file runs. Each such
+# job installs it from the npm registry (step `claude-code`) and hands the binary to the action
+# through `path_to_claude_code_executable`, so the action never fetches `claude.ai/install.sh`. That
+# download answered 403 to some jobs on self-hosted runners that share one public IP (11 of 96
+# review jobs on 25-26 Nov 2026). Keep this equal to the version the pinned action itself installs
+# (`claudeCodeVersion` in its `src/entrypoints/run.ts`); `claude-code-install-workflow.test.mjs`
+# maps the action SHA to that version and fails when the two drift. See docs/flow-reusable-workflows.md.
+env:
+  FLOW_CLAUDE_CODE_VERSION: "2.1.293"
+
 permissions:
   contents: read
 
@@ -384,12 +394,37 @@ jobs:
           # bundle against the head `plan` recorded, in a job no model ran in.
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      # flow-0240. Install the pinned Claude Code CLI from npm, so the action below skips its own
+      # download from claude.ai. continue-on-error: on failure `path` stays empty and the action
+      # falls back to that download, exactly as before this step existed.
+      - name: Install Claude Code from npm (pinned)
+        id: claude-code
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set -u
+          dir="$RUNNER_TEMP/claude-code"
+          pkg="@anthropic-ai/claude-code@$FLOW_CLAUDE_CODE_VERSION"
+          for attempt in 1 2 3; do
+            if npm install --prefix "$dir" --no-save --no-package-lock --no-audit --no-fund "$pkg"; then
+              bin="$dir/node_modules/.bin/claude"
+              if "$bin" --version | grep -qF "$FLOW_CLAUDE_CODE_VERSION"; then
+                echo "path=$bin" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "$bin does not report version $FLOW_CLAUDE_CODE_VERSION"
+            fi
+            [ "$attempt" = 3 ] || sleep $((attempt * 10))
+          done
+          echo "::warning::Could not install $pkg from npm; claude-code-action will download Claude Code itself."
+          exit 1
       - name: The auto-fix round (a fresh worker session, commit-only)
         id: worker
         uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         env:
           GH_TOKEN: ${{ github.token }}
         with:
+          path_to_claude_code_executable: ${{ steps.claude-code.outputs.path }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
           # The same action pin and model settings the worker used before its retired Actions
@@ -927,12 +962,37 @@ jobs:
           check-latest: true
           node-version: ${{ inputs.node_version }}
 
+      # flow-0240. Install the pinned Claude Code CLI from npm, so the action below skips its own
+      # download from claude.ai. continue-on-error: on failure `path` stays empty and the action
+      # falls back to that download, exactly as before this step existed.
+      - name: Install Claude Code from npm (pinned)
+        id: claude-code
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set -u
+          dir="$RUNNER_TEMP/claude-code"
+          pkg="@anthropic-ai/claude-code@$FLOW_CLAUDE_CODE_VERSION"
+          for attempt in 1 2 3; do
+            if npm install --prefix "$dir" --no-save --no-package-lock --no-audit --no-fund "$pkg"; then
+              bin="$dir/node_modules/.bin/claude"
+              if "$bin" --version | grep -qF "$FLOW_CLAUDE_CODE_VERSION"; then
+                echo "path=$bin" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "$bin does not report version $FLOW_CLAUDE_CODE_VERSION"
+            fi
+            [ "$attempt" = 3 ] || sleep $((attempt * 10))
+          done
+          echo "::warning::Could not install $pkg from npm; claude-code-action will download Claude Code itself."
+          exit 1
       - name: Write the dead round's card fields (read-only)
         id: write-card
         uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         env:
           GH_TOKEN: ${{ github.token }}
         with:
+          path_to_claude_code_executable: ${{ steps.claude-code.outputs.path }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
           # The same bounds as `card`: it may not commit, push, re-ready, merge, comment or label,
@@ -1167,12 +1227,37 @@ jobs:
           check-latest: true
           node-version: ${{ inputs.node_version }}
 
+      # flow-0240. Install the pinned Claude Code CLI from npm, so the action below skips its own
+      # download from claude.ai. continue-on-error: on failure `path` stays empty and the action
+      # falls back to that download, exactly as before this step existed.
+      - name: Install Claude Code from npm (pinned)
+        id: claude-code
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set -u
+          dir="$RUNNER_TEMP/claude-code"
+          pkg="@anthropic-ai/claude-code@$FLOW_CLAUDE_CODE_VERSION"
+          for attempt in 1 2 3; do
+            if npm install --prefix "$dir" --no-save --no-package-lock --no-audit --no-fund "$pkg"; then
+              bin="$dir/node_modules/.bin/claude"
+              if "$bin" --version | grep -qF "$FLOW_CLAUDE_CODE_VERSION"; then
+                echo "path=$bin" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "$bin does not report version $FLOW_CLAUDE_CODE_VERSION"
+            fi
+            [ "$attempt" = 3 ] || sleep $((attempt * 10))
+          done
+          echo "::warning::Could not install $pkg from npm; claude-code-action will download Claude Code itself."
+          exit 1
       - name: Write the card's four fields (read-only)
         id: write-card
         uses: anthropics/claude-code-action@6fed3ca145920b639991cb756090506e1bcaf515 # v1.0.245
         env:
           GH_TOKEN: ${{ github.token }}
         with:
+          path_to_claude_code_executable: ${{ steps.claude-code.outputs.path }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
           # Bounded and read-only with respect to the PR: it may not commit, push, re-ready,
