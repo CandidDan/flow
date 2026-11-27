@@ -158,7 +158,7 @@ API. Flow does not build it.
 - A hosting cost, which Dan has not yet approved. The free tier has no daily backups and may pause
   a project after a period of inactivity; both must be checked against Supabase's current terms
   before the first repo moves. A paid project is the expected choice, and Dan sets the number
-  before Phase 5.
+  before Phase 2 begins.
 - Flow now has two stores to keep correct. The shared contract tests are what keep this honest.
 
 ## Rollout
@@ -171,7 +171,7 @@ needs Dan's accept.
 | 1 | Rewrite `PROTOCOL.md` as the storage contract. Put the store interface in `project-template/.flow/bin/` and move the git code behind it with no behaviour change. | sonnet |
 | 2 | Database store: schema, API, tokens, atomic claim, events, daily export. **First step, before any schema work:** check Supabase's current terms (backups, pausing when idle) and get Dan's approval of the monthly cost. Security review runs on the PR. | opus |
 | 3 | `depends_on`, `ready()`, and the read API inflight uses. | sonnet |
-| 4 | Import canonical's tasks and run canonical on the database store for about a week. Then delete the task files and the git-only workarounds there. | opus |
+| 4 | Import canonical's tasks and run canonical on the database store for about a week. Then delete the task files and the git-only workarounds there (the store-guard and `only-flow-changed.mjs` stay in the template until the last repo has moved, because a rollback needs them). | opus |
 | 5 | Move each adopting repo, one at a time, lowest-traffic first and tanplan-platform last. `store.kind: git` is the rollback for each, but only after a fresh export is written back to `.flow/tasks/`, because the old files are stale once a repo has written to the database. | sonnet |
 
 A repo that syncs helpers expecting the database store without having moved must fail loudly, not
