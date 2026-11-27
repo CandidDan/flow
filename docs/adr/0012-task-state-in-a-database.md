@@ -1,6 +1,6 @@
 # ADR-0012: Task state lives in a database, behind a storage contract
 
-**Status:** Proposed. Accepted when this PR merges.
+**Status:** Proposed — accepted when this PR merges
 **Date:** 2026-11-26
 **Deciders:** Dan (sole maintainer)
 **Supersedes:** ADR-0001 (task store is repo files on `main`) and ADR-0011 (where task state is
@@ -31,7 +31,7 @@ ADR records which store Flow's own fleet uses, and how.
 
 ### 1. The protocol describes operations, not files
 
-`PROTOCOL.md` is rewritten so that every step that edits a task says what it does, not which file
+`project-template/.flow/PROTOCOL.md` is rewritten so that every step that edits a task says what it does, not which file
 it edits. The operations are the **storage contract**:
 
 | Operation | Meaning |
@@ -169,10 +169,10 @@ needs Dan's accept.
 | Phase | Work | Model |
 |---|---|---|
 | 1 | Rewrite `PROTOCOL.md` as the storage contract. Put the store interface in `project-template/.flow/bin/` and move the git code behind it with no behaviour change. | sonnet |
-| 2 | Database store: schema, API, tokens, atomic claim, events, daily export. Security review runs on the PR. | opus |
+| 2 | Database store: schema, API, tokens, atomic claim, events, daily export. **First step, before any schema work:** check Supabase's current terms (backups, pausing when idle) and get Dan's approval of the monthly cost. Security review runs on the PR. | opus |
 | 3 | `depends_on`, `ready()`, and the read API inflight uses. | sonnet |
 | 4 | Import canonical's tasks and run canonical on the database store for about a week. Then delete the task files and the git-only workarounds there. | opus |
-| 5 | Move each adopting repo, one at a time, lowest-traffic first and tanplan-platform last. `store.kind: git` is the rollback for each. | sonnet |
+| 5 | Move each adopting repo, one at a time, lowest-traffic first and tanplan-platform last. `store.kind: git` is the rollback for each, but only after a fresh export is written back to `.flow/tasks/`, because the old files are stale once a repo has written to the database. | sonnet |
 
 A repo that syncs helpers expecting the database store without having moved must fail loudly, not
 read an empty store.
