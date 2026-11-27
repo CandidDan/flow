@@ -1,6 +1,6 @@
 # ADR-0001: Backing store for the Flow work queue — repo files vs GitHub Issues
 
-**Status:** Proposed
+**Status:** Superseded by ADR-0012 (task state lives in a database)
 **Date:** 2026-06-11
 **Deciders:** Dan (inspirator / sole maintainer)
 

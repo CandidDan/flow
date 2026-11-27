@@ -1,6 +1,6 @@
 # ADR-0011: Where task state is committed: `main`, `main` with `[skip ci]`, or a `flow-state` branch
 
-**Status:** Proposed. Dan decides; accepted when this PR merges with an option chosen.
+**Status:** Superseded by ADR-0012 (task state lives in a database)
 **Date:** 2026-11-13
 **Deciders:** Dan (sole maintainer)
 **Related:** ADR-0001 (task store is repo files on `main`), flow-0223 (minimal CI for store-only
